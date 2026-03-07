@@ -1,4 +1,4 @@
-  CLIPMAKER 1.1 — Setup Guide
+  CLIPMAKER 1.1 — Setup Guide.
   Football highlight reel generator by B4L1
 ================================================================
 
