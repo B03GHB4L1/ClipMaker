@@ -6,7 +6,7 @@ import time
 import platform
 import pandas as pd
 import streamlit as st
-from moviepy import VideoFileClip, concatenate_videoclips
+
 
 # =============================================================================
 # PAGE CONFIG
@@ -168,16 +168,18 @@ def monitor_file_progress(out_path, total_frames, fps, progress_queue, stop_even
 
 
 def merge_overlapping_windows(windows, min_gap):
+    """Windows are tuples of (start, end, label, period).
+    Only merge windows from the same period (same video file in split mode)."""
     if not windows:
         return []
     merged = [list(windows[0])]
-    for start, end, label in windows[1:]:
+    for start, end, label, period in windows[1:]:
         prev = merged[-1]
-        if start <= prev[1] + min_gap:
+        if start <= prev[1] + min_gap and period == prev[3]:
             prev[1] = max(prev[1], end)
             prev[2] = prev[2] + " + " + label
         else:
-            merged.append([start, end, label])
+            merged.append([start, end, label, period])
     return [tuple(w) for w in merged]
 
 def apply_filters(df, config):
@@ -225,6 +227,11 @@ def run_clip_maker(config, log_queue, progress_queue):
             if col not in df.columns:
                 raise ValueError(f"CSV missing column: '{col}'")
 
+        split_video = config.get("split_video", False)
+
+        # In split mode each period's timestamp is relative to its own file.
+        # period_start stores kick-off position within each file.
+        # In single-file mode period_start stores position in the one file.
         period_start = {
             1: to_seconds(config["half1_time"]),
             2: to_seconds(config["half2_time"]),
@@ -234,10 +241,27 @@ def run_clip_maker(config, log_queue, progress_queue):
         if config["half4_time"].strip():
             period_start[4] = to_seconds(config["half4_time"])
 
-        period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0)}
+        # In split mode: each file starts from its own clock zero.
+        # Period offset is always the match clock at kick-off of that period.
+        # In single-file mode: period_start already accounts for the global offset.
+        if split_video:
+            # Each file is independent — period offset is match clock at KO
+            period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0)}
+        else:
+            period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0)}
+
         fallback = config["fallback_row"]
         period_col = config["period_column"] or None
         df = assign_periods(df, period_col, fallback)
+
+        # Apply half filter
+        half_filter = config.get("half_filter", "Both halves")
+        if half_filter == "1st half only":
+            df = df[df["resolved_period"] == 1]
+            log("Filtering to 1st half only.")
+        elif half_filter == "2nd half only":
+            df = df[df["resolved_period"] == 2]
+            log("Filtering to 2nd half only.")
 
         # Apply filters
         df, filtered_count = apply_filters(df, config)
@@ -262,22 +286,133 @@ def run_clip_maker(config, log_queue, progress_queue):
         raw_windows = []
         for _, row in df.iterrows():
             ts = row["video_timestamp"]
-            label = f"{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{int(row['resolved_period'])})"
-            raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label))
+            period = int(row["resolved_period"])
+            label = f"{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
+            raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
         log(f"Found {len(df)} events → {len(windows)} clips after merging.\n")
 
         if config["dry_run"]:
-            for i, (s, e, lbl) in enumerate(windows, 1):
+            for i, (s, e, lbl, p) in enumerate(windows, 1):
                 log(f"  Clip {i:02d}: {s:.1f}s – {e:.1f}s  ({e-s:.0f}s)  |  {lbl}")
             log("\n✓ DRY RUN complete.")
             log_queue.put({"type": "done"})
             return
 
+        def get_ffmpeg_binary():
+            """Get the FFmpeg binary path — from PATH or MoviePy's bundled copy."""
+            import shutil
+            cmd = shutil.which("ffmpeg")
+            if cmd:
+                return cmd
+            try:
+                from moviepy.config import FFMPEG_BINARY
+                if os.path.exists(FFMPEG_BINARY):
+                    return FFMPEG_BINARY
+            except Exception:
+                pass
+            raise ValueError("FFmpeg not found. Please ensure FFmpeg is installed.")
+
+        def get_video_duration(path, ffmpeg_bin):
+            """Get video duration in seconds using ffmpeg -i stderr output."""
+            import subprocess, re
+            r = subprocess.run(
+                [ffmpeg_bin, "-i", path],
+                capture_output=True, text=True
+            )
+            output = r.stdout + r.stderr
+            m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", output)
+            if not m:
+                raise ValueError(f"Could not determine duration of {path}")
+            return int(m.group(1))*3600 + int(m.group(2))*60 + float(m.group(3))
+
+        def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
+            """Cut a clip directly with FFmpeg — bypasses MoviePy entirely.
+            Uses stream copy for speed when possible, falls back to re-encode."""
+            import subprocess
+            duration = end - start
+            # -map 0:v:0 -map 0:a:0 picks first video and first audio stream
+            # -avoid_negative_ts make_zero fixes timestamp issues in .mkv files
+            cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-ss", str(start),
+                "-i", src_path,
+                "-t", str(duration),
+                "-map", "0:v:0",
+                "-map", "0:a:0?",   # optional audio — won't fail if missing
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-c:a", "aac",
+                "-avoid_negative_ts", "make_zero",
+                out_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise ValueError(f"FFmpeg error cutting clip: {result.stderr[-500:]}")
+
+        def cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, start_time):
+            """Cut all clips and concatenate using FFmpeg concat demuxer."""
+            import subprocess, tempfile
+            tmp_dir = tempfile.mkdtemp()
+            tmp_files = []
+            total = len(clip_specs)
+
+            for i, (src, start, end) in enumerate(clip_specs, 1):
+                tmp_path = os.path.join(tmp_dir, f"part_{i:04d}.mp4")
+                cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_path)
+                tmp_files.append(tmp_path)
+                elapsed = time.time() - start_time
+                progress_queue.put({"current": i, "total": total, "elapsed": elapsed, "phase": "clips"})
+
+            # Write concat list
+            list_path = os.path.join(tmp_dir, "concat.txt")
+            with open(list_path, "w") as f:
+                for p in tmp_files:
+                    f.write(f"file '{p}'\n")
+
+            # Concatenate
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", list_path,
+                "-c", "copy",
+                out_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise ValueError(f"FFmpeg concat error: {result.stderr[-500:]}")
+
+            # Cleanup
+            for p in tmp_files:
+                try: os.remove(p)
+                except: pass
+            try: os.remove(list_path)
+            except: pass
+            try: os.rmdir(tmp_dir)
+            except: pass
+
         log("Loading video...")
-        video_path = config["video_file"].strip().strip('"\'')
-        video = VideoFileClip(video_path)
+        ffmpeg_bin = get_ffmpeg_binary()
+        video1_path = config["video_file"].strip().strip("\"'")
+        video1_duration = get_video_duration(video1_path, ffmpeg_bin)
+        log(f"  Video 1 duration: {video1_duration:.2f}s")
+
+        if split_video and config.get("video2_file"):
+            video2_path_str = config["video2_file"].strip().strip("\"'")
+            video2_duration = get_video_duration(video2_path_str, ffmpeg_bin)
+            log(f"  Video 2 duration: {video2_duration:.2f}s")
+            log("  Two-file mode: 1st half from file 1, 2nd half from file 2.")
+        else:
+            video2_path_str = None
+            video2_duration = None
+
+        def get_src_and_duration(period):
+            if split_video and video2_path_str and period >= 2:
+                return video2_path_str, video2_duration
+            return video1_path, video1_duration
+
         out_dir = config["output_dir"]
         os.makedirs(out_dir, exist_ok=True)
 
@@ -286,54 +421,55 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         if config["individual_clips"]:
             saved = []
-            for i, (start, end, label) in enumerate(windows, 1):
-                start = max(0, start)
-                end = min(video.duration, end)
-                if end <= start:
+            for i, (start, end, label, period) in enumerate(windows, 1):
+                src, src_dur = get_src_and_duration(period)
+                s = max(0, start)
+                e = min(src_dur, end)
+                if e <= s:
+                    log(f"  SKIPPED clip {i:02d}: {s:.1f}s–{e:.1f}s outside video duration {src_dur:.1f}s")
                     continue
-                actions = [p.split(" @")[0].strip() for p in label.split(" + ")]
+                actions = [pt.split(" @")[0].strip() for pt in label.split(" + ")]
                 dominant = max(set(actions), key=actions.count).replace(" ", "_")
                 filename = f"{i:02d}_{dominant}.mp4"
                 filepath = os.path.join(out_dir, filename)
                 log(f"  Rendering {i:02d}/{total_clips}: {filename}")
-                clip = video.subclipped(start, end)
-                clip.write_videofile(filepath, codec="libx264", preset="ultrafast", logger=None)
+                cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath)
                 saved.append(filepath)
                 prog(i, total_clips, time.time() - start_time)
-            video.close()
-            log(f"\n✓ {len(saved)} clips saved to: {os.path.abspath(out_dir)}/")
+            log(f"\n\u2713 {len(saved)} clips saved to: {os.path.abspath(out_dir)}/")
         else:
-            clips = []
-            for i, (start, end, label) in enumerate(windows, 1):
-                start = max(0, start)
-                end = min(video.duration, end)
-                if end <= start:
+            clip_specs = []
+            for i, (start, end, label, period) in enumerate(windows, 1):
+                src, src_dur = get_src_and_duration(period)
+                s = max(0, start)
+                e = min(src_dur, end)
+                if e <= s:
+                    log(f"  SKIPPED clip {i:02d}: {s:.1f}s–{e:.1f}s outside video duration {src_dur:.1f}s")
                     continue
-                clips.append(video.subclipped(start, end))
-                prog(i, total_clips, time.time() - start_time)
+                clip_specs.append((src, s, e))
 
-            total_dur = sum(c.duration for c in clips)
-            log(f"Assembling {len(clips)} clips ({total_dur:.1f}s)...")
+            total_dur = sum(e - s for _, s, e in clip_specs)
+            log(f"Assembling {len(clip_specs)} clips ({total_dur:.1f}s)...")
             out_path = os.path.join(out_dir, config["output_filename"])
-            final = concatenate_videoclips(clips)
-            # Calculate total frames for progress tracking
-            fps = final.fps or 25
-            total_frames = int(total_dur * fps)
+
+            # For progress bar — estimate based on clip count
             assembly_start = time.time()
             stop_event = threading.Event()
+            fps_est = 25
+            total_frames = int(total_dur * fps_est)
             monitor_thread = threading.Thread(
                 target=monitor_file_progress,
-                args=(out_path, total_frames, fps, progress_queue, stop_event),
+                args=(out_path, total_frames, fps_est, progress_queue, stop_event),
                 daemon=True
             )
             monitor_thread.start()
-            final.write_videofile(out_path, codec="libx264", preset="ultrafast", logger=None)
+            cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
             stop_event.set()
             monitor_thread.join()
-            video.close()
-            log(f"\n✓ Saved to: {out_path}")
+            log(f"\n\u2713 Saved to: {out_path}")
 
         log_queue.put({"type": "done"})
+
 
     except Exception as e:
         log(f"\n✗ ERROR: {e}")
@@ -415,6 +551,12 @@ with col1:
     with tc2:
         half2 = st.text_input("2nd Half kick-off", placeholder="e.g. 0:45" if split_video else "e.g. 1:00:32")
         half4 = st.text_input("ET 2nd Half (optional)", placeholder="leave blank")
+
+    half_filter = st.selectbox(
+        "Halves to include",
+        options=["Both halves", "1st half only", "2nd half only"],
+        help="Restrict clips to a specific half. Useful when working with split video files."
+    )
 
     st.subheader("Action Filters")
     st.caption("Leave all blank to include every action in the CSV")
@@ -551,6 +693,7 @@ if run_btn:
             "output_filename": out_filename,
             "individual_clips": individual,
             "dry_run": dry_run,
+            "half_filter": half_filter,
             "filter_types": filter_types,
             "progressive_only": progressive_only,
             "xt_min": xt_min,
