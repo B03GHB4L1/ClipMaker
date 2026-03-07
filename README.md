@@ -82,8 +82,10 @@ Optional columns that unlock additional filters:
 ### v1.1
 - Action type, progressive, xT, and Top N filters
 - Split video file support (separate 1st/2nd half files)
+- Half filter — clip 1st half only, 2nd half only, or both
 - Live assembly progress bar with frame count and ETA
 - Finalising message when muxing audio and video
+- Switched from MoviePy to direct FFmpeg for all video cutting and assembly — faster rendering and full support for multi-audio stream files (e.g. dual-language `.mkv`)
 
 ### v1.0
 - Initial release
