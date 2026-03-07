@@ -12,7 +12,7 @@ ClipMaker is intentionally kept as a single file:
 |------|---------|
 | `app_streamlit.py` | The entire application — UI, filtering logic, FFmpeg integration |
 
-The single-file structure is a deliberate design decision. ClipMaker's users are football analysts and scouts, not developers. They receive the app as a simple download and run it via a launcher. Splitting into modules would complicate distribution without benefiting end users.
+The single-file structure is a deliberate design decision. ClipMaker's users are football analysts, scouts, and comp makers, not developers. They receive the app as a simple download and run it via a launcher. Splitting into modules would complicate distribution without benefiting end users.
 
 ---
 
