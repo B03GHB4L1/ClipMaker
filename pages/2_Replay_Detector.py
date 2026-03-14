@@ -322,7 +322,8 @@ def video_sec_to_clock(video_sec, period, period_start, period_offset):
 
 def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
                            scene_threshold, flow_threshold, min_replay_duration,
-                           sample_interval, log, max_event_seconds=12.0):
+                           sample_interval, log, max_event_seconds=0.0,
+                           max_clusters_to_check=0, shared_frame_cache=None):
     """
     Two-pass replay finder. *cap* is owned by the caller — it is NOT opened or
     closed here, so the caller can reuse it across all events without the
@@ -341,24 +342,65 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
 
     Returns (replay_start, replay_end, confidence) or None.
     """
-    SCAN_STEP   = max(1.0, float(sample_interval) * 2.5)   # Pass-1 step (s)
+    # Accuracy-first defaults: finer probing unless user explicitly throttles.
+    SCAN_STEP   = max(0.4, float(sample_interval) * 1.5)   # Pass-1 step (s)
     DUP_THR     = 0.35  # Minimum dup ratio for cluster confirmation
-    DUP_STEP    = max(0.4, float(sample_interval))   # Boundary walk resolution (s)
+    DUP_STEP    = max(0.2, float(sample_interval) * 0.75)   # Boundary walk resolution (s)
     CLUSTER_GAP = SCAN_STEP * 2
     event_start_time = time.time()
 
-    frame_cache = {}
+    frame_cache = shared_frame_cache if isinstance(shared_frame_cache, dict) else {}
+    cache_limit = 3000 if isinstance(shared_frame_cache, dict) else 450
+
+    def _frame_delta(a, b):
+        """Fast per-frame absolute-difference score (lower = more duplicated)."""
+        return float(cv2.absdiff(a, b).mean())
+
     def _grab_cached(t_probe):
         key = round(float(t_probe), 2)
         if key in frame_cache:
             return frame_cache[key]
         frame_cache[key] = _grab(cap, t_probe, fps)
-        if len(frame_cache) > 450:
+        while len(frame_cache) > cache_limit:
             frame_cache.pop(next(iter(frame_cache)))
         return frame_cache[key]
 
+    def _frame_dup_ratio_cached(center_t, win=2.0, pairs=8):
+        """Cache-aware version of _frame_dup_ratio to avoid redundant frame grabs."""
+        start = max(0.0, float(center_t) - win / 2.0)
+        end = start + win
+        ts = np.linspace(start, end, num=max(3, pairs + 1))
+
+        diffs = []
+        prev = None
+        for t_probe in ts:
+            gray, _ = _grab_cached(t_probe)
+            if gray is None:
+                continue
+            if prev is not None:
+                diffs.append(_frame_delta(prev, gray))
+            prev = gray
+
+        if not diffs:
+            return 0.0
+
+        base_t_local = max(0.0, float(center_t) - 30.0)
+        b1, _ = _grab_cached(base_t_local)
+        b2, _ = _grab_cached(base_t_local + 0.1)
+        if b1 is not None and b2 is not None:
+            baseline = _frame_delta(b1, b2)
+        else:
+            baseline = 8.0
+
+        if baseline <= 0:
+            return 0.0
+
+        dup_count = sum(1 for d in diffs if d < baseline * 0.6)
+        return dup_count / len(diffs)
+
     def _timed_out():
-        return (time.time() - event_start_time) >= max_event_seconds
+        budget = float(max_event_seconds or 0.0)
+        return budget > 0 and (time.time() - event_start_time) >= budget
 
     # flow_threshold (0.5–5.0) → fraction of baseline diff allowed (0.60→0.20).
     sensitivity = 0.60 - (min(5.0, max(0.5, flow_threshold)) - 0.5) / 4.5 * 0.40
@@ -371,7 +413,7 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
     ga, _ = _grab_cached(base_t)
     gb, _ = _grab_cached(base_t + 0.1)
     if ga is not None and gb is not None:
-        base_diff = float(np.mean(np.abs(ga.astype(np.float32) - gb.astype(np.float32))))
+        base_diff = _frame_delta(ga, gb)
     else:
         base_diff = 8.0
     diff_thr = max(1.5, base_diff * sensitivity)
@@ -382,12 +424,12 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
     t = window_start
     while t < min(window_end, dur):
         if _timed_out():
-            log("[ANALYZE] Event time budget reached; skipping this event for speed.")
+            log("[ANALYZE] Event time budget reached; stopping this event.")
             return None
         g1, _ = _grab_cached(t)
         g2, _ = _grab_cached(t + 0.1)
         if g1 is not None and g2 is not None:
-            d = float(np.mean(np.abs(g1.astype(np.float32) - g2.astype(np.float32))))
+            d = _frame_delta(g1, g2)
             if d < diff_thr:
                 candidates.append(t)
         t += SCAN_STEP
@@ -407,7 +449,8 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
             clusters.append(cur)
             cur = [c]
     clusters.append(cur)
-    clusters = clusters[:3]
+    if int(max_clusters_to_check or 0) > 0:
+        clusters = clusters[:int(max_clusters_to_check)]
 
     # ── Pass 2: confirm each cluster with _frame_dup_ratio (once per cluster)
     replay_start = None
@@ -419,7 +462,7 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
             log("[ANALYZE] Event time budget reached during verification.")
             return None
         probe = cluster[len(cluster) // 2]
-        dup = _frame_dup_ratio(cap, fps, probe, win=2.0, pairs=8)
+        dup = _frame_dup_ratio_cached(probe, win=2.0, pairs=8)
         if dup < DUP_THR:
             log(f"[ANALYZE] Cluster at ~{probe:.1f}s dup={dup:.2f}: not a replay.")
             continue
@@ -433,7 +476,7 @@ def find_replay_for_event(cap, fps, dur, event_ts, search_after, search_window,
             f2, _ = _grab_cached(t_probe + 0.1)
             if f1 is None or f2 is None:
                 return False
-            d = float(np.mean(np.abs(f1.astype(np.float32) - f2.astype(np.float32))))
+            d = _frame_delta(f1, f2)
             return d < diff_thr  # True = slow-mo = still in replay
 
         # Walk backward to tighten replay start
@@ -595,6 +638,7 @@ def run_detector(config, log_queue, progress_queue):
         results = []
         total = len(df)
         start_time = time.time()
+        shared_frame_cache = {}
 
         for i, (_, row) in enumerate(df.iterrows(), 1):
             event_ts = row["video_timestamp"]
@@ -622,7 +666,9 @@ def run_detector(config, log_queue, progress_queue):
                 flow_threshold=config["flow_threshold"],
                 min_replay_duration=config["min_replay_duration"],
                 sample_interval=config["sample_interval"],
-                max_event_seconds=float(config.get("max_event_seconds", 12.0)),
+                max_event_seconds=float(config.get("max_event_seconds", 0.0)),
+                max_clusters_to_check=int(config.get("max_clusters_to_check", 0)),
+                shared_frame_cache=shared_frame_cache,
                 log=log,
             )
 
@@ -1037,7 +1083,6 @@ if run_btn:
             "split_video": split_video,
             "video2_file": final_video2,
             "video3_file": final_video3,
-            "max_event_seconds": 10.0,
         }
         log_queue = queue.Queue()
         progress_queue = queue.Queue()
