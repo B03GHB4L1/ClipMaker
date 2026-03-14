@@ -8,6 +8,7 @@ import re
 import json
 import importlib
 import pandas as pd
+import numpy as np
 
 st.set_page_config(page_title="WhoScored Scraper", layout="wide")
 
@@ -103,6 +104,178 @@ st.markdown("""
     <b>xT and progressive distance columns</b> will be included as empty columns — ready for Insight90 integration.
 </div>
 """, unsafe_allow_html=True)
+
+# =============================================================================
+# BALL CARRY INSERTION
+# =============================================================================
+
+def insert_ball_carries(
+    events_df,
+    min_carry_length=3.0,
+    max_carry_length=100.0,
+    min_carry_duration=1.0,
+    max_carry_duration=50.0,
+    log_func=None,
+):
+    """
+    Insert synthetic Carry events between events when a player maintains possession.
+    """
+    if log_func is None:
+        log_func = lambda x: None
+
+    try:
+        match_events = events_df.copy().reset_index(drop=True)
+
+        # Add cumulative minutes if not present
+        if "cumulative_mins" not in match_events.columns:
+            match_events["cumulative_mins"] = match_events["minute"] + (match_events["second"] / 60)
+
+        # Ensure numeric types
+        for col in ["x", "y", "endX", "endY", "minute", "second"]:
+            if col in match_events.columns:
+                match_events[col] = pd.to_numeric(match_events[col], errors='coerce')
+
+        # Handle missing endX/endY for some event types
+        match_events.loc[match_events["endX"].isna(), "endX"] = match_events.loc[match_events["endX"].isna(), "x"]
+        match_events.loc[match_events["endY"].isna(), "endY"] = match_events.loc[match_events["endY"].isna(), "y"]
+
+        match_carries = pd.DataFrame()
+
+        for idx in range(len(match_events) - 1):
+            match_event = match_events.iloc[idx]
+            prev_evt_team = match_event.get("team", "")
+
+            next_evt_idx = idx + 1
+            init_next_evt = match_events.iloc[next_evt_idx]
+            take_ons = 0
+            incorrect_next_evt = True
+
+            # Skip events and count successful take-ons
+            while incorrect_next_evt and next_evt_idx < len(match_events):
+                next_evt = match_events.iloc[next_evt_idx]
+
+                if (
+                    next_evt.get("type") == "TakeOn"
+                    and next_evt.get("outcomeType") == "Successful"
+                ):
+                    take_ons += 1
+                    incorrect_next_evt = True
+
+                elif (
+                    (
+                        next_evt.get("type") == "TakeOn"
+                        and next_evt.get("outcomeType") == "Unsuccessful"
+                    )
+                    or (next_evt.get("type") == "Foul")
+                    or (next_evt.get("type") == "Card")
+                ):
+                    incorrect_next_evt = True
+
+                else:
+                    incorrect_next_evt = False
+
+                next_evt_idx += 1
+
+            if next_evt_idx >= len(match_events):
+                continue
+
+            next_evt = match_events.iloc[next_evt_idx - 1]
+
+            # Check carry conditions
+            same_team = prev_evt_team == next_evt.get("team", "")
+            not_ball_touch = match_event.get("type") != "BallTouch"
+
+            # Convert to meters
+            try:
+                dx = 105 * (match_event.get("endX", 0) - next_evt.get("x", 0)) / 100
+                dy = 68 * (match_event.get("endY", 0) - next_evt.get("y", 0)) / 100
+            except (TypeError, ValueError):
+                continue
+
+            far_enough = dx**2 + dy**2 >= min_carry_length**2
+            not_too_far = dx**2 + dy**2 <= max_carry_length**2
+
+            try:
+                dt = 60 * (
+                    next_evt.get("cumulative_mins", 0) - match_event.get("cumulative_mins", 0)
+                )
+            except (TypeError, ValueError):
+                dt = 0
+
+            min_time = dt >= min_carry_duration
+            same_phase = dt < max_carry_duration
+            same_period = match_event.get("period") == next_evt.get("period")
+
+            valid_carry = (
+                same_team
+                and not_ball_touch
+                and far_enough
+                and not_too_far
+                and min_time
+                and same_phase
+                and same_period
+            )
+
+            if valid_carry:
+                # Create carry event
+                carry = {
+                    "minute": int(
+                        np.floor(
+                            (
+                                (init_next_evt.get("minute", 0) * 60 + init_next_evt.get("second", 0))
+                                + (match_event.get("minute", 0) * 60 + match_event.get("second", 0))
+                            )
+                            / (2 * 60)
+                        )
+                    ),
+                    "second": int(
+                        (
+                            (init_next_evt.get("minute", 0) * 60 + init_next_evt.get("second", 0))
+                            + (match_event.get("minute", 0) * 60 + match_event.get("second", 0))
+                        )
+                        / 2
+                    ) - (
+                        int(
+                            np.floor(
+                                (
+                                    (init_next_evt.get("minute", 0) * 60 + init_next_evt.get("second", 0))
+                                    + (match_event.get("minute", 0) * 60 + match_event.get("second", 0))
+                                )
+                                / (2 * 60)
+                            )
+                        )
+                        * 60
+                    ),
+                    "type": "Carry",
+                    "outcomeType": "Successful",
+                    "period": next_evt.get("period", ""),
+                    "playerName": next_evt.get("playerName", ""),
+                    "team": next_evt.get("team", ""),
+                    "x": match_event.get("endX", ""),
+                    "y": match_event.get("endY", ""),
+                    "endX": next_evt.get("x", ""),
+                    "endY": next_evt.get("y", ""),
+                    "xT": np.nan,
+                    "prog_pass": np.nan,
+                    "prog_carry": np.nan,
+                }
+                match_carries = pd.concat(
+                    [match_carries, pd.DataFrame([carry])], ignore_index=True, sort=False
+                )
+
+        # Concatenate original events with carries and sort
+        if len(match_carries) > 0:
+            result_df = pd.concat([events_df, match_carries], ignore_index=True, sort=False)
+            result_df = result_df.sort_values(["period", "minute", "second"]).reset_index(drop=True)
+            log_func(f"  Inserted {len(match_carries)} synthetic Carry events.")
+            return result_df
+        else:
+            log_func(f"  No qualifying Carry events to insert.")
+            return events_df
+
+    except Exception as e:
+        log_func(f"  Warning: Could not insert carry events: {str(e)}")
+        return events_df
 
 # =============================================================================
 # SCRAPER CORE — requests only, no browser needed
@@ -363,6 +536,8 @@ def scrape_whoscored(url, player_name, log_queue):
                     "team": player_team.get(player_id, ""),
                     "x": ev.get("x", ""),
                     "y": ev.get("y", ""),
+                    "endX": ev.get("endX", ""),
+                    "endY": ev.get("endY", ""),
                     # Reserved for Insight90 integration
                     "xT": "",
                     "prog_pass": "",
@@ -382,6 +557,143 @@ def scrape_whoscored(url, player_name, log_queue):
             )
 
         df = pd.DataFrame(rows).sort_values(["period", "minute", "second"])
+
+        # Convert coordinate columns to numeric
+        for col in ["x", "y", "endX", "endY"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Calculate xT values for successful passes and carries
+        try:
+            xT_path = os.path.join(os.path.dirname(__file__), "..", "config", "xT_Grid.csv")
+            xT_grid = pd.read_csv(xT_path, header=None)
+            xT_array = np.array(xT_grid, dtype=float)
+            xT_rows, xT_cols = xT_array.shape
+
+            # Filter for successful passes and carries
+            dfxT = df[(df["type"].isin(["Pass", "Carry"])) & (df["outcomeType"] == "Successful")].copy()
+
+            if len(dfxT) > 0:
+                # Bin coordinates
+                dfxT["x1_bin_xT"] = pd.cut(dfxT["x"], bins=xT_cols, labels=False)
+                dfxT["y1_bin_xT"] = pd.cut(dfxT["y"], bins=xT_rows, labels=False)
+                dfxT["x2_bin_xT"] = pd.cut(dfxT["endX"], bins=xT_cols, labels=False)
+                dfxT["y2_bin_xT"] = pd.cut(dfxT["endY"], bins=xT_rows, labels=False)
+
+                # Calculate zone values
+                def get_zone_value(x_idx, y_idx):
+                    try:
+                        x_idx = int(x_idx)
+                        y_idx = int(y_idx)
+                        if 0 <= x_idx < xT_cols and 0 <= y_idx < xT_rows:
+                            return float(xT_array[y_idx, x_idx])
+                    except (ValueError, TypeError, IndexError):
+                        pass
+                    return np.nan
+
+                dfxT["start_zone_value_xT"] = dfxT[["x1_bin_xT", "y1_bin_xT"]].apply(
+                    lambda row: get_zone_value(row[0], row[1]), axis=1
+                )
+                dfxT["end_zone_value_xT"] = dfxT[["x2_bin_xT", "y2_bin_xT"]].apply(
+                    lambda row: get_zone_value(row[0], row[1]), axis=1
+                )
+
+                # Calculate xT
+                dfxT["xT"] = dfxT["end_zone_value_xT"] - dfxT["start_zone_value_xT"]
+
+                # Update main dataframe
+                df["xT"] = np.nan
+                df.loc[dfxT.index, "xT"] = dfxT["xT"]
+                xT_count = dfxT["xT"].notna().sum()
+                log(f"  xT values calculated for {xT_count} successful pass/carry events.")
+        except Exception as e:
+            log(f"  Warning: Could not calculate xT values: {str(e)}")
+            df["xT"] = np.nan
+
+        # Calculate progressive pass and carry distances
+        try:
+            df["prog_pass"] = np.nan
+            df["prog_carry"] = np.nan
+
+            # Progressive pass (distance advanced towards opponent goal for successful Pass events only)
+            pass_mask = (df["type"] == "Pass") & (df["outcomeType"] == "Successful")
+            if pass_mask.any():
+                df.loc[pass_mask, "prog_pass"] = (
+                    np.sqrt((105 - df.loc[pass_mask, "x"]) ** 2 + (34 - df.loc[pass_mask, "y"]) ** 2)
+                    - np.sqrt((105 - df.loc[pass_mask, "endX"]) ** 2 + (34 - df.loc[pass_mask, "endY"]) ** 2)
+                )
+
+            # Progressive carry (distance advanced towards opponent goal for successful Carry events)
+            carry_mask = (df["type"] == "Carry") & (df["outcomeType"] == "Successful")
+            if carry_mask.any():
+                df.loc[carry_mask, "prog_carry"] = (
+                    np.sqrt((105 - df.loc[carry_mask, "x"]) ** 2 + (34 - df.loc[carry_mask, "y"]) ** 2)
+                    - np.sqrt((105 - df.loc[carry_mask, "endX"]) ** 2 + (34 - df.loc[carry_mask, "endY"]) ** 2)
+                )
+
+            log(f"  Progressive pass/carry distances calculated.")
+        except Exception as e:
+            log(f"  Warning: Could not calculate progressive pass/carry: {str(e)}")
+
+        # Insert synthetic ball carries
+        df = insert_ball_carries(df, log_func=log)
+
+        # Recalculate xT and prog_carry for newly inserted carries
+        try:
+            xT_path = os.path.join(os.path.dirname(__file__), "..", "config", "xT_Grid.csv")
+            xT_grid = pd.read_csv(xT_path, header=None)
+            xT_array = np.array(xT_grid, dtype=float)
+            xT_rows, xT_cols = xT_array.shape
+
+            # Calculate xT for successful carries that don't have it yet
+            dfxT_new = df[(df["type"] == "Carry") & (df["outcomeType"] == "Successful") & (df["xT"].isna())].copy()
+
+            if len(dfxT_new) > 0:
+                # Bin coordinates
+                dfxT_new["x1_bin_xT"] = pd.cut(dfxT_new["x"], bins=xT_cols, labels=False)
+                dfxT_new["y1_bin_xT"] = pd.cut(dfxT_new["y"], bins=xT_rows, labels=False)
+                dfxT_new["x2_bin_xT"] = pd.cut(dfxT_new["endX"], bins=xT_cols, labels=False)
+                dfxT_new["y2_bin_xT"] = pd.cut(dfxT_new["endY"], bins=xT_rows, labels=False)
+
+                # Calculate zone values
+                def get_zone_value(x_idx, y_idx):
+                    try:
+                        x_idx = int(x_idx)
+                        y_idx = int(y_idx)
+                        if 0 <= x_idx < xT_cols and 0 <= y_idx < xT_rows:
+                            return float(xT_array[y_idx, x_idx])
+                    except (ValueError, TypeError, IndexError):
+                        pass
+                    return np.nan
+
+                dfxT_new["start_zone_value_xT"] = dfxT_new[["x1_bin_xT", "y1_bin_xT"]].apply(
+                    lambda row: get_zone_value(row[0], row[1]), axis=1
+                )
+                dfxT_new["end_zone_value_xT"] = dfxT_new[["x2_bin_xT", "y2_bin_xT"]].apply(
+                    lambda row: get_zone_value(row[0], row[1]), axis=1
+                )
+
+                # Calculate xT
+                dfxT_new["xT"] = dfxT_new["end_zone_value_xT"] - dfxT_new["start_zone_value_xT"]
+
+                # Update main dataframe
+                df.loc[dfxT_new.index, "xT"] = dfxT_new["xT"]
+                log(f"  xT values calculated for {len(dfxT_new)} inserted carry events.")
+        except Exception as e:
+            log(f"  Warning: Could not calculate xT for inserted carries: {str(e)}")
+
+        # Recalculate prog_carry for newly inserted carries
+        try:
+            carry_mask = (df["type"] == "Carry") & (df["outcomeType"] == "Successful") & (df["prog_carry"].isna())
+            if carry_mask.any():
+                df.loc[carry_mask, "prog_carry"] = (
+                    np.sqrt((105 - df.loc[carry_mask, "x"]) ** 2 + (34 - df.loc[carry_mask, "y"]) ** 2)
+                    - np.sqrt((105 - df.loc[carry_mask, "endX"]) ** 2 + (34 - df.loc[carry_mask, "endY"]) ** 2)
+                )
+                log(f"  Progressive carry distances calculated for {carry_mask.sum()} inserted carry events.")
+        except Exception as e:
+            log(f"  Warning: Could not calculate prog_carry for inserted carries: {str(e)}")
+
         log(f"[RESULT] Extracted {len(df)} events for {player_name or 'all players'}.")
         log_queue.put({"type": "data", "df": df, "home_team": home_team, "away_team": away_team})
         log_queue.put({"type": "done"})
