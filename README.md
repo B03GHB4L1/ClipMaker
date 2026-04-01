@@ -1,6 +1,7 @@
 <p align="center">
   <img src="./assets/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
 </p>
+
 # ClipMaker
 **Football video clipping and analysis workstation built from match event data**
 
