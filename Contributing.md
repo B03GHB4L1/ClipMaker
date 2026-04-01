@@ -6,8 +6,6 @@ Thanks for your interest in contributing to ClipMaker. This guide explains how t
 
 ## Project Structure
 
-ClipMaker is no longer a single-file app.
-
 The current packaged builds are platform-specific, but the Windows package is the best reference implementation when working on features:
 
 | Path | Purpose |
