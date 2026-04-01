@@ -1,6 +1,7 @@
 <p align="center">
-  <img src=".Mac/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
+  <img src="./ClipMaker_v1.2_Mac/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
 </p>
+
 # ClipMaker
 **Football video clipping and analysis workstation built from match event data**
 
