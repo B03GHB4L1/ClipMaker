@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    @import url('https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
+    body { background: #0e0e0e; overflow: hidden; font-family: 'Iosevka Charon Mono', monospace; color: #f0f0f0; }
+    #plot { width: 100%; }
+    #no-data {
+      display: none;
+      text-align: center;
+      padding: 40px 20px;
+      color: #888;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <div id="no-data">No data available.</div>
+
+  <script src="plotly-2.27.0.min.js"></script>
+  <script>
+  if (typeof Plotly === "undefined") {
+    var _s = document.createElement("script");
+    _s.src = "https://cdn.plot.ly/plotly-2.27.0.min.js";
+    document.head.appendChild(_s);
+  }
+  </script>
+  <script>
+  // ════════════════════════════════════════════════════════════════════════════
+  // Streamlit component protocol (unchanged from working version)
+  // ════════════════════════════════════════════════════════════════════════════
+  const Streamlit = {
+    ready() {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*"
+      );
+    },
+    setHeight(h) {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: Math.ceil(h) }, "*"
+      );
+    },
+    setValue(v) {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:setComponentValue", value: v, dataType: "json" }, "*"
+      );
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Constants
+  // ════════════════════════════════════════════════════════════════════════════
+  const HOME_RGB   = [122, 180, 255];
+  const AWAY_RGB   = [255, 115, 81];
+  const HOME_HEX   = "#7ab4ff";
+  const AWAY_HEX   = "#ff7351";
+  const SUCC_HEX   = "#7ab4ff";
+  const FAIL_HEX   = "#ff7351";
+  const PITCH_BG   = "#131313";
+  const PITCH_LINE = "rgba(255,255,255,0.12)";
+  const PITCH_THICK= "rgba(255,255,255,0.35)";
+  const MISSED     = new Set(["MissedShot","Attempt","MissedShots"]);
+
+  // Standard football goal dimensions: 7.32m wide x 2.44m high.
+  // The feed uses a much taller z-scale than the goal-mouth y-span,
+  // so we preserve the real-world goal ratio through axis scaling.
+  const GOAL_Y_LEFT  = 45.2;  // Matches existing width
+  const GOAL_Y_RIGHT = 54.8;
+  const GOAL_Z_TOP   = 29.5;
+  const GOAL_Z_BOT   = 0;
+  const GOAL_ASPECT_RATIO = 7.32 / 2.44;
+  const GOAL_SCALERATIO = (GOAL_Y_RIGHT - GOAL_Y_LEFT) / (GOAL_ASPECT_RATIO * (GOAL_Z_TOP - GOAL_Z_BOT));
+  const NORMAL_GOALFRAME_X_RANGE = [20, 80];
+  const NORMAL_GOALFRAME_Y_RANGE = [-8, GOAL_Z_TOP + 14];
+  const NORMAL_GOALFRAME_EXPAND_MARGIN_X = 4;
+  const NORMAL_GOALFRAME_EXPAND_MARGIN_Y = 8;
+  const SHOOTOUT_GOALFRAME_X_PADDING = 7.5;
+  const SHOOTOUT_GOALFRAME_X_RANGE = [GOAL_Y_LEFT - SHOOTOUT_GOALFRAME_X_PADDING, GOAL_Y_RIGHT + SHOOTOUT_GOALFRAME_X_PADDING];
+  const SHOOTOUT_GOALFRAME_Y_RANGE = [-8, GOAL_Z_TOP + 14];
+  const SHOOTOUT_GOALFRAME_EXPAND_MARGIN_X = 4;
+  const SHOOTOUT_GOALFRAME_EXPAND_MARGIN_Y = 8;
+
+  const DEF_STYLE = {
+    "Tackle":       { color:"#2980b9", symbol:"circle" },
+    "Interception": { color:"#27ae60", symbol:"square" },
+    "Clearance":    { color:"#95a5a6", symbol:"diamond" },
+    "Aerial":       { color:"#8e44ad", symbol:"triangle-up" },
+    "Block":        { color:"#d35400", symbol:"pentagon" },
+    "Challenge":    { color:"#1abc9c", symbol:"hexagon" },
+    "Dispossessed": { color:"#c0392b", symbol:"x" },
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Colour helpers
+  // ════════════════════════════════════════════════════════════════════════════
+  function shotColor(isHome) {
+    const [r, g, b] = isHome ? HOME_RGB : AWAY_RGB;
+    return `rgba(${r},${g},${b},0.75)`;
+  }
+  function borderColor(isHome) {
+    const [r, g, b] = isHome ? HOME_RGB : AWAY_RGB;
+    return `rgba(${r},${g},${b},0.90)`;
+  }
+  function hexToRgba(hex, alpha) {
+    const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Pitch shapes (from working Shot Map Parlour — proven correct)
+  // ════════════════════════════════════════════════════════════════════════════
+  function pitchShapes() {
+    const lw  = { color: PITCH_LINE,  width: 1.5 };
+    const lw2 = { color: PITCH_THICK, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:-3,    y0:0,    x1:103,   y1:100,  fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,     y0:0,    x1:100,   y1:100,  fillcolor:t,        line:lw2 },
+      { type:"line",   x0:50,    y0:0,    x1:50,    y1:100,  line:lw },
+      { type:"circle", x0:40.85, y0:35.9, x1:59.15, y1:64.1, fillcolor:t,        line:lw },
+      { type:"circle", x0:49.5,  y0:49.3, x1:50.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
+      { type:"rect",   x0:0,     y0:21.1, x1:17.0,  y1:78.9, fillcolor:t,        line:lw },
+      { type:"rect",   x0:83.0,  y0:21.1, x1:100,   y1:78.9, fillcolor:t,        line:lw },
+      { type:"rect",   x0:0,     y0:36.6, x1:5.5,   y1:63.4, fillcolor:t,        line:lw },
+      { type:"rect",   x0:94.5,  y0:36.6, x1:100,   y1:63.4, fillcolor:t,        line:lw },
+      { type:"circle", x0:10.5,  y0:49.3, x1:11.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
+      { type:"circle", x0:88.5,  y0:49.3, x1:89.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
+      { type:"rect",   x0:-3,    y0:44.5, x1:0,     y1:55.5, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"rect",   x0:100,   y0:44.5, x1:103,   y1:55.5, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+    ];
+  }
+
+  function halfPitchVertShapes() {
+    const lw  = { color: PITCH_LINE,  width: 1.5 };
+    const lw2 = { color: PITCH_THICK, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:0,    y0:-3,   x1:100,  y1:53,   fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:0,    x1:100,  y1:50,   fillcolor:t,        line:lw2 },
+      { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
+      { type:"rect",   x0:21.1, y0:0,    x1:78.9, y1:17.0, fillcolor:t,        line:lw },
+      { type:"rect",   x0:36.6, y0:0,    x1:63.4, y1:5.5,  fillcolor:t,        line:lw },
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:PITCH_LINE, line:lw },
+      { type:"rect",   x0:44.5, y0:-3,   x1:55.5, y1:0,    fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+    ];
+  }
+
+
+  // Defensive half pitch: own goal at bottom (y=100), centre line at top (y=50)
+  // Used for goalkeeper maps — mirrors halfPitchVertShapes but shows own half
+  function defHalfPitchVertShapes() {
+    const lw  = { color: PITCH_LINE,  width: 1.5 };
+    const lw2 = { color: PITCH_THICK, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:0,    y0:47,   x1:100,  y1:103,  fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:50,   x1:100,  y1:100,  fillcolor:t,        line:lw2 },
+      { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
+      { type:"rect",   x0:21.1, y0:83.0, x1:78.9, y1:100,  fillcolor:t,        line:lw },
+      { type:"rect",   x0:36.6, y0:94.5, x1:63.4, y1:100,  fillcolor:t,        line:lw },
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:PITCH_LINE, line:lw },
+      { type:"rect",   x0:44.5, y0:100,  x1:55.5, y1:103,  fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"path",   path:"M 35.9 83.0 A 14.1 9.15 0 0 1 64.1 83.0", fillcolor:t, line:lw },
+    ];
+  }
+
+  // Full pitch drawn vertically: x=0-100 (width), y=0-100 (length)
+  // Goal at y=0 (top), own goal at y=100 (bottom), direction of play: bottom→top
+  function fullPitchVertShapes() {
+    const lw  = { color: PITCH_LINE,  width: 1.5 };
+    const lw2 = { color: PITCH_THICK, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = "rgba(255,255,255,0.04)";
+    return [
+      // Background
+      { type:"rect", x0:-3, y0:-3, x1:103, y1:103, fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      // Pitch outline
+      { type:"rect", x0:0, y0:0, x1:100, y1:100, fillcolor:t, line:lw2 },
+      // Centre line
+      { type:"line", x0:0, y0:50, x1:100, y1:50, line:lw },
+      // Centre circle
+      { type:"circle", x0:35.9, y0:40.85, x1:64.1, y1:59.15, fillcolor:t, line:lw },
+      // Centre spot
+      { type:"circle", x0:49.3, y0:49.5, x1:50.7, y1:50.5, fillcolor:PITCH_LINE, line:lw },
+      // Top penalty area (attacking end)
+      { type:"rect", x0:21.1, y0:0, x1:78.9, y1:17.0, fillcolor:t, line:lw },
+      // Top 6-yard box
+      { type:"rect", x0:36.6, y0:0, x1:63.4, y1:5.5, fillcolor:t, line:lw },
+      // Top penalty spot
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:PITCH_LINE, line:lw },
+      // Top goal
+      { type:"rect", x0:44.5, y0:-3, x1:55.5, y1:0, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      // Bottom penalty area (own goal end)
+      { type:"rect", x0:21.1, y0:83.0, x1:78.9, y1:100, fillcolor:t, line:lw },
+      // Bottom 6-yard box
+      { type:"rect", x0:36.6, y0:94.5, x1:63.4, y1:100, fillcolor:t, line:lw },
+      // Bottom penalty spot
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:PITCH_LINE, line:lw },
+      // Bottom goal
+      { type:"rect", x0:44.5, y0:100, x1:55.5, y1:103, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      // Penalty arcs (top)
+      { type:"path", path:"M 35.9 17.0 A 14.1 9.15 0 0 0 64.1 17.0", fillcolor:t, line:lw },
+      // Penalty arcs (bottom)
+      { type:"path", path:"M 35.9 83.0 A 14.1 9.15 0 0 1 64.1 83.0", fillcolor:t, line:lw },
+    ];
+  }
+
+  function goalframeShapes(xRange, yRange) {
+    const goalLine = { color: "#ffffff", width: 3 };
+    const t = "rgba(0,0,0,0)";
+    // Goal dimensions: width (GOAL_Y_RIGHT - GOAL_Y_LEFT) = 9.6 units
+    // Height (GOAL_Z_TOP = 33.3 z-units ≈ crossbar; goal is 3:1 w:h aspect ratio)
+    // To ensure correct aspect ratio, the plot limits and scaling need to reflect this.
+    return [
+      // Background rectangle for the goalframe area. Adjusted y1 to match new GOAL_Z_TOP.
+      { type:"rect", x0:xRange[0], y0:yRange[0], x1:xRange[1], y1:yRange[1], fillcolor:PITCH_BG, line:{color:t}, layer:"below" },
+      // Goal frame outline.
+      { type:"rect", x0:GOAL_Y_LEFT, y0:GOAL_Z_BOT, x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP,
+        fillcolor:"rgba(255,255,255,0.08)", line:goalLine },
+      // Ground line at the goal.
+      { type:"line", x0:xRange[0], y0:0, x1:xRange[1], y1:0, line:{color:PITCH_LINE, width:1} },
+      // Vertical grid lines inside the goal, adjusted to new GOAL_Z_TOP.
+      { type:"line", x0:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
+        x1:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
+        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+      { type:"line", x0:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
+        x1:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
+        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+      // Horizontal grid line inside the goal, adjusted to new GOAL_Z_TOP.
+      { type:"line", x0:GOAL_Y_LEFT, y0:GOAL_Z_TOP/2,
+        x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP/2,
+        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+      // Goalposts extending slightly below the ground line.
+      { type:"line", x0:GOAL_Y_LEFT,  y0:0, x1:GOAL_Y_LEFT,  y1:-4, line:goalLine },
+      { type:"line", x0:GOAL_Y_RIGHT, y0:0, x1:GOAL_Y_RIGHT, y1:-4, line:goalLine },
+    ];
+  }
+
+  function expandedGoalframeRangeForShot(shot, defaultXRange, defaultYRange, marginX, marginY) {
+    if (!shot || shot._px == null || shot._py == null) {
+      return { xRange: defaultXRange, yRange: defaultYRange };
+    }
+
+    const xRange = [...defaultXRange];
+    const yRange = [...defaultYRange];
+
+    if (shot._px < xRange[0]) xRange[0] = shot._px - marginX;
+    if (shot._px > xRange[1]) xRange[1] = shot._px + marginX;
+    if (shot._py < yRange[0]) yRange[0] = shot._py - marginY;
+    if (shot._py > yRange[1]) yRange[1] = shot._py + marginY;
+
+    return { xRange, yRange };
+  }
+
+  function periodSortValue(period) {
+    const order = {
+      "FirstHalf": 1,
+      "SecondHalf": 2,
+      "FirstPeriodOfExtraTime": 3,
+      "SecondPeriodOfExtraTime": 4,
+      "PenaltyShootout": 5,
+    };
+    return order[period] || 99;
+  }
+
+  function sortShotsChronologically(shots) {
+    return [...shots].sort((a, b) => {
+      const periodDiff = periodSortValue(a.period) - periodSortValue(b.period);
+      if (periodDiff !== 0) return periodDiff;
+
+      const minuteDiff = (Number(a.minute) || 0) - (Number(b.minute) || 0);
+      if (minuteDiff !== 0) return minuteDiff;
+
+      const secondDiff = (Number(a.second) || 0) - (Number(b.second) || 0);
+      if (secondDiff !== 0) return secondDiff;
+
+      return (Number(a.df_idx) || 0) - (Number(b.df_idx) || 0);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Shared Plotly config
+  // ════════════════════════════════════════════════════════════════════════════
+  const PLOTLY_CONFIG = { displayModeBar: false, responsive: true };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHOT MAP — based on working Shot Map Parlour
+  // ════════════════════════════════════════════════════════════════════════════
+  function buildShotTrace(shotList, isHome, teamName, selectedIdx, isGF) {
+    if (!shotList.length) {
+      return { x:[], y:[], mode:"markers", name:teamName, type:"scatter",
+        marker:{size:12, color:isHome?HOME_HEX:AWAY_HEX}, showlegend:true };
+    }
+    const xs=[], ys=[], colors=[], symbols=[], sizes=[], texts=[], cd=[];
+    for (const s of shotList) {
+      xs.push(s._px); ys.push(s._py);
+      colors.push(shotColor(isHome));
+      if (s.type === "Goal") symbols.push("circle");
+      else if (MISSED.has(s.type)) symbols.push("x");
+      else symbols.push("circle-open");
+      sizes.push(s.df_idx === selectedIdx ? 22 : 13);
+      const sec = String(s.second).padStart(2,"0");
+      const et = (s.period||"").includes("ExtraTime") ? " ET" : "";
+      texts.push(`<b>${s.playerName||""}</b><br>${s.minute}'${sec}"${et}<br>${s.type}`);
+      cd.push(s.df_idx);
+    }
+    return { x:xs, y:ys, mode:"markers", name:teamName, type:"scatter",
+      text:texts, hovertemplate:"%{text}<extra></extra>", customdata:cd,
+      marker:{ size:sizes, color:colors, symbol:symbols, line:{color:borderColor(isHome),width:2} },
+      showlegend:true };
+  }
+
+  function renderShotMap(args) {
+    const shots      = args.shots      || [];
+    const homeTeam   = args.home_team  || "Home";
+    const awayTeam   = args.away_team  || "Away";
+    const selectedIdx= args.selected_idx;
+    const view       = args.view       || "pitch";
+    const height     = args.height     || 460;
+    const isGF = view === "goalframe";
+    const isHPV = view === "halfpitch_vert";
+    const isHP = view === "halfpitch";
+
+    let toPlot = shots;
+    if (isGF) toPlot = shots.filter(s => s.goal_mouth_y != null && s.goal_mouth_z != null);
+
+    for (const s of toPlot) {
+      if (isGF) {
+        s._px = 100 - s.goal_mouth_y;
+        s._py = s.goal_mouth_z;
+      } else if (isHPV) {
+        s._px = 100 - s.y;
+        s._py = 100 - s.x;
+      } else {
+        s._px = s.x;
+        s._py = 100 - s.y;
+      }
+    }
+
+    const homeShots = toPlot.filter(s => s.is_home);
+    const awayShots = toPlot.filter(s => !s.is_home);
+    const noData = toPlot.length === 0;
+    document.getElementById("no-data").style.display = noData ? "block" : "none";
+    document.getElementById("plot").style.display = noData ? "none" : "block";
+
+    const traces = [
+      buildShotTrace(homeShots, true, homeTeam, selectedIdx, isGF),
+      buildShotTrace(awayShots, false, awayTeam, selectedIdx, isGF),
+    ];
+
+    const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
+    const annotations = isGF ? [
+      {x:GOAL_Y_LEFT,y:-6,text:"Post",showarrow:false,font:{color:"#adaaaa",size:10}},
+      {x:GOAL_Y_RIGHT,y:-6,text:"Post",showarrow:false,font:{color:"#adaaaa",size:10}},
+      {x:gMid,y:GOAL_Z_TOP+4,text:"Crossbar",showarrow:false,font:{color:"#adaaaa",size:10}},
+    ] : [];
+
+    const selectedShot = selectedIdx != null ? toPlot.find(s => s.df_idx === selectedIdx) : null;
+
+    let xRange, yRange, scaleRatio, shapes;
+    if (isGF) {
+      const expanded = expandedGoalframeRangeForShot(
+        selectedShot,
+        NORMAL_GOALFRAME_X_RANGE,
+        NORMAL_GOALFRAME_Y_RANGE,
+        NORMAL_GOALFRAME_EXPAND_MARGIN_X,
+        NORMAL_GOALFRAME_EXPAND_MARGIN_Y
+      );
+      xRange=expanded.xRange; yRange=expanded.yRange; scaleRatio=GOAL_SCALERATIO; shapes=goalframeShapes(xRange, yRange);
+    } else if (isHPV) {
+      xRange=[-5,105]; yRange=[55,-5]; scaleRatio=0.65; shapes=halfPitchVertShapes();
+    } else if (isHP) {
+      xRange=[47,105]; yRange=[105,-5]; scaleRatio=0.65; shapes=halfPitchShapes();
+    } else {
+      xRange=[-5,105]; yRange=[105,-5]; scaleRatio=0.65; shapes=pitchShapes();
+    }
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      margin:{l:0,r:0,t:isGF?20:0,b:0}, height:height,
+      showlegend:!isGF,
+      legend:{orientation:"h",yanchor:"bottom",y:1.02,xanchor:"left",x:0,font:{color:"#ffffff",size:12},bgcolor:"rgba(0,0,0,0)"},
+      xaxis:{range:xRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:yRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:scaleRatio},
+      shapes:shapes, annotations:annotations, dragmode:false,
+    };
+
+    const plotEl = document.getElementById("plot");
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const dfIdx = data.points[0].customdata;
+        if (dfIdx != null) Streamlit.setValue([dfIdx, Date.now()]);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PASS MAP — player passes and pass network
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderPassMap(args) {
+    const passes     = args.passes      || [];
+    const homeTeam   = args.home_team   || "";
+    const awayTeam   = args.away_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const mode       = args.mode        || "player";
+    const height     = args.height      || 520;
+
+    document.getElementById("no-data").style.display = passes.length ? "none" : "block";
+    document.getElementById("plot").style.display = passes.length ? "block" : "none";
+    if (!passes.length) { Streamlit.setHeight(100); return; }
+
+    if (mode === "network") renderPassNetwork(passes, homeTeam, awayTeam, height);
+    else renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height);
+  }
+
+
+  function renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height) {
+    const plotEl = document.getElementById("plot");
+    const shapes = fullPitchVertShapes();
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    // Transform WhoScored coords (x=0-100 left→right, y=0-100 top→bottom)
+    // to portrait pitch (display x = 100-y, display y = 100-x so goal=top)
+    passes.forEach(p => {
+      if (p.x == null || p.endX == null) return;
+      const isSelected = selectedIdx === p.df_idx;
+      const col = p.successful ? SUCC_HEX : FAIL_HEX;
+      const lineAlpha = dimmed ? (isSelected ? 0.5 : 0.04) : 0.18;
+      const dotAlpha = dimmed ? (isSelected ? 1.0 : 0.08) : 0.7;
+      const sx=100-p.y, sy=100-p.x, ex=100-p.endY, ey=100-p.endX;
+
+      traces.push({
+        x:[sx,ex], y:[sy,ey], mode:"lines",
+        line:{color:hexToRgba(col,lineAlpha),width:isSelected?2:1},
+        hoverinfo:"none", showlegend:false,
+      });
+      traces.push({
+        x:[ex], y:[ey], mode:"markers",
+        marker:{color:hexToRgba(col,dotAlpha),size:isSelected?14:8,symbol:"circle",
+          line:{color:isSelected?col:"rgba(0,0,0,0.15)",width:isSelected?2:1}},
+        text:[`${p.playerName}<br>${p.minute}'${String(p.second).padStart(2,'0')}"<br>${p.successful?"✅ Successful":"❌ Unsuccessful"}`],
+        hovertemplate:"%{text}<extra></extra>",
+        customdata:[[p.df_idx, Date.now()]], showlegend:false,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      margin:{l:0,r:0,t:0,b:0}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
+      shapes:shapes, dragmode:false, showlegend:false,
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  function renderPassNetwork(passes, homeTeam, awayTeam, height) {
+    const plotEl = document.getElementById("plot");
+
+    // Build player data with starter info
+    const players = {};
+    passes.forEach(p => {
+      if (!p.playerName || p.x == null) return;
+      if (!players[p.playerName]) {
+        players[p.playerName] = {xs:[],ys:[],count:0,isHome:p.is_home,team:p.team,isStarter:p.is_starter!==false};
+      }
+      players[p.playerName].xs.push(p.x);
+      players[p.playerName].ys.push(p.y);
+      players[p.playerName].count++;
+    });
+
+    const nodes = {};
+    Object.entries(players).forEach(([name,d]) => {
+      nodes[name] = {
+        ax:d.xs.reduce((a,b)=>a+b,0)/d.xs.length,
+        ay:d.ys.reduce((a,b)=>a+b,0)/d.ys.length,
+        count:d.count, isHome:d.isHome, team:d.team, isStarter:d.isStarter,
+      };
+    });
+
+    const conns = {};
+    for (let i=0; i<passes.length-1; i++) {
+      const a=passes[i], b=passes[i+1];
+      if (!a.playerName||!b.playerName) continue;
+      if (a.team!==b.team||a.playerName===b.playerName) continue;
+      const key=[a.playerName,b.playerName].sort().join("|||");
+      conns[key]=(conns[key]||0)+1;
+    }
+
+    const homeNodes=Object.entries(nodes).filter(([,n])=>n.isHome);
+    const awayNodes=Object.entries(nodes).filter(([,n])=>!n.isHome);
+    const homeConns=Object.entries(conns).filter(([k])=>{const [a]=k.split("|||");return nodes[a]&&nodes[a].isHome;});
+    const awayConns=Object.entries(conns).filter(([k])=>{const [a]=k.split("|||");return nodes[a]&&!nodes[a].isHome;});
+
+    const homeMaxConn=Math.max(...homeConns.map(([,f])=>f),1);
+    const awayMaxConn=Math.max(...awayConns.map(([,f])=>f),1);
+    const homeMaxCount=Math.max(...homeNodes.map(([,n])=>n.count),1);
+    const awayMaxCount=Math.max(...awayNodes.map(([,n])=>n.count),1);
+
+    function buildTeamTraces(teamNodes,teamConns,maxConn,maxCount,baseHex,xaxis,yaxis) {
+      const traces=[];
+      const [br,bg,bb]=[parseInt(baseHex.slice(1,3),16),parseInt(baseHex.slice(3,5),16),parseInt(baseHex.slice(5,7),16)];
+
+      // Connection lines: transform WhoScored→portrait (display x=100-y, display y=100-x)
+      teamConns.forEach(([key,freq]) => {
+        const [a,b]=key.split("|||");
+        if (!nodes[a]||!nodes[b]) return;
+        const alpha=0.08+0.55*(freq/maxConn);
+        traces.push({
+          x:[100-nodes[a].ay, 100-nodes[b].ay], y:[100-nodes[a].ax, 100-nodes[b].ax],
+          xaxis:xaxis, yaxis:yaxis, mode:"lines",
+          line:{color:`rgba(${br},${bg},${bb},${alpha})`,width:1+3*(freq/maxConn)},
+          hoverinfo:"none", showlegend:false,
+        });
+      });
+
+      // Starters (circles)
+      const starters=teamNodes.filter(([,n])=>n.isStarter);
+      if (starters.length) {
+        traces.push({
+          x:starters.map(([,n])=>100-n.ay), y:starters.map(([,n])=>100-n.ax),
+          xaxis:xaxis, yaxis:yaxis, mode:"markers+text",
+          marker:{
+            color:starters.map(([,n])=>`rgba(${br},${bg},${bb},${0.25+0.7*(n.count/maxCount)})`),
+            size:starters.map(([,n])=>14+14*(n.count/maxCount)), symbol:"circle",
+            line:{color:baseHex,width:2},
+          },
+          text:starters.map(([name])=>name.split(" ").pop()),
+          textposition:"top center", textfont:{size:9,color:"#ffffff"},
+          hovertext:starters.map(([name,n])=>`${name}<br>${n.count} passes`),
+          hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
+        });
+      }
+
+      // Subs (smaller squares)
+      const subs=teamNodes.filter(([,n])=>!n.isStarter);
+      if (subs.length) {
+        traces.push({
+          x:subs.map(([,n])=>100-n.ay), y:subs.map(([,n])=>100-n.ax),
+          xaxis:xaxis, yaxis:yaxis, mode:"markers+text",
+          marker:{
+            color:subs.map(([,n])=>`rgba(${br},${bg},${bb},${0.25+0.7*(n.count/maxCount)})`),
+            size:subs.map(([,n])=>8+8*(n.count/maxCount)), symbol:"square",
+            line:{color:baseHex,width:1.5},
+          },
+          text:subs.map(([name])=>name.split(" ").pop()),
+          textposition:"top center", textfont:{size:8,color:"#adaaaa"},
+          hovertext:subs.map(([name,n])=>`${name} (sub)<br>${n.count} passes`),
+          hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
+        });
+      }
+
+      return traces;
+    }
+
+    const traces=[
+      ...buildTeamTraces(homeNodes,homeConns,homeMaxConn,homeMaxCount,HOME_HEX,"x","y"),
+      ...buildTeamTraces(awayNodes,awayConns,awayMaxConn,awayMaxCount,AWAY_HEX,"x2","y2"),
+    ];
+
+    // Pitch shapes for both subplots
+    const shapes1=fullPitchVertShapes();
+    const shapes2=fullPitchVertShapes().map(s => {
+      const ns=Object.assign({},s);
+      ns.xref="x2"; ns.yref="y2";
+      if (ns.line) ns.line=Object.assign({},ns.line);
+      return ns;
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+      margin:{l:0,r:0,t:25,b:10}, height:height, dragmode:false, showlegend:false,
+      xaxis: {range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,domain:[0,0.48]},
+      yaxis: {range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
+      xaxis2:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,domain:[0.52,1],anchor:"y2"},
+      yaxis2:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x2",scaleratio:1.5,anchor:"x2"},
+      shapes:[...shapes1,...shapes2],
+      annotations:[
+        {x:50,y:107,xref:"x",yref:"y",text:`<b>${homeTeam}</b>`,showarrow:false,font:{size:13,color:HOME_HEX}},
+        {x:50,y:107,xref:"x2",yref:"y2",text:`<b>${awayTeam}</b>`,showarrow:false,font:{size:13,color:AWAY_HEX}},
+      ],
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // DEFENSIVE MAP — portrait full pitch (bottom→top)
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderDefensiveMap(args) {
+    const actions    = args.actions     || [];
+    const homeTeam   = args.home_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height      || 620;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = fullPitchVertShapes();
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    const byType = {};
+    actions.forEach(a => { if (!byType[a.type]) byType[a.type]=[]; byType[a.type].push(a); });
+
+    Object.entries(byType).forEach(([atype,acts]) => {
+      const style = DEF_STYLE[atype] || {color:"#aaa",symbol:"circle"};
+      // Transform: display x=100-y, display y=100-x
+      traces.push({
+        x:acts.map(a=>100-a.y), y:acts.map(a=>100-a.x), mode:"markers", name:atype,
+        marker:{
+          color:acts.map(a=>{
+            const isSel=selectedIdx===a.df_idx;
+            const alpha=dimmed?(isSel?1.0:0.12):0.75;
+            const [r,g,b]=[parseInt(style.color.slice(1,3),16),parseInt(style.color.slice(3,5),16),parseInt(style.color.slice(5,7),16)];
+            return `rgba(${r},${g},${b},${alpha})`;
+          }),
+          size:acts.map(a=>selectedIdx===a.df_idx?24:16), symbol:style.symbol,
+          line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:"rgba(255,255,255,0.35)"),
+                width:acts.map(a=>selectedIdx===a.df_idx?2.5:1.5)},
+        },
+        text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}`),
+        hovertemplate:"%{text}<extra></extra>",
+        customdata:acts.map(a=>[a.df_idx, Date.now()]),
+        showlegend:true,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      margin:{l:0,r:0,t:0,b:60}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
+      shapes:shapes, dragmode:false,
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:"#adaaaa"}},
+      showlegend:true,
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ROI SELECTOR — click-and-drag rectangle on a video frame
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderRoiSelector(args) {
+    const frame_b64   = args.frame_b64   || "";
+    const frame_w     = args.frame_w     || 960;
+    const frame_h     = args.frame_h     || 540;
+    const existing    = args.existing_roi || {};
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    plotEl.style.display = "block";
+
+    plotEl.innerHTML = `
+      <div style="position:relative;width:100%;user-select:none;">
+        <canvas id="roi-canvas" style="cursor:crosshair;width:100%;display:block;border:1px solid #333;border-radius:4px;"></canvas>
+        <div id="roi-hint" style="color:#adaaaa;font-size:11px;margin-top:5px;min-height:16px;"></div>
+      </div>`;
+
+    const canvas = document.getElementById("roi-canvas");
+    const ctx    = canvas.getContext("2d");
+    const img    = new Image();
+
+    let isDragging = false;
+    let startX = 0, startY = 0;
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    // Map a canvas-CSS coordinate to an image-pixel coordinate
+    function toImg(cx, cy) {
+      const scaleX = frame_w / canvas.width;
+      const scaleY = frame_h / canvas.height;
+      return [cx * scaleX, cy * scaleY];
+    }
+
+    // Map a canvas-CSS position (relative to canvas element) from a mouse event
+    function canvasPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width  / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const src = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
+      return [
+        (src.clientX - rect.left)  * scaleX,
+        (src.clientY - rect.top)   * scaleY,
+      ];
+    }
+
+    function drawScene(rect) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (rect && rect.w >= 2 && rect.h >= 2) {
+        ctx.strokeStyle = "#00ff50";
+        ctx.lineWidth   = 2;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.fillStyle   = "rgba(0,255,80,0.10)";
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      }
+    }
+
+    function sendRoi(x1, y1, x2, y2) {
+      let ix1 = clamp(Math.round(Math.min(x1, x2)), 0, frame_w - 1);
+      let iy1 = clamp(Math.round(Math.min(y1, y2)), 0, frame_h - 1);
+      let iw  = clamp(Math.round(Math.abs(x2 - x1)), 4, frame_w  - ix1);
+      let ih  = clamp(Math.round(Math.abs(y2 - y1)), 2, frame_h  - iy1);
+      if (iw < 4 || ih < 2) return;
+      Streamlit.setValue({ x: ix1, y: iy1, w: iw, h: ih });
+      const hint = document.getElementById("roi-hint");
+      if (hint) hint.textContent = `ROI: (${ix1}, ${iy1})  ${iw}×${ih}px — draw again to adjust.`;
+    }
+
+    img.onload = function () {
+      canvas.width  = frame_w;
+      canvas.height = frame_h;
+
+      // Show existing ROI (if any) on first render
+      let initRect = null;
+      if (existing.w > 0 && existing.h > 0) {
+        initRect = { x: existing.x, y: existing.y, w: existing.w, h: existing.h };
+        const hint = document.getElementById("roi-hint");
+        if (hint) hint.textContent = `Current ROI: (${existing.x}, ${existing.y})  ${existing.w}×${existing.h}px`;
+      } else {
+        const hint = document.getElementById("roi-hint");
+        if (hint) hint.textContent = "Click and drag to draw the scoreboard region.";
+      }
+      drawScene(initRect);
+
+      requestAnimationFrame(() => {
+        const h = canvas.getBoundingClientRect().height;
+        Streamlit.setHeight(h + 30);
+      });
+    };
+
+    img.src = "data:image/jpeg;base64," + frame_b64;
+
+    // ── Mouse events ─────────────────────────────────────────────────────────
+    canvas.addEventListener("mousedown", function (e) {
+      [startX, startY] = canvasPos(e);
+      isDragging = true;
+      e.preventDefault();
+    });
+
+    canvas.addEventListener("mousemove", function (e) {
+      if (!isDragging) return;
+      const [cx, cy] = canvasPos(e);
+      drawScene({ x: Math.min(startX, cx), y: Math.min(startY, cy),
+                  w: Math.abs(cx - startX), h: Math.abs(cy - startY) });
+    });
+
+    canvas.addEventListener("mouseup", function (e) {
+      if (!isDragging) return;
+      isDragging = false;
+      const [cx, cy] = canvasPos(e);
+      const [ix1, iy1] = toImg(startX, startY);
+      const [ix2, iy2] = toImg(cx, cy);
+      sendRoi(ix1, iy1, ix2, iy2);
+    });
+
+    canvas.addEventListener("mouseleave", function () { isDragging = false; });
+
+    // ── Touch events ──────────────────────────────────────────────────────────
+    canvas.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      [startX, startY] = canvasPos(e);
+      isDragging = true;
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", function (e) {
+      e.preventDefault();
+      if (!isDragging) return;
+      const [cx, cy] = canvasPos(e);
+      drawScene({ x: Math.min(startX, cx), y: Math.min(startY, cy),
+                  w: Math.abs(cx - startX), h: Math.abs(cy - startY) });
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", function (e) {
+      e.preventDefault();
+      if (!isDragging) return;
+      isDragging = false;
+      const [cx, cy] = canvasPos(e);
+      const [ix1, iy1] = toImg(startX, startY);
+      const [ix2, iy2] = toImg(cx, cy);
+      sendRoi(ix1, iy1, ix2, iy2);
+    }, { passive: false });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Goalkeeper Actions Map
+  // ════════════════════════════════════════════════════════════════════════════
+  const GK_STYLE = {
+    "Punch":         { color: "#3498db", symbol: "circle" },
+    "Claim":         { color: "#27ae60", symbol: "square" },
+    "KeeperSweeper": { color: "#f39c12", symbol: "diamond" },
+    "KeeperPickup":  { color: "#8e44ad", symbol: "triangle-up" },
+    "PenaltyFaced":  { color: "#e74c3c", symbol: "pentagon" },
+  };
+
+  function renderGoalkeeperMap(args) {
+    const actions    = args.actions     || [];
+    const homeTeam   = args.home_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height      || 520;
+    const shotsFaced = args.shots_faced === true;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = defHalfPitchVertShapes();
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    if (shotsFaced) {
+      // ── Shots Faced mode ────────────────────────────────────────────────────
+      // Opposing shots: display_x = y, display_y = x (no inversion — x≈90 lands near own goal)
+      // y is mirrored (a.y not 100-a.y) so left/right matches the GK's perspective
+      // Group by outcome: Saved (blue) vs Goal (red)
+      const groups = [
+        { label: "Saved",    color: "#7ab4ff", acts: actions.filter(a => a.type === "SavedShot") },
+        { label: "Goal",     color: "#e74c3c", acts: actions.filter(a => a.type === "Goal")      },
+      ];
+      groups.forEach(({label, color, acts}) => {
+        if (!acts.length) return;
+        const [r,g,b] = [parseInt(color.slice(1,3),16),parseInt(color.slice(3,5),16),parseInt(color.slice(5,7),16)];
+        traces.push({
+          x: acts.map(a => a.y),
+          y: acts.map(a => a.x),
+          mode: "markers", name: label,
+          marker: {
+            symbol: label === "Goal" ? "x" : "circle",
+            color: acts.map(a => {
+              const isSel = selectedIdx === a.df_idx;
+              const alpha = dimmed ? (isSel ? 1.0 : 0.12) : 0.82;
+              return `rgba(${r},${g},${b},${alpha})`;
+            }),
+            size: acts.map(a => selectedIdx === a.df_idx ? 22 : 14),
+            line: {
+              color: acts.map(a => selectedIdx === a.df_idx ? color : "rgba(255,255,255,0.35)"),
+              width: acts.map(a => selectedIdx === a.df_idx ? 2.5 : 1.5),
+            },
+          },
+          text: acts.map(a => `${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${label}`),
+          hovertemplate: "%{text}<extra></extra>",
+          customdata: acts.map(a => [a.df_idx, Date.now()]),
+          showlegend: true,
+        });
+      });
+    } else {
+      // ── GK Actions mode ─────────────────────────────────────────────────────
+      const byType = {};
+      actions.forEach(a => { if (!byType[a.type]) byType[a.type]=[]; byType[a.type].push(a); });
+
+      Object.entries(byType).forEach(([atype,acts]) => {
+        const style = GK_STYLE[atype] || {color:"#aaa",symbol:"circle"};
+        // PenaltyFaced has no meaningful coords in WhoScored — always pin to penalty spot
+        const isPenalty = atype === "PenaltyFaced";
+        traces.push({
+          x:acts.map(a=> isPenalty ? 50   : 100-a.y),
+          y:acts.map(a=> isPenalty ? 88.5 : 100-a.x),
+          mode:"markers", name:atype,
+          marker:{
+            color:acts.map(a=>{
+              const isSel=selectedIdx===a.df_idx;
+              const alpha=dimmed?(isSel?1.0:0.12):0.75;
+              const [r,g,b]=[parseInt(style.color.slice(1,3),16),parseInt(style.color.slice(3,5),16),parseInt(style.color.slice(5,7),16)];
+              return `rgba(${r},${g},${b},${alpha})`;
+            }),
+            size:acts.map(a=>selectedIdx===a.df_idx?24:16), symbol:style.symbol,
+            line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:"rgba(255,255,255,0.35)"),
+                  width:acts.map(a=>selectedIdx===a.df_idx?2.5:1.5)},
+          },
+          text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}`),
+          hovertemplate:"%{text}<extra></extra>",
+          customdata:acts.map(a=>[a.df_idx, Date.now()]),
+          showlegend:true,
+        });
+      });
+    }
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      margin:{l:0,r:0,t:0,b:60}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,45],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
+      shapes:shapes, dragmode:false,
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:"#adaaaa"}},
+      showlegend:true,
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Dribble & Carry Map
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderDribbleCarryMap(args) {
+    const actions     = args.actions      || [];
+    const selectedIdx = args.selected_idx != null ? args.selected_idx : null;
+    const height      = args.height       || 700;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display    = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = fullPitchVertShapes();
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    const SUCC_COLOR  = "#27ae60";
+    const FAIL_COLOR  = "#e74c3c";
+    const CARRY_COLOR = "#e0c860";
+
+    const dribbles = actions.filter(a => a.type === "TakeOn");
+    const carries  = actions.filter(a => a.type === "Carry" && a.endX != null && a.endY != null);
+
+    // ── Carry lines (null-separated, not clickable) ──────────────────────────
+    if (carries.length) {
+      const lineAlpha = dimmed ? 0.12 : 0.55;
+      const cxs = [], cys = [];
+      carries.forEach(c => {
+        cxs.push(100 - c.y, 100 - c.endY, null);
+        cys.push(100 - c.x, 100 - c.endX, null);
+      });
+      traces.push({
+        x: cxs, y: cys, mode: "lines",
+        line: { dash: "dot", width: 2, color: `rgba(224,200,96,${lineAlpha})` },
+        hoverinfo: "skip", showlegend: false, name: "Carry line",
+      });
+
+      // highlighted line for selected carry
+      if (dimmed) {
+        const sel = carries.find(c => c.df_idx === selectedIdx);
+        if (sel) {
+          traces.push({
+            x: [100 - sel.y, 100 - sel.endY],
+            y: [100 - sel.x, 100 - sel.endX],
+            mode: "lines",
+            line: { dash: "dot", width: 3, color: "rgba(224,200,96,1.0)" },
+            hoverinfo: "skip", showlegend: false, name: "",
+          });
+        }
+      }
+
+      // ── Carry endpoints (clickable dots) ────────────────────────────────────
+      const ex = [], ey = [], ec = [], es = [], elc = [], elw = [], et = [], ecd = [];
+      carries.forEach(c => {
+        const isSel  = selectedIdx === c.df_idx;
+        const alpha  = dimmed ? (isSel ? 1.0 : 0.12) : 0.75;
+        ex.push(100 - c.endY);
+        ey.push(100 - c.endX);
+        ec.push(`rgba(224,200,96,${alpha})`);
+        es.push(isSel ? 16 : 10);
+        elc.push(isSel ? CARRY_COLOR : "rgba(255,255,255,0.3)");
+        elw.push(isSel ? 2.5 : 1.5);
+        et.push(`${c.playerName}<br>${c.minute}'${String(c.second).padStart(2,"0")}"<br>Carry`);
+        ecd.push([c.df_idx, Date.now()]);
+      });
+      traces.push({
+        x: ex, y: ey, mode: "markers", name: "Carry",
+        marker: { symbol: "circle", color: ec, size: es,
+                  line: { color: elc, width: elw } },
+        text: et, hovertemplate: "%{text}<extra></extra>",
+        customdata: ecd, showlegend: true,
+      });
+    }
+
+    // ── Dribbles ─────────────────────────────────────────────────────────────
+    [
+      [dribbles.filter(d => d.outcomeType === "Successful"),   SUCC_COLOR, "Succ. dribbles"],
+      [dribbles.filter(d => d.outcomeType !== "Successful"),   FAIL_COLOR, "Unsucc. dribbles"],
+    ].forEach(([grp, color, name]) => {
+      if (!grp.length) return;
+      const [r,g,b] = [parseInt(color.slice(1,3),16), parseInt(color.slice(3,5),16), parseInt(color.slice(5,7),16)];
+      traces.push({
+        x: grp.map(d => 100 - d.y),
+        y: grp.map(d => 100 - d.x),
+        mode: "markers", name: name,
+        marker: {
+          symbol: "circle",
+          color: grp.map(d => {
+            const isSel = selectedIdx === d.df_idx;
+            const alpha = dimmed ? (isSel ? 1.0 : 0.12) : 0.82;
+            return `rgba(${r},${g},${b},${alpha})`;
+          }),
+          size: grp.map(d => selectedIdx === d.df_idx ? 20 : 13),
+          line: {
+            color: grp.map(d => selectedIdx === d.df_idx ? color : "rgba(255,255,255,0.35)"),
+            width: grp.map(d => selectedIdx === d.df_idx ? 2.5 : 1.5),
+          },
+        },
+        text: grp.map(d => `${d.playerName}<br>${d.minute}'${String(d.second).padStart(2,"0")}"<br>${d.outcomeType === "Successful" ? "Successful dribble" : "Unsuccessful dribble"}`),
+        hovertemplate: "%{text}<extra></extra>",
+        customdata: grp.map(d => [d.df_idx, Date.now()]),
+        showlegend: true,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: PITCH_BG,
+      margin: {l:0, r:0, t:0, b:60}, height: height,
+      xaxis: {range:[-5,105], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true},
+      yaxis: {range:[105,-5], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true, scaleanchor:"x", scaleratio:1.5},
+      shapes: shapes, dragmode: false,
+      legend: {orientation:"h", y:-0.04, x:0.5, xanchor:"center", bgcolor:"rgba(0,0,0,0)", font:{size:11, color:"#adaaaa"}},
+      showlegend: true,
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUILD-UP MAP — horizontal pitch, plots a single sequence's ball path
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderBuildUpMap(args) {
+    const actions   = args.actions   || [];
+    const isHome    = args.is_home   || false;
+    const height    = args.height    || 260;
+    const teamColor = isHome ? HOME_HEX : AWAY_HEX;
+    const [tr, tg, tb] = isHome ? HOME_RGB : AWAY_RGB;
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    document.getElementById("plot").style.display    = "block";
+
+    const shapes      = pitchShapes();
+    const annotations = [];
+    const traces      = [];
+
+    const carryX = [], carryY = [];
+    const stepX  = [], stepY  = [], stepText = [], stepHover = [];
+
+    actions.forEach(a => {
+      if (a.endX == null || a.endY == null) return;
+      const sx = a.x,    sy = 100 - a.y;
+      const ex = a.endX, ey = 100 - a.endY;
+
+      stepX.push(sx);
+      stepY.push(sy);
+      stepText.push(String(a.step));
+      stepHover.push(
+        `${a.step}. ${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,"0")}" (${a.type})`
+      );
+
+      if (a.type === "Pass" || a.type === "SuccessfulFinalThirdPass") {
+        annotations.push({
+          x: ex, y: ey, ax: sx, ay: sy,
+          xref: "x", yref: "y", axref: "x", ayref: "y",
+          showarrow: true,
+          arrowhead: 2, arrowsize: 1.2, arrowwidth: 2,
+          arrowcolor: teamColor,
+          text: "",
+        });
+      } else {
+        // Carry — dashed line
+        carryX.push(sx, ex, null);
+        carryY.push(sy, ey, null);
+      }
+    });
+
+    // Carry lines
+    if (carryX.length) {
+      traces.push({
+        x: carryX, y: carryY, mode: "lines",
+        line: { dash: "dot", width: 2.5, color: `rgba(${tr},${tg},${tb},0.7)` },
+        hoverinfo: "skip", showlegend: false,
+      });
+    }
+
+    // Terminal end-point dot (last action's end position)
+    if (actions.length > 0) {
+      const last = actions[actions.length - 1];
+      if (last.endX != null && last.endY != null) {
+        traces.push({
+          x: [last.endX], y: [100 - last.endY], mode: "markers",
+          marker: { symbol: "circle", size: 10,
+                    color: `rgba(${tr},${tg},${tb},0.9)`,
+                    line: { color: teamColor, width: 1.5 } },
+          hoverinfo: "skip", showlegend: false,
+        });
+      }
+    }
+
+    // Numbered start markers (drawn last so they sit on top)
+    if (stepX.length) {
+      traces.push({
+        x: stepX, y: stepY, mode: "markers+text",
+        text: stepText,
+        textposition: "middle center",
+        textfont: { size: 9, color: "#0d0d0d", family: "Iosevka Charon Mono, monospace" },
+        marker: {
+          symbol: "circle", size: 20,
+          color: `rgba(${tr},${tg},${tb},0.9)`,
+          line: { color: teamColor, width: 1.5 },
+        },
+        hovertext: stepHover,
+        hovertemplate: "%{hovertext}<extra></extra>",
+        showlegend: false,
+      });
+    }
+
+    // Empty state
+    if (!actions.length) {
+      annotations.push({
+        x: 50, y: 50, xref: "x", yref: "y",
+        text: "Select a sequence",
+        showarrow: false,
+        font: { color: "#555555", size: 13 },
+      });
+    }
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: PITCH_BG,
+      margin: { l: 0, r: 0, t: 0, b: 0 }, height: height,
+      xaxis: { range: [-5, 105], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true },
+      yaxis: { range: [105, -5], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true,
+               scaleanchor: "x", scaleratio: 0.65 },
+      shapes: shapes, annotations: annotations,
+      dragmode: false, showlegend: false,
+    };
+
+    Plotly.newPlot(plotEl, traces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PENALTY SHOOTOUT MAP
+  // Layout: goalframe top-centre, home player circles left, away player circles right
+  // Clicking a player circle sends back [df_idx, timestamp]
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderPenaltyShootout(args) {
+    const shots      = args.shots      || [];
+    const homeTeam   = args.home_team  || "Home";
+    const awayTeam   = args.away_team  || "Away";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height     || 560;
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = shots.length ? "none" : "block";
+    plotEl.style.display = shots.length ? "block" : "none";
+    if (!shots.length) { Streamlit.setHeight(100); return; }
+
+    const homeShots = sortShotsChronologically(shots.filter(s => s.is_home));
+    const awayShots = sortShotsChronologically(shots.filter(s => !s.is_home));
+    const ROW_SIZE = 5;
+    const homeRows = Math.max(1, Math.ceil(homeShots.length / ROW_SIZE));
+    const awayRows = Math.max(1, Math.ceil(awayShots.length / ROW_SIZE));
+    const playerRows = Math.max(homeRows, awayRows);
+    const playerRangeForRows = rows => [-(rows - 1) - 0.8, 0.8];
+    const layoutHeight = Math.max(height, 760 + Math.max(0, playerRows - 1) * 72);
+
+    // Compute goalframe data for selected shot
+    const selShot = selectedIdx != null ? shots.find(s => s.df_idx === selectedIdx) : null;
+    const hasGF   = selShot && selShot.goal_mouth_y != null && selShot.goal_mouth_z != null;
+
+    // ── Helper: build player circle trace for one team ──────────────────────
+    // ── Helper: build player traces for one team (split by outcome for correct rendering)
+    function buildPlayerTraces(teamShots, isHome, xaxis, yaxis) {
+      const baseColor = isHome ? HOME_HEX : AWAY_HEX;
+      const [r,g,b]   = isHome ? HOME_RGB  : AWAY_RGB;
+      const goals = [], saved = [], missed = [];
+
+      teamShots.forEach((s, i) => {
+        const col  = i % ROW_SIZE;
+        const row  = Math.floor(i / ROW_SIZE);
+        const isSel = s.df_idx === selectedIdx;
+        const sec   = String(s.second).padStart(2, "0");
+        const entry = {
+          x: col, y: -row, dfIdx: s.df_idx, size: isSel ? 30 : 22,
+          text: "<b>" + (s.playerName || "") + "</b><br>" + s.minute + "'" + sec + '"<br>' + s.type,
+        };
+        if      (s.type === "Goal")   goals.push(entry);
+        else if (MISSED.has(s.type))  missed.push(entry);
+        else                          saved.push(entry);
+      });
+
+      function mkTrace(bucket, symbol, fillColor, borderColor, lineWidth) {
+        if (!bucket.length) return null;
+        return {
+          x: bucket.map(e => e.x), y: bucket.map(e => e.y),
+          mode: "markers", type: "scatter", xaxis, yaxis,
+          text: bucket.map(e => e.text),
+          hovertemplate: "%{text}<extra></extra>",
+          customdata: bucket.map(e => e.dfIdx),
+          marker: {
+            size:   bucket.map(e => e.size),
+            symbol, color: fillColor,
+            line:   { color: borderColor, width: lineWidth },
+          },
+          showlegend: false,
+        };
+      }
+
+      return [
+        mkTrace(goals,  "circle",      "rgba(" + r + "," + g + "," + b + ",0.85)", baseColor, 2),
+        mkTrace(saved,  "circle-open", baseColor,                                    baseColor, 3),
+        mkTrace(missed, "circle-open", baseColor,                                    baseColor, 3),
+      ].filter(Boolean);
+    }
+
+    // ── Goal frame traces ────────────────────────────────────────────────────
+    const shootoutExpandedRange = expandedGoalframeRangeForShot(
+      hasGF ? { _px: 100 - selShot.goal_mouth_y, _py: selShot.goal_mouth_z } : null,
+      SHOOTOUT_GOALFRAME_X_RANGE,
+      SHOOTOUT_GOALFRAME_Y_RANGE,
+      SHOOTOUT_GOALFRAME_EXPAND_MARGIN_X,
+      SHOOTOUT_GOALFRAME_EXPAND_MARGIN_Y
+    );
+
+    const gfShapes = goalframeShapes(shootoutExpandedRange.xRange, shootoutExpandedRange.yRange).map(s => {
+      const ns = Object.assign({}, s);
+      ns.xref = "x2"; ns.yref = "y2";
+      if (ns.line) ns.line = Object.assign({}, ns.line);
+      return ns;
+    });
+
+    // Shot dot on goalframe
+    const gfTraces = [];
+    if (hasGF) {
+      const gx = 100 - selShot.goal_mouth_y;
+      const gy = selShot.goal_mouth_z;
+      const isHome = selShot.is_home;
+      const [r,g,b] = isHome ? HOME_RGB : AWAY_RGB;
+      const isGoal  = selShot.type === "Goal";
+      const isMiss  = MISSED.has(selShot.type);
+      gfTraces.push({
+        x: [gx], y: [gy], mode: "markers", type: "scatter",
+        xaxis: "x2", yaxis: "y2",
+        marker: {
+          size: 18,
+          color: isGoal ? `rgba(${r},${g},${b},0.85)` : (isHome ? HOME_HEX : AWAY_HEX),
+          symbol: isGoal ? "circle" : "circle-open",
+          line: { color: isHome ? HOME_HEX : AWAY_HEX, width: 3 },
+        },
+        hoverinfo: "none", showlegend: false,
+      });
+    }
+
+    // ── Penalty spot marker (goalframe) ──────────────────────────────────────
+    gfTraces.push({
+      x: [50], y: [-5.2], mode: "markers", type: "scatter",
+      xaxis: "x2", yaxis: "y2",
+      marker: { size: 10, color: "rgba(0,0,0,0)", symbol: "circle-open",
+                line: { color: "rgba(255,255,255,0.5)", width: 2 } },
+      hoverinfo: "none", showlegend: false,
+    });
+
+    const homeTraces = buildPlayerTraces(homeShots, true,  "x",  "y");
+    const awayTraces = buildPlayerTraces(awayShots, false, "x3", "y3");
+
+    // ── Annotations ─────────────────────────────────────────────────────────
+    const annotations = [
+      { text: "GOALFRAME",           x: 0.50, y: 1.03, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: "#adaaaa" } },
+      { text: `<b>${homeTeam}</b>`,  x: 0.25, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: HOME_HEX } },
+      { text: `<b>${awayTeam}</b>`,  x: 0.75, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: AWAY_HEX } },
+      { text: "Penalty spot",        x: 50,   y: -7.1, xref: "x2",    yref: "y2",    showarrow: false, font: { size: 9, color: "#767575" } },
+    ];
+
+    // Goalframe post / crossbar annotations
+    const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
+    [{x: GOAL_Y_LEFT, t: "Post"}, {x: GOAL_Y_RIGHT, t: "Post"}].forEach(p => {
+      annotations.push({ x: p.x, y: -7.1, xref: "x2", yref: "y2", text: p.t, showarrow: false, font: { size: 9, color: "#adaaaa" } });
+    });
+    annotations.push({ x: gMid, y: GOAL_Z_TOP + 1, xref: "x2", yref: "y2", text: "Bar", showarrow: false, font: { size: 9, color: "#adaaaa" } });
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+      margin: { l: 10, r: 10, t: 30, b: 20 }, height: layoutHeight,
+      dragmode: false, showlegend: false,
+      annotations: annotations,
+
+      // x/y — home player circles (bottom left)
+      xaxis:  { domain: [0.05, 0.47], range: [-0.7, 4.7], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y" },
+      yaxis:  { domain: [0.02, 0.23], range: playerRangeForRows(homeRows), showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, scaleanchor: "x", scaleratio: 1, anchor: "x" },
+
+      // x2/y2 — goalframe (top, full column width)
+      xaxis2: { domain: [0.03, 0.97], range: shootoutExpandedRange.xRange, showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y2" },
+      yaxis2: { domain: [0.34, 0.98], range: shootoutExpandedRange.yRange, showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "x2", scaleanchor: "x2", scaleratio: GOAL_SCALERATIO },
+
+      // x3/y3 — away player circles (bottom right)
+      xaxis3: { domain: [0.53, 0.95], range: [-0.7, 4.7], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y3" },
+      yaxis3: { domain: [0.02, 0.23], range: playerRangeForRows(awayRows), showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, scaleanchor: "x3", scaleratio: 1, anchor: "x3" },
+
+      shapes: [
+        { type: "rect", x0: shootoutExpandedRange.xRange[0], y0: shootoutExpandedRange.yRange[0], x1: shootoutExpandedRange.xRange[1], y1: shootoutExpandedRange.yRange[1], fillcolor: PITCH_BG, line: { color: "rgba(0,0,0,0)" }, layer: "below", xref: "x2", yref: "y2" },
+        ...gfShapes,
+      ],
+    };
+
+    const allTraces = [...homeTraces, ...awayTraces, ...gfTraces];
+
+    Plotly.newPlot(plotEl, allTraces, layout, PLOTLY_CONFIG).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        // Only player circle traces carry customdata as a plain df_idx integer
+        if (pt.customdata != null && typeof pt.customdata !== "object") {
+          Streamlit.setValue([pt.customdata, Date.now()]);
+        }
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Router
+  // ════════════════════════════════════════════════════════════════════════════
+  function render(args) {
+    const t = args.component_type || "";
+    if (t === "penalty_shootout")       renderPenaltyShootout(args);
+    else if (t === "shot_map")         renderShotMap(args);
+    else if (t === "pass_map")         renderPassMap(args);
+    else if (t === "defensive_map")    renderDefensiveMap(args);
+    else if (t === "dribble_carry_map") renderDribbleCarryMap(args);
+    else if (t === "goalkeeper_map")   renderGoalkeeperMap(args);
+    else if (t === "build_up_map")     renderBuildUpMap(args);
+    else if (t === "roi_selector")     renderRoiSelector(args);
+    else {
+      if (args.shots !== undefined)   renderShotMap(args);
+      else if (args.passes !== undefined) renderPassMap(args);
+      else if (args.actions !== undefined) renderDefensiveMap(args);
+      else Streamlit.setHeight(100);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Boot — listen for Streamlit render messages
+  // ════════════════════════════════════════════════════════════════════════════
+  window.addEventListener("message", function(event) {
+    var msg = event.data;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "streamlit:render") {
+      render(msg.args);
+    }
+  });
+  Streamlit.ready();
+  </script>
+</body>
+</html>
