@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./ClipMaker_v1.2_Mac/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
+  <img src=".ClipMaker_logo.png" alt="ClipMaker logo" width="140">
 </p>
 
 # ClipMaker
