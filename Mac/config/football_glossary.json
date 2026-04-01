@@ -1,0 +1,551 @@
+{
+  "skip_words": [
+    "action", "actions", "all", "analysis", "analyst", "analytics", "any", "area", "areas",
+    "ask", "assist", "assists", "attacking", "attacks", "aerial", "aerials", "ball", "balls",
+    "best", "big", "block", "blocks", "both", "box", "break", "breaks", "build", "build-up",
+    "builds", "carry", "carries", "card", "cards", "centre", "central", "chance", "chances",
+    "challenge", "challenges", "claim", "claims", "clip", "clips", "corner", "corners",
+    "counter", "counterattack", "counterattacks", "counter-attack", "counter-attacks", "create",
+    "created", "creates", "creation", "cross", "crosses", "data", "dead", "deep", "defending", "diagonal", "diagonals",
+    "defensive", "deliveries", "delivery", "describe", "display", "dribble", "dribbles", "duel",
+    "duels", "each", "effort", "efforts", "entry", "entries", "event", "events", "every",
+    "field", "filter", "filters", "final", "find", "first", "flag", "flags", "for", "foul",
+    "fouls", "free", "from", "game", "get", "glossary", "goal", "goals", "goalkeeper", "gk",
+    "half", "halves", "have", "header", "headers", "heatmap", "highlight", "highlights", "how",
+    "in", "inside", "interception", "interceptions", "intent", "intents", "key", "kick", "kicks",
+    "keeper", "lane", "lanes", "left", "line", "lines", "list", "locate", "location", "locations",
+    "long", "lost", "low", "make", "many", "map", "maps", "match", "middle", "midfield", "minute",
+    "minutes", "more", "most", "move", "moves", "nutmeg", "nutmegs", "of", "off", "offside", "only",
+    "outside", "pass", "passes", "pattern", "patterns", "penalty", "penalties", "phase", "phases",
+    "piece", "pieces", "pitch", "play", "player", "players", "possession", "press", "pressing",
+    "progressive", "query", "queries", "recovery", "recoveries", "restart", "restarts", "right",
+    "role", "roles", "save", "saves", "second", "sequence", "sequences", "set", "setpiece",
+    "setpieces", "set-play", "set-plays", "shot", "shots", "show", "side", "situation", "situations",
+    "successful", "sweeper", "switch", "switches", "tackle", "tackles", "take", "team", "teams",
+    "term", "terms", "third", "thirds", "this", "through", "touch", "touches", "transition",
+    "transitions", "type", "types", "unsuccessful", "what", "when", "where", "which", "who",
+    "whip", "wing", "won", "worst", "xg", "xt", "zone", "zones"
+  ],
+  "skip_phrases": [
+    "all actions",
+    "all attacking actions",
+    "all defensive actions",
+    "all events",
+    "all set piece",
+    "all set pieces",
+    "ask about",
+    "ask about data",
+    "attacking third",
+    "ball recoveries",
+    "big chance",
+    "big chances",
+    "big chances created",
+    "build up",
+    "build-up",
+    "build up play",
+    "build-up play",
+    "chance creation",
+    "counter attacks",
+    "dead ball",
+    "dead ball situations",
+    "dead balls",
+    "deep completion",
+    "display all",
+    "final third",
+    "free kick",
+    "free kicks",
+    "give me",
+    "goal kicks",
+    "in transition",
+    "key passes",
+    "long balls",
+    "make clips",
+    "middle third",
+    "progressive carries",
+    "progressive passes",
+    "set piece",
+    "set pieces",
+    "show all",
+    "show me",
+    "switch of play",
+    "through balls",
+    "touches in the box"
+  ],
+  "intent_aliases": {
+    "set_pieces": [
+      "set piece",
+      "set pieces",
+      "set-piece",
+      "set-pieces",
+      "set play",
+      "set plays",
+      "set-play",
+      "set-plays",
+      "dead ball",
+      "dead balls",
+      "dead-ball",
+      "dead-ball situations",
+      "restart",
+      "restarts",
+      "restart situations"
+    ],
+    "corners_only": [
+      "corner",
+      "corners",
+      "corner kick",
+      "corner kicks",
+      "corners won",
+      "corners taken",
+      "from the corner flag",
+      "from corners"
+    ],
+    "freekicks_only": [
+      "free kick",
+      "free kicks",
+      "freekick",
+      "freekicks",
+      "fk",
+      "fks",
+      "dead-ball delivery",
+      "dead-ball deliveries",
+      "from free kicks"
+    ],
+    "crosses_only": [
+      "cross",
+      "crosses",
+      "delivery",
+      "deliveries",
+      "whip",
+      "whipped ball",
+      "whipped cross",
+      "inswinger",
+      "outswinger",
+      "balls into the box",
+      "box deliveries"
+    ],
+    "through_balls_only": [
+      "through ball",
+      "through balls",
+      "slide-rule pass",
+      "slide rule pass",
+      "split pass",
+      "splitting pass",
+      "slip pass",
+      "threaded pass",
+      "threaded through ball",
+      "defence-splitting pass",
+      "line-breaking through ball"
+    ],
+    "long_balls_only": [
+      "long ball",
+      "long balls",
+      "crossfield ball",
+      "cross-field ball"
+    ],
+    "switches_only": [
+      "switch",
+      "switches",
+      "switch of play",
+      "switches of play",
+      "switch play",
+      "switched play",
+      "cross-switch"
+    ],
+    "diagonals_only": [
+      "diagonal",
+      "diagonals",
+      "long diagonal",
+      "long diagonals",
+      "raking diagonal",
+      "raking diagonals",
+      "diagonal long ball",
+      "diagonal long balls"
+    ],
+    "key_passes_only": [
+      "key pass",
+      "key passes",
+      "chance created",
+      "chance creation",
+      "created chance",
+      "created chances",
+      "chance-creating pass",
+      "chance-creating passes",
+      "final pass",
+      "final passes"
+    ],
+    "headers_only": [
+      "header",
+      "headers",
+      "headed effort",
+      "headed chance",
+      "headed shot",
+      "headed attempt",
+      "aerial finish"
+    ],
+    "big_chances_only": [
+      "big chance",
+      "big chances",
+      "clear chance",
+      "clear chances",
+      "high quality chance",
+      "high-quality chance",
+      "sitters",
+      "sitter",
+      "gilt-edged chance",
+      "gilt edged chance"
+    ],
+    "big_chances_created_only": [
+      "big chance created",
+      "big chances created",
+      "create big chance",
+      "created a big chance",
+      "big chance creation",
+      "clear chance created",
+      "clear chances created"
+    ],
+    "fast_break_only": [
+      "fast break",
+      "fast breaks",
+      "counter attack",
+      "counter attacks",
+      "counter-attack",
+      "counter-attacks",
+      "counter",
+      "counters",
+      "breakaway",
+      "breakaways",
+      "in transition",
+      "transition attack",
+      "transition attacks"
+    ],
+    "touch_in_box_only": [
+      "touch in box",
+      "touches in the box",
+      "box touch",
+      "box touches",
+      "in the box",
+      "inside the box",
+      "penalty area touch",
+      "penalty area touches"
+    ],
+    "penalties_only": [
+      "penalty kick",
+      "penalty kicks",
+      "spot kick",
+      "spot kicks",
+      "from the spot",
+      "from 12 yards",
+      "pk"
+    ],
+    "volleys_only": [
+      "volley",
+      "volleys",
+      "first-time volley",
+      "first time volley",
+      "on the volley"
+    ],
+    "chipped_only": [
+      "chip",
+      "chipped",
+      "chipped finish",
+      "lob",
+      "lobbed",
+      "dink",
+      "dinked finish"
+    ],
+    "left_foot_only": [
+      "left foot",
+      "left-foot",
+      "left footed",
+      "left-footer",
+      "on his left",
+      "on her left"
+    ],
+    "right_foot_only": [
+      "right foot",
+      "right-foot",
+      "right footed",
+      "right-footer",
+      "on his right",
+      "on her right"
+    ],
+    "assist_throughball_only": [
+      "through ball assist",
+      "through-ball assist",
+      "assist through ball",
+      "assists through ball"
+    ],
+    "assist_cross_only": [
+      "cross assist",
+      "cross-assisted",
+      "assist from cross",
+      "assists from crosses"
+    ],
+    "assist_corner_only": [
+      "corner assist",
+      "assist from corner",
+      "assists from corners"
+    ],
+    "assist_freekick_only": [
+      "free kick assist",
+      "freekick assist",
+      "assist from free kick",
+      "assists from free kicks"
+    ],
+    "intentional_assists_only": [
+      "intentional assist",
+      "intentional assists",
+      "deliberate assist",
+      "deliberate assists"
+    ],
+    "yellow_cards_only": [
+      "yellow card",
+      "yellow cards",
+      "booked",
+      "booking",
+      "caution",
+      "cautions"
+    ],
+    "red_cards_only": [
+      "red card",
+      "red cards",
+      "sent off",
+      "sending off",
+      "dismissal",
+      "dismissed"
+    ],
+    "second_yellow_only": [
+      "second yellow",
+      "double yellow",
+      "two yellows",
+      "sent off for second yellow"
+    ],
+    "nutmegs_only": [
+      "nutmeg",
+      "nutmegs",
+      "meg",
+      "megs",
+      "through the legs"
+    ],
+    "success_in_box_only": [
+      "successful take on in the box",
+      "successful dribble in the box",
+      "beat man in box",
+      "beat defender in the box"
+    ],
+    "deep_completion_only": [
+      "deep completion",
+      "deep completions"
+    ],
+    "box_entry_pass_only": [
+      "box entry pass",
+      "box entry passes",
+      "pass into the box",
+      "passes into the box",
+      "pass entering the box",
+      "passes entering the box"
+    ],
+    "box_entry_carry_only": [
+      "box entry carry",
+      "box entry carries",
+      "carry into the box",
+      "carries into the box",
+      "carry entering the box",
+      "carries entering the box"
+    ],
+    "final_third_entry_pass_only": [
+      "final third entry pass",
+      "final third entry passes",
+      "pass into the final third",
+      "passes into the final third"
+    ],
+    "final_third_entry_carry_only": [
+      "final third entry carry",
+      "final third entry carries",
+      "carry into the final third",
+      "carries into the final third"
+    ]
+  },
+  "event_aliases": {
+    "Pass": [
+      "pass",
+      "passes",
+      "distribution",
+      "ball played",
+      "progression pass"
+    ],
+    "Carry": [
+      "carry",
+      "carries",
+      "ball carry",
+      "run with the ball",
+      "driving run"
+    ],
+    "TakeOn": [
+      "take on",
+      "take-ons",
+      "dribble",
+      "dribbles",
+      "1v1",
+      "beat his man",
+      "beat her marker"
+    ],
+    "Tackle": [
+      "tackle",
+      "tackles",
+      "duel won",
+      "ground duel"
+    ],
+    "Interception": [
+      "interception",
+      "interceptions",
+      "read the pass",
+      "cut out"
+    ],
+    "Clearance": [
+      "clearance",
+      "clearances",
+      "hook clear",
+      "hack clear"
+    ],
+    "Aerial": [
+      "aerial",
+      "aerials",
+      "header duel",
+      "air duel"
+    ],
+    "BallRecovery": [
+      "recovery",
+      "recoveries",
+      "regain",
+      "regains",
+      "won it back"
+    ],
+    "Save": [
+      "save",
+      "saves",
+      "stop",
+      "stops"
+    ],
+    "Claim": [
+      "claim",
+      "claims",
+      "claimed cross"
+    ],
+    "Punch": [
+      "punch",
+      "punches",
+      "punched clear"
+    ]
+  },
+  "role_terms": {
+    "goalkeeper": [
+      "goalkeeper",
+      "keeper",
+      "gk",
+      "shot stopper",
+      "sweeper keeper",
+      "sweeper-keeper"
+    ],
+    "centre_back": [
+      "centre back",
+      "center back",
+      "cb",
+      "central defender"
+    ],
+    "full_back": [
+      "full back",
+      "full-back",
+      "fb",
+      "wing back",
+      "wing-back"
+    ],
+    "midfielder": [
+      "midfielder",
+      "midfielders",
+      "cm",
+      "dm",
+      "am",
+      "number 6",
+      "number 8",
+      "number 10"
+    ],
+    "winger": [
+      "winger",
+      "wingers",
+      "wide forward",
+      "inside forward"
+    ],
+    "striker": [
+      "striker",
+      "forward",
+      "centre forward",
+      "center forward",
+      "number 9"
+    ]
+  },
+  "tactical_terms": {
+    "build_up": [
+      "build up",
+      "build-up",
+      "build-up play",
+      "first phase",
+      "first-phase possession"
+    ],
+    "progression": [
+      "progression",
+      "progressive play",
+      "line breaking",
+      "line-breaking",
+      "vertical progression"
+    ],
+    "chance_creation": [
+      "chance creation",
+      "chance-creation",
+      "final third creation",
+      "creative actions"
+    ],
+    "rest_defence": [
+      "rest defence",
+      "rest-defense",
+      "rest defense"
+    ],
+    "counterpress": [
+      "counterpress",
+      "counter-press",
+      "counter press",
+      "gegenpress",
+      "gegenpressing"
+    ],
+    "low_block": [
+      "low block",
+      "mid block",
+      "high block",
+      "compact shape"
+    ],
+    "overload": [
+      "overload",
+      "overloads",
+      "isolation",
+      "isolations"
+    ],
+    "switch_of_play": [
+      "switch",
+      "switches",
+      "switch of play",
+      "switches of play",
+      "switch play",
+      "switched play",
+      "cross-switch"
+    ],
+    "diagonal_progression": [
+      "diagonal",
+      "diagonals",
+      "long diagonal",
+      "long diagonals",
+      "diagonal pass",
+      "diagonal ball",
+      "diagonal progression"
+    ]
+  }
+}
