@@ -131,6 +131,33 @@ Go to the [Releases](../../releases) page and download the package for your plat
 - **macOS**
 - **Linux**
 
+## Or clone only one platform folder
+
+### Windows
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
+cd ClipMaker
+git sparse-checkout init --cone
+git sparse-checkout set Windows
+git checkout main
+
+### macOS
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
+cd ClipMaker
+git sparse-checkout init --cone
+git sparse-checkout set Mac
+git checkout main
+
+### Linux
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
+cd ClipMaker
+git sparse-checkout init --cone
+git sparse-checkout set Linux
+git checkout main
+
+
 Each package includes platform-specific setup instructions and launchers.
 
 ---
