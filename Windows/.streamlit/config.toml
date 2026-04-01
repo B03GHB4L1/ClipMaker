@@ -1,0 +1,13 @@
+[server]
+maxUploadSize = 10240
+
+[client]
+showSidebarNavigation = false
+
+[theme]
+base = "dark"
+primaryColor = "#DFFF00"
+backgroundColor = "#0e0e0e"
+secondaryBackgroundColor = "#131313"
+textColor = "#ffffff"
+font = "monospace"
