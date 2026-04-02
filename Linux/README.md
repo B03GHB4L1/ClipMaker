@@ -10,15 +10,16 @@
 ## Quick Start
 
 1. Open a terminal in this folder.
-2. Make the launcher executable if needed:
+2. Run the launcher:
+
+```bash
+bash Launch_ClipMaker.sh
+```
+
+If you are on a normal Linux filesystem and want to make it executable first, you can also do:
 
 ```bash
 chmod +x Launch_ClipMaker.sh
-```
-
-3. Run the launcher:
-
-```bash
 ./Launch_ClipMaker.sh
 ```
 
@@ -82,5 +83,7 @@ python -m streamlit run ClipMaker.py --server.port 8501 --server.headless false 
   - Debian/Ubuntu: `sudo apt install python3-tk python3-venv`
   - Fedora: `sudo dnf install python3-tkinter`
   - Arch: `sudo pacman -S tk`
+- On WSL, test from the Linux filesystem such as `~/clipmaker-test/`, not directly from `/mnt/c/...`, because virtual environment creation is more reliable there.
+- On `/mnt/c/...` under WSL, `chmod +x` may fail with `Operation not permitted`; in that case just run `bash Launch_ClipMaker.sh`.
 
 If the browser does not open automatically, visit the `http://localhost:<port>` URL shown in the terminal manually.
