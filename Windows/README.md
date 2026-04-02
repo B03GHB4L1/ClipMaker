@@ -11,7 +11,7 @@
 1. Open this folder in File Explorer.
 2. Double-click `Launch_ClipMaker.bat`.
 3. Wait for the setup checks to finish.
-4. Your browser should open `http://localhost:8501`.
+4. Your browser should open the local ClipMaker URL shown in the launcher window.
 
 Keep the launcher window open while you use the app.
 
@@ -24,7 +24,7 @@ Keep the launcher window open while you use the app.
 - install the Playwright Chromium browser if needed
 - download `plotly-2.27.0.min.js` into `smp_component/frontend/`
 - apply the Streamlit theme patch once
-- start the app with Streamlit on port `8501`
+- start the app with Streamlit on the first free port from `8501` to `8510`
 
 ## Manual Setup
 
@@ -44,6 +44,8 @@ Then launch:
 python -m streamlit run .\ClipMaker.py --server.port 8501 --server.headless false --browser.gatherUsageStats false
 ```
 
+If port `8501` is already in use, pick another local port such as `8502`.
+
 ## Optional Helper Scripts
 
 - `download_plotly.bat`: downloads the local Plotly bundle used by the Analyst Room maps
@@ -57,9 +59,8 @@ Install Python from [python.org](https://www.python.org/downloads/) and make sur
 
 ### Browser does not open automatically
 
-Open [http://localhost:8501](http://localhost:8501) manually.
+Open the `http://localhost:<port>` URL shown in the launcher window manually.
 
 ### Browse buttons do not work
 
 Your Python install may be missing `tkinter`. Reinstall Python with the default Windows options.
-
