@@ -1,5 +1,5 @@
-"""
-clipmaker_core.py  —  Shared backend logic for ClipMaker v1.2
+﻿"""
+clipmaker_core.py  â€”  Shared backend logic for ClipMaker v1.2
 Imported by ClipMaker.py (Home) and pages/1_Filtering.py
 """
 
@@ -8,6 +8,8 @@ import threading
 import time
 import json
 import pandas as pd
+
+_FOOTBALL_GLOSSARY_CACHE = None
 
 # =============================================================================
 # PERIOD / TIMESTAMP HELPERS
@@ -20,13 +22,91 @@ PERIOD_MAP = {
     1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
 }
 
+DEFAULT_FOOTBALL_GLOSSARY = {
+    "skip_words": [],
+    "skip_phrases": [],
+    "intent_aliases": {},
+}
+
+INTENT_FLAG_TO_BOOL_COL = {
+    "corners_only": "is_corner",
+    "freekicks_only": "is_freekick",
+    "headers_only": "is_header",
+    "big_chances_only": "is_big_chance_shot",
+    "big_chances_created_only": "is_big_chance",
+    "crosses_only": "is_cross",
+    "key_passes_only": "is_key_pass",
+    "through_balls_only": "is_through_ball",
+    "long_balls_only": "is_long_ball",
+    "switches_only": "is_switch_of_play",
+    "diagonals_only": "is_diagonal_long_ball",
+    "fast_break_only": "is_fast_break",
+    "touch_in_box_only": "is_touch_in_box",
+    "box_entry_pass_only":          "is_box_entry_pass",
+    "deep_completion_only":         "is_deep_completion",
+    "box_entry_carry_only":         "is_box_entry_carry",
+    "final_third_entry_pass_only":  "is_final_third_entry_pass",
+    "final_third_entry_carry_only": "is_final_third_entry_carry",
+}
+
+
+def load_football_glossary():
+    global _FOOTBALL_GLOSSARY_CACHE
+    if _FOOTBALL_GLOSSARY_CACHE is not None:
+        return _FOOTBALL_GLOSSARY_CACHE
+
+    glossary = {
+        "skip_words": list(DEFAULT_FOOTBALL_GLOSSARY["skip_words"]),
+        "skip_phrases": list(DEFAULT_FOOTBALL_GLOSSARY["skip_phrases"]),
+        "intent_aliases": dict(DEFAULT_FOOTBALL_GLOSSARY["intent_aliases"]),
+    }
+
+    glossary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "football_glossary.json")
+    try:
+        with open(glossary_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        glossary["skip_words"].extend(loaded.get("skip_words", []))
+        glossary["skip_phrases"].extend(loaded.get("skip_phrases", []))
+        for key, phrases in loaded.get("intent_aliases", {}).items():
+            glossary["intent_aliases"].setdefault(key, [])
+            glossary["intent_aliases"][key].extend(phrases or [])
+    except Exception:
+        pass
+
+    glossary["skip_words"] = sorted({str(v).strip().lower() for v in glossary["skip_words"] if str(v).strip()})
+    glossary["skip_phrases"] = sorted({str(v).strip().lower() for v in glossary["skip_phrases"] if str(v).strip()})
+    normalized_aliases = {}
+    for key, phrases in glossary["intent_aliases"].items():
+        normalized_aliases[key] = sorted({str(v).strip().lower() for v in phrases if str(v).strip()})
+    glossary["intent_aliases"] = normalized_aliases
+
+    _FOOTBALL_GLOSSARY_CACHE = glossary
+    return glossary
+
+
+def glossary_skip_words():
+    return set(load_football_glossary().get("skip_words", []))
+
+
+def glossary_skip_phrases():
+    return set(load_football_glossary().get("skip_phrases", []))
+
+
+def query_has_intent_alias(query_text, intent_key):
+    q = (query_text or "").lower()
+    aliases = load_football_glossary().get("intent_aliases", {}).get(intent_key, [])
+    for alias in aliases:
+        if alias and alias in q:
+            return True
+    return False
+
 def to_seconds(timestamp):
     parts = list(map(int, timestamp.strip().split(":")))
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    raise ValueError(f"Invalid timestamp: '{timestamp}' — use MM:SS or HH:MM:SS")
+    raise ValueError(f"Invalid timestamp: '{timestamp}' â€” use MM:SS or HH:MM:SS")
 
 def assign_periods(df, period_column, fallback_row):
     if period_column:
@@ -92,7 +172,164 @@ def merge_overlapping_windows(windows, min_gap):
             merged.append([start, end, label, period])
     return [tuple(w) for w in merged]
 
+def _effective_pitch_zone_series(df):
+    """Return a Series of pitch zones relative to the away team's attacking direction.
+    WhoScored's absolute y=0 is the away team's right touchline, so all events
+    (both teams) must be mirrored (100 - y) to label zones from the away team's
+    attacking perspective â€” the consistent reference frame used throughout.
+    Falls back to the stored pitch_zone column if coordinate columns are absent."""
+    from whoscored_scraper import _pitch_zone as _pz
+    if all(c in df.columns for c in ["y", "team", "homeTeam"]):
+        y_num = pd.to_numeric(df["y"], errors="coerce")
+        flip_mask = df["homeTeam"].notna() & (df["homeTeam"] != "")
+        effective_y = y_num.where(~flip_mask, 100 - y_num)
+        return effective_y.apply(lambda v: _pz(v) if pd.notna(v) else "")
+    if "pitch_zone" in df.columns:
+        return df["pitch_zone"]
+    return pd.Series([""] * len(df), index=df.index)
+
+
+def ensure_computed_event_flags(df):
+    """Backfill computed event flags for older CSVs that predate new columns."""
+    if df is None or len(df) == 0:
+        return df
+
+    if (
+        "is_switch_of_play" not in df.columns
+        and all(c in df.columns for c in ["y", "endY", "is_long_ball"])
+    ):
+        from whoscored_scraper import _is_switch_of_play as _switch_of_play
+
+        long_mask = df["is_long_ball"].astype(str).str.lower().isin(["true", "1", "yes"])
+        start_y = pd.to_numeric(df["y"], errors="coerce")
+        end_y = pd.to_numeric(df["endY"], errors="coerce")
+        home_team = df["homeTeam"] if "homeTeam" in df.columns else pd.Series([""] * len(df), index=df.index)
+
+        df["is_switch_of_play"] = [
+            bool(is_long and pd.notna(sy) and pd.notna(ey) and _switch_of_play(sy, ey, ht))
+            for is_long, sy, ey, ht in zip(long_mask.tolist(), start_y.tolist(), end_y.tolist(), home_team.fillna("").tolist())
+        ]
+
+    if (
+        "is_diagonal_long_ball" not in df.columns
+        and all(c in df.columns for c in ["x", "y", "endX", "endY", "is_long_ball"])
+    ):
+        from whoscored_scraper import _is_diagonal_long_ball as _diagonal_long_ball
+
+        long_mask = df["is_long_ball"].astype(str).str.lower().isin(["true", "1", "yes"])
+        start_x = pd.to_numeric(df["x"], errors="coerce")
+        start_y = pd.to_numeric(df["y"], errors="coerce")
+        end_x = pd.to_numeric(df["endX"], errors="coerce")
+        end_y = pd.to_numeric(df["endY"], errors="coerce")
+
+        df["is_diagonal_long_ball"] = [
+            bool(is_long and pd.notna(sx) and pd.notna(sy) and pd.notna(ex) and pd.notna(ey)
+                 and _diagonal_long_ball(sx, sy, ex, ey))
+            for is_long, sx, sy, ex, ey in zip(
+                long_mask.tolist(), start_x.tolist(), start_y.tolist(), end_x.tolist(), end_y.tolist()
+            )
+        ]
+
+    if (
+        "is_box_entry_pass" not in df.columns
+        and all(c in df.columns for c in ["type", "x", "y", "endX", "endY"])
+    ):
+        from whoscored_scraper import _is_box_entry_pass as _box_entry_pass
+        is_pass = df["type"] == "Pass"
+        x = pd.to_numeric(df["x"], errors="coerce")
+        y = pd.to_numeric(df["y"], errors="coerce")
+        end_x = pd.to_numeric(df["endX"], errors="coerce")
+        end_y = pd.to_numeric(df["endY"], errors="coerce")
+        is_corner  = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_corner" in df.columns else pd.Series([False] * len(df), index=df.index)
+        is_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_freekick" in df.columns else pd.Series([False] * len(df), index=df.index)
+        df["is_box_entry_pass"] = [
+            bool(ip and pd.notna(sx) and pd.notna(sy) and pd.notna(ex) and pd.notna(ey)
+                 and _box_entry_pass(sx, sy, ex, ey, ic, ifk))
+            for ip, sx, sy, ex, ey, ic, ifk in zip(
+                is_pass.tolist(), x.tolist(), y.tolist(), end_x.tolist(), end_y.tolist(),
+                is_corner.tolist(), is_freekick.tolist()
+            )
+        ]
+
+    if (
+        "is_deep_completion" not in df.columns
+        and all(c in df.columns for c in ["type", "endX", "endY", "outcomeType"])
+    ):
+        from whoscored_scraper import _is_deep_completion as _deep_completion
+        is_pass  = df["type"] == "Pass"
+        end_x    = pd.to_numeric(df["endX"], errors="coerce")
+        end_y    = pd.to_numeric(df["endY"], errors="coerce")
+        is_cross   = df["is_cross"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_cross" in df.columns else pd.Series([False] * len(df), index=df.index)
+        is_corner  = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_corner" in df.columns else pd.Series([False] * len(df), index=df.index)
+        is_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_freekick" in df.columns else pd.Series([False] * len(df), index=df.index)
+        outcome  = df["outcomeType"].fillna("")
+        df["is_deep_completion"] = [
+            bool(ip and pd.notna(ex) and pd.notna(ey)
+                 and _deep_completion(ex, ey, ic, ico, ifk, oc))
+            for ip, ex, ey, ic, ico, ifk, oc in zip(
+                is_pass.tolist(), end_x.tolist(), end_y.tolist(), is_cross.tolist(),
+                is_corner.tolist(), is_freekick.tolist(), outcome.tolist()
+            )
+        ]
+
+    if (
+        "is_box_entry_carry" not in df.columns
+        and all(c in df.columns for c in ["type", "x", "y", "endX", "endY"])
+    ):
+        from whoscored_scraper import _is_box_entry_carry as _box_entry_carry
+        is_carry = df["type"] == "Carry"
+        x     = pd.to_numeric(df["x"], errors="coerce")
+        y     = pd.to_numeric(df["y"], errors="coerce")
+        end_x = pd.to_numeric(df["endX"], errors="coerce")
+        end_y = pd.to_numeric(df["endY"], errors="coerce")
+        df["is_box_entry_carry"] = [
+            bool(ic and pd.notna(sx) and pd.notna(sy) and pd.notna(ex) and pd.notna(ey)
+                 and _box_entry_carry(sx, sy, ex, ey))
+            for ic, sx, sy, ex, ey in zip(
+                is_carry.tolist(), x.tolist(), y.tolist(), end_x.tolist(), end_y.tolist()
+            )
+        ]
+
+    if (
+        "is_final_third_entry_pass" not in df.columns
+        and all(c in df.columns for c in ["type", "x", "endX"])
+    ):
+        from whoscored_scraper import _is_final_third_entry_pass as _ft_entry_pass
+        is_pass  = df["type"] == "Pass"
+        x        = pd.to_numeric(df["x"], errors="coerce")
+        end_x    = pd.to_numeric(df["endX"], errors="coerce")
+        is_corner  = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_corner" in df.columns else pd.Series([False] * len(df), index=df.index)
+        is_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"]) if "is_freekick" in df.columns else pd.Series([False] * len(df), index=df.index)
+        df["is_final_third_entry_pass"] = [
+            bool(ip and pd.notna(sx) and pd.notna(ex)
+                 and _ft_entry_pass(sx, ex, ic, ifk))
+            for ip, sx, ex, ic, ifk in zip(
+                is_pass.tolist(), x.tolist(), end_x.tolist(),
+                is_corner.tolist(), is_freekick.tolist()
+            )
+        ]
+
+    if (
+        "is_final_third_entry_carry" not in df.columns
+        and all(c in df.columns for c in ["type", "x", "endX"])
+    ):
+        from whoscored_scraper import _is_final_third_entry_carry as _ft_entry_carry
+        is_carry = df["type"] == "Carry"
+        x        = pd.to_numeric(df["x"], errors="coerce")
+        end_x    = pd.to_numeric(df["endX"], errors="coerce")
+        df["is_final_third_entry_carry"] = [
+            bool(ic and pd.notna(sx) and pd.notna(ex)
+                 and _ft_entry_carry(sx, ex))
+            for ic, sx, ex in zip(
+                is_carry.tolist(), x.tolist(), end_x.tolist()
+            )
+        ]
+
+    return df
+
+
 def apply_filters(df, config, log=None):
+    df = ensure_computed_event_flags(df)
     original = len(df)
 
     if config.get("filter_types"):
@@ -102,7 +339,7 @@ def apply_filters(df, config, log=None):
             available = df["type"].unique().tolist() if "type" in df.columns else []
             df = df[df["type"].isin(selected)]
             if log and len(df) == 0 and before > 0:
-                log(f"  ⚠ filter_types={selected} matched 0/{before} events. Available types: {available[:15]}")
+                log(f"  [WARN] filter_types={selected} matched 0/{before} events. Available types: {available[:15]}")
 
     if config.get("progressive_only"):
         prog_cols = [c for c in ["prog_pass", "prog_carry"] if c in df.columns]
@@ -112,23 +349,72 @@ def apply_filters(df, config, log=None):
             if len(filtered) > 0:
                 df = filtered
             elif log:
-                log("  ⚠ progressive_only matched 0 events — ignoring flag")
+                log("  [WARN] progressive_only matched 0 events â€” ignoring flag")
 
-    if config.get("key_passes_only") and "is_key_pass" in df.columns:
-        df = df[df["is_key_pass"].astype(str).str.lower().isin(["true", "1", "yes"])]
+    # Dedicated OR logic: all shots + key passes only (used by Attacking Chaos preset)
+    if config.get("shots_and_key_passes_only") and "type" in df.columns and "is_key_pass" in df.columns:
+        _shot_type_set = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
+        _shot_mask = df["type"].isin(_shot_type_set)
+        _kp_mask   = (df["type"] == "Pass") & df["is_key_pass"].astype(str).str.lower().isin(["true", "1", "yes"])
+        df = df[_shot_mask | _kp_mask]
 
-    for flag, col in [
-        ("crosses_only",      "is_cross"),
-        ("long_balls_only",   "is_long_ball"),
-        ("through_balls_only","is_through_ball"),
-        ("corners_only",      "is_corner"),
-        ("freekicks_only",    "is_freekick"),
-        ("headers_only",      "is_header"),
-        ("big_chances_only",  "is_big_chance_shot"),
-        ("big_chances_created_only", "is_big_chance"),
-    ]:
-        if config.get(flag) and col in df.columns:
-            df = df[df[col].astype(str).str.lower().isin(["true", "1", "yes"])]
+    def _apply_qualifier(df, col):
+        """Apply a qualifier filter strictly to rows where the qualifier is true."""
+        is_true = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
+        if not is_true.any():
+            return df  # qualifier has no True values â€” ignore it
+        return df[is_true]
+
+    if config.get("key_passes_only") and not config.get("shots_and_key_passes_only") and "is_key_pass" in df.columns:
+        df = _apply_qualifier(df, "is_key_pass")
+
+    # Special case: if both corners_only and freekicks_only are set, use OR logic
+    if config.get("corners_only") and config.get("freekicks_only"):
+        if "is_corner" in df.columns and "is_freekick" in df.columns:
+            mask_corner = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"])
+            mask_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"])
+            if (mask_corner | mask_freekick).any():
+                df = df[mask_corner | mask_freekick]
+    else:
+        for flag, col in [
+            ("crosses_only",             "is_cross"),
+            ("long_balls_only",          "is_long_ball"),
+            ("switches_only",            "is_switch_of_play"),
+            ("diagonals_only",           "is_diagonal_long_ball"),
+            ("through_balls_only",       "is_through_ball"),
+            ("corners_only",             "is_corner"),
+            ("freekicks_only",           "is_freekick"),
+            ("headers_only",             "is_header"),
+            ("big_chances_only",         "is_big_chance_shot"),
+            ("big_chances_created_only", "is_big_chance"),
+            ("own_goals_only",           "is_own_goal"),
+            ("gk_saves_only",            "is_gk_save"),
+            ("penalties_only",           "is_penalty"),
+            ("volleys_only",             "is_volley"),
+            ("chipped_only",             "is_chipped"),
+            ("direct_from_corner_only",  "is_direct_from_corner"),
+            ("left_foot_only",           "is_left_foot"),
+            ("right_foot_only",          "is_right_foot"),
+            ("fast_break_only",          "is_fast_break"),
+            ("touch_in_box_only",        "is_touch_in_box"),
+            ("assist_throughball_only",  "is_assist_throughball"),
+            ("assist_cross_only",        "is_assist_cross"),
+            ("assist_corner_only",       "is_assist_corner"),
+            ("assist_freekick_only",     "is_assist_freekick"),
+            ("intentional_assists_only", "is_intentional_assist"),
+            ("yellow_cards_only",        "is_yellow_card"),
+            ("red_cards_only",           "is_red_card"),
+            ("second_yellow_only",       "is_second_yellow"),
+            ("nutmegs_only",             "is_nutmeg"),
+            ("success_in_box_only",      "is_success_in_box"),
+            ("box_entry_pass_only",          "is_box_entry_pass"),
+            ("deep_completion_only",         "is_deep_completion"),
+            ("box_entry_carry_only",         "is_box_entry_carry"),
+            ("final_third_entry_pass_only",  "is_final_third_entry_pass"),
+            ("final_third_entry_carry_only", "is_final_third_entry_carry"),
+        ]:
+            if config.get(flag) and col in df.columns:
+                df = _apply_qualifier(df, col)
 
     if config.get("successful_only") and "outcomeType" in df.columns:
         df = df[df["outcomeType"] == "Successful"]
@@ -150,6 +436,21 @@ def apply_filters(df, config, log=None):
         df = df.copy()
         df["_xt_num"] = pd.to_numeric(df["xT"], errors="coerce").fillna(0)
         df = df.nlargest(n, "_xt_num").drop(columns=["_xt_num"])
+
+    if config.get("pitch_zone_filter"):
+        zone_series = _effective_pitch_zone_series(df)
+        zone_filter = config["pitch_zone_filter"]
+        combined_pitch_zones = {
+            "Entire Left Side": ["Left Wing", "Left Half Space"],
+            "Entire Right Side": ["Right Wing", "Right Half Space"],
+        }
+        if zone_filter in combined_pitch_zones:
+            df = df[zone_series.isin(combined_pitch_zones[zone_filter])]
+        else:
+            df = df[zone_series == zone_filter]
+
+    if config.get("depth_zone_filter") and "depth_zone" in df.columns:
+        df = df[df["depth_zone"] == config["depth_zone_filter"]]
 
     return df, original - len(df)
 
@@ -203,8 +504,16 @@ def run_clip_maker(config, log_queue, progress_queue):
             active_filters.append(f"types={config['filter_types']}")
         for flag in ["key_passes_only", "crosses_only", "through_balls_only",
                       "corners_only", "freekicks_only", "headers_only",
-                      "big_chances_only", "long_balls_only", "successful_only",
-                      "unsuccessful_only", "progressive_only"]:
+                      "big_chances_only", "long_balls_only", "own_goals_only",
+                      "successful_only", "unsuccessful_only", "progressive_only",
+                      "penalties_only", "volleys_only", "chipped_only",
+                      "direct_from_corner_only", "left_foot_only", "right_foot_only",
+                      "fast_break_only", "touch_in_box_only",
+                      "assist_throughball_only", "assist_cross_only",
+                      "assist_corner_only", "assist_freekick_only",
+                      "intentional_assists_only", "yellow_cards_only",
+                      "red_cards_only", "second_yellow_only",
+                      "nutmegs_only", "success_in_box_only"]:
             if config.get(flag):
                 active_filters.append(flag)
         if active_filters:
@@ -237,12 +546,12 @@ def run_clip_maker(config, log_queue, progress_queue):
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
-        log(f"Found {len(df)} events → {len(windows)} clips after merging.\n")
+        log(f"Found {len(df)} events â†’ {len(windows)} clips after merging.\n")
 
         if config["dry_run"]:
             for i, (s, e, lbl, p) in enumerate(windows, 1):
-                log(f"  Clip {i:02d}: {s:.1f}s – {e:.1f}s  ({e-s:.0f}s)  |  {lbl}")
-            log("\n✓ DRY RUN complete.")
+                log(f"  Clip {i:02d}: {s:.1f}s â€“ {e:.1f}s  ({e-s:.0f}s)  |  {lbl}")
+            log("\n[OK] DRY RUN complete.")
             log_queue.put({"type": "done"})
             return
 
@@ -276,7 +585,7 @@ def run_clip_maker(config, log_queue, progress_queue):
                 "-ss", str(start),
                 "-i", src_path,
                 "-t", str(duration),
-                "-map", "0:v:0", "-map", "0:a:0?",
+                "-map", "0:v:0", "-map", "0:a:0",
                 "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
                 "-c:a", "aac",
                 "-avoid_negative_ts", "make_zero",
@@ -353,8 +662,6 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         total_clips = len(windows)
         start_time = time.time()
-        replay_map = config.get("replay_map", {})
-
         if config["individual_clips"]:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -396,39 +703,6 @@ def run_clip_maker(config, log_queue, progress_queue):
                     completed_count[0] += 1
                     log(f"  Rendered {i:02d}/{total_clips}: {os.path.basename(filepath)}")
 
-                    if replay_map:
-                        import tempfile
-                        for pt in label.split(" + "):
-                            action_part = pt.split(" @")[0].strip()
-                            minute_match = None
-                            for chunk in pt.split():
-                                if ":" in chunk:
-                                    try:
-                                        minute_match = int(chunk.split(":")[0])
-                                    except ValueError:
-                                        pass
-                            rkey = (action_part, minute_match)
-                            if rkey in replay_map:
-                                rdata = replay_map[rkey]
-                                replay_clip = rdata.get("clip_path", "")
-                                if replay_clip and os.path.exists(replay_clip):
-                                    combined = filepath.replace(".mp4", "_with_replay.mp4")
-                                    concat_list = tempfile.NamedTemporaryFile(
-                                        mode="w", suffix=".txt", delete=False)
-                                    concat_list.write(f"file '{os.path.abspath(filepath).replace(os.sep, '/')}'\n")
-                                    concat_list.write(f"file '{os.path.abspath(replay_clip).replace(os.sep, '/')}'\n")
-                                    concat_list.close()
-                                    import subprocess
-                                    subprocess.run([
-                                        ffmpeg_bin, "-y", "-f", "concat", "-safe", "0",
-                                        "-i", concat_list.name, "-c", "copy", combined
-                                    ], capture_output=True)
-                                    os.unlink(concat_list.name)
-                                    if os.path.exists(combined):
-                                        os.replace(combined, filepath)
-                                        log(f"    + Replay appended (confidence {rdata['confidence']:.2f})")
-                                break
-
                     saved.append(filepath)
                     prog(completed_count[0], total_clips, time.time() - start_time)
 
@@ -444,27 +718,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                     continue
                 clip_specs.append((src, s, e))
 
-                if replay_map:
-                    for pt in label.split(" + "):
-                        action_part = pt.split(" @")[0].strip()
-                        minute_match = None
-                        for chunk in pt.split():
-                            if ":" in chunk:
-                                try:
-                                    minute_match = int(chunk.split(":")[0])
-                                except ValueError:
-                                    pass
-                        rkey = (action_part, minute_match)
-                        if rkey in replay_map:
-                            rdata = replay_map[rkey]
-                            replay_clip = rdata.get("clip_path", "")
-                            if replay_clip and os.path.exists(replay_clip):
-                                clip_specs.append((replay_clip, None, None))
-                                log(f"    + Replay queued for {action_part} {minute_match}′")
-                            break
-
             if not clip_specs:
-                log("\n✗ No matching events found — nothing to clip.")
+                log("\n[ERR] No matching events found â€” nothing to clip.")
                 progress_queue.put({"error": "No matching events found. Try a different filter or check your CSV data."})
                 return
 
@@ -490,12 +745,12 @@ def run_clip_maker(config, log_queue, progress_queue):
         log_queue.put({"type": "done"})
 
     except Exception as e:
-        log(f"\n✗ ERROR: {e}")
+        log(f"\n[ERR] ERROR: {e}")
         log_queue.put({"type": "error"})
 
 
 # =============================================================================
-# AI — GROQ PROXY
+# AI â€” GROQ PROXY
 # =============================================================================
 
 GROQ_PROXY_URL = "https://groq-proxy-eight.vercel.app/api/chat"
@@ -594,6 +849,7 @@ def _read_csv_cached(path, _mtime):
             df[col] = df[col].astype(str).str.strip().str.upper().map(
                 {"TRUE": True, "FALSE": False, "1": True, "0": False, "YES": True, "NO": False}
             ).fillna(False).astype(bool)
+    df = ensure_computed_event_flags(df)
     return df
 
 
@@ -608,14 +864,14 @@ def fuzzy_correct_player(name, df):
     def _clean(s):
         """Strip accents, possessives, trailing plurals, and punctuation."""
         s = _strip(s)
-        s = re.sub(r"[''`]s?\b", "", s)       # possessive 's
+        s = re.sub(r"[''`]s[CLR]\b", "", s)       # possessive 's
         s = re.sub(r"[^a-z0-9\s]", "", s)     # non-alphanumeric
         return s.strip()
 
     if "playerName" not in df.columns:
         return None, None
 
-    # Skip common football/query terms — single words AND multi-word phrases
+    # Skip common football/query terms â€” single words AND multi-word phrases
     SKIP_WORDS = {
         "show", "shots", "shot", "passes", "pass", "goals", "goal", "saves",
         "save", "tackle", "tackles", "cards", "card", "fouls", "foul",
@@ -626,7 +882,7 @@ def fuzzy_correct_player(name, df):
         "recovery", "recoveries", "duel", "duels", "challenge", "challenges",
         "dispossessed", "offside", "penalty", "penalties",
         "punch", "punches", "substitution", "substitutions", "sub", "subs",
-        "pickup", "sweeper",
+        "pickup", "sweeper", "set", "piece", "pieces", "setpiece", "setpieces",
         "first", "second", "half", "halves", "both", "team", "teams",
         "player", "players", "all", "the", "for", "from", "with",
         "most", "many", "how", "who", "what", "which", "where", "when",
@@ -648,7 +904,11 @@ def fuzzy_correct_player(name, df):
         "long ball", "free kicks", "free kick", "big chances", "big chance",
         "all key", "all long", "all free", "all big",
         "show all", "me show", "make clips", "ask about",
+        "set piece", "set pieces",
     }
+
+    SKIP_WORDS |= glossary_skip_words()
+    SKIP_PHRASES |= glossary_skip_phrases()
 
     name_cleaned = _clean(name)
     if not name_cleaned or len(name_cleaned) < 2:
@@ -697,7 +957,7 @@ def fuzzy_correct_player(name, df):
                 if len(np_) >= 5 and (np_ in pp or pp in np_):
                     return all_players[i], name
 
-    # 3. Strip trailing 's' for plurals (e.g. "hills" → "hill")
+    # 3. Strip trailing 's' for plurals (e.g. "hills" â†’ "hill")
     for w in words:
         if w in SKIP_WORDS:
             continue
@@ -754,45 +1014,71 @@ def query_data(question, df):
     the filtered data to the LLM to answer the question in plain English."""
     import re, unicodedata
 
+    df = ensure_computed_event_flags(df)
     q = question.lower().strip()
 
-    # ── 1. Detect boolean filters (through balls, key passes, etc.) ──
+    # â”€â”€ 1. Detect boolean filters (through balls, key passes, etc.) â”€â”€
     BOOL_PATTERNS = {
-        "is_through_ball":    [r"\bthrough\s*ball"],
-        "is_long_ball":       [r"\blong\s*ball"],
-        "is_key_pass":        [r"\bkey\s*pass", r"\bchance[sd]?\s*creat", r"\bcreat\w*\b.*\bchance"],
-        "is_cross":           [r"\bcross(?:es)?\b"],
-        "is_header":          [r"\bheader"],
-        "is_corner":          [r"\bcorner"],
-        "is_freekick":        [r"\bfree\s*kick"],
-        "is_big_chance_shot": [r"\bbig\s*chance"],
-        "is_big_chance":      [r"\bbig\s*chance[sd]?\s*creat", r"\bcreat\w*\b.*\bbig\s*chance"],
-        "is_gk_save":         [r"\bgk\s*save", r"\bkeeper\s*save"],
+        "is_through_ball":       [r"\bthrough\s*ball"],
+        "is_long_ball":          [r"\blong\s*ball"],
+        "is_key_pass":           [r"\bkey\s*pass", r"\bchance[sd][CLR]\s*creat", r"\bcreat\w*\b.*\bchance"],
+        "is_cross":              [r"\bcrosses?\b"],
+        "is_header":             [r"\bheader"],
+        "is_corner":             [r"\bcorner"],
+        "is_freekick":           [r"\bfree\s*kick"],
+        "is_switch_of_play":          [r"\bswitch(?:es)?\s+of\s+play\b", r"\bswitch(?:es)?\b"],
+        "is_diagonal_long_ball":      [r"\bdiagonal(?:s)?\b", r"\blong\s+diagonal(?:s)?\b", r"\braking\s+diagonal(?:s)?\b"],
+        "is_box_entry_pass":          [r"\bbox\s*entry\s*pass", r"\bpass(?:es)?\s+into\s+(?:the\s+)?box", r"\bpass(?:es)?\s+(?:that\s+)?enter(?:s|ing)?\s+(?:the\s+)?box"],
+        "is_deep_completion":         [r"\bdeep\s*completion"],
+        "is_box_entry_carry":         [r"\bbox\s*entry\s*carr(?:y|ies)", r"\bcarr(?:y|ies)\s+into\s+(?:the\s+)?box", r"\bcarr(?:y|ies)\s+(?:that\s+)?enter(?:s|ing)?\s+(?:the\s+)?box"],
+        "is_final_third_entry_pass":  [r"\bfinal\s*third\s*entry\s*pass", r"\bpass(?:es)?\s+into\s+(?:the\s+)?final\s+third", r"\bfinal\s*third\s+pass\s*entr"],
+        "is_final_third_entry_carry": [r"\bfinal\s*third\s*entry\s*carr", r"\bcarr(?:y|ies)\s+into\s+(?:the\s+)?final\s+third", r"\bfinal\s*third\s+carr(?:y|ies)\s*entr"],
+        "is_big_chance_shot":    [r"\bbig\s*chance"],
+        "is_big_chance":         [r"\bbig\s*chance[sd][CLR]\s*creat", r"\bcreat\w*\b.*\bbig\s*chance"],
+        "is_gk_save":            [r"\bgk\s*save", r"\bkeeper\s*save"],
+        "is_penalty":            [r"\bpenalty\s*kick|\bspot\s*kick|\bpenalty\s*shot"],
+        "is_volley":             [r"\bvolley"],
+        "is_chipped":            [r"\bchip(ped)?\b|\blob(bed)?\b"],
+        "is_direct_from_corner": [r"\bdirect\s*from\s*corner|\bcorner\s*goal"],
+        "is_left_foot":          [r"\bleft\s*foot|\bleft\s*footed"],
+        "is_right_foot":         [r"\bright\s*foot|\bright\s*footed"],
+        "is_fast_break":         [r"\bfast\s*break|\bcounter\s*attack|\bon\s*the\s*break"],
+        "is_touch_in_box":       [r"\btouch\s*in\s*(the\s*)?box|\bin\s*the\s*box"],
+        "is_assist_throughball": [r"\bassist.*through\s*ball|\bthrough\s*ball.*assist"],
+        "is_assist_cross":       [r"\bassist.*cross|\bcross.*assist"],
+        "is_assist_corner":      [r"\bassist.*corner|\bcorner.*assist"],
+        "is_assist_freekick":    [r"\bassist.*free\s*kick|\bfree\s*kick.*assist"],
+        "is_intentional_assist": [r"\bintentional\s*assist|\bdeliberate\s*assist"],
+        "is_yellow_card":        [r"\byellow\s*card|\bbooked"],
+        "is_red_card":           [r"\bred\s*card|\bsent\s*off|\bsending\s*off"],
+        "is_second_yellow":      [r"\bsecond\s*yellow|\bdouble\s*yellow"],
+        "is_nutmeg":             [r"\bnutmeg"],
+        "is_success_in_box":     [r"\bsuccess.*in\s*(the\s*)?box|\btake.?on.*in\s*(the\s*)?box"],
     }
 
     TYPE_PATTERNS = {
         "shots":          (r"\bshot", ["MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"]),
         "goals":          (r"\bgoal", ["Goal"]),
-        "passes":         (r"\bpass(?:es)?\b", ["Pass"]),
+        "passes":         (r"\bpasses?\b", ["Pass"]),
         "tackles":        (r"\btackle", ["Tackle"]),
         "take_ons":       (r"\btake\s*on|\bdribble", ["TakeOn"]),
         "aerials":        (r"\baerial", ["Aerial"]),
-        "carries":        (r"\bcarr(?:y|ies)\b", ["Carry"]),
+        "carries":        (r"\bcarr(y|ies)\b", ["Carry"]),
         "clearances":     (r"\bclearance", ["Clearance"]),
         "interceptions":  (r"\bintercept", ["Interception"]),
         "fouls":          (r"\bfoul", ["Foul"]),
-        "saves":          (r"\bsave(?:s)?\b(?!d)", ["Save"]),
+        "saves":          (r"\bsaves?\b(?!d)", ["Save"]),
         "cards":          (r"\bcard|\byellow|\bred\b", ["Card"]),
-        "blocks":         (r"\bblock(?:s)?\b", ["Block", "BlockedPass", "BlockedShot"]),
+        "blocks":         (r"\bblocks?\b", ["Block", "BlockedPass", "BlockedShot"]),
         "recoveries":     (r"\brecovery|\brecoveries|\brecover", ["BallRecovery"]),
-        "duels":          (r"\bduel", ["Tackle", "TakeOn", "Aerial", "Challenge"]),
+        "duels":          (r"\bduel", ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]),
         "challenges":     (r"\bchallenge", ["Challenge"]),
-        "ball_touches":   (r"\bball\s*touch|\btouch(?:es)?\b", ["BallTouch"]),
+        "ball_touches":   (r"\bball\s*touch|\btouches?\b", ["BallTouch"]),
         "dispossessed":   (r"\bdispossess", ["Dispossessed"]),
         "offside":        (r"\boffside", ["OffsideGiven", "OffsidePass", "OffsideProvoked"]),
-        "penalty":        (r"\bpenalt(?:y|ies)", ["PenaltyFaced"]),
-        "punch":          (r"\bpunch(?:es)?\b", ["Punch"]),
-        "substitutions":  (r"\bsub(?:stitution)?s?\b|\bcoming\s*on|\bcoming\s*off", ["SubstitutionOn", "SubstitutionOff"]),
+        "penalty":        (r"\bpenalt(y|ies)", ["PenaltyFaced"]),
+        "punch":          (r"\bpunches?\b", ["Punch"]),
+        "substitutions":  (r"\bsubs?(titutions?)?\b|\bcoming\s*on|\bcoming\s*off", ["SubstitutionOn", "SubstitutionOff"]),
         "keeper_actions": (r"\bgoalkeeper\b|\bkeeper\b(?!\s*save)|\bgk\b", ["Claim", "KeeperPickup", "KeeperSweeper", "Punch"]),
         "claims":         (r"\bclaim", ["Claim"]),
         "keeper_pickup":  (r"\bkeeper\s*pick\s*up|\bpick\s*up\b", ["KeeperPickup"]),
@@ -808,14 +1094,27 @@ def query_data(question, df):
                     active_bools[col] = True
                     break
 
-    # "big chances created" matches both — "created" is more specific, wins
+    for flag_name, col in INTENT_FLAG_TO_BOOL_COL.items():
+        if col in df.columns and query_has_intent_alias(q, flag_name):
+            active_bools[col] = True
+
+    # "big chances created" matches both â€” "created" is more specific, wins
     if "is_big_chance" in active_bools and "is_big_chance_shot" in active_bools:
         del active_bools["is_big_chance_shot"]
 
-    # "big chances created" also matches is_key_pass via "chance created" —
+    # "big chances created" also matches is_key_pass via "chance created" â€”
     # if is_big_chance matched, it's more specific, remove is_key_pass
     if "is_big_chance" in active_bools and "is_key_pass" in active_bools:
         del active_bools["is_key_pass"]
+
+    # "set piece(s)" means the restart family, which in this dataset maps to
+    # corners and free kicks. Use both flags together so downstream filtering
+    # applies OR logic rather than collapsing to unrelated event types.
+    if re.search(r"\bset[\s-]*pieces?\b", q) or query_has_intent_alias(q, "set_pieces"):
+        if "is_corner" in df.columns:
+            active_bools["is_corner"] = True
+        if "is_freekick" in df.columns:
+            active_bools["is_freekick"] = True
 
     active_types = []
     for name, (pat, types) in TYPE_PATTERNS.items():
@@ -824,7 +1123,7 @@ def query_data(question, df):
                 if t in df["type"].values:
                     active_types.append(t)
 
-    # ── 2. Detect players ──
+    # â”€â”€ 2. Detect players â”€â”€
     resolved_players = []
     fragments = re.split(r"[''`\s,&+]+", q)
     pairs = [f"{fragments[i]} {fragments[i+1]}" for i in range(len(fragments)-1)]
@@ -837,7 +1136,7 @@ def query_data(question, df):
             resolved_players.append(match)
             seen.add(match)
 
-    # ── 3. Detect team filter ──
+    # â”€â”€ 3. Detect team filter â”€â”€
     teams = df["team"].dropna().unique().tolist() if "team" in df.columns else []
     active_team = None
     for team in teams:
@@ -845,23 +1144,23 @@ def query_data(question, df):
             active_team = team
             break
 
-    # ── 4. Detect half filter ──
+    # â”€â”€ 4. Detect half filter â”€â”€
     active_half = None
     if re.search(r"\b1st\s*half|\bfirst\s*half", q):
         active_half = "FirstHalf"
     elif re.search(r"\b2nd\s*half|\bsecond\s*half", q):
         active_half = "SecondHalf"
 
-    # ── 5. Detect outcome filter ──
+    # â”€â”€ 5. Detect outcome filter â”€â”€
     # "won" in "who won the most X" or "won the most X" is an aggregate question,
-    # not an outcome filter — suppress successful_only in that context.
+    # not an outcome filter â€” suppress successful_only in that context.
     _won_is_agg = bool(re.search(r"\bwho\b.*\bwon\b|\bwon\b.*\bmost\b", q))
     successful_only = bool(re.search(r"\bsuccessful\b|\bcompleted\b|\bwin\b", q)) or (
         bool(re.search(r"\bwon\b", q)) and not _won_is_agg
     )
     unsuccessful_only = bool(re.search(r"\bunsuccessful\b|\bfailed\b|\bmissed\b|\blost\b|\blose\b", q))
 
-    # ── 6. Apply deterministic filters ──
+    # â”€â”€ 6. Apply deterministic filters â”€â”€
     result = df.copy()
 
     if resolved_players:
@@ -878,6 +1177,15 @@ def query_data(question, df):
     if active_half and "period" in result.columns:
         result = result[result["period"] == active_half]
 
+    if {"is_corner", "is_freekick"}.issubset(active_bools.keys()) and all(
+        col in result.columns for col in ("is_corner", "is_freekick")
+    ):
+        mask_corner = result["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"])
+        mask_freekick = result["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"])
+        result = result[mask_corner | mask_freekick]
+        active_bools.pop("is_corner", None)
+        active_bools.pop("is_freekick", None)
+
     if active_bools:
         for col in active_bools:
             if col in result.columns:
@@ -891,7 +1199,36 @@ def query_data(question, df):
     if unsuccessful_only and "outcomeType" in result.columns:
         result = result[result["outcomeType"] == "Unsuccessful"]
 
-    # ── 7. Build display columns ──
+    # â”€â”€ 6b. Detect spatial zone filters â”€â”€
+    PITCH_ZONE_PATTERNS = [
+        (r"\bleft\s*side(\s+of\s+the\s+(pitch|field))?\b",  "Entire Left Side"),
+        (r"\bright\s*side(\s+of\s+the\s+(pitch|field))?\b", "Entire Right Side"),
+        (r"\bleft\s*half\s*space\b",  "Left Half Space"),
+        (r"\bright\s*half\s*space\b", "Right Half Space"),
+        (r"\bleft\s*wing\b",          "Left Wing"),
+        (r"\bright\s*wing\b",         "Right Wing"),
+        (r"\b(center|centre|central)\b", "Centre"),
+    ]
+    DEPTH_ZONE_PATTERNS = [
+        (r"\bdefensive\s*third\b",            "Defensive Third"),
+        (r"\bmid(dle)?\s*third\b",            "Middle Third"),
+        (r"\battacking\s*third\b|\bfinal\s*third\b", "Attacking Third"),
+    ]
+
+    if "y" in result.columns or "pitch_zone" in result.columns:
+        for pat, zone in PITCH_ZONE_PATTERNS:
+            if re.search(pat, q):
+                zone_series = _effective_pitch_zone_series(result)
+                result = result[zone_series == zone]
+                break
+
+    if "depth_zone" in result.columns:
+        for pat, zone in DEPTH_ZONE_PATTERNS:
+            if re.search(pat, q):
+                result = result[result["depth_zone"] == zone]
+                break
+
+    # â”€â”€ 7. Build display columns â”€â”€
     DISPLAY_COLS = ["minute", "second", "type", "outcomeType", "playerName",
                     "team", "period"]
 
@@ -905,7 +1242,7 @@ def query_data(question, df):
     if result.empty:
         return {"type": "text", "data": "No matching events found."}
 
-    # ── 8. Detect special aggregate queries (progressive, xT/dangerous) ──
+    # â”€â”€ 8. Detect special aggregate queries (progressive, xT/dangerous) â”€â”€
     is_progressive = bool(re.search(r"\bprogressive\b|\bprog\b", q))
     is_dangerous = bool(re.search(r"\bdangerous\b|\bthreat\b|\bxt\b", q))
 
@@ -954,7 +1291,7 @@ def query_data(question, df):
             display_df = _display(xt_df)
             return {"type": "table", "data": display_df, "count": len(display_df)}
 
-    # ── 9. Standard response types ──
+    # â”€â”€ 9. Standard response types â”€â”€
     display_df = _display(result)
     total_rows = len(display_df)
 
@@ -995,7 +1332,7 @@ def answer_with_pandas(question, df):
     def strip_accents(s):
         return "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn")
 
-    # ── Pre-resolve player names from the question ──
+    # â”€â”€ Pre-resolve player names from the question â”€â”€
     # Split on spaces and common delimiters, try each fragment
     resolved_players = []
     fragments = re.split(r"[''`\s,&+]+", question.lower())
@@ -1011,7 +1348,7 @@ def answer_with_pandas(question, df):
             resolved_players.append(match)
             seen_matches.add(match)
 
-    # ── Pre-filter the DataFrame if we found player names ──
+    # â”€â”€ Pre-filter the DataFrame if we found player names â”€â”€
     # This means the LLM doesn't need to handle player matching at all
     df_work = df.copy()
     player_note_for_llm = ""
@@ -1044,38 +1381,81 @@ def answer_with_pandas(question, df):
         f"Unique periods (EXACT): {unique_periods}\n"
         f"prog_pass present: {'prog_pass' in df.columns}\n"
         f"prog_carry present: {'prog_carry' in df.columns}\n"
-        f"xT present: {'xT' in df.columns}"
+        f"xT present: {'xT' in df.columns}\n"
+        f"pitch_zone values (EXACT): {sorted(df_work['pitch_zone'].dropna().unique().tolist()) if 'pitch_zone' in df_work.columns else 'not present'}\n"
+        f"depth_zone values (EXACT): {sorted(df_work['depth_zone'].dropna().unique().tolist()) if 'depth_zone' in df_work.columns else 'not present'}"
         f"{player_note_for_llm}"
     )
     system = """You are a Python/pandas code generator for football data analysis.
 Write a single Python expression that answers the question using a DataFrame called `df`.
-Return ONLY the expression — no imports, no assignments, no markdown, no explanation.
+Return ONLY the expression â€” no imports, no assignments, no markdown, no explanation.
 RULES:
-- Use EXACT strings from the schema — never invent type names
-- Player names: use str.contains(..., case=False, na=False) — BUT if the NOTE says
+- Use EXACT strings from the schema â€” never invent type names
+- Player names: use str.contains(..., case=False, na=False) â€” BUT if the NOTE says
   the df is already pre-filtered for players, do NOT add any player filter
-- CRITICAL — boolean columns must use ==True, never filter by type name:
-    crosses       -> df['is_cross']==True
-    headers       -> df['is_header']==True
-    corners       -> df['is_corner']==True
-    freekicks     -> df['is_freekick']==True
-    key passes    -> df['is_key_pass']==True
-    long balls    -> df['is_long_ball']==True
-    through balls -> df['is_through_ball']==True
+- CRITICAL â€” boolean columns must use ==True, never filter by type name:
+    crosses            -> df['is_cross']==True
+    headers            -> df['is_header']==True
+    corners            -> df['is_corner']==True
+    freekicks          -> df['is_freekick']==True
+    key passes         -> df['is_key_pass']==True
+    long balls         -> df['is_long_ball']==True
+    through balls      -> df['is_through_ball']==True
     big chances        -> df['is_big_chance_shot']==True
     big chances created -> df['is_big_chance']==True
+    penalties          -> df['is_penalty']==True
+    volleys            -> df['is_volley']==True
+    chipped shots      -> df['is_chipped']==True
+    direct from corner -> df['is_direct_from_corner']==True
+    left foot          -> df['is_left_foot']==True
+    right foot         -> df['is_right_foot']==True
+    fast break/counter -> df['is_fast_break']==True
+    touch in box       -> df['is_touch_in_box']==True
+    assist (through ball) -> df['is_assist_throughball']==True
+    assist (cross)     -> df['is_assist_cross']==True
+    assist (corner)    -> df['is_assist_corner']==True
+    assist (free kick) -> df['is_assist_freekick']==True
+    intentional assist -> df['is_intentional_assist']==True
+    yellow cards       -> df['is_yellow_card']==True
+    red cards          -> df['is_red_card']==True
+    second yellow      -> df['is_second_yellow']==True
+    nutmegs            -> df['is_nutmeg']==True
+    success in box     -> df['is_success_in_box']==True
 - shots = ONLY df['type'].isin(['MissedShot','SavedShot','Goal','ShotOnPost','BlockedShot'])
 - passes = ONLY df['type']=='Pass'
 - saves = ONLY df['type']=='Save'
+- CRITICAL â€” ALWAYS combine ALL applicable conditions with &. Never apply a boolean flag alone when other filters are also implied:
+    boolean flag + type keyword  -> combine with &:
+      "left foot shots"    -> df[(df['is_left_foot']==True) & (df['type'].isin(['MissedShot','SavedShot','Goal','ShotOnPost','BlockedShot']))]
+      "right foot goals"   -> df[(df['is_right_foot']==True) & (df['type']=='Goal')]
+      "headed passes"      -> df[(df['is_header']==True) & (df['type']=='Pass')]
+      "volley goals"       -> df[(df['is_volley']==True) & (df['type']=='Goal')]
+      "key pass crosses"   -> df[(df['is_key_pass']==True) & (df['is_cross']==True)]
+    boolean flag + boolean flag  -> combine with &:
+      "left foot crosses"  -> df[(df['is_left_foot']==True) & (df['is_cross']==True)]
+      "headed big chances" -> df[(df['is_header']==True) & (df['is_big_chance_shot']==True)]
+      "long ball key passes" -> df[(df['is_long_ball']==True) & (df['is_key_pass']==True)]
+    three-way combinations -> chain all with &:
+      "left foot shot big chances" -> df[(df['is_left_foot']==True) & (df['is_big_chance_shot']==True) & (df['type'].isin(['MissedShot','SavedShot','Goal','ShotOnPost','BlockedShot']))]
+    The rule: every concept in the question maps to a condition; every condition must appear in the final expression joined by &.
+- pitch_zone filter: use df['pitch_zone'] == '<exact zone name>' (use EXACT values from schema)
+    zones: "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing"
+    "left wing shots"         -> df[(df['pitch_zone']=='Left Wing') & (df['type'].isin(['MissedShot','SavedShot','Goal','ShotOnPost','BlockedShot']))]
+    "right half space passes" -> df[(df['pitch_zone']=='Right Half Space') & (df['type']=='Pass')]
+    "centre crosses"          -> df[(df['pitch_zone']=='Centre') & (df['is_cross']==True)]
+- depth_zone filter: use df['depth_zone'] == '<exact zone name>' (use EXACT values from schema)
+    zones: "Defensive Third", "Middle Third", "Attacking Third"
+    "attacking third crosses" -> df[(df['depth_zone']=='Attacking Third') & (df['is_cross']==True)]
+    "middle third passes"     -> df[(df['depth_zone']=='Middle Third') & (df['type']=='Pass')]
 - team filter: use df['team'].str.contains(..., case=False, na=False)
-- "who had the most X?" ALWAYS returns .groupby('playerName').size().idxmax()
-- "how many X?" returns a scalar via .shape[0] or .sum()
+- "who had the most X[CLR]" ALWAYS returns .groupby('playerName').size().idxmax()
+- "how many X[CLR]" returns a scalar via .shape[0] or .sum()
 - When returning a filtered DataFrame, return the FULL filtered df
 - If the df is pre-filtered for a player, just filter by event type"""
     user = f"Schema:\n{schema}\n\nQuestion: {question}"
     raw = call_llm(system, user).strip()
     import re as _re
-    raw = _re.sub(r"^```[a-zA-Z]*\n?", "", raw).strip()
+    raw = _re.sub(r"^```[a-zA-Z]*\n[CLR]", "", raw).strip()
     raw = _re.sub(r"```$", "", raw).strip()
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     code = raw
@@ -1096,8 +1476,16 @@ RULES:
     code_norm = strip_accents(code)
 
     DISPLAY_COLS = ["minute", "second", "type", "outcomeType", "playerName", "team", "period",
-                    "is_key_pass", "is_cross", "is_long_ball", "is_through_ball",
-                    "is_corner", "is_freekick", "is_header", "is_big_chance", "xT"]
+                    "is_key_pass", "is_cross", "is_long_ball", "is_switch_of_play", "is_diagonal_long_ball", "is_through_ball",
+                    "is_box_entry_pass", "is_deep_completion", "is_box_entry_carry", "is_final_third_entry_pass", "is_final_third_entry_carry",
+                    "is_corner", "is_freekick", "is_header", "is_big_chance",
+                    "is_penalty", "is_volley", "is_chipped", "is_direct_from_corner",
+                    "is_left_foot", "is_right_foot", "is_fast_break", "is_touch_in_box",
+                    "is_assist_throughball", "is_assist_cross", "is_assist_corner",
+                    "is_assist_freekick", "is_intentional_assist",
+                    "is_yellow_card", "is_red_card", "is_second_yellow",
+                    "is_nutmeg", "is_success_in_box", "xT",
+                    "pitch_zone", "depth_zone"]
 
     def _clean_df_result(result):
         # Restore original accented player names if we stripped them
@@ -1133,7 +1521,7 @@ RULES:
 
         if isinstance(result, pd.Series):
             # If it's a boolean Series, the LLM returned a mask instead of
-            # a filtered DataFrame — apply it
+            # a filtered DataFrame â€” apply it
             if result.dtype == bool or set(result.dropna().unique()).issubset({True, False, 0, 1}):
                 filtered = df_norm[result.astype(bool)]
                 if filtered.empty:
@@ -1154,26 +1542,53 @@ RULES:
         if "argmax of an empty sequence" in err or "argmin of an empty sequence" in err:
             teams = df["team"].dropna().unique().tolist() if "team" in df.columns else []
             raise ValueError(
-                f"No matching events found — the filter returned no data. "
+                f"No matching events found â€” the filter returned no data. "
                 f"Teams in this CSV: {teams}"
             )
         raise ValueError(f"Could not compute: {err}  [code: {code_norm}]")
 
 
 BOOL_COL_TO_FLAG = {
-    "is_key_pass":        "key_passes_only",
-    "is_cross":           "crosses_only",
-    "is_long_ball":       "long_balls_only",
-    "is_through_ball":    "through_balls_only",
-    "is_corner":          "corners_only",
-    "is_freekick":        "freekicks_only",
-    "is_header":          "headers_only",
-    "is_big_chance_shot": "big_chances_only",          # the big chance shot itself
-    "is_big_chance":      "big_chances_created_only",  # pass that created a big chance
+    "is_key_pass":           "key_passes_only",
+    "is_cross":              "crosses_only",
+    "is_long_ball":          "long_balls_only",
+    "is_switch_of_play":     "switches_only",
+    "is_diagonal_long_ball": "diagonals_only",
+    "is_through_ball":       "through_balls_only",
+    "is_corner":             "corners_only",
+    "is_freekick":           "freekicks_only",
+    "is_header":             "headers_only",
+    "is_big_chance_shot":    "big_chances_only",
+    "is_big_chance":         "big_chances_created_only",
+    "is_own_goal":           "own_goals_only",
+    "is_penalty":            "penalties_only",
+    "is_volley":             "volleys_only",
+    "is_chipped":            "chipped_only",
+    "is_direct_from_corner": "direct_from_corner_only",
+    "is_left_foot":          "left_foot_only",
+    "is_right_foot":         "right_foot_only",
+    "is_fast_break":         "fast_break_only",
+    "is_touch_in_box":       "touch_in_box_only",
+    "is_assist_throughball": "assist_throughball_only",
+    "is_assist_cross":       "assist_cross_only",
+    "is_assist_corner":      "assist_corner_only",
+    "is_assist_freekick":    "assist_freekick_only",
+    "is_intentional_assist": "intentional_assists_only",
+    "is_yellow_card":        "yellow_cards_only",
+    "is_red_card":           "red_cards_only",
+    "is_second_yellow":      "second_yellow_only",
+    "is_nutmeg":                    "nutmegs_only",
+    "is_success_in_box":            "success_in_box_only",
+    "is_box_entry_pass":            "box_entry_pass_only",
+    "is_deep_completion":           "deep_completion_only",
+    "is_box_entry_carry":           "box_entry_carry_only",
+    "is_final_third_entry_pass":    "final_third_entry_pass_only",
+    "is_final_third_entry_carry":   "final_third_entry_carry_only",
 }
 
 def parse_filters(instruction, df, available_types):
     import re as _re
+    df = ensure_computed_event_flags(df)
     has_xt   = "xT" in df.columns
     has_prog = "prog_pass" in df.columns or "prog_carry" in df.columns
     players  = df["playerName"].dropna().unique().tolist() if "playerName" in df.columns else []
@@ -1192,7 +1607,7 @@ def parse_filters(instruction, df, available_types):
 
     name_hint = ""
     if resolved_names:
-        hints = [f'"{orig}" → use player_filter="{matched}"' for orig, matched in resolved_names]
+        hints = [f'"{orig}" â†’ use player_filter="{matched}"' for orig, matched in resolved_names]
         name_hint = f"\nPlayer name resolution: {'; '.join(hints)}\n"
 
     active_bool_cols = {
@@ -1221,7 +1636,7 @@ IMPORTANT RULES:
 - When user says "actions", "all actions", "all events", or "everything": leave filter_types=[] (empty) to include all event types
 - "team_filter": use for team requests
 - "player_filter": comma-separated EXACT player names from the available list
-- "half_filter": "1st half only", "2nd half only", or "Both halves"
+- "half_filter": "1st half only", "2nd half only", or "Both halves" â€” NOTE: "right half space" and "left half space" are pitch ZONE terms, NOT halves; always set half_filter="Both halves" unless the user explicitly asks for a specific half of the match
 - "successful_only": true when user says "successful" or "completed"
 - "unsuccessful_only": true when user says "unsuccessful" or "failed"
 - "minute_min" / "minute_max": for time range requests
@@ -1234,7 +1649,7 @@ IMPORTANT RULES:
 - For interceptions: use filter_types=["Interception"]
 - For fouls: use filter_types=["Foul"]
 - For carries: use filter_types=["Carry"]
-- For duels: use filter_types=["Tackle", "TakeOn", "Aerial", "Challenge"]
+- For duels: use filter_types=["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]
 - For challenges: use filter_types=["Challenge"]
 - For ball touches: use filter_types=["BallTouch"]
 - For ball recoveries: use filter_types=["BallRecovery"]
@@ -1246,17 +1661,38 @@ IMPORTANT RULES:
 - For goalkeeper claims: use filter_types=["Claim"]
 - For goalkeeper pickups: use filter_types=["KeeperPickup"]
 - For goalkeeper sweeper actions: use filter_types=["KeeperSweeper"]
-- "shots" means ALL shot types above — never omit any unless the user specifies a subtype
-- NEVER invent event type names — ONLY use exact names from the available list
+- "shots" means ALL shot types above â€” never omit any unless the user specifies a subtype
+- NEVER invent event type names â€” ONLY use exact names from the available list
 - For through balls: set "through_balls_only": true (NOT filter_types)
 - For key passes: set "key_passes_only": true (NOT filter_types)
 - For crosses: set "crosses_only": true (NOT filter_types)
 - For long balls: set "long_balls_only": true (NOT filter_types)
+- For switches of play: set "switches_only": true (NOT filter_types)
+- For diagonals / long diagonals: set "diagonals_only": true (NOT filter_types)
 - For headers: set "headers_only": true (NOT filter_types)
 - For corners: set "corners_only": true (NOT filter_types)
 - For free kicks: set "freekicks_only": true (NOT filter_types)
 - For big chances (the shot itself): set "big_chances_only": true (NOT filter_types)
 - For big chances created (the pass that created a big chance): set "big_chances_created_only": true (NOT filter_types)
+- For own goals: set "own_goals_only": true and filter_types=["Goal"] (coordinate-based detection)
+- For penalties (shot from spot): set "penalties_only": true (NOT filter_types)
+- For volleys: set "volleys_only": true (NOT filter_types)
+- For chipped/lob shots: set "chipped_only": true (NOT filter_types)
+- For goals/shots direct from corner: set "direct_from_corner_only": true (NOT filter_types)
+- For left foot actions: set "left_foot_only": true (NOT filter_types)
+- For right foot actions: set "right_foot_only": true (NOT filter_types)
+- For fast break/counter-attack: set "fast_break_only": true (NOT filter_types)
+- For actions with a touch in the box: set "touch_in_box_only": true (NOT filter_types)
+- For assists via through ball: set "assist_throughball_only": true (NOT filter_types)
+- For assists via cross: set "assist_cross_only": true (NOT filter_types)
+- For assists via corner: set "assist_corner_only": true (NOT filter_types)
+- For assists via free kick: set "assist_freekick_only": true (NOT filter_types)
+- For intentional/deliberate assists: set "intentional_assists_only": true (NOT filter_types)
+- For yellow cards: set "yellow_cards_only": true and filter_types=["Card"]
+- For red cards: set "red_cards_only": true and filter_types=["Card"]
+- For second yellow cards: set "second_yellow_only": true and filter_types=["Card"]
+- For nutmegs: set "nutmegs_only": true (NOT filter_types)
+- For successful take-ons in the box: set "success_in_box_only": true (NOT filter_types)
 
 Return ONLY valid JSON with these keys (no markdown):
 {{
@@ -1273,12 +1709,38 @@ Return ONLY valid JSON with these keys (no markdown):
   "key_passes_only": false,
   "crosses_only": false,
   "long_balls_only": false,
+  "switches_only": false,
+  "diagonals_only": false,
   "through_balls_only": false,
   "corners_only": false,
   "freekicks_only": false,
   "headers_only": false,
   "big_chances_only": false,
   "big_chances_created_only": false,
+  "own_goals_only": false,
+  "penalties_only": false,
+  "volleys_only": false,
+  "chipped_only": false,
+  "direct_from_corner_only": false,
+  "left_foot_only": false,
+  "right_foot_only": false,
+  "fast_break_only": false,
+  "touch_in_box_only": false,
+  "assist_throughball_only": false,
+  "assist_cross_only": false,
+  "assist_corner_only": false,
+  "assist_freekick_only": false,
+  "intentional_assists_only": false,
+  "yellow_cards_only": false,
+  "red_cards_only": false,
+  "second_yellow_only": false,
+  "nutmegs_only": false,
+  "success_in_box_only": false,
+  "deep_completion_only": false,
+  "box_entry_pass_only": false,
+  "box_entry_carry_only": false,
+  "final_third_entry_pass_only": false,
+  "final_third_entry_carry_only": false,
   "successful_only": false,
   "unsuccessful_only": false,
   "minute_min": null,
@@ -1297,7 +1759,7 @@ Return ONLY valid JSON with these keys (no markdown):
     if not raw or not raw.startswith("{"):
         # Try to extract JSON from mixed text/JSON response
         import re as _re2
-        json_match = _re2.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw or "")
+        json_match = _re2.search(r'\{[^{}]*([CLR]:\{[^{}]*\}[^{}]*)*\}', raw or "")
         if json_match:
             raw = json_match.group(0)
         else:
@@ -1310,7 +1772,7 @@ Return ONLY valid JSON with these keys (no markdown):
                     raw = raw[4:]
             raw = raw.strip()
             if not raw or not raw.startswith("{"):
-                json_match2 = _re2.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw or "")
+                json_match2 = _re2.search(r'\{[^{}]*([CLR]:\{[^{}]*\}[^{}]*)*\}', raw or "")
                 if json_match2:
                     raw = json_match2.group(0)
                 else:
@@ -1318,83 +1780,152 @@ Return ONLY valid JSON with these keys (no markdown):
 
     result = json.loads(raw)
 
-    FLAG_NAMES = {"long_balls_only", "successful_only", "unsuccessful_only", "progressive_only",
+    # Clamp half_filter to valid values â€” LLM can confuse "right half space" with a half
+    _valid_halves = {"1st half only", "2nd half only", "Both halves"}
+    if result.get("half_filter") not in _valid_halves:
+        result["half_filter"] = "Both halves"
+
+    FLAG_NAMES = {"long_balls_only", "switches_only", "diagonals_only", "successful_only", "unsuccessful_only", "progressive_only",
                   "key_passes_only", "crosses_only", "through_balls_only",
                   "corners_only", "freekicks_only", "headers_only",
-                  "big_chances_only", "big_chances_created_only"}
+                  "big_chances_only", "big_chances_created_only", "own_goals_only",
+                  "gk_saves_only", "penalties_only", "volleys_only", "chipped_only",
+                  "direct_from_corner_only", "left_foot_only", "right_foot_only",
+                  "fast_break_only", "touch_in_box_only",
+                  "assist_throughball_only", "assist_cross_only", "assist_corner_only",
+                  "assist_freekick_only", "intentional_assists_only",
+                  "yellow_cards_only", "red_cards_only", "second_yellow_only",
+                  "nutmegs_only", "success_in_box_only",
+                  "deep_completion_only", "box_entry_pass_only", "box_entry_carry_only",
+                  "final_third_entry_pass_only", "final_third_entry_carry_only"}
     bad = [v for v in result.get("filter_types", []) if v in FLAG_NAMES]
     for flag in bad:
         result["filter_types"].remove(flag)
         result[flag] = True
 
-    # ── Post-processing: strip hallucinated flags ──
+    # â”€â”€ Post-processing: strip hallucinated flags â”€â”€
     # The LLM often sets flags the user never asked for. Only allow flags
     # that match keywords actually present in the instruction.
     instr_lower = instruction.lower()
 
     FLAG_KEYWORD_MAP = {
-        "progressive_only":       ["progressive", "prog pass", "prog carry"],
-        "successful_only":        ["successful", "completed", "success"],
-        "unsuccessful_only":      ["unsuccessful", "failed", "incomplete", "missed"],
-        "key_passes_only":        ["key pass", "key passes"],
-        "crosses_only":           ["cross", "crosses"],
-        "long_balls_only":        ["long ball", "long balls"],
-        "through_balls_only":     ["through ball", "through balls"],
-        "corners_only":           ["corner", "corners"],
-        "freekicks_only":         ["free kick", "free kicks", "freekick"],
-        "headers_only":           ["header", "headers", "headed"],
-        "big_chances_only":       ["big chance", "big chances"],
+        "progressive_only":         ["progressive", "prog pass", "prog carry"],
+        "successful_only":          ["successful", "completed", "success"],
+        "unsuccessful_only":        ["unsuccessful", "failed", "incomplete", "missed"],
+        "key_passes_only":          ["key pass", "key passes"],
+        "crosses_only":             ["cross", "crosses"],
+        "long_balls_only":          ["long ball", "long balls"],
+        "switches_only":            ["switch", "switches", "switch of play", "switches of play"],
+        "diagonals_only":           ["diagonal", "diagonals", "long diagonal", "long diagonals", "raking diagonal", "raking diagonals"],
+        "through_balls_only":       ["through ball", "through balls"],
+        "corners_only":             ["corner", "corners"],
+        "freekicks_only":           ["free kick", "free kicks", "freekick"],
+        "headers_only":             ["header", "headers", "headed"],
+        "big_chances_only":         ["big chance", "big chances"],
         "big_chances_created_only": ["big chance created", "big chances created",
                                      "chance created", "chances created"],
+        "own_goals_only":           ["own goal", "own goals", "og"],
+        "gk_saves_only":            ["gk save", "goalkeeper save", "keeper save", "saved"],
+        "penalties_only":           ["penalty kick", "spot kick", "penalty shot"],
+        "volleys_only":             ["volley", "volleys"],
+        "chipped_only":             ["chipped", "chip shot", "lob"],
+        "direct_from_corner_only":  ["direct from corner", "corner goal"],
+        "left_foot_only":           ["left foot", "left footed"],
+        "right_foot_only":          ["right foot", "right footed"],
+        "fast_break_only":          ["fast break", "counter attack", "counter-attack", "on the break"],
+        "touch_in_box_only":        ["touch in box", "in the box"],
+        "assist_throughball_only":  ["assist through ball", "through ball assist"],
+        "assist_cross_only":        ["assist cross", "cross assist"],
+        "assist_corner_only":       ["assist corner", "corner assist"],
+        "assist_freekick_only":     ["assist free kick", "free kick assist"],
+        "intentional_assists_only": ["intentional assist", "deliberate assist"],
+        "yellow_cards_only":        ["yellow card", "booked"],
+        "red_cards_only":           ["red card", "sent off"],
+        "second_yellow_only":       ["second yellow", "double yellow"],
+        "nutmegs_only":             ["nutmeg", "nutmegs"],
+        "success_in_box_only":          ["success in box", "take on in box", "dribble in box"],
+        "deep_completion_only":         ["deep completion", "deep completions"],
+        "box_entry_pass_only":          ["box entry pass", "box entry passes", "pass into the box", "passes into the box"],
+        "box_entry_carry_only":         ["box entry carry", "box entry carries", "carry into the box", "carries into the box"],
+        "final_third_entry_pass_only":  ["final third entry pass", "final third entry passes", "pass into the final third", "passes into the final third"],
+        "final_third_entry_carry_only": ["final third entry carry", "final third entry carries", "carry into the final third", "carries into the final third"],
     }
 
     for flag, keywords in FLAG_KEYWORD_MAP.items():
         if result.get(flag) and not any(kw in instr_lower for kw in keywords):
             result[flag] = False
 
-    # ── Keyword-based overrides for common requests ──
+    for flag_name in INTENT_FLAG_TO_BOOL_COL:
+        if query_has_intent_alias(instr_lower, flag_name):
+            result[flag_name] = True
+
+    # â”€â”€ Keyword-based overrides for common requests â”€â”€
     # These catch cases where the LLM maps to wrong filter_types
 
-    # "through ball(s)" → through_balls_only flag, not filter_types
+    # "through ball(s)" â†’ through_balls_only flag, not filter_types
     if _re.search(r"\bthrough\s*ball", instr_lower):
         result["through_balls_only"] = True
         # Remove wrong filter_types the LLM might have set
         result["filter_types"] = [t for t in result.get("filter_types", [])
                                   if t not in ("Carry", "Pass")]
 
-    # "key pass(es)" → key_passes_only flag
+    # "key pass(es)" â†’ key_passes_only flag
     if _re.search(r"\bkey\s*pass", instr_lower):
         result["key_passes_only"] = True
         result["filter_types"] = [t for t in result.get("filter_types", [])
                                   if t not in ("Pass",)]
 
-    # "cross(es)" → crosses_only flag
-    if _re.search(r"\bcross(?:es)?\b", instr_lower) and "crossbar" not in instr_lower:
+    # "cross(es)" â†’ crosses_only flag
+    if _re.search(r"\bcrosses?\b", instr_lower) and "crossbar" not in instr_lower:
         result["crosses_only"] = True
 
-    # "long ball(s)" → long_balls_only flag
+    # "long ball(s)" â†’ long_balls_only flag
     if _re.search(r"\blong\s*ball", instr_lower):
         result["long_balls_only"] = True
 
-    # "header(s)" → headers_only flag
+    if _re.search(r"\bswitch(?:es)?(?:\s+of\s+play)?\b", instr_lower):
+        result["switches_only"] = True
+
+    if _re.search(r"\b(?:long\s+)?diagonal(?:s)?\b|\braking\s+diagonal(?:s)?\b", instr_lower):
+        result["diagonals_only"] = True
+
+    # "header(s)" â†’ headers_only flag
     if _re.search(r"\bheader", instr_lower):
         result["headers_only"] = True
 
-    # "corner(s)" → corners_only flag
+    # "corner(s)" â†’ corners_only flag
     if _re.search(r"\bcorner", instr_lower):
         result["corners_only"] = True
 
-    # "free kick(s)" → freekicks_only flag
+    # "free kick(s)" â†’ freekicks_only flag
     if _re.search(r"\bfree\s*kick", instr_lower):
         result["freekicks_only"] = True
 
-    # ── When a boolean flag is active, only keep filter_types the user asked for ──
+    # "set piece(s)" â†’ corners + free kicks together. Clear any broad
+    # filter_types unless the user explicitly asked for a specific event type.
+    if _re.search(r"\bset[\s-]*pieces?\b", instr_lower) or query_has_intent_alias(instr_lower, "set_pieces"):
+        result["corners_only"] = True
+        result["freekicks_only"] = True
+        result["filter_types"] = [t for t in result.get("filter_types", [])
+                                  if t in available_types and t in {"Pass", "Goal", "MissedShot",
+                                                                    "SavedShot", "ShotOnPost", "BlockedShot",
+                                                                    "Aerial", "Foul", "Card"}]
+
+    # â”€â”€ When a boolean flag is active, only keep filter_types the user asked for â”€â”€
     # The LLM often adds filter_types that the user didn't request.
-    # e.g. "all big chances" → LLM adds shot types, but big chances can be passes too.
+    # e.g. "all big chances" â†’ LLM adds shot types, but big chances can be passes too.
     # Only keep filter_types if the user's words explicitly match a type keyword.
-    BOOL_FLAGS = ["key_passes_only", "crosses_only", "long_balls_only",
+    BOOL_FLAGS = ["key_passes_only", "crosses_only", "long_balls_only", "switches_only", "diagonals_only",
                   "through_balls_only", "corners_only", "freekicks_only",
-                  "headers_only", "big_chances_only", "big_chances_created_only"]
+                  "headers_only", "big_chances_only", "big_chances_created_only",
+                  "own_goals_only", "penalties_only", "volleys_only", "chipped_only",
+                  "direct_from_corner_only", "left_foot_only", "right_foot_only",
+                  "fast_break_only", "touch_in_box_only", "assist_throughball_only",
+                  "assist_cross_only", "assist_corner_only", "assist_freekick_only",
+                  "intentional_assists_only", "yellow_cards_only", "red_cards_only",
+                  "second_yellow_only", "nutmegs_only", "success_in_box_only",
+                  "deep_completion_only", "box_entry_pass_only", "box_entry_carry_only",
+                  "final_third_entry_pass_only", "final_third_entry_carry_only"]
     if any(result.get(f) for f in BOOL_FLAGS) and result.get("filter_types"):
         # Check which type keywords the user actually mentioned
         USER_TYPE_KEYWORDS = {
@@ -1412,14 +1943,14 @@ Return ONLY valid JSON with these keys (no markdown):
             r"\bsave":          {"Save"},
             r"\bcard":          {"Card"},
             r"\bblock":         {"Block", "BlockedPass", "BlockedShot"},
-            r"\bduel":          {"Tackle", "TakeOn", "Aerial", "Challenge"},
+            r"\bduel":          {"Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"},
             r"\bchallenge":     {"Challenge"},
             r"\btouch":         {"BallTouch"},
             r"\bdispossess":    {"Dispossessed"},
             r"\boffside":       {"OffsideGiven", "OffsidePass", "OffsideProvoked"},
             r"\bpenalt":        {"PenaltyFaced"},
             r"\bpunch":         {"Punch"},
-            r"\bsub(?:stitut)": {"SubstitutionOn", "SubstitutionOff"},
+            r"\bsub(stitut)?": {"SubstitutionOn", "SubstitutionOff"},
             r"\bclaim":         {"Claim"},
             r"\brecovery|\brecoveries": {"BallRecovery"},
         }
@@ -1433,90 +1964,128 @@ Return ONLY valid JSON with these keys (no markdown):
             result["filter_types"] = [t for t in result["filter_types"]
                                       if t in user_requested_types and t in available_types]
         else:
-            # User didn't mention any type → clear filter_types, let boolean flag work alone
+            # User didn't mention any type â†’ clear filter_types, let boolean flag work alone
             result["filter_types"] = []
 
-    # "big chances created" → big_chances_created_only flag (pass that created big chance)
-    if _re.search(r"\bbig\s*chance[sd]?\s*creat|\bcreat\w*\b.*\bbig\s*chance", instr_lower):
+    # For generic "set pieces" requests, prefer the restart flags alone.
+    if (_re.search(r"\bset[\s-]*pieces?\b", instr_lower) or query_has_intent_alias(instr_lower, "set_pieces")) and not _re.search(
+        r"\b(pass|passes|shot|shots|goal|goals|cross|crosses|header|headers|assist|assists)\b",
+        instr_lower,
+    ):
+        result["filter_types"] = []
+
+    # "deep completion(s)" â†’ deep_completion_only flag, not a made-up filter type
+    if _re.search(r"\bdeep\s*completion", instr_lower):
+        result["deep_completion_only"] = True
+        result["filter_types"] = []
+
+    # "box entry pass(es)" â†’ box_entry_pass_only flag
+    if _re.search(r"\bbox\s*entry\s*pass|\bpass(?:es)?\s+into\s+(?:the\s+)?box|\bpass(?:es)?\s+(?:that\s+)?enter(?:s|ing)?\s+(?:the\s+)?box", instr_lower):
+        result["box_entry_pass_only"] = True
+        result["filter_types"] = []
+
+    # "box entry carry/carries" â†’ box_entry_carry_only flag
+    if _re.search(r"\bbox\s*entry\s*carr(?:y|ies)|\bcarr(?:y|ies)\s+into\s+(?:the\s+)?box|\bcarr(?:y|ies)\s+(?:that\s+)?enter(?:s|ing)?\s+(?:the\s+)?box", instr_lower):
+        result["box_entry_carry_only"] = True
+        result["filter_types"] = []
+
+    # "final third entry pass(es)" â†’ final_third_entry_pass_only flag
+    if _re.search(r"\bfinal\s*third\s*entry\s*pass|\bpass(?:es)?\s+into\s+(?:the\s+)?final\s+third|\bfinal\s*third\s+pass\s*entr", instr_lower):
+        result["final_third_entry_pass_only"] = True
+        result["filter_types"] = []
+
+    # "final third entry carry/carries" â†’ final_third_entry_carry_only flag
+    if _re.search(r"\bfinal\s*third\s*entry\s*carr|\bcarr(?:y|ies)\s+into\s+(?:the\s+)?final\s+third|\bfinal\s*third\s+carr(?:y|ies)\s*entr", instr_lower):
+        result["final_third_entry_carry_only"] = True
+        result["filter_types"] = []
+
+    # "big chances created" â†’ big_chances_created_only flag (pass that created big chance)
+    if _re.search(r"\bbig\s*chances?\s*creat|\bcreat\w*\b.*\bbig\s*chance", instr_lower):
         result["big_chances_created_only"] = True
         result["big_chances_only"] = False
         result["filter_types"] = [t for t in result.get("filter_types", [])
                                   if t not in ("MissedShot", "SavedShot", "Goal", "BlockedShot")]
 
-    # "take on(s)" / "dribble(s)" → filter_types TakeOn
+    # "own goal(s)" / "og" â†’ own_goals_only flag; must include Goal type
+    if _re.search(r"\bown\s*goal|\bog\b", instr_lower):
+        result["own_goals_only"] = True
+        if "Goal" in available_types:
+            result["filter_types"] = ["Goal"]
+
+    # "take on(s)" / "dribble(s)" â†’ filter_types TakeOn
     if _re.search(r"\btake\s*on", instr_lower) or _re.search(r"\bdribble", instr_lower):
         if "TakeOn" in available_types:
             result["filter_types"] = ["TakeOn"]
 
-    # "tackle(s)" → filter_types Tackle
+    # "tackle(s)" â†’ filter_types Tackle
     if _re.search(r"\btackle", instr_lower):
         if "Tackle" in available_types:
             result["filter_types"] = ["Tackle"]
 
-    # "shot(s)" → all shot types
+    # "shot(s)" â†’ all shot types
     if _re.search(r"\bshot", instr_lower) and not _re.search(r"\btake\b", instr_lower):
         shot_types = [t for t in ["MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"]
                       if t in available_types]
         if shot_types:
             result["filter_types"] = shot_types
 
-    # "aerial(s)" → filter_types Aerial
+    # "aerial(s)" â†’ filter_types Aerial
     if _re.search(r"\baerial", instr_lower):
         if "Aerial" in available_types:
             result["filter_types"] = ["Aerial"]
 
-    # "duel(s)" → all duel types
+    # "duel(s)" â†’ all duel types
     if _re.search(r"\bduel", instr_lower):
-        duel_types = [t for t in ["Tackle", "TakeOn", "Aerial", "Challenge"]
+        duel_types = [t for t in ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]
                       if t in available_types]
         if duel_types:
             result["filter_types"] = duel_types
 
-    # "challenge(s)" → Challenge
+    # "challenge(s)" â†’ Challenge
     if _re.search(r"\bchallenge", instr_lower):
         if "Challenge" in available_types:
             result["filter_types"] = ["Challenge"]
 
-    # "ball touch(es)" / "touch(es)" → BallTouch
+    # "ball touch(es)" / "touch(es)" â†’ BallTouch
     if _re.search(r"\bball\s*touch|\bball\s*touches", instr_lower):
         if "BallTouch" in available_types:
             result["filter_types"] = ["BallTouch"]
 
-    # "dispossessed" → Dispossessed
+    # "dispossessed" â†’ Dispossessed
     if _re.search(r"\bdispossess", instr_lower):
         if "Dispossessed" in available_types:
             result["filter_types"] = ["Dispossessed"]
 
-    # "offside" → all offside types
+    # "offside" â†’ all offside types
     if _re.search(r"\boffside", instr_lower):
         offside_types = [t for t in ["OffsideGiven", "OffsidePass", "OffsideProvoked"]
                          if t in available_types]
         if offside_types:
             result["filter_types"] = offside_types
 
-    # "penalty" / "penalties" → PenaltyFaced
-    if _re.search(r"\bpenalt(?:y|ies)", instr_lower):
+    # "penalty" / "penalties" â†’ PenaltyFaced
+    if _re.search(r"\bpenalt(y|ies)", instr_lower):
         if "PenaltyFaced" in available_types:
             result["filter_types"] = ["PenaltyFaced"]
 
-    # "punch(es)" → Punch
-    if _re.search(r"\bpunch(?:es)?\b", instr_lower):
+    # "punch(es)" â†’ Punch
+    if _re.search(r"\bpunches?\b", instr_lower):
         if "Punch" in available_types:
             result["filter_types"] = ["Punch"]
 
-    # "substitution(s)" / "sub(s)" → SubstitutionOn + SubstitutionOff
-    if _re.search(r"\bsub(?:stitution)?s?\b", instr_lower):
+    # "substitution(s)" / "sub(s)" â†’ SubstitutionOn + SubstitutionOff
+    if _re.search(r"\bsubs?(titutions?)?\b", instr_lower):
         sub_types = [t for t in ["SubstitutionOn", "SubstitutionOff"]
                      if t in available_types]
         if sub_types:
             result["filter_types"] = sub_types
 
-    # "claim(s)" → Claim
+    # "claim(s)" â†’ Claim
     if _re.search(r"\bclaim", instr_lower):
         if "Claim" in available_types:
             result["filter_types"] = ["Claim"]
 
-    # "ball recovery" / "recoveries" → BallRecovery
+    # "ball recovery" / "recoveries" â†’ BallRecovery
     if _re.search(r"\bball\s*recover|\brecoveries", instr_lower):
         if "BallRecovery" in available_types:
             result["filter_types"] = ["BallRecovery"]
@@ -1544,6 +2113,35 @@ Return ONLY valid JSON with these keys (no markdown):
                 if not matched:
                     corrected_types.append(ft)  # keep as-is, let it fail gracefully
         result["filter_types"] = corrected_types
+
+    # â”€â”€ Deterministic zone filtering (pitch_zone / depth_zone) â”€â”€
+    PITCH_ZONE_PATTERNS = [
+        (r"\bleft\s*side(\s+of\s+the\s+(pitch|field))?\b",  "Entire Left Side"),
+        (r"\bright\s*side(\s+of\s+the\s+(pitch|field))?\b", "Entire Right Side"),
+        (r"\bleft\s*half\s*space\b",  "Left Half Space"),
+        (r"\bright\s*half\s*space\b", "Right Half Space"),
+        (r"\bleft\s*wing\b",          "Left Wing"),
+        (r"\bright\s*wing\b",         "Right Wing"),
+        (r"\b(center|centre|central)\b", "Centre"),
+    ]
+    DEPTH_ZONE_PATTERNS = [
+        (r"\bdefensive\s*third\b",                   "Defensive Third"),
+        (r"\bmid(dle)?\s*third\b",                   "Middle Third"),
+        (r"\battacking\s*third\b|\bfinal\s*third\b", "Attacking Third"),
+    ]
+
+    result["pitch_zone_filter"] = ""
+    result["depth_zone_filter"] = ""
+
+    for pat, zone in PITCH_ZONE_PATTERNS:
+        if _re.search(pat, instr_lower):
+            result["pitch_zone_filter"] = zone
+            break
+
+    for pat, zone in DEPTH_ZONE_PATTERNS:
+        if _re.search(pat, instr_lower):
+            result["depth_zone_filter"] = zone
+            break
 
     return result
 
@@ -1581,54 +2179,145 @@ def render_stats_panel(df):
 
 
 # =============================================================================
-# FILTER SNAPSHOTS
-# Snapshots are persisted as a JSON dict in config/snapshots.json,
-# keyed by snapshot name, value is the saved filter config dict.
+# C2 â€” FILTER SNAPSHOTS
 # =============================================================================
+from pathlib import Path as _Path
 
-_SNAPSHOTS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "config", "snapshots.json"
-)
-
-
-def _load_snapshots_store():
-    if os.path.exists(_SNAPSHOTS_PATH):
-        try:
-            with open(_SNAPSHOTS_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+_SNAPSHOTS_DIR = _Path.home() / ".clipmaker_snapshots"
 
 
-def _save_snapshots_store(store):
-    os.makedirs(os.path.dirname(_SNAPSHOTS_PATH), exist_ok=True)
-    with open(_SNAPSHOTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(store, f, indent=2)
+def _get_snapshots_dir():
+    _SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    return _SNAPSHOTS_DIR
 
 
-def save_filter_snapshot(name, data):
-    """Persist a named filter configuration snapshot."""
-    store = _load_snapshots_store()
-    store[name] = data
-    _save_snapshots_store(store)
+def save_filter_snapshot(name, config):
+    """Save a filter configuration dict to a named JSON snapshot."""
+    snapshot_file = _get_snapshots_dir() / f"{name}.json"
+    with open(snapshot_file, "w") as f:
+        json.dump(config, f, indent=2)
 
 
 def load_filter_snapshot(name):
-    """Return the saved filter config dict for *name*, or None if not found."""
-    store = _load_snapshots_store()
-    return store.get(name)
+    """Load a filter configuration dict from a named snapshot."""
+    snapshot_file = _get_snapshots_dir() / f"{name}.json"
+    if snapshot_file.exists():
+        with open(snapshot_file, "r") as f:
+            return json.load(f)
+    return None
 
 
 def list_snapshots():
-    """Return a sorted list of saved snapshot names."""
-    return sorted(_load_snapshots_store().keys())
+    """Return sorted list of saved snapshot names."""
+    d = _get_snapshots_dir()
+    return sorted([f.stem for f in d.glob("*.json")])
 
 
 def delete_snapshot(name):
-    """Delete a snapshot by name. No-op if it does not exist."""
-    store = _load_snapshots_store()
-    if name in store:
-        del store[name]
-        _save_snapshots_store(store)
+    """Delete a saved snapshot by name."""
+    snapshot_file = _get_snapshots_dir() / f"{name}.json"
+    if snapshot_file.exists():
+        snapshot_file.unlink()
+
+
+# =============================================================================
+# D2 â€” PROGRESSIVE ACTION CHAINS
+# =============================================================================
+
+def detect_progressive_chains(df_all, min_chain_length=3):
+    """
+    Detect sequences of consecutive progressive actions (prog_pass or prog_carry)
+    by the same team.  Returns a list of chain dicts.
+
+    Each chain includes:
+      - starts_in_own_half: True if the first progressive action starts in x < 50
+      - reaches_opp_half: True if the final progressive action ends in x > 50
+      - start_x / end_x: start and terminal x coordinates for sequence filtering
+    """
+    if df_all is None or df_all.empty:
+        return []
+
+    has_prog_pass  = "prog_pass"  in df_all.columns
+    has_prog_carry = "prog_carry" in df_all.columns
+    if not has_prog_pass and not has_prog_carry:
+        return []
+
+    def _end_x(row):
+        try:
+            v = row.get("endX") if row.get("endX") is not None else row.get("x", 0)
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _start_x(row):
+        try:
+            return float(row.get("x", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _build_chain(chain_idxs, current_team):
+        s  = df_all.loc[chain_idxs[0]]
+        e  = df_all.loc[chain_idxs[-1]]
+        sx = _start_x(s)
+        ex = _end_x(e)
+        start_seconds = int(s.get("minute", 0) or 0) * 60 + int(s.get("second", 0) or 0)
+        end_seconds   = int(e.get("minute", 0) or 0) * 60 + int(e.get("second", 0) or 0)
+        return {
+            "start_idx":        chain_idxs[0],
+            "end_idx":          chain_idxs[-1],
+            "team":             current_team,
+            "start_minute":     s.get("minute", 0),
+            "start_second":     s.get("second", 0),
+            "end_minute":       e.get("minute", 0),
+            "end_second":       e.get("second", 0),
+            "start_period":     s.get("period", "FirstHalf"),
+            "end_period":       e.get("period", "FirstHalf"),
+            "action_count":     len(chain_idxs),
+            "start_x":          sx,
+            "end_x":            ex,
+            "starts_in_own_half": sx < 50,
+            "reaches_opp_half": ex > 50,
+            "duration_seconds": max(0, end_seconds - start_seconds),
+        }
+
+    chains     = []
+    chain_idxs = []
+    current_team = None
+
+    for idx, row in df_all.iterrows():
+        row_type = row.get("type", "")
+        row_team = row.get("team", "")
+        is_prog  = False
+
+        if has_prog_pass and row_type == "Pass":
+            try:
+                is_prog = float(row.get("prog_pass", 0)) > 0
+            except (TypeError, ValueError):
+                is_prog = bool(row.get("prog_pass"))
+        if not is_prog and has_prog_carry and row_type == "Carry":
+            try:
+                is_prog = float(row.get("prog_carry", 0)) > 0
+            except (TypeError, ValueError):
+                is_prog = bool(row.get("prog_carry"))
+
+        if is_prog and (current_team is None or row_team == current_team):
+            chain_idxs.append(idx)
+            current_team = row_team
+        else:
+            if len(chain_idxs) >= min_chain_length:
+                chains.append(_build_chain(chain_idxs, current_team))
+            chain_idxs   = [idx] if is_prog else []
+            current_team = row_team if is_prog else None
+
+    if len(chain_idxs) >= min_chain_length:
+        chains.append(_build_chain(chain_idxs, current_team))
+
+    return chains
+
+
+def get_chain_actions(df_all, chain):
+    """Return a DataFrame slice of all events belonging to a build-up chain."""
+    mask = (df_all.index >= chain["start_idx"]) & (df_all.index <= chain["end_idx"])
+    return df_all[mask].copy()
+
 
