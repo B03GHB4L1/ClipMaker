@@ -199,18 +199,23 @@ echo.
 echo  ================================================
 echo.
 
-echo  [..] Closing any older ClipMaker sessions...
-powershell -NoProfile -NonInteractive -Command ^
-    "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'streamlit run' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
+set "CHOSEN_PORT="
+for /f "delims=" %%i in ('powershell -NoProfile -NonInteractive -Command "$ports=8501..8510; foreach($p in $ports){ $busy=Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue; if(-not $busy){ Write-Output $p; break } }"') do set "CHOSEN_PORT=%%i"
 
-:: Also free port 8501 if anything else is holding it
-powershell -NoProfile -NonInteractive -Command ^
-    "$conn=Get-NetTCPConnection -LocalPort 8501 -ErrorAction SilentlyContinue; if($conn){ Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+if not defined CHOSEN_PORT (
+    echo  [!] Could not find a free local port between 8501 and 8510.
+    echo      Please close other local web apps and try again.
+    pause
+    exit /b 1
+)
 
-timeout /t 2 /nobreak >nul
+if "%CHOSEN_PORT%"=="8501" (
+    echo  [..] Launching ClipMaker on http://localhost:%CHOSEN_PORT% ...
+) else (
+    echo  [!] Port 8501 is busy.
+    echo  [..] Launching ClipMaker on http://localhost:%CHOSEN_PORT% instead ...
+)
 
-echo  [..] Launching fresh session on http://localhost:8501 ...
-
-python -m streamlit run "%~dp0ClipMaker.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+python -m streamlit run "%~dp0ClipMaker.py" --server.port %CHOSEN_PORT% --server.headless false --browser.gatherUsageStats false
 
 pause
