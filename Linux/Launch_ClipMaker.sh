@@ -161,42 +161,61 @@ echo ""
 echo " ================================================"
 echo ""
 
-# Kill any existing streamlit session on port 8501
-echo " [..] Closing any older ClipMaker sessions..."
-if command -v fuser &>/dev/null; then
-    fuser -k 8501/tcp &>/dev/null
-elif command -v lsof &>/dev/null; then
-    OLDPID=$(lsof -ti tcp:8501 2>/dev/null)
-    [ -n "$OLDPID" ] && kill -9 "$OLDPID" &>/dev/null
-elif command -v ss &>/dev/null; then
-    OLDPID=$(ss -tlnp 'sport = :8501' 2>/dev/null | awk 'NR>1 {match($0,/pid=([0-9]+)/,a); if(a[1]) print a[1]}')
-    [ -n "$OLDPID" ] && kill -9 "$OLDPID" &>/dev/null
-fi
-sleep 1
+find_free_port() {
+    for port in $(seq 8501 8510); do
+        if ! $PYTHON -c "import socket, sys; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); ok=0
+try:
+    s.bind(('127.0.0.1', $port))
+    ok=1
+except OSError:
+    ok=0
+finally:
+    s.close()
+sys.exit(0 if ok else 1)" &>/dev/null; then
+            continue
+        fi
+        echo "$port"
+        return 0
+    done
+    return 1
+}
 
-echo " [..] Launching fresh session on http://localhost:8501 ..."
+PORT="$(find_free_port)"
+if [ -z "$PORT" ]; then
+    echo " [!] Could not find a free local port between 8501 and 8510."
+    echo "     Please close other local web apps and try again."
+    read -p " Press Enter to exit..."
+    exit 1
+fi
+
+if [ "$PORT" = "8501" ]; then
+    echo " [..] Launching ClipMaker on http://localhost:$PORT ..."
+else
+    echo " [!] Port 8501 is busy."
+    echo " [..] Launching ClipMaker on http://localhost:$PORT instead ..."
+fi
 
 # Open browser after a short delay (give streamlit time to start)
 _open_browser() {
     sleep 3
     if command -v xdg-open &>/dev/null; then
-        xdg-open "http://localhost:8501" &>/dev/null
+        xdg-open "http://localhost:$PORT" &>/dev/null
     elif command -v sensible-browser &>/dev/null; then
-        sensible-browser "http://localhost:8501" &>/dev/null
+        sensible-browser "http://localhost:$PORT" &>/dev/null
     elif command -v firefox &>/dev/null; then
-        firefox "http://localhost:8501" &>/dev/null
+        firefox "http://localhost:$PORT" &>/dev/null
     elif command -v google-chrome &>/dev/null; then
-        google-chrome "http://localhost:8501" &>/dev/null
+        google-chrome "http://localhost:$PORT" &>/dev/null
     elif command -v chromium-browser &>/dev/null; then
-        chromium-browser "http://localhost:8501" &>/dev/null
+        chromium-browser "http://localhost:$PORT" &>/dev/null
     else
         echo " [!] Could not open browser automatically."
-        echo "     Please open http://localhost:8501 in your browser manually."
+        echo "     Please open http://localhost:$PORT in your browser manually."
     fi
 }
 _open_browser &
 
 $PYTHON -m streamlit run "$SCRIPT_DIR/ClipMaker.py" \
-    --server.port 8501 \
+    --server.port "$PORT" \
     --server.headless false \
     --browser.gatherUsageStats false
