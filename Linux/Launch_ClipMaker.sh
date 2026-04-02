@@ -23,7 +23,7 @@ if [ -z "$PYTHON" ]; then
     echo ""
     echo " To fix this, install Python 3 using your package manager:"
     echo ""
-    echo "   Debian/Ubuntu:  sudo apt install python3 python3-pip"
+    echo "   Debian/Ubuntu:  sudo apt install python3 python3-pip python3-venv"
     echo "   Fedora:         sudo dnf install python3 python3-pip"
     echo "   Arch:           sudo pacman -S python python-pip"
     echo ""
@@ -36,27 +36,47 @@ fi
 echo " [OK] Python is installed ($($PYTHON --version 2>&1))."
 
 # -----------------------------------------------
-# STEP 2 - Install missing packages
+# STEP 2 - Create/use local virtual environment
+# Avoid Linux/WSL PEP 668 "externally managed" pip errors
+# -----------------------------------------------
+if [ -z "$VIRTUAL_ENV" ] && [ -z "$CONDA_PREFIX" ] && ! $PYTHON -c "import sys; exit(0 if sys.prefix != sys.base_prefix else 1)" &>/dev/null; then
+    VENV_DIR="$SCRIPT_DIR/.venv"
+    if [ ! -x "$VENV_DIR/bin/python" ]; then
+        echo " [..] Creating local Python environment in .venv ..."
+        if ! $PYTHON -m venv "$VENV_DIR" &>/dev/null; then
+            echo " [!] Could not create a virtual environment."
+            echo ""
+            echo " On Debian/Ubuntu/WSL, install the venv package first:"
+            echo "   sudo apt install python3-venv"
+            echo ""
+            echo " Then run this launcher again."
+            echo ""
+            read -p " Press Enter to exit..."
+            exit 1
+        fi
+        echo " [OK] Local environment created."
+        echo ""
+    fi
+
+    PYTHON="$VENV_DIR/bin/python"
+    export VIRTUAL_ENV="$VENV_DIR"
+    export PATH="$VENV_DIR/bin:$PATH"
+    echo " [OK] Using local virtual environment: $VENV_DIR"
+    echo ""
+fi
+
+# -----------------------------------------------
+# STEP 3 - Install missing packages
 # -----------------------------------------------
 echo " [..] Checking required packages..."
 echo ""
-
-# Detect if we're inside a virtual environment — --user is not compatible with venv
-IN_VENV=0
-if [ -n "$VIRTUAL_ENV" ] || [ -n "$CONDA_PREFIX" ] || $PYTHON -c "import sys; exit(0 if sys.prefix != sys.base_prefix else 1)" &>/dev/null; then
-    IN_VENV=1
-fi
 
 check_and_install() {
     local module="$1"
     local package="${2:-$1}"
     if ! $PYTHON -c "import $module" &>/dev/null; then
         echo " [..] Installing $package..."
-        if [ "$IN_VENV" -eq 1 ]; then
-            $PYTHON -m pip install "$package"
-        else
-            $PYTHON -m pip install "$package" --user
-        fi
+        $PYTHON -m pip install "$package"
         echo ""
     fi
 }
@@ -96,7 +116,7 @@ if ! $PYTHON -c "import tkinter" &>/dev/null; then
     echo ""
 fi
 
-# Final check — streamlit must be importable
+# Final check - streamlit must be importable
 if ! $PYTHON -c "import streamlit" &>/dev/null; then
     echo ""
     echo " [!] Streamlit could not be installed."
@@ -109,7 +129,7 @@ if ! $PYTHON -c "import streamlit" &>/dev/null; then
 fi
 
 # -----------------------------------------------
-# STEP 2b - Download Plotly.js for Analyst Room maps (one-time)
+# STEP 3b - Download Plotly.js for Analyst Room maps (one-time)
 # -----------------------------------------------
 PLOTLY_JS="$SCRIPT_DIR/smp_component/frontend/plotly-2.27.0.min.js"
 if [ ! -f "$PLOTLY_JS" ]; then
@@ -130,7 +150,7 @@ echo " [OK] All packages ready."
 echo ""
 
 # -----------------------------------------------
-# STEP 2c - Patch Streamlit index.html (one-time)
+# STEP 3c - Patch Streamlit index.html (one-time)
 # -----------------------------------------------
 STREAMLIT_INDEX=$($PYTHON -c "import streamlit, os; print(os.path.join(os.path.dirname(streamlit.__file__), 'static', 'index.html'))" 2>/dev/null)
 if [ -n "$STREAMLIT_INDEX" ] && [ -f "$STREAMLIT_INDEX" ]; then
@@ -150,7 +170,7 @@ if [ ! -f "$HOME/.streamlit/credentials.toml" ]; then
 fi
 
 # -----------------------------------------------
-# STEP 3 - Launch
+# STEP 4 - Launch
 # -----------------------------------------------
 echo " [..] Opening ClipMaker v1.2 in your browser..."
 echo ""
@@ -195,7 +215,6 @@ else
     echo " [..] Launching ClipMaker on http://localhost:$PORT instead ..."
 fi
 
-# Open browser after a short delay (give streamlit time to start)
 _open_browser() {
     sleep 3
     if command -v xdg-open &>/dev/null; then
