@@ -5,20 +5,107 @@ Reference: Kinetic Analyst dashboard mockup.
 """
 
 import os
+import re
 
 _LOCAL_FONTS_CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts", "fonts.css")
 _USE_LOCAL_FONTS = os.path.exists(_LOCAL_FONTS_CSS)
 
 FONTS_URL = "https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400;1,500&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap"
+ICONS_URL = "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,500,0,0"
+
+ICON_MAP = {
+    "[OK]": "check_circle",
+    "[ERR]": "cancel",
+    "[X]": "close",
+    "[DL]": "download",
+    "[RUN]": "play_arrow",
+    "[SETUP]": "tune",
+    "[SHOT]": "sports_soccer",
+    "[PASS]": "route",
+    "[DEF]": "shield",
+    "[FILTER]": "filter_alt",
+    "[AI]": "smart_toy",
+    "[ASK]": "chat",
+    "[DEBUG]": "bug_report",
+    "[FIND]": "search",
+    "[SEARCH]": "search",
+    "[CLIP]": "movie",
+    "[RETRY]": "refresh",
+    "[DATA]": "dataset",
+    "[WARN]": "warning",
+    "[INFO]": "info",
+    "[ERROR]": "error",
+    "[FAIL]": "report",
+    "[MATCH]": "done_all",
+    "[RESULT]": "analytics",
+    "[HINT]": "lightbulb",
+    "[SM]": "slow_motion_video",
+    "[SB]": "tv",
+    "[GOAL]": "sports_soccer",
+    "[SAVE]": "sports_handball",
+    "[POST]": "vertical_align_center",
+    "[TKL]": "front_hand",
+    "[INT]": "call_merge",
+    "[CLR]": "cleaning_services",
+    "[AER]": "north",
+    "[BLK]": "block",
+    "[CHL]": "bolt",
+    "[DIS]": "do_not_disturb_on",
+    "[KEY]": "key",
+}
+
+ICON_GLYPH_MAP = {
+    "[OK]": "✓",
+    "[ERR]": "✕",
+    "[X]": "✕",
+    "[DL]": "⤓",
+    "[RUN]": "▶",
+    "[SETUP]": "⚙",
+    "[SHOT]": "◉",
+    "[PASS]": "⇢",
+    "[DEF]": "▣",
+    "[FILTER]": "⌬",
+    "[AI]": "✦",
+    "[ASK]": "?",
+    "[DEBUG]": "⌁",
+    "[FIND]": "⌕",
+    "[SEARCH]": "⌕",
+    "[CLIP]": "▤",
+    "[RETRY]": "↻",
+    "[DATA]": "▦",
+    "[WARN]": "⚠",
+    "[INFO]": "ℹ",
+    "[ERROR]": "✖",
+    "[FAIL]": "✖",
+    "[MATCH]": "✓",
+    "[RESULT]": "◎",
+    "[HINT]": "※",
+    "[SM]": "≈",
+    "[SB]": "▭",
+    "[GOAL]": "◉",
+    "[SAVE]": "◍",
+    "[POST]": "│",
+    "[TKL]": "Ⓣ",
+    "[INT]": "Ⓘ",
+    "[CLR]": "Ⓒ",
+    "[AER]": "Ⓐ",
+    "[BLK]": "Ⓑ",
+    "[CHL]": "Ⓗ",
+    "[DIS]": "Ⓓ",
+    "[KEY]": "◆",
+}
+
+_ICON_TOKEN_PATTERN = re.compile(r"\[([A-Z]{1,})\]")
 
 def _fonts_import():
+    icon_import = f"@import url('{ICONS_URL}');"
     if _USE_LOCAL_FONTS:
         try:
             with open(_LOCAL_FONTS_CSS, "r", encoding="utf-8") as f:
-                return f.read()
+                return f"{f.read()}\n{icon_import}"
         except Exception:
             pass
-    return f"@import url('{FONTS_URL}');"
+    return f"@import url('{FONTS_URL}');\n{icon_import}"
 
 BG_BASE      = "#0e0e0e"
 BG_SURFACE   = "#131313"
@@ -47,6 +134,46 @@ GLOBAL_CSS = f"""
 <style>
 /* fonts injected dynamically by inject() */
 
+:root {{
+    --cm-sidebar-width: 18rem;
+}}
+
+/* Navbar mode: hide Streamlit sidebar navigation entirely */
+section[data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"] {{
+    display: none !important;
+}}
+
+[data-testid="stPageLink"] a {{
+    width: auto !important;
+    display: inline-flex !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 36px !important;
+    padding: 0 14px !important;
+    border: 1px solid {BG_BORDER} !important;
+    background: {BG_SURFACE} !important;
+    color: {TEXT_SECONDARY} !important;
+    font-family: 'Iosevka Charon Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+    border-radius: 2px !important;
+}}
+[data-testid="stPageLink"] a:hover {{
+    border-color: {ACCENT} !important;
+    color: {ACCENT} !important;
+    background: {ACCENT_SOFT} !important;
+}}
+
+.cm-topnav-divider {{
+    height: 1px;
+    background: linear-gradient(90deg, rgba(223,255,0,0.45), transparent);
+    margin: 10px 0 20px 0;
+}}
+
 /* ── Reset & Base ── */
 html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif !important;
@@ -54,11 +181,16 @@ html, body, [class*="css"] {{
     background-color: {BG_BASE};
 }}
 
+.material-symbols-outlined {{
+    font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 20;
+    vertical-align: text-bottom;
+}}
+
 /* ── Main container ── */
 .block-container {{
     padding-top: 2rem !important;
     padding-bottom: 3rem !important;
-    max-width: 1150px !important;
+    max-width: 1380px !important;
     background-color: {BG_BASE} !important;
 }}
 
@@ -92,6 +224,10 @@ h2 {{ font-size: 1.15rem !important; }}
 section[data-testid="stSidebar"] {{
     background: {BG_SURFACE} !important;
     border-right: 1px solid rgba(255,255,255,0.05) !important;
+    transition: none !important;
+}}
+section[data-testid="stSidebar"] > div {{
+    transition: none !important;
 }}
 /* Logo area at top of sidebar */
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div:first-child {{
@@ -100,19 +236,23 @@ section[data-testid="stSidebar"] [data-testid="stSidebarContent"] > div:first-ch
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {{
     position: relative !important;
 }}
-section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] [title],
 section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] svg {{
     display: none !important;
     pointer-events: none !important;
 }}
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] * {{
+    transition: none !important;
+}}
 /* Nav links — font and active state only, no wildcard * rule */
 section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] span {{
     font-family: 'Iosevka Charon Mono', monospace !important;
-    font-size: 10px !important;
+    font-size: 14px !important;
     font-weight: 500 !important;
     letter-spacing: 0.18em !important;
     text-transform: uppercase !important;
     color: {TEXT_SECONDARY} !important;
+    transition: none !important;
 }}
 section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover span {{
     color: {ACCENT} !important;
@@ -124,11 +264,7 @@ section[data-testid="stSidebar"] [aria-current="page"] {{
     background: {BG_HIGH} !important;
     border-right: 3px solid {ACCENT} !important;
 }}
-/* Hide tooltip overlays */
-[data-baseweb="tooltip"],
-[role="tooltip"] {{
-    display: none !important;
-}}
+
 
 /* ── Inputs ── */
 [data-baseweb="input"] {{
@@ -608,6 +744,104 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {{
     font-weight: 300;
     text-transform: uppercase;
 }}
+
+.cm-support-footer {{
+    margin-top: 32px;
+    padding-top: 22px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+}}
+
+.cm-support-panel {{
+    background: linear-gradient(180deg, #151515 0%, #111111 100%);
+    border: 1px solid {BG_BORDER};
+    border-radius: 4px;
+    padding: 18px 20px;
+    min-height: 100%;
+}}
+
+.cm-support-kicker {{
+    color: {ACCENT};
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-family: 'Iosevka Charon Mono', monospace;
+    margin-bottom: 8px;
+}}
+
+.cm-support-title {{
+    color: {TEXT_PRIMARY};
+    font-family: 'Iosevka Charon Mono', monospace;
+    font-size: 1rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}}
+
+.cm-support-copy {{
+    color: {TEXT_SECONDARY};
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+}}
+
+.cm-support-meta {{
+    color: {TEXT_MUTED};
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-family: 'Iosevka Charon Mono', monospace;
+    margin-top: 14px;
+}}
+
+.cm-support-btn {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 18px;
+    background: linear-gradient(180deg, #80b2ff 0%, #72a4f2 100%);
+    color: #ffffff !important;
+    border-radius: 12px;
+    font-family: Inter, sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+    text-decoration: none !important;
+    box-shadow: 0 10px 24px rgba(114,164,242,0.2);
+}}
+
+.cm-support-btn:hover {{
+    filter: brightness(1.06);
+}}
+
+.cm-support-qr-wrap {{
+    background: #ffffff;
+    border-radius: 4px;
+    padding: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 220px;
+    margin: 0 auto;
+}}
+
+.cm-support-qr-wrap img {{
+    display: block;
+    width: 100%;
+    height: auto;
+}}
+
+.cm-support-qr-caption {{
+    display: block;
+    width: 100%;
+    text-align: center;
+    color: {TEXT_MUTED};
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-family: 'Iosevka Charon Mono', monospace;
+    margin-top: 10px;
+}}
 </style>
 """
 
@@ -662,22 +896,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {{
     margin-top: 132px !important;
 }}
 """
-    rename_block = ""
-    if first_nav_label:
-        rename_block = f"""
-section[data-testid="stSidebar"] nav ul li:first-child a span:last-child::before {{
-    content: "{first_nav_label}";
-}}
-section[data-testid="stSidebar"] nav ul li:first-child a span:last-child {{
-    font-size: 0 !important;
-}}
-section[data-testid="stSidebar"] nav ul li:first-child a span:last-child::before {{
-    font-size: 10px !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.18em !important;
-}}
-"""
-    return f"<style>{brand_block}{rename_block}</style>"
+    return f"<style>{brand_block}</style>"
 
 
 def inject(logo_path: str = "", first_nav_label: str = ""):
@@ -689,18 +908,29 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
         return _build_css()
 
     st.markdown(_once(), unsafe_allow_html=True)
-    st.markdown(
-        _sidebar_branding_css(load_logo_b64(logo_path) if logo_path else "", first_nav_label),
-        unsafe_allow_html=True,
-    )
+    # Sidebar branding is intentionally disabled in navbar mode.
 
-    # Strip the inline max-width React sets on multiselect tag elements at runtime.
+    # Runtime guardrails for Streamlit DOM mutations:
+    # keep select tags from clipping without forcing sidebar state/width.
     # Must use components.html — st.markdown strips <script> tags.
     _sel = "[data-baseweb=\'tag\']"
     _js = (
         "<script>(function(){"
         "var sel='" + _sel + "';"
-        "function f(){"
+        "var qs=new URLSearchParams(window.location.search);"
+        "var safeSidebar=qs.get('safeSidebar')==='1';"
+        "if(safeSidebar){"
+        "var st=document.createElement('style');"
+        "st.textContent='"
+        "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarContent\"]::before,"
+        "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarContent\"]::after{content:none!important;}"
+        "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarNav\"]{margin-top:0!important;}"
+        "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarNavLink\"] svg{display:inline-block!important;}"
+        "';"
+        "document.head.appendChild(st);"
+        "return;"
+        "}"
+        "function fixTags(){"
         "document.querySelectorAll(sel).forEach(function(t){"
         "t.style.setProperty('max-width','none','important');"
         "t.style.setProperty('overflow','visible','important');"
@@ -710,12 +940,109 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
         "c.style.setProperty('text-overflow','unset','important');"
         "c.style.setProperty('white-space','nowrap','important');"
         "});});}"
-        "f();setTimeout(f,300);setTimeout(f,900);"
-        "new MutationObserver(f).observe(document.documentElement,"
-        "{childList:true,subtree:true,attributes:true,attributeFilter:['style']});"
+        "function stabilize(){fixTags();}"
+        "stabilize();setTimeout(stabilize,250);setTimeout(stabilize,800);setTimeout(stabilize,1600);"
+        "var runs=0,maxRuns=8;"
+        "var iv=setInterval(function(){stabilize();runs+=1;if(runs>=maxRuns){clearInterval(iv);}},220);"
+        "window.addEventListener('resize',stabilize,{passive:true});"
+        "window.addEventListener('popstate',stabilize,{passive:true});"
+        "document.addEventListener('visibilitychange',function(){if(!document.hidden){stabilize();}},{passive:true});"
         "})();</script>"
     )
     _cv1.html(_js, height=0, scrolling=False)
+
+
+SHARED_STATE_DEFAULTS = {
+    "video_path": "",
+    "video2_path": "",
+    "video3_path": "",
+    "csv_path": "",
+    "output_dir": "",
+    "half1_time": "",
+    "half2_time": "",
+    "half3_time": "",
+    "half4_time": "",
+    "split_video": False,
+    "whoscored_url": "",
+        "before_buffer": 5,
+        "after_buffer": 8,
+    "min_gap": 6,
+    "scraped_csv_path": "",
+    "scraped_csv_df": "",
+    "scraper_home_team": "",
+    "scraper_away_team": "",
+}
+
+
+def init_shared_state():
+    import streamlit as st
+
+    for key, default in SHARED_STATE_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    scraped_csv = st.session_state.get("scraped_csv_path", "")
+    if scraped_csv and not st.session_state.get("csv_path"):
+        st.session_state["csv_path"] = scraped_csv
+
+
+def render_top_nav(current_page: str = ""):
+    import streamlit as st
+
+    items = [
+        ("home", "ClipMaker.py", "Home", "[SETUP]"),
+        ("filtering", "pages/1_Filtering_Output.py", "Filtering", "[FILTER]"),
+        ("analyst", "pages/2_The_Analysts_Room.py", "Analyst's Room", "[RESULT]"),
+    ]
+
+    cols = st.columns([1.35, 1.75, 2.85, 8.0], gap="small")
+    for col, (page_key, page_path, label, token) in zip(cols[:len(items)], items):
+        with col:
+            nav_label = f"{label} ·" if page_key == current_page else label
+            st.page_link(page_path, label=nav_label, icon=icon_shortcode(token))
+
+    st.markdown('<div class="cm-topnav-divider"></div>', unsafe_allow_html=True)
+
+
+def render_support_footer(page_label: str = ""):
+    import streamlit as st
+    from urllib.parse import quote
+
+    kofi_url = "https://ko-fi.com/R6R71WP4PR"
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data={quote(kofi_url, safe='')}"
+    meta = "@B03GHB4L1" if not page_label else f"@B03GHB4L1 · {page_label}"
+
+    st.markdown('<div class="cm-support-footer"></div>', unsafe_allow_html=True)
+    qr_col, info_col = st.columns([1.1, 2.0], gap="medium")
+
+    with qr_col:
+        st.markdown(
+            f"""
+            <div class="cm-support-qr-wrap">
+              <img src="{qr_url}" alt="Ko-fi QR code"/>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with info_col:
+        st.markdown(
+            f"""
+            <div class="cm-support-panel">
+              <div class="cm-support-kicker">Support ClipMaker</div>
+              <div class="cm-support-title">Enjoying the app?</div>
+              <div class="cm-support-copy">
+                If ClipMaker saves you time or helps your workflow, you can support future updates,
+                maintenance, and new features on Ko-fi.
+              </div>
+              <a class="cm-support-btn" href="{kofi_url}" target="_blank" rel="noopener noreferrer">
+                Support me on Ko-fi
+              </a>
+              <div class="cm-support-meta">{meta}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 import functools as _functools
@@ -747,7 +1074,7 @@ def logo_header(title: str, subtitle: str, logo_b64: str = None, uppercase_title
             f'filter:drop-shadow(0 0 10px rgba(223,255,0,0.25))"/>' 
         )
     else:
-        img = '<span style="font-size:32px">⚽</span>'
+        img = '<span style="font-size:18px;font-family:Inter,sans-serif;font-weight:800;letter-spacing:.12em">CM</span>'
     title_transform = "none" if not uppercase_title else "uppercase"
     return (
         f"<div style='display:flex;align-items:center;gap:16px;margin-bottom:10px;overflow:visible'>"
@@ -820,3 +1147,44 @@ def context_bar(csv_ok, video_ok, times_ok, csv_name, video_name, times_str,
         f'<div class="cm-ctx-item">{dot_dim()} <span>Buffer {before_buf}s · {after_buf}s · {min_gap}s merge</span></div>'
         f'</div>'
     )
+
+
+def icon_name(token: str) -> str:
+    t = (token or "").strip().upper()
+    if not t.startswith("["):
+        t = f"[{t}]"
+    return ICON_MAP.get(t, "radio_button_unchecked")
+
+
+def icon_shortcode(token: str) -> str:
+    return f":material/{icon_name(token)}:"
+
+
+def icon_glyph(token: str) -> str:
+    t = (token or "").strip().upper()
+    if not t.startswith("["):
+        t = f"[{t}]"
+    return ICON_GLYPH_MAP.get(t, "•")
+
+
+def icon_span(token: str, color: str = "", size: int = 14) -> str:
+    style = [f"font-size:{int(size)}px", "line-height:1", "display:inline-flex", "align-items:center"]
+    if color:
+        style.append(f"color:{color}")
+    return (
+        f"<span aria-hidden='true' style='{' ; '.join(style)}'>"
+        f"{icon_glyph(token)}"
+        "</span>"
+    )
+
+
+def ui(text: str) -> str:
+    if not text:
+        return text
+    return _ICON_TOKEN_PATTERN.sub(lambda m: icon_shortcode(f"[{m.group(1)}]"), text)
+
+
+def ui_html(text: str, color: str = "", size: int = 14) -> str:
+    if not text:
+        return text
+    return _ICON_TOKEN_PATTERN.sub(lambda m: icon_span(f"[{m.group(1)}]", color=color, size=size), text)
