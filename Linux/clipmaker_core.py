@@ -2230,8 +2230,9 @@ def detect_progressive_chains(df_all, min_chain_length=3):
     by the same team.  Returns a list of chain dicts.
 
     Each chain includes:
-      - reaches_opp_half: True if the final action's endX > 50 (crosses halfway line)
-      - end_x: endX of the final action
+      - starts_in_own_half: True if the first progressive action starts in x < 50
+      - reaches_opp_half: True if the final progressive action ends in x > 50
+      - start_x / end_x: start and terminal x coordinates for sequence filtering
     """
     if df_all is None or df_all.empty:
         return []
@@ -2248,10 +2249,19 @@ def detect_progressive_chains(df_all, min_chain_length=3):
         except (TypeError, ValueError):
             return 0.0
 
+    def _start_x(row):
+        try:
+            return float(row.get("x", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _build_chain(chain_idxs, current_team):
         s  = df_all.loc[chain_idxs[0]]
         e  = df_all.loc[chain_idxs[-1]]
+        sx = _start_x(s)
         ex = _end_x(e)
+        start_seconds = int(s.get("minute", 0) or 0) * 60 + int(s.get("second", 0) or 0)
+        end_seconds   = int(e.get("minute", 0) or 0) * 60 + int(e.get("second", 0) or 0)
         return {
             "start_idx":        chain_idxs[0],
             "end_idx":          chain_idxs[-1],
@@ -2261,9 +2271,13 @@ def detect_progressive_chains(df_all, min_chain_length=3):
             "end_minute":       e.get("minute", 0),
             "end_second":       e.get("second", 0),
             "start_period":     s.get("period", "FirstHalf"),
+            "end_period":       e.get("period", "FirstHalf"),
             "action_count":     len(chain_idxs),
+            "start_x":          sx,
             "end_x":            ex,
+            "starts_in_own_half": sx < 50,
             "reaches_opp_half": ex > 50,
+            "duration_seconds": max(0, end_seconds - start_seconds),
         }
 
     chains     = []
@@ -2305,6 +2319,5 @@ def get_chain_actions(df_all, chain):
     """Return a DataFrame slice of all events belonging to a build-up chain."""
     mask = (df_all.index >= chain["start_idx"]) & (df_all.index <= chain["end_idx"])
     return df_all[mask].copy()
-
 
 

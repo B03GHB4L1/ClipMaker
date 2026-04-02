@@ -273,6 +273,56 @@ def cut_clip(minute, second, period_str, before=None, after=None):
         raise ValueError(f"FFmpeg error: {r.stderr[-400:]}")
     return out
 
+def cut_build_up_clip(chain, df_source):
+    if not video_path:
+        raise ValueError("No video file loaded. Go to Home and set a video path.")
+
+    _before_buf, _after_buf = _analysts_room_buffers()
+    start_row = df_source.loc[chain["start_idx"]]
+    end_row   = df_source.loc[chain["end_idx"]]
+
+    start_minute = int(start_row.get("minute", 0) or 0)
+    start_second = int(start_row.get("second", 0) or 0)
+    end_minute   = int(end_row.get("minute", 0) or 0)
+    end_second   = int(end_row.get("second", 0) or 0)
+    period_str   = start_row.get("period", "FirstHalf")
+    period_int   = PERIOD_MAP.get(period_str, 1)
+
+    period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
+    period_start = {}
+    if half1_time: period_start[1] = to_seconds(half1_time)
+    if half2_time: period_start[2] = to_seconds(half2_time)
+    if half3_time: period_start[3] = to_seconds(half3_time)
+    if half4_time: period_start[4] = to_seconds(half4_time)
+    if half5_time: period_start[5] = to_seconds(half5_time)
+    if period_int not in period_start:
+        raise ValueError(f"No kick-off time set for period {period_int}.")
+
+    off_min, off_sec = period_offset.get(period_int, (0, 0))
+    start_elapsed = max(0, start_minute * 60 + start_second - (off_min * 60 + off_sec))
+    end_elapsed   = max(0, end_minute * 60 + end_second - (off_min * 60 + off_sec))
+
+    start_video_ts = period_start[period_int] + start_elapsed
+    end_video_ts   = period_start[period_int] + end_elapsed
+    clip_start_ts  = max(0.0, start_video_ts - _before_buf)
+    clip_end_ts    = max(clip_start_ts, end_video_ts + _after_buf)
+    duration       = max(1.0, clip_end_ts - clip_start_ts)
+
+    src = (video2_path if split_video and period_int >= 2 and video2_path else video_path)
+    ffmpeg = get_ffmpeg()
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out = tmp.name
+    tmp.close()
+    r = subprocess.run([
+        ffmpeg, "-y", "-ss", str(clip_start_ts), "-i", src,
+        "-t", str(duration), "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+        "-c:a", "aac", "-avoid_negative_ts", "make_zero", out
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise ValueError(f"FFmpeg error: {r.stderr[-400:]}")
+    return out
+
 # =============================================================================
 # STATS BARS
 # =============================================================================
@@ -1635,8 +1685,9 @@ def render_build_up_tab():
 
     all_chains  = detect_progressive_chains(df_all, min_chain_length=min_chain)
     team_chains = [c for c in all_chains if c["team"] == team_sel]
-    # Only show sequences that end with an attempt to enter the opponent's half
-    entry_chains = [c for c in team_chains if c["reaches_opp_half"]]
+    # Only show progressive build-ups that start in the team's own half
+    # and finish in the opposition half.
+    entry_chains = [c for c in team_chains if c["starts_in_own_half"] and c["reaches_opp_half"]]
 
     _bu_fkey = f"{team_sel}|{min_chain}"
     if st.session_state.get("_bu_last_filter") != _bu_fkey:
@@ -1647,7 +1698,7 @@ def render_build_up_tab():
         st.session_state["bu_clip_error"]         = None
 
     if not entry_chains:
-        st.info(f"No build-up sequences reaching the opponent's half ({min_chain}+ actions) found for {team_sel}.")
+        st.info(f"No build-up sequences starting in the team's own half and ending in the opposition half ({min_chain}+ actions) were found for {team_sel}.")
         return
 
     avg_actions  = sum(c["action_count"] for c in entry_chains) / len(entry_chains)
@@ -1655,8 +1706,8 @@ def render_build_up_tab():
     direct_pct   = direct_count / len(entry_chains) * 100
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Half Entries", len(entry_chains),
-              help="Sequences where the final progressive action crossed into the opponent's half")
+    m1.metric("Build-Up Entries", len(entry_chains),
+              help="Sequences that start in the team's own half and finish in the opposition half")
     m2.metric("Avg Actions", f"{avg_actions:.1f}",
               help="Average number of consecutive progressive actions per entry sequence")
     m3.metric("Direct %", f"{direct_pct:.0f}%",
@@ -1687,8 +1738,7 @@ def render_build_up_tab():
                         st.rerun()
                 with c_watch:
                     if st.button("▶", key=f"bu_watch_{ci}"):
-                        _start = df_all.loc[chain["start_idx"]]
-                        _clip_key = f"bu_{ci}_{chain['start_idx']}"
+                        _clip_key = f"bu_{ci}_{chain['start_idx']}_{chain['end_idx']}"
                         existing   = st.session_state.get("bu_clip_path")
                         existing_k = st.session_state.get("bu_clip_key")
                         if existing_k == _clip_key and existing and os.path.exists(existing):
@@ -1696,14 +1746,7 @@ def render_build_up_tab():
                         else:
                             with st.spinner("Cutting clip…"):
                                 try:
-                                    _before_buf, _after_buf = _analysts_room_buffers()
-                                    _path = cut_clip(
-                                        _start.get("minute", 0),
-                                        _start.get("second", 0),
-                                        _start.get("period", "FirstHalf"),
-                                        before=_before_buf,
-                                        after=_after_buf,
-                                    )
+                                    _path = cut_build_up_clip(chain, df_all)
                                     st.session_state["bu_clip_path"]          = _path
                                     st.session_state["bu_clip_key"]           = _clip_key
                                     st.session_state["bu_clip_error"]         = None
