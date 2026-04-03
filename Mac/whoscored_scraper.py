@@ -10,6 +10,145 @@ import pandas as pd
 SHOT_TYPES = {"SavedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
 
 
+def _in_box(x, y):
+    """Return True if coordinates fall inside the attacking penalty box (WhoScored 0-100 scale)."""
+    try:
+        return float(x) > 83 and 21 < float(y) < 79
+    except (TypeError, ValueError):
+        return False
+
+
+def _pitch_zone(y, flip=False):
+    """Lateral pitch zone from y coordinate (WhoScored 0-100 absolute scale).
+    WhoScored's absolute y=0 corresponds to the away team's right touchline, so
+    flip=True (applied to all events) produces zones relative to the away team's
+    attacking direction, which is the consistent reference frame used throughout."""
+    try:
+        y = float(y)
+    except (TypeError, ValueError):
+        return ""
+    if flip:
+        y = 100 - y
+    if y < 20:  return "Left Wing"
+    if y < 37:  return "Left Half Space"
+    if y < 63:  return "Centre"
+    if y < 80:  return "Right Half Space"
+    return "Right Wing"
+
+
+def _depth_zone(x):
+    """Depth zone from x coordinate (0=own goal, 100=opponent goal, per-team normalised)."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return ""
+    if x < 34:  return "Defensive Third"
+    if x < 67:  return "Middle Third"
+    return "Attacking Third"
+
+
+def _is_switch_of_play(start_y, end_y, home_team=""):
+    """
+    Detect a switch of play from lateral pitch geography.
+    For this app, a switch is a long pass that starts on one side of the pitch
+    (wing or half-space) and ends on the opposite side.
+    """
+    start_zone = _pitch_zone(start_y, flip=(home_team != ""))
+    end_zone = _pitch_zone(end_y, flip=(home_team != ""))
+    left_side = {"Left Wing", "Left Half Space"}
+    right_side = {"Right Wing", "Right Half Space"}
+    return (
+        (start_zone in left_side and end_zone in right_side)
+        or (start_zone in right_side and end_zone in left_side)
+    )
+
+
+def _is_diagonal_long_ball(start_x, start_y, end_x, end_y):
+    """
+    Detect a diagonal long ball from pass geometry.
+    A diagonal long ball must make meaningful forward progress and meaningful
+    lateral progress, without being so lateral-dominant that it is really just
+    a side-to-side switch.
+    """
+    try:
+        start_x = float(start_x)
+        start_y = float(start_y)
+        end_x = float(end_x)
+        end_y = float(end_y)
+    except (TypeError, ValueError):
+        return False
+
+    forward = end_x - start_x
+    lateral = abs(end_y - start_y)
+    if forward < 12 or lateral < 18:
+        return False
+
+    ratio = lateral / max(forward, 1e-9)
+    return 0.45 <= ratio <= 2.2
+
+
+def _is_box_entry_pass(x, y, end_x, end_y, is_corner, is_freekick):
+    """Pass starting outside the attacking box and ending inside it, open play only."""
+    try:
+        x, y, end_x, end_y = float(x), float(y), float(end_x), float(end_y)
+    except (TypeError, ValueError):
+        return False
+    if is_corner or is_freekick:
+        return False
+    start_in_box = x > 83 and 21 < y < 79
+    end_in_box = end_x > 83 and 21 < end_y < 79
+    return not start_in_box and end_in_box
+
+
+def _is_deep_completion(end_x, end_y, is_cross, is_corner, is_freekick, outcome):
+    """Completed non-cross pass ending within 20m of the opponent's goal centre (circular zone).
+    Coordinates are on a 0-100 scale; pitch dimensions assumed 105m x 68m."""
+    try:
+        end_x = float(end_x)
+        end_y = float(end_y)
+    except (TypeError, ValueError):
+        return False
+    if is_cross or is_corner or is_freekick:
+        return False
+    if str(outcome).lower() == "unsuccessful":
+        return False
+    # Convert to metres and compute distance from goal centre (105, 34)
+    dx = end_x * 1.05 - 105.0
+    dy = end_y * 0.68 - 34.0
+    return (dx * dx + dy * dy) <= 400.0  # 20^2 = 400
+
+
+def _is_box_entry_carry(x, y, end_x, end_y):
+    """Carry starting outside the attacking box and ending inside it."""
+    try:
+        x, y, end_x, end_y = float(x), float(y), float(end_x), float(end_y)
+    except (TypeError, ValueError):
+        return False
+    start_in_box = x > 83 and 21 < y < 79
+    end_in_box = end_x > 83 and 21 < end_y < 79
+    return not start_in_box and end_in_box
+
+
+def _is_final_third_entry_pass(x, end_x, is_corner, is_freekick):
+    """Pass starting outside the final third and ending inside it, open play only."""
+    try:
+        x, end_x = float(x), float(end_x)
+    except (TypeError, ValueError):
+        return False
+    if is_corner or is_freekick:
+        return False
+    return x < 67 and end_x >= 67
+
+
+def _is_final_third_entry_carry(x, end_x):
+    """Carry starting outside the final third and ending inside it."""
+    try:
+        x, end_x = float(x), float(end_x)
+    except (TypeError, ValueError):
+        return False
+    return x < 67 and end_x >= 67
+
+
 def _get_xt_grid_path(app_dir):
     path = os.path.join(app_dir, "config", "xT_Grid.csv")
     if not os.path.exists(path):
@@ -57,9 +196,17 @@ def _fuzzy_player_match(ws_name, fm_name):
     return last_a in b or last_b in a
 
 
-def insert_ball_carries(events_df, log_func=None):
+def insert_ball_carries(events_df, log_func=None, home_team=None):
     if log_func is None:
         log_func = lambda x: None
+
+    # Resolve home_team from the DataFrame if not explicitly provided
+    if home_team is None:
+        if "homeTeam" in events_df.columns:
+            ht = events_df["homeTeam"].dropna()
+            home_team = ht.iloc[0] if len(ht) > 0 else ""
+        else:
+            home_team = ""
 
     try:
         match_events = events_df.copy().reset_index(drop=True)
@@ -144,12 +291,47 @@ def insert_ball_carries(events_df, log_func=None):
                     "is_key_pass": False,
                     "is_cross": False,
                     "is_long_ball": False,
+                    "is_switch_of_play": False,
+                    "is_diagonal_long_ball": False,
+                    "is_box_entry_pass": False,
+                    "is_deep_completion": False,
+                    "is_box_entry_carry": _is_box_entry_carry(
+                        match_event.get("endX", ""), match_event.get("endY", ""),
+                        next_evt.get("x", ""), next_evt.get("y", ""),
+                    ),
+                    "is_final_third_entry_pass": False,
+                    "is_final_third_entry_carry": _is_final_third_entry_carry(
+                        match_event.get("endX", ""), next_evt.get("x", ""),
+                    ),
                     "is_through_ball": False,
                     "is_corner": False,
                     "is_freekick": False,
                     "is_header": False,
+                    "is_own_goal": False,
                     "is_big_chance": False,
                     "is_big_chance_shot": False,
+                    "is_gk_save": False,
+                    "is_penalty": False,
+                    "is_volley": False,
+                    "is_chipped": False,
+                    "is_direct_from_corner": False,
+                    "is_left_foot": False,
+                    "is_right_foot": False,
+                    "is_fast_break": False,
+                    "is_touch_in_box": False,
+                    "is_assist_throughball": False,
+                    "is_assist_cross": False,
+                    "is_assist_corner": False,
+                    "is_assist_freekick": False,
+                    "is_intentional_assist": False,
+                    "is_yellow_card": False,
+                    "is_red_card": False,
+                    "is_second_yellow": False,
+                    "is_nutmeg": False,
+                    "is_success_in_box": False,
+                    "pitch_zone": _pitch_zone(match_event.get("endY", ""),
+                                              flip=(home_team != "")),
+                    "depth_zone": _depth_zone(match_event.get("endX", "")),
                     "xT": np.nan,
                     "prog_pass": np.nan,
                     "prog_carry": np.nan,
@@ -233,7 +415,7 @@ def _apply_xt_and_progressive(df, app_dir, log):
     except Exception as exc:
         log(f"  Warning: Could not calculate progressive pass/carry: {exc}")
 
-    df = insert_ball_carries(df, log_func=log)
+    df = insert_ball_carries(df, log_func=log)  # home_team resolved from df["homeTeam"]
     if "endX" in df.columns and "x" in df.columns:
         df.loc[df["endX"].isna(), "endX"] = df.loc[df["endX"].isna(), "x"]
     if "endY" in df.columns and "y" in df.columns:
@@ -310,7 +492,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                 "Sec-Fetch-Dest": "document",
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "none",
-                "Sec-Fetch-User": "?1",
+                "Sec-Fetch-User": "[CLR]1",
                 "Cache-Control": "max-age=0",
             })
         try:
@@ -500,13 +682,85 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_key_pass": "KeyPass" in qualifier_names,
                     "is_cross": "Cross" in qualifier_names,
                     "is_long_ball": "Longball" in qualifier_names,
+                    "is_switch_of_play": (
+                        type_name == "Pass"
+                        and "Longball" in qualifier_names
+                        and _is_switch_of_play(event.get("y", ""), event.get("endY", ""), home_team)
+                    ),
+                    "is_diagonal_long_ball": (
+                        type_name == "Pass"
+                        and "Longball" in qualifier_names
+                        and _is_diagonal_long_ball(
+                            event.get("x", ""),
+                            event.get("y", ""),
+                            event.get("endX", ""),
+                            event.get("endY", ""),
+                        )
+                    ),
+                    "is_box_entry_pass": (
+                        type_name == "Pass"
+                        and _is_box_entry_pass(
+                            event.get("x", ""), event.get("y", ""),
+                            event.get("endX", ""), event.get("endY", ""),
+                            "CornerTaken" in qualifier_names,
+                            "FreekickTaken" in qualifier_names,
+                        )
+                    ),
+                    "is_deep_completion": (
+                        type_name == "Pass"
+                        and _is_deep_completion(
+                            event.get("endX", ""),
+                            event.get("endY", ""),
+                            "Cross" in qualifier_names,
+                            "CornerTaken" in qualifier_names,
+                            "FreekickTaken" in qualifier_names,
+                            outcome_name,
+                        )
+                    ),
+                    "is_box_entry_carry": False,
+                    "is_final_third_entry_pass": (
+                        type_name == "Pass"
+                        and _is_final_third_entry_pass(
+                            event.get("x", ""), event.get("endX", ""),
+                            "CornerTaken" in qualifier_names,
+                            "FreekickTaken" in qualifier_names,
+                        )
+                    ),
+                    "is_final_third_entry_carry": False,
                     "is_through_ball": "Throughball" in qualifier_names,
                     "is_corner": "CornerTaken" in qualifier_names,
                     "is_freekick": "FreekickTaken" in qualifier_names,
                     "is_header": "Head" in qualifier_names,
+                    "is_own_goal": "OwnGoal" in qualifier_names,
                     "is_big_chance": "BigChanceCreated" in qualifier_names,
                     "is_big_chance_shot": "BigChance" in qualifier_names,
                     "is_gk_save": type_name == "Save" and player in goalkeeper_names,
+                    # Shot qualifiers
+                    "is_penalty": "Penalty" in qualifier_names,
+                    "is_volley": "Volley" in qualifier_names,
+                    "is_chipped": "Chipped" in qualifier_names,
+                    "is_direct_from_corner": "DirectFromCorner" in qualifier_names,
+                    "is_left_foot": "LeftFoot" in qualifier_names,
+                    "is_right_foot": "RightFoot" in qualifier_names,
+                    # Counter-attack / positional
+                    "is_fast_break": "FastBreak" in qualifier_names,
+                    "is_touch_in_box": _in_box(event.get("x", ""), event.get("y", "")),
+                    # Assist qualifiers
+                    "is_assist_throughball": "AssistThroughball" in qualifier_names,
+                    "is_assist_cross": "AssistCross" in qualifier_names,
+                    "is_assist_corner": "AssistCorner" in qualifier_names,
+                    "is_assist_freekick": "AssistFreekick" in qualifier_names,
+                    "is_intentional_assist": "IntentionalAssist" in qualifier_names,
+                    # Card subtypes
+                    "is_yellow_card": "Yellow" in qualifier_names,
+                    "is_red_card": "Red" in qualifier_names,
+                    "is_second_yellow": "SecondYellow" in qualifier_names,
+                    # TakeOn qualifiers
+                    "is_nutmeg": "Nutmeg" in qualifier_names,
+                    "is_success_in_box": type_name == "TakeOn" and outcome_name == "Successful" and _in_box(event.get("x", ""), event.get("y", "")),
+                    "pitch_zone": _pitch_zone(event.get("y", ""),
+                                              flip=(home_team != "")),
+                    "depth_zone": _depth_zone(event.get("x", "")),
                     "xT": "",
                     "prog_pass": "",
                     "prog_carry": "",
