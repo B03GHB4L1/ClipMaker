@@ -316,7 +316,7 @@ else:
     with vc2:
         st.write(""); st.write("")
         if st.button("Browse", key="browse_video"):
-            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov"), ("All files", "*.*")])
+            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
             if picked:
                 st.session_state.video_path = picked
                 st.rerun()
@@ -340,7 +340,7 @@ if split_video:
         with v2c2:
             st.write(""); st.write("")
             if st.button("Browse", key="browse_video2"):
-                picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov"), ("All files", "*.*")])
+                picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
                 if picked:
                     st.session_state.video2_path = picked
                     st.rerun()
