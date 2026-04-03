@@ -68,7 +68,7 @@ if [ ! -f "$HOME/.streamlit/credentials.toml" ]; then
 fi
 
 mkdir -p "$SCRIPT_DIR/.streamlit"
-printf '[server]\nmaxUploadSize = 0\n' > "$SCRIPT_DIR/.streamlit/config.toml"
+printf '[server]\nmaxUploadSize = 10000\nmaxMessageSize = 10000\n' > "$SCRIPT_DIR/.streamlit/config.toml"
 
 echo " [..] Opening ClipMaker v1.2 in your browser..."
 echo ""
