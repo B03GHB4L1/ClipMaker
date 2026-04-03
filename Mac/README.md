@@ -1,49 +1,85 @@
 # ClipMaker v1.2 for macOS
 
-## Recommended Option: Use the bundled app launcher
+ClipMaker is a local football video clipping and analysis app for macOS.
 
-This package includes a bundled macOS app launcher inside:
+This Mac package uses:
 
-- `ClipMakerApp_1.2.zip`
+- `Launch_ClipMaker.command` as the main launcher
+- `RUN_IN_TERMINAL.txt` as the step-by-step backup guide
 
-After unzipping it, open:
+## Before You Start
 
-- `ClipMakerApp_1.2/ClipMaker.app`
+You need:
 
-## What the bundled app does
+- macOS
+- Python 3.10 or later
+- internet access on first launch so ClipMaker can install required packages
 
-The app launcher opens Terminal and will try to:
+If Python is not already installed, download it from [python.org](https://www.python.org/downloads/).
 
-- detect `python3` or `python`
-- install missing Python packages
+## First Run
+
+1. Extract the Mac package.
+2. Move the extracted `ClipMaker_v1.2_Mac` folder to a normal location like `Desktop` or `Documents`.
+3. Open `RUN_IN_TERMINAL.txt`.
+4. Follow the steps in that file.
+5. Keep the Terminal window open while using ClipMaker.
+
+## What the Folder Should Contain
+
+You should see files like:
+
+- `ClipMaker.py`
+- `clipmaker_core.py`
+- `whoscored_scraper.py`
+- `Launch_ClipMaker.command`
+- `RUN_IN_TERMINAL.txt`
+- `README.md`
+- `pages/`
+- `static/`
+- `smp_component/`
+
+## What the Launch Commands Do
+
+On first run, the commands will:
+
+- create a local Python virtual environment in `.venv`
+- install required Python packages
 - install the Playwright Chromium browser if needed
-- download the local Plotly bundle if it is missing
+- download the local Plotly bundle if needed
 - apply the Streamlit theme patch if needed
-- create the needed Streamlit config files
-- run the packaged `Launch_ClipMaker.command` script in Terminal
-- launch ClipMaker with Streamlit in your browser on the first free port from `8501` to `8510`
+- launch the app in your browser
 
-In other words: yes, the bundled macOS app is intended to act as the launcher.
+The launcher uses the first free local port from `8501` to `8510`.
 
-## Recommended Setup Steps
+## If macOS Blocks the Launcher
 
-1. Extract `ClipMakerApp_1.2.zip`.
-2. Keep `ClipMaker.app` inside the extracted `ClipMakerApp_1.2` folder. Do not move the app bundle away from the rest of the files.
-3. If the extracted `ClipMakerApp_1.2` folder is still in `Downloads`, move the entire `ClipMakerApp_1.2` folder to a normal location like `Desktop` or `Documents`.
-4. Open `ClipMaker.app` from inside the `ClipMakerApp_1.2` folder.
-5. If macOS warns about security or quarantine, right-click the app and choose `Open`.
-6. Keep the Terminal window open while using ClipMaker.
+If macOS refuses to open `Launch_ClipMaker.command`, open Terminal and run:
 
-The app should launch the project in your browser.
+```bash
+xattr -dr com.apple.quarantine "/path/to/ClipMaker_v1.2_Mac"
+chmod +x "/path/to/ClipMaker_v1.2_Mac/Launch_ClipMaker.command"
+```
 
-## Important macOS Note
+Then try `Launch_ClipMaker.command` again.
 
-The launcher script checks for macOS app translocation/quarantine behavior.
-If you open it directly from a quarantined temp location, it may ask you to move the entire `ClipMakerApp_1.2` folder first.
+## Using ClipMaker
 
-## Manual Terminal Setup
+On macOS, ClipMaker uses native in-app `Browse` buttons for:
 
-If you prefer not to use the bundled app, you can still run it manually:
+- video files
+- second-half video files
+- match CSV files
+
+You do not need to upload those files through the browser.
+
+## If the Browser Does Not Open Automatically
+
+Use the `http://localhost:<port>` URL shown in Terminal.
+
+## Manual Terminal Method
+
+If you want the short version instead of reading `RUN_IN_TERMINAL.txt`, use:
 
 ```bash
 cd "/path/to/ClipMaker_v1.2_Mac"
@@ -51,52 +87,4 @@ chmod +x ./Launch_ClipMaker.command
 ./Launch_ClipMaker.command
 ```
 
-Or, if you want to do the setup yourself:
-
-```bash
-cd "/path/to/ClipMaker_v1.2_Mac"
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install streamlit pandas moviepy plotly curl-cffi playwright numpy
-python -m playwright install chromium
-bash download_plotly.sh
-python download_fonts.py
-python patch_streamlit.py
-python -m streamlit run ClipMaker.py --server.port 8501 --server.headless false --browser.gatherUsageStats false
-```
-
-If the browser does not open automatically, use the `http://localhost:<port>` URL shown in Terminal.
-
-## Optional Virtual Environment Setup
-
-```bash
-cd "/path/to/ClipMaker_v1.2_Mac"
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install streamlit pandas moviepy plotly curl-cffi playwright numpy
-python -m playwright install chromium
-bash download_plotly.sh
-python download_fonts.py
-python patch_streamlit.py
-python -m streamlit run ClipMaker.py --server.headless false --browser.gatherUsageStats false
-```
-
-## Common Issues
-
-### The app closes immediately
-
-Make sure you replaced any older copy of `ClipMakerApp_1.2.zip` with the latest one, then open `ClipMaker.app` again from inside the extracted `ClipMakerApp_1.2` folder.
-
-### Finder says the app cannot be opened
-
-Right-click `ClipMaker.app` and choose `Open`. If needed, remove quarantine manually:
-
-```bash
-xattr -dr com.apple.quarantine "ClipMaker.app"
-```
-
-### Browser does not open automatically
-
-Use the `http://localhost:<port>` URL shown in Terminal manually.
+The launcher will handle dependency installation and will choose the first free local port from `8501` to `8510`.

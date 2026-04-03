@@ -299,78 +299,48 @@ st.session_state["split_video"] = split_video
 
 # Video 1
 lbl1 = "1st Half Video" if split_video else "Video file"
-if IS_MAC:
-    _up1 = st.file_uploader(lbl1, type=["mp4","mkv","avi","mov"], key="up_video1")
-    if _up1:
-        _p = _save_uploaded_file(_up1)
-        if _p != st.session_state.video_path:
-            st.session_state.video_path = _p
+vc1, vc2 = st.columns([5, 1])
+with vc1:
+    video_path = st.text_input(lbl1, value=st.session_state.video_path,
+                                placeholder="Click Browse or paste full path")
+with vc2:
+    st.write(""); st.write("")
+    if st.button("Browse", key="browse_video"):
+        picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
+        if picked:
+            st.session_state.video_path = picked
             st.rerun()
-    video_path = st.session_state.video_path
-    if video_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video_path)}")
-else:
-    vc1, vc2 = st.columns([5, 1])
-    with vc1:
-        video_path = st.text_input(lbl1, value=st.session_state.video_path,
-                                    placeholder="Click Browse or paste full path")
-    with vc2:
-        st.write(""); st.write("")
-        if st.button("Browse", key="browse_video"):
-            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov"), ("All files", "*.*")])
-            if picked:
-                st.session_state.video_path = picked
-                st.rerun()
 
 # Video 2 (split mode)
 if split_video:
-    if IS_MAC:
-        _up2 = st.file_uploader("2nd Half Video", type=["mp4","mkv","avi","mov"], key="up_video2")
-        if _up2:
-            _p2 = _save_uploaded_file(_up2)
-            if _p2 != st.session_state.video2_path:
-                st.session_state.video2_path = _p2
+    v2c1, v2c2 = st.columns([5, 1])
+    with v2c1:
+        video2_path = st.text_input("2nd Half Video", value=st.session_state.video2_path,
+                                    placeholder="Click Browse or paste full path")
+    with v2c2:
+        st.write(""); st.write("")
+        if st.button("Browse", key="browse_video2"):
+            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
+            if picked:
+                st.session_state.video2_path = picked
                 st.rerun()
-        video2_path = st.session_state.video2_path
-        if video2_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video2_path)}")
-    else:
-        v2c1, v2c2 = st.columns([5, 1])
-        with v2c1:
-            video2_path = st.text_input("2nd Half Video", value=st.session_state.video2_path,
-                                        placeholder="Click Browse or paste full path")
-        with v2c2:
-            st.write(""); st.write("")
-            if st.button("Browse", key="browse_video2"):
-                picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov"), ("All files", "*.*")])
-                if picked:
-                    st.session_state.video2_path = picked
-                    st.rerun()
 else:
     video2_path = ""
 
 # CSV
 _from_scraper = (st.session_state.get("scraped_csv_path")
                  and st.session_state.csv_path == st.session_state.scraped_csv_path)
-if IS_MAC:
-    if not _from_scraper:
-        _upc = st.file_uploader("Match data CSV", type=["csv"], key="up_csv")
-        if _upc:
-            _pc = _save_uploaded_file(_upc)
-            if _pc != st.session_state.csv_path:
-                st.session_state.csv_path = _pc
-                st.rerun()
-    csv_path = st.session_state.csv_path
-else:
-    cc1, cc2 = st.columns([5, 1])
-    with cc1:
-        csv_path = st.text_input("Match data CSV", value=st.session_state.csv_path,
-                                  placeholder="Click Browse — or scrape a match first")
-    with cc2:
-        st.write(""); st.write("")
-        if st.button("Browse", key="browse_csv"):
-            picked = browse_file([("CSV files", "*.csv"), ("All files", "*.*")])
-            if picked:
-                st.session_state.csv_path = picked
-                st.rerun()
+cc1, cc2 = st.columns([5, 1])
+with cc1:
+    csv_path = st.text_input("Match data CSV", value=st.session_state.csv_path,
+                              placeholder="Click Browse — or scrape a match first")
+with cc2:
+    st.write(""); st.write("")
+    if st.button("Browse", key="browse_csv", disabled=_from_scraper):
+        picked = browse_file([("CSV files", "*.csv"), ("All files", "*.*")])
+        if picked:
+            st.session_state.csv_path = picked
+            st.rerun()
 
 if _from_scraper:
     c1, c2 = st.columns([3, 1])

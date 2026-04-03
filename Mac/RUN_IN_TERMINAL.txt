@@ -1,0 +1,26 @@
+CLIPMAKER FOR MAC - TERMINAL BACKUP METHOD
+
+If Launch_ClipMaker.command does not open, use this backup method.
+
+1. Open Terminal.
+
+2. Type:
+
+cd 
+
+3. Press Space once, then drag the "ClipMaker_v1.2_Mac" folder into the Terminal window.
+
+4. Press Enter.
+
+5. Run these commands:
+
+chmod +x ./Launch_ClipMaker.command
+./Launch_ClipMaker.command
+
+6. Keep Terminal open while using the app.
+
+7. If the browser does not open automatically, use the local address shown in Terminal, for example:
+
+http://localhost:8501
+
+If 8501 is busy, the launcher will automatically try the next free port up to 8510.
