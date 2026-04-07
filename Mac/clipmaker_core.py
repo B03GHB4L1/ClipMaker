@@ -576,7 +576,7 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         def get_video_duration(path, ffmpeg_bin):
             import subprocess, re
-            r = subprocess.run([ffmpeg_bin, "-i", path], capture_output=True, text=True)
+            r = subprocess.run([ffmpeg_bin, "-analyzeduration", "100M", "-probesize", "100M", "-i", path], capture_output=True, text=True)
             output = r.stdout + r.stderr
             m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", output)
             if not m:
