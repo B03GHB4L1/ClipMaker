@@ -2,10 +2,13 @@
   <img src="./assets/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
 </p>
 
-# ClipMaker
-**Football video clipping and analysis workstation built from match event data**
+<div align="center">
+  <h1>ClipMaker</h1>
+
+  **Football video clipping and analysis workstation built from match event data**
 
 Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
+</div>
 
 ---
 
