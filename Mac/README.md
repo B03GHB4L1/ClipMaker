@@ -5,7 +5,7 @@ ClipMaker is a local football video clipping and analysis app for macOS.
 This Mac package uses:
 
 - `Launch_ClipMaker.command` as the main launcher
-- `RUN_IN_TERMINAL.txt` as the step-by-step backup guide
+- `FIRST_RUN.txt` as the step-by-step first run guide
 
 ## Before You Start
 
@@ -21,9 +21,14 @@ If Python is not already installed, download it from [python.org](https://www.py
 
 1. Extract the Mac package.
 2. Move the extracted `ClipMaker_v1.2_Mac` folder to a normal location like `Desktop` or `Documents`.
-3. Open `RUN_IN_TERMINAL.txt`.
+3. Open `FIRST_RUN.txt`.
 4. Follow the steps in that file.
 5. Keep the Terminal window open while using ClipMaker.
+
+## Subsequent Runs
+
+If you followed the instructions above, you should be able to run ClipMaker simply by double-clicking 'Lanch_ClipMaker.command' on subsequent runs.
+
 
 ## What the Folder Should Contain
 
