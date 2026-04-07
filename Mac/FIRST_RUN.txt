@@ -12,9 +12,12 @@ cd
 
 4. Press Enter.
 
-5. Run these commands:
+5. Run these commands one after the other:
 
 chmod +x ./Launch_ClipMaker.command
+
+xattr -dr com.apple.quarantine ./Launch_ClipMaker.command
+
 ./Launch_ClipMaker.command
 
 6. Keep Terminal open while using the app.

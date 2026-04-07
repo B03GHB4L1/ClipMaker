@@ -101,12 +101,18 @@ def query_has_intent_alias(query_text, intent_key):
     return False
 
 def to_seconds(timestamp):
-    parts = list(map(int, timestamp.strip().split(":")))
+    if not isinstance(timestamp, str):
+        timestamp = str(timestamp)
+    parts_raw = timestamp.strip().split(":")
+    try:
+        parts = [int(float(p)) for p in parts_raw]
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid timestamp: '{timestamp}' — use MM:SS or HH:MM:SS") from exc
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    raise ValueError(f"Invalid timestamp: '{timestamp}' â€” use MM:SS or HH:MM:SS")
+    raise ValueError(f"Invalid timestamp: '{timestamp}' — use MM:SS or HH:MM:SS")
 
 def assign_periods(df, period_column, fallback_row):
     if period_column:

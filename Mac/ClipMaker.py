@@ -30,6 +30,40 @@ theme.render_top_nav("home")
 # =============================================================================
 IS_MAC = platform.system() == "Darwin"
 
+# ── macOS helpers (use osascript — tkinter cannot run off the main thread on Mac) ──
+
+def _browse_file_mac():
+    """Open a native macOS file picker via AppleScript. Safe from any thread."""
+    import subprocess
+    script = 'tell application "Finder" to set f to (choose file)\nreturn POSIX path of f'
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+def _browse_folder_mac():
+    """Open a native macOS folder picker via AppleScript. Safe from any thread."""
+    import subprocess
+    script = 'tell application "Finder" to set f to (choose folder)\nreturn POSIX path of f'
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().rstrip("/")
+    except Exception:
+        pass
+    return ""
+
+# ── Windows / Linux helpers (use tkinter in a thread) ──
+
 def _pick_file_thread(result_queue, filetypes):
     import tkinter as tk
     from tkinter import filedialog
@@ -51,6 +85,8 @@ def _pick_folder_thread(result_queue):
     result_queue.put(path)
 
 def browse_file(filetypes):
+    if IS_MAC:
+        return _browse_file_mac()
     q = queue.Queue()
     t = threading.Thread(target=_pick_file_thread, args=(q, filetypes), daemon=True)
     t.start(); t.join(timeout=60)
@@ -58,6 +94,8 @@ def browse_file(filetypes):
     except queue.Empty: return ""
 
 def browse_folder():
+    if IS_MAC:
+        return _browse_folder_mac()
     q = queue.Queue()
     t = threading.Thread(target=_pick_folder_thread, args=(q,), daemon=True)
     t.start(); t.join(timeout=60)
@@ -328,7 +366,7 @@ else:
     video2_path = ""
 
 # CSV
-_from_scraper = (st.session_state.get("scraped_csv_path")
+_from_scraper = bool(st.session_state.get("scraped_csv_path")
                  and st.session_state.csv_path == st.session_state.scraped_csv_path)
 cc1, cc2 = st.columns([5, 1])
 with cc1:
@@ -414,11 +452,11 @@ st.markdown(theme.step_header(4, "Clip Settings"), unsafe_allow_html=True)
 
 cs1, cs2, cs3 = st.columns(3)
 with cs1:
-    before_buf = st.number_input("Seconds before event", value=int(st.session_state.get("before_buffer", 5)), min_value=0)
+    before_buf = st.number_input("Seconds before event", value=int(st.session_state.get("before_buffer") or 5), min_value=0, step=1)
 with cs2:
-    after_buf = st.number_input("Seconds after event", value=int(st.session_state.get("after_buffer", 8)), min_value=0)
+    after_buf = st.number_input("Seconds after event", value=int(st.session_state.get("after_buffer") or 8), min_value=0, step=1)
 with cs3:
-    min_gap = st.number_input("Merge gap (s)", value=int(st.session_state.get("min_gap", 6)), min_value=0,
+    min_gap = st.number_input("Merge gap (s)", value=int(st.session_state.get("min_gap") or 6), min_value=0, step=1,
                                help="Events within this many seconds are merged into one clip")
 
 if before_buf != st.session_state.get("before_buffer"):
