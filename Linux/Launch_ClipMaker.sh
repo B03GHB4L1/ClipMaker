@@ -4,7 +4,7 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo " ================================================"
-echo "   ClipMaker v1.2 by B4L1 - Starting up..."
+echo "   ClipMaker v1.2.1 by B4L1 - Starting up..."
 echo " ================================================"
 echo ""
 
@@ -172,7 +172,7 @@ fi
 # -----------------------------------------------
 # STEP 4 - Launch
 # -----------------------------------------------
-echo " [..] Opening ClipMaker v1.2 in your browser..."
+echo " [..] Opening ClipMaker v1.2.1 in your browser..."
 echo ""
 echo " Note: A browser tab will open automatically."
 echo " Keep this window open while using the app."
