@@ -14,7 +14,7 @@ import theme
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="ClipMaker v1.2 by B4L1",
+    page_title="ClipMaker v1.2.1 by B4L1",
     page_icon="ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -102,7 +102,7 @@ if "proxy_warmed" not in st.session_state:
 # HEADER
 # =============================================================================
 _logo_b64 = theme.load_logo_b64(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ClipMaker_logo.png"))
-st.markdown(theme.logo_header("CLIPMAKER v1.2", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
+st.markdown(theme.logo_header("CLIPMAKER v1.2.1", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
 
 # Status banner
 if st.session_state.csv_path and os.path.exists(st.session_state.csv_path):

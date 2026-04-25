@@ -20,13 +20,14 @@ from clipmaker_core import (
     to_seconds, assign_periods, match_clock_to_video_time,
     merge_overlapping_windows,
     save_filter_snapshot, load_filter_snapshot, list_snapshots, delete_snapshot,
+    INTENT_FLAG_TO_BOOL_COL,
 )
 
 # =============================================================================
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="Filtering/Output — ClipMaker",
+    page_title="Filtering/Output — ClipMaker v1.2.1",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -84,7 +85,7 @@ def _clip_download_name(base_slug, window, index):
 def _compute_windows_from_config(cfg):
     if not cfg.get("data_file") or not cfg.get("half1_time") or not cfg.get("half2_time"):
         return []
-    df = pd.read_csv(cfg["data_file"])
+    df = read_csv_safe(cfg["data_file"])
     for col in ["minute", "second", "type"]:
         if col not in df.columns:
             return []
@@ -145,8 +146,15 @@ def _render_ai_video_output():
     result = st.session_state.get("_ai_video_output")
     if not result:
         return
-    st.markdown("##### Latest AI Video Output")
-    st.caption(f"Prompt summary: `{result['base_slug']}`")
+    _hdr_c1, _hdr_c2 = st.columns([4, 1])
+    with _hdr_c1:
+        st.markdown("##### Latest AI Video Output")
+        st.caption(f"Prompt summary: `{result['base_slug']}`")
+    with _hdr_c2:
+        if st.button("Clear results", use_container_width=True,
+                     key="ai_output_clear", icon=theme.icon_shortcode("[X]")):
+            st.session_state.pop("_ai_video_output", None)
+            st.rerun()
     if result.get("individual_clips"):
         files = result.get("files", [])
         if not files:
@@ -158,33 +166,31 @@ def _render_ai_video_output():
             if not path or not os.path.exists(path):
                 continue
             with st.expander(item.get("title") or f"Clip {i}", expanded=(i == 1)):
+                st.video(path)
                 with open(path, "rb") as vf:
-                    clip_bytes = vf.read()
-                st.video(clip_bytes)
-                st.download_button(
-                    "Download clip",
-                    data=clip_bytes,
-                    file_name=item.get("download_name") or os.path.basename(path),
-                    mime="video/mp4",
-                    use_container_width=True,
-                    key=f"ai_clip_download_{i}_{os.path.basename(path)}",
-                    icon=theme.icon_shortcode("[DL]"),
-                )
+                    st.download_button(
+                        "Download clip",
+                        data=vf.read(),
+                        file_name=item.get("download_name") or os.path.basename(path),
+                        mime="video/mp4",
+                        use_container_width=True,
+                        key=f"ai_clip_download_{i}_{os.path.basename(path)}",
+                        icon=theme.icon_shortcode("[DL]"),
+                    )
     else:
         reel_path = result.get("reel_path", "")
         if reel_path and os.path.exists(reel_path):
+            st.video(reel_path)
             with open(reel_path, "rb") as vf:
-                reel_bytes = vf.read()
-            st.video(reel_bytes)
-            st.download_button(
-                "Download reel",
-                data=reel_bytes,
-                file_name=result.get("download_name") or os.path.basename(reel_path),
-                mime="video/mp4",
-                use_container_width=True,
-                key=f"ai_reel_download_{os.path.basename(reel_path)}",
-                icon=theme.icon_shortcode("[DL]"),
-            )
+                st.download_button(
+                    "Download reel",
+                    data=vf.read(),
+                    file_name=result.get("download_name") or os.path.basename(reel_path),
+                    mime="video/mp4",
+                    use_container_width=True,
+                    key=f"ai_reel_download_{os.path.basename(reel_path)}",
+                    icon=theme.icon_shortcode("[DL]"),
+                )
         else:
             st.info("The last AI reel could not be found in the output folder.")
 
@@ -321,10 +327,10 @@ with tab_manual:
         if "progressive_only" in _pending_preset:
             st.session_state["_cm_progressive"] = _pending_preset["progressive_only"]
         if "corner_or_freekick" in _pending_preset and _pending_preset["corner_or_freekick"]:
-            st.session_state["_cm_selected_pass_types"] = ["Corners", "Freekicks"]
+            st.session_state["_cm_selected_pass_types"] = ["[Pass] Corners", "[Pass] Freekicks"]
         if "shots_and_key_passes_only" in _pending_preset and _pending_preset["shots_and_key_passes_only"]:
             st.session_state["_cm_shots_and_kp"] = True
-            st.session_state["_cm_selected_pass_types"] = ["Key passes"]
+            st.session_state["_cm_selected_pass_types"] = ["[Pass] Key passes"]
 
     # ── C1: Quick Preset Buttons ──────────────────────────────────────────────
     st.caption("Quick presets")
@@ -395,61 +401,132 @@ with tab_manual:
 
     # ── Action Qualifiers ─────────────────────────────────────────────────────
     PASS_TYPE_MAP = {
-        # Outcome
+        # Outcome (apply to all types)
         "Successful":            ("successful_only",           "outcomeType"),
         "Unsuccessful":          ("unsuccessful_only",         "outcomeType"),
         # Pass qualifiers
-        "Key passes":            ("key_passes_only",           "is_key_pass"),
-        "Crosses":               ("crosses_only",              "is_cross"),
-        "Long balls":            ("long_balls_only",           "is_long_ball"),
-        "Switches of play":      ("switches_only",             "is_switch_of_play"),
-        "Diagonals":             ("diagonals_only",            "is_diagonal_long_ball"),
-        "Through balls":         ("through_balls_only",        "is_through_ball"),
-        "Corners":               ("corners_only",              "is_corner"),
-        "Freekicks":             ("freekicks_only",            "is_freekick"),
-        "Headers":               ("headers_only",              "is_header"),
-        "Big chances":           ("big_chances_only",          "is_big_chance_shot"),
-        "Big chances created":   ("big_chances_created_only",  "is_big_chance"),
+        "[Pass] Key passes":     ("key_passes_only",           "is_key_pass"),
+        "[Pass] Crosses":        ("crosses_only",              "is_cross"),
+        "[Pass] Long balls":     ("long_balls_only",           "is_long_ball"),
+        "[Pass] Switches of play": ("switches_only",           "is_switch_of_play"),
+        "[Pass] Diagonals":      ("diagonals_only",            "is_diagonal_long_ball"),
+        "[Pass] Through balls":  ("through_balls_only",        "is_through_ball"),
+        "[Pass] Corners":        ("corners_only",              "is_corner"),
+        "[Pass] Freekicks":      ("freekicks_only",            "is_freekick"),
+        "[Pass] Headers":        ("headers_only",              "is_header"),
+        "[Pass] Throw ins":      ("throw_ins_only",            "is_throw_in"),
+        # Big chances
+        "[Any] Big chances":     ("big_chances_only",          "is_big_chance_shot"),
+        "[Pass] Big chances created": ("big_chances_created_only", "is_big_chance"),
         # Shot qualifiers
-        "Own goal":              ("own_goals_only",            "is_own_goal"),
-        "Penalties":             ("penalties_only",            "is_penalty"),
-        "Volleys":               ("volleys_only",              "is_volley"),
-        "Chipped shots":         ("chipped_only",              "is_chipped"),
-        "Direct from corner":    ("direct_from_corner_only",   "is_direct_from_corner"),
-        "Left foot":             ("left_foot_only",            "is_left_foot"),
-        "Right foot":            ("right_foot_only",           "is_right_foot"),
-        # Context
-        "Fast break":            ("fast_break_only",           "is_fast_break"),
-        "Touch in box":          ("touch_in_box_only",         "is_touch_in_box"),
+        "[Shot] Own goal":       ("own_goals_only",            "is_own_goal"),
+        "[Shot] Penalties":      ("penalties_only",            "is_penalty"),
+        "[Shot] Volleys":        ("volleys_only",              "is_volley"),
+        "[Shot] Chipped shots":  ("chipped_only",              "is_chipped"),
+        "[Shot] Direct from corner": ("direct_from_corner_only", "is_direct_from_corner"),
+        "[Shot] Left foot":      ("left_foot_only",            "is_left_foot"),
+        "[Shot] Right foot":     ("right_foot_only",           "is_right_foot"),
+        # Context (apply to any type)
+        "[Any] Fast break":      ("fast_break_only",           "is_fast_break"),
+        "[Any] Touch in box":    ("touch_in_box_only",         "is_touch_in_box"),
         # Assist qualifiers
-        "Assist (through ball)": ("assist_throughball_only",   "is_assist_throughball"),
-        "Assist (cross)":        ("assist_cross_only",         "is_assist_cross"),
-        "Assist (corner)":       ("assist_corner_only",        "is_assist_corner"),
-        "Assist (free kick)":    ("assist_freekick_only",      "is_assist_freekick"),
-        "Intentional assists":   ("intentional_assists_only",  "is_intentional_assist"),
+        "[Pass] Assist (through ball)": ("assist_throughball_only", "is_assist_throughball"),
+        "[Pass] Assist (cross)":        ("assist_cross_only",       "is_assist_cross"),
+        "[Pass] Assist (corner)":       ("assist_corner_only",      "is_assist_corner"),
+        "[Pass] Assist (free kick)":    ("assist_freekick_only",    "is_assist_freekick"),
+        "[Pass] Intentional assists":   ("intentional_assists_only", "is_intentional_assist"),
         # Goalkeeper qualifiers
-        "GK save":               ("gk_saves_only",             "is_gk_save"),
+        "[GK] GK save":          ("gk_saves_only",             "is_gk_save"),
         # Card subtypes
-        "Yellow card":           ("yellow_cards_only",         "is_yellow_card"),
-        "Red card":              ("red_cards_only",            "is_red_card"),
-        "Second yellow":         ("second_yellow_only",        "is_second_yellow"),
+        "[Card] Yellow card":    ("yellow_cards_only",         "is_yellow_card"),
+        "[Card] Red card":       ("red_cards_only",            "is_red_card"),
+        "[Card] Second yellow":  ("second_yellow_only",        "is_second_yellow"),
         # TakeOn qualifiers
-        "Nutmeg":                ("nutmegs_only",              "is_nutmeg"),
-        "Success in box":        ("success_in_box_only",       "is_success_in_box"),
+        "[Dribble] Nutmeg":      ("nutmegs_only",              "is_nutmeg"),
+        "[Dribble] Success in box": ("success_in_box_only",    "is_success_in_box"),
+        # Advanced pass qualifiers
+        "[Pass] Box entry (pass)":          ("box_entry_pass_only",          "is_box_entry_pass"),
+        "[Pass] Deep completion":           ("deep_completion_only",         "is_deep_completion"),
+        "[Pass] Final third entry (pass)":  ("final_third_entry_pass_only",  "is_final_third_entry_pass"),
+        "[Carry] Box entry (carry)":        ("box_entry_carry_only",         "is_box_entry_carry"),
+        "[Carry] Final third entry (carry)":("final_third_entry_carry_only", "is_final_third_entry_carry"),
     }
+    # Helper: resolve display label back to plain key for config
+    def _qual_flag_from_label(label):
+        """Given a display label like '[Pass] Crosses', return the config flag name like 'crosses_only'."""
+        if label in PASS_TYPE_MAP:
+            return PASS_TYPE_MAP[label][0]
+        return None
+
+    def _qual_col_from_label(label):
+        if label in PASS_TYPE_MAP:
+            return PASS_TYPE_MAP[label][1]
+        return None
+
+    # Use player/team-filtered df so only relevant qualifiers appear
+    _qual_df = _filter_df
+    if _qual_df is not None:
+        # Also filter by selected action types if any are chosen
+        _selected_types = st.session_state.get("_cm_filter_types", [])
+        if _selected_types and "type" in _qual_df.columns:
+            _qual_df = _qual_df[_qual_df["type"].isin(_selected_types)]
+        if team_filter != "All players" and "team" in _qual_df.columns:
+            _qual_df = _qual_df[_qual_df["team"] == team_filter]
+        if player_filter != "All players" and "playerName" in _qual_df.columns:
+            _qual_df = _qual_df[_qual_df["playerName"] == player_filter]
+
+    def _col_has_true(df, col):
+        return df[col].astype(str).str.lower().isin(["true", "1", "yes"]).any()
+
     available_pass_types = []
-    if _filter_df is not None:
+    if _qual_df is not None and not _qual_df.empty:
         for label, (flag, col) in PASS_TYPE_MAP.items():
             if col == "outcomeType":
                 outcome_val = "Successful" if flag == "successful_only" else "Unsuccessful"
-                if col in _filter_df.columns and (_filter_df[col] == outcome_val).any():
+                if col in _qual_df.columns and (_qual_df[col] == outcome_val).any():
                     available_pass_types.append(label)
-            elif col in _filter_df.columns and _filter_df[col].any():
+            elif col in _qual_df.columns and _col_has_true(_qual_df, col):
                 available_pass_types.append(label)
     # Apply any qualifiers restored from a snapshot (validated against available options)
     _pending_pass_types = st.session_state.pop("_cm_snap_pass_types_pending", None)
     if _pending_pass_types is not None:
-        st.session_state["_cm_selected_pass_types"] = [q for q in _pending_pass_types if q in available_pass_types]
+        # Snapshot stored plain labels; map legacy labels to new prefixed ones
+        _legacy_to_prefixed = {
+            "Key passes": "[Pass] Key passes",
+            "Crosses": "[Pass] Crosses",
+            "Long balls": "[Pass] Long balls",
+            "Switches of play": "[Pass] Switches of play",
+            "Diagonals": "[Pass] Diagonals",
+            "Through balls": "[Pass] Through balls",
+            "Corners": "[Pass] Corners",
+            "Freekicks": "[Pass] Freekicks",
+            "Headers": "[Pass] Headers",
+            "Big chances": "[Any] Big chances",
+            "Big chances created": "[Pass] Big chances created",
+            "Own goal": "[Shot] Own goal",
+            "Penalties": "[Shot] Penalties",
+            "Volleys": "[Shot] Volleys",
+            "Chipped shots": "[Shot] Chipped shots",
+            "Direct from corner": "[Shot] Direct from corner",
+            "Left foot": "[Shot] Left foot",
+            "Right foot": "[Shot] Right foot",
+            "Fast break": "[Any] Fast break",
+            "Touch in box": "[Any] Touch in box",
+            "Assist (through ball)": "[Pass] Assist (through ball)",
+            "Assist (cross)": "[Pass] Assist (cross)",
+            "Assist (corner)": "[Pass] Assist (corner)",
+            "Assist (free kick)": "[Pass] Assist (free kick)",
+            "Intentional assists": "[Pass] Intentional assists",
+            "GK save": "[GK] GK save",
+            "Yellow card": "[Card] Yellow card",
+            "Red card": "[Card] Red card",
+            "Second yellow": "[Card] Second yellow",
+            "Nutmeg": "[Dribble] Nutmeg",
+            "Success in box": "[Dribble] Success in box",
+            "Throw ins": "[Pass] Throw ins",
+        }
+        _mapped = [_legacy_to_prefixed.get(q, q) for q in _pending_pass_types]
+        st.session_state["_cm_selected_pass_types"] = [q for q in _mapped if q in available_pass_types]
 
     selected_pass_types = []
     key_passes_only = False
@@ -462,7 +539,8 @@ with tab_manual:
             placeholder="All qualifiers",
             key="_cm_selected_pass_types",
         )
-        key_passes_only = "Key passes" in selected_pass_types
+        key_passes_only = "[Pass] Key passes" in selected_pass_types
+
 
     if has_prog:
         progressive_only = st.checkbox("Progressive actions only",
@@ -629,36 +707,42 @@ with tab_manual:
             "shots_and_key_passes_only": st.session_state.get("_cm_shots_and_kp", False),
             "successful_only":           "Successful"            in selected_pass_types,
             "unsuccessful_only":         "Unsuccessful"          in selected_pass_types,
-            "crosses_only":              "Crosses"               in selected_pass_types,
-            "long_balls_only":           "Long balls"            in selected_pass_types,
-            "switches_only":             "Switches of play"      in selected_pass_types,
-            "diagonals_only":            "Diagonals"             in selected_pass_types,
-            "through_balls_only":        "Through balls"         in selected_pass_types,
-            "corners_only":              "Corners"               in selected_pass_types,
-            "freekicks_only":            "Freekicks"             in selected_pass_types,
-            "headers_only":              "Headers"               in selected_pass_types,
-            "big_chances_only":          "Big chances"           in selected_pass_types,
-            "big_chances_created_only":  "Big chances created"   in selected_pass_types,
-            "own_goals_only":            "Own goal"              in selected_pass_types,
-            "penalties_only":            "Penalties"             in selected_pass_types,
-            "volleys_only":              "Volleys"               in selected_pass_types,
-            "chipped_only":              "Chipped shots"         in selected_pass_types,
-            "direct_from_corner_only":   "Direct from corner"    in selected_pass_types,
-            "left_foot_only":            "Left foot"             in selected_pass_types,
-            "right_foot_only":           "Right foot"            in selected_pass_types,
-            "fast_break_only":           "Fast break"            in selected_pass_types,
-            "touch_in_box_only":         "Touch in box"          in selected_pass_types,
-            "assist_throughball_only":   "Assist (through ball)" in selected_pass_types,
-            "assist_cross_only":         "Assist (cross)"        in selected_pass_types,
-            "assist_corner_only":        "Assist (corner)"       in selected_pass_types,
-            "assist_freekick_only":      "Assist (free kick)"    in selected_pass_types,
-            "intentional_assists_only":  "Intentional assists"   in selected_pass_types,
-            "gk_saves_only":             "GK save"               in selected_pass_types,
-            "yellow_cards_only":         "Yellow card"           in selected_pass_types,
-            "red_cards_only":            "Red card"              in selected_pass_types,
-            "second_yellow_only":        "Second yellow"         in selected_pass_types,
-            "nutmegs_only":              "Nutmeg"                in selected_pass_types,
-            "success_in_box_only":       "Success in box"        in selected_pass_types,
+            "crosses_only":              "[Pass] Crosses"        in selected_pass_types,
+            "long_balls_only":           "[Pass] Long balls"     in selected_pass_types,
+            "switches_only":             "[Pass] Switches of play" in selected_pass_types,
+            "diagonals_only":            "[Pass] Diagonals"      in selected_pass_types,
+            "through_balls_only":        "[Pass] Through balls"  in selected_pass_types,
+            "corners_only":              "[Pass] Corners"        in selected_pass_types,
+            "freekicks_only":            "[Pass] Freekicks"      in selected_pass_types,
+            "headers_only":              "[Pass] Headers"        in selected_pass_types,
+            "big_chances_only":          "[Any] Big chances"     in selected_pass_types,
+            "big_chances_created_only":  "[Pass] Big chances created" in selected_pass_types,
+            "own_goals_only":            "[Shot] Own goal"       in selected_pass_types,
+            "penalties_only":            "[Shot] Penalties"      in selected_pass_types,
+            "volleys_only":              "[Shot] Volleys"        in selected_pass_types,
+            "chipped_only":              "[Shot] Chipped shots"  in selected_pass_types,
+            "direct_from_corner_only":   "[Shot] Direct from corner" in selected_pass_types,
+            "left_foot_only":            "[Shot] Left foot"      in selected_pass_types,
+            "right_foot_only":           "[Shot] Right foot"     in selected_pass_types,
+            "fast_break_only":           "[Any] Fast break"      in selected_pass_types,
+            "touch_in_box_only":         "[Any] Touch in box"    in selected_pass_types,
+            "assist_throughball_only":   "[Pass] Assist (through ball)" in selected_pass_types,
+            "assist_cross_only":         "[Pass] Assist (cross)" in selected_pass_types,
+            "assist_corner_only":        "[Pass] Assist (corner)" in selected_pass_types,
+            "assist_freekick_only":      "[Pass] Assist (free kick)" in selected_pass_types,
+            "intentional_assists_only":  "[Pass] Intentional assists" in selected_pass_types,
+            "gk_saves_only":             "[GK] GK save"          in selected_pass_types,
+            "yellow_cards_only":         "[Card] Yellow card"    in selected_pass_types,
+            "red_cards_only":            "[Card] Red card"       in selected_pass_types,
+            "second_yellow_only":        "[Card] Second yellow"  in selected_pass_types,
+            "nutmegs_only":              "[Dribble] Nutmeg"      in selected_pass_types,
+            "success_in_box_only":       "[Dribble] Success in box" in selected_pass_types,
+            "throw_ins_only":            "[Pass] Throw ins"      in selected_pass_types,
+            "box_entry_pass_only":       "[Pass] Box entry (pass)" in selected_pass_types,
+            "deep_completion_only":      "[Pass] Deep completion" in selected_pass_types,
+            "final_third_entry_pass_only":  "[Pass] Final third entry (pass)" in selected_pass_types,
+            "box_entry_carry_only":      "[Carry] Box entry (carry)" in selected_pass_types,
+            "final_third_entry_carry_only": "[Carry] Final third entry (carry)" in selected_pass_types,
             "pitch_zone_filter": pitch_zone_filter,
             "depth_zone_filter": depth_zone_filter,
             "xt_min":           xt_min,
@@ -683,6 +767,35 @@ with tab_manual:
         except Exception: pass
         raise ValueError("FFmpeg not found.")
 
+    def _get_ffprobe():
+        cmd = shutil.which("ffprobe")
+        if cmd:
+            return cmd
+        ffmpeg_path = _get_ffmpeg()
+        ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+        ffprobe_path = os.path.join(os.path.dirname(ffmpeg_path), ffprobe_name)
+        if os.path.exists(ffprobe_path):
+            return ffprobe_path
+        raise ValueError("FFprobe not found.")
+
+    def _get_media_duration(src):
+        try:
+            ffprobe = _get_ffprobe()
+            result = subprocess.run(
+                [
+                    ffprobe, "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    src,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return max(0.0, float((result.stdout or "").strip()))
+        except Exception:
+            return 0.0
+
     def _cut_clip(src, start, end, out_path):
         ff = _get_ffmpeg()
         r = subprocess.run(
@@ -699,6 +812,118 @@ with tab_manual:
         h, m = divmod(m, 60)
         return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
+    def _duration_input_value(secs):
+        total = max(0, int(round(float(secs))))
+        minutes, seconds = divmod(total, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _parse_duration_input(raw_value, fallback_seconds):
+        try:
+            text = str(raw_value or "").strip()
+            if not text:
+                return 0
+            parts = text.split(":")
+            if len(parts) != 2:
+                raise ValueError
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+            if minutes < 0 or seconds < 0 or seconds > 59:
+                raise ValueError
+            return minutes * 60 + seconds
+        except Exception:
+            return max(0, int(round(float(fallback_seconds))))
+
+    def _preview_clip_meta_key(index):
+        return f"_filt_clip_meta_{index}"
+
+    def _normalize_duration_input_key(key):
+        if not str(st.session_state.get(key, "")).strip():
+            st.session_state[key] = "00:00"
+
+    def _adjust_duration_input_key(key, delta_seconds):
+        current_seconds = _parse_duration_input(st.session_state.get(key, "00:00"), 0)
+        st.session_state[key] = _duration_input_value(max(0, current_seconds + int(delta_seconds)))
+
+    def _reset_slider_to_default(draft_start_key, draft_end_key, slider_key, reset_inputs_key, base_start, base_end):
+        st.session_state[draft_start_key] = base_start
+        st.session_state[draft_end_key] = base_end
+        st.session_state.pop(slider_key, None)
+        st.session_state[reset_inputs_key] = True
+
+    def _draft_start_key(index):
+        return f"_clip_draft_start_{index}"
+
+    def _draft_end_key(index):
+        return f"_clip_draft_end_{index}"
+
+    def _cleanup_preview_clip(index):
+        clip_key = f"_filt_clip_{index}"
+        clip_path = st.session_state.get(clip_key, "")
+        if clip_path and os.path.exists(clip_path):
+            try:
+                os.remove(clip_path)
+            except OSError:
+                pass
+        st.session_state.pop(clip_key, None)
+        st.session_state.pop(_preview_clip_meta_key(index), None)
+        st.session_state.pop(f"_extend_back_{index}", None)
+        st.session_state.pop(f"_extend_forward_{index}", None)
+        st.session_state.pop(f"_extend_back_input_{index}", None)
+        st.session_state.pop(f"_extend_forward_input_{index}", None)
+        st.session_state.pop(f"_manual_extension_enabled_{index}", None)
+        st.session_state.pop(f"_reset_mmss_inputs_{index}", None)
+        st.session_state.pop(_draft_start_key(index), None)
+        st.session_state.pop(_draft_end_key(index), None)
+        st.session_state.pop(f"_timeline_before_{index}", None)
+        st.session_state.pop(f"_timeline_after_{index}", None)
+
+    def _render_preview_clip_window(index, src, base_start, base_end, render_start, render_end):
+        clip_key = f"_filt_clip_{index}"
+        render_start = max(0, float(render_start))
+        render_end = max(render_start + 0.25, float(render_end))
+
+        _cleanup_preview_clip(index)
+
+        temp_clip = tempfile.NamedTemporaryFile(
+            suffix=".mp4",
+            delete=False,
+            dir=tempfile.gettempdir(),
+        )
+        temp_clip.close()
+
+        try:
+            _cut_clip(src, render_start, render_end, temp_clip.name)
+        except Exception:
+            try:
+                if os.path.exists(temp_clip.name):
+                    os.remove(temp_clip.name)
+            except OSError:
+                pass
+            raise
+
+        extend_back = max(0.0, float(base_start) - render_start)
+        extend_forward = max(0.0, render_end - float(base_end))
+
+        st.session_state[clip_key] = temp_clip.name
+        st.session_state[_preview_clip_meta_key(index)] = {
+            "path": temp_clip.name,
+            "base_start": float(base_start),
+            "base_end": float(base_end),
+            "render_start": render_start,
+            "render_end": render_end,
+            "extend_back": extend_back,
+            "extend_forward": extend_forward,
+        }
+        st.session_state[f"_extend_back_{index}"] = _duration_input_value(extend_back)
+        st.session_state[f"_extend_forward_{index}"] = _duration_input_value(extend_forward)
+        st.session_state[_draft_start_key(index)] = render_start
+        st.session_state[_draft_end_key(index)] = render_end
+
+    def _render_preview_clip(index, src, start, end, extend_back=0, extend_forward=0):
+        render_start = max(0, float(start) - max(0, float(extend_back)))
+        render_end = max(render_start + 0.25, float(end) + max(0, float(extend_forward)))
+        _render_preview_clip_window(index, src, start, end, render_start, render_end)
+
     # ── Buttons row ───────────────────────────────────────────────────────────
     btn1, btn2 = st.columns(2)
     with btn1:
@@ -714,7 +939,7 @@ with tab_manual:
     def _clear_preview():
         old_pw = st.session_state.get("_preview_windows") or []
         for j in range(len(old_pw)):
-            st.session_state.pop(f"_filt_clip_{j}", None)
+            _cleanup_preview_clip(j)
         st.session_state.pop("_preview_windows", None)
         st.session_state.pop("_preview_video", None)
 
@@ -745,6 +970,7 @@ with tab_manual:
     # ── Show persisted preview list ───────────────────────────────────────────
     _pw = st.session_state.get("_preview_windows")
     _pv = st.session_state.get("_preview_video", "")
+    _preview_video_duration = _get_media_duration(_pv) if _pv and os.path.exists(_pv) else 0.0
     if _pw:
         _hdr1, _hdr2 = st.columns([5, 1])
         with _hdr1:
@@ -759,44 +985,199 @@ with tab_manual:
                 f"**Clip {i+1}** · {_fmt(s)} → {_fmt(e)} · {dur:.0f}s · {lbl}",
                 expanded=False,
             ):
-                mc1, mc2 = st.columns([1, 1], gap="large")
-                with mc1:
+                base_start = max(0.0, float(s))
+                base_end = max(base_start + 0.25, float(e))
+                min_start = max(0.0, base_start - 180.0)
+                max_end = base_end + 180.0
+                if _preview_video_duration > 0:
+                    max_end = min(_preview_video_duration, max_end)
+                max_end = max(base_end, max_end)
+
+                editor_c1, editor_c2 = st.columns([0.34, 0.66], gap="large")
+                clip_key = f"_filt_clip_{i}"
+                clip_path = st.session_state.get(clip_key, "")
+                clip_meta = st.session_state.get(_preview_clip_meta_key(i), {})
+                draft_start_key = _draft_start_key(i)
+                draft_end_key = _draft_end_key(i)
+
+                if draft_start_key not in st.session_state:
+                    st.session_state[draft_start_key] = float(clip_meta.get("render_start", base_start))
+                if draft_end_key not in st.session_state:
+                    st.session_state[draft_end_key] = float(clip_meta.get("render_end", base_end))
+
+                draft_start = max(min_start, min(float(st.session_state[draft_start_key]), base_end))
+                draft_end = min(max_end, max(float(st.session_state[draft_end_key]), base_end))
+                if draft_end <= draft_start:
+                    draft_end = min(max_end, draft_start + max(1.0, base_end - base_start))
+                if draft_end <= draft_start:
+                    draft_start = max(min_start, base_start)
+                    draft_end = max(base_end, min(max_end, draft_start + 1.0))
+
+                st.session_state[draft_start_key] = draft_start
+                st.session_state[draft_end_key] = draft_end
+
+                extend_back_seconds = max(0, int(round(base_start - draft_start)))
+                extend_forward_seconds = max(0, int(round(draft_end - base_end)))
+                extend_back_input_key = f"_extend_back_input_{i}"
+                extend_forward_input_key = f"_extend_forward_input_{i}"
+                manual_toggle_key = f"_manual_extension_enabled_{i}"
+                reset_inputs_key = f"_reset_mmss_inputs_{i}"
+                if st.session_state.pop(reset_inputs_key, False):
+                    st.session_state[extend_back_input_key] = "00:00"
+                    st.session_state[extend_forward_input_key] = "00:00"
+                if extend_back_input_key not in st.session_state:
+                    st.session_state[extend_back_input_key] = _duration_input_value(extend_back_seconds)
+                if extend_forward_input_key not in st.session_state:
+                    st.session_state[extend_forward_input_key] = _duration_input_value(extend_forward_seconds)
+                if manual_toggle_key not in st.session_state:
+                    st.session_state[manual_toggle_key] = False
+
+                with editor_c1:
                     st.markdown(f"**Start:** {_fmt(s)}  \n**End:** {_fmt(e)}  \n**Duration:** {dur:.0f}s")
                     st.caption(lbl)
-                with mc2:
-                    clip_key = f"_filt_clip_{i}"
-                    clip_path = st.session_state.get(clip_key, "")
-                    if clip_path and os.path.exists(clip_path):
-                        with open(clip_path, "rb") as vf:
-                            st.video(vf.read())
-                        with open(clip_path, "rb") as vf:
-                            st.download_button(
-                                "Download clip",
-                                data=vf.read(),
-                                file_name=f"clip_{i+1}_{_fmt(s).replace(':','')}.mp4",
-                                mime="video/mp4",
-                                use_container_width=True,
-                                key=f"dl_filt_{i}",
-                                icon=theme.icon_shortcode("[DL]"),
+                    st.markdown("**Manual Extension**")
+                    use_manual_extension = st.checkbox(
+                        "Use MM:SS inputs",
+                        key=manual_toggle_key,
+                        help="Turn this on if you want to type the extension instead of using the slider.",
+                    )
+                    if use_manual_extension:
+                        st.caption("Adjust first, then preview. You can use MM:SS here or the range slider below.")
+                        back_btn_c1, back_btn_c2, back_btn_c3 = st.columns([1, 5, 1], gap="small")
+                        with back_btn_c1:
+                            st.button("-", key=f"minus_back_{i}", use_container_width=True,
+                                      on_click=_adjust_duration_input_key, args=(extend_back_input_key, -30))
+                        with back_btn_c2:
+                            extend_back_text = st.text_input(
+                                "Add time before start (MM:SS)",
+                                key=extend_back_input_key,
+                                help="Use MM:SS, for example 00:30 or 03:00.",
+                                on_change=_normalize_duration_input_key,
+                                args=(extend_back_input_key,),
                             )
+                        with back_btn_c3:
+                            st.button("+", key=f"plus_back_{i}", use_container_width=True,
+                                      on_click=_adjust_duration_input_key, args=(extend_back_input_key, 30))
+
+                        forward_btn_c1, forward_btn_c2, forward_btn_c3 = st.columns([1, 5, 1], gap="small")
+                        with forward_btn_c1:
+                            st.button("-", key=f"minus_forward_{i}", use_container_width=True,
+                                      on_click=_adjust_duration_input_key, args=(extend_forward_input_key, -30))
+                        with forward_btn_c2:
+                            extend_forward_text = st.text_input(
+                                "Add time after end (MM:SS)",
+                                key=extend_forward_input_key,
+                                help="Use MM:SS, for example 00:45 or 03:00.",
+                                on_change=_normalize_duration_input_key,
+                                args=(extend_forward_input_key,),
+                            )
+                        with forward_btn_c3:
+                            st.button("+", key=f"plus_forward_{i}", use_container_width=True,
+                                      on_click=_adjust_duration_input_key, args=(extend_forward_input_key, 30))
                     else:
-                        if _pv and os.path.exists(_pv):
-                            if st.button("Render this clip", key=f"rend_{i}",
-                                          icon=theme.icon_shortcode("[RUN]"),
-                                          use_container_width=True):
-                                with st.spinner("Cutting clip…"):
-                                    try:
-                                        _otmp = tempfile.NamedTemporaryFile(
-                                            suffix=".mp4", delete=False,
-                                            dir=tempfile.gettempdir())
-                                        _otmp.close()
-                                        _cut_clip(_pv, s, e, _otmp.name)
-                                        st.session_state[clip_key] = _otmp.name
-                                        st.rerun()
-                                    except Exception as ex:
-                                        st.error(f"Could not cut clip: {ex}")
-                        else:
-                            st.caption("Set your video file on the Home page to render clips.")
+                        extend_back_text = st.session_state.get(extend_back_input_key, "00:00")
+                        extend_forward_text = st.session_state.get(extend_forward_input_key, "00:00")
+                        st.caption("Use the slider below, or enable MM:SS inputs if you prefer typing the extension.")
+                    st.markdown(
+                        f"**Draft Window**  \n`{_fmt(draft_start)} -> {_fmt(draft_end)}`  \n`{(draft_end - draft_start):.0f}s total`"
+                    )
+
+                    if use_manual_extension:
+                        typed_c1, typed_c2 = st.columns(2, gap="small")
+                        with typed_c1:
+                            if st.button(
+                                "Apply MM:SS",
+                                key=f"apply_mmss_{i}",
+                                use_container_width=True,
+                                icon=theme.icon_shortcode("[RUN]"),
+                            ):
+                                parsed_back = min(180, _parse_duration_input(extend_back_text, extend_back_seconds))
+                                parsed_forward = min(180, _parse_duration_input(extend_forward_text, extend_forward_seconds))
+                                new_start = max(min_start, base_start - parsed_back)
+                                new_end = min(max_end, base_end + parsed_forward)
+                                if new_end <= new_start:
+                                    new_end = min(max_end, new_start + max(1.0, base_end - base_start))
+                                st.session_state[draft_start_key] = new_start
+                                st.session_state[draft_end_key] = new_end
+                                st.rerun()
+                        with typed_c2:
+                            if st.button(
+                                "Reset draft",
+                                key=f"reset_draft_{i}",
+                                use_container_width=True,
+                                icon=theme.icon_shortcode("[X]"),
+                            ):
+                                st.session_state[draft_start_key] = base_start
+                                st.session_state[draft_end_key] = base_end
+                                st.session_state[reset_inputs_key] = True
+                                st.rerun()
+
+                    preview_label = "Update preview" if clip_path and os.path.exists(clip_path) else "Preview this window"
+                    preview_help = "Use the current draft window to render the preview clip."
+                    if _pv and os.path.exists(_pv):
+                        if st.button(
+                            preview_label,
+                            key=f"preview_draft_{i}",
+                            icon=theme.icon_shortcode("[RUN]"),
+                            use_container_width=True,
+                            help=preview_help,
+                        ):
+                            with st.spinner("Rendering preview clip…"):
+                                try:
+                                    _render_preview_clip_window(i, _pv, s, e, draft_start, draft_end)
+                                    st.rerun()
+                                except Exception as ex:
+                                    st.error(f"Could not render clip: {ex}")
+                    else:
+                        st.caption("Set your video file on the Home page to render clips.")
+
+                with editor_c2:
+                    if clip_path and os.path.exists(clip_path):
+                        render_start = clip_meta.get("render_start", float(s))
+                        render_end = clip_meta.get("render_end", float(e))
+                        current_duration = render_end - render_start
+                        st.caption(f"Rendered window: {_fmt(render_start)} -> {_fmt(render_end)} ({current_duration:.0f}s)")
+                        st.video(clip_path)
+                        with open(clip_path, "rb") as vf:
+                            st.download_button("Download clip", data=vf.read(), file_name=f"clip_{i+1}_{_fmt(render_start).replace(':','')}.mp4", mime="video/mp4", use_container_width=True, key=f"dl_filt_{i}", icon=theme.icon_shortcode("[DL]"))
+                    else:
+                        pass
+
+                st.markdown("**Timeline Editor**")
+                slider_min = int(round(min_start))
+                slider_max = int(round(max_end))
+                slider_start = max(slider_min, min(slider_max - 1, int(round(draft_start))))
+                slider_end = min(slider_max, max(slider_start + 1, int(round(draft_end))))
+                if slider_end <= slider_start:
+                    slider_end = min(slider_max, slider_start + 1)
+                st.caption(f"{_fmt(slider_start)} → {_fmt(slider_end)}")
+                selected_range = st.slider(
+                    f"Draft range for clip {i+1}",
+                    min_value=slider_min,
+                    max_value=slider_max,
+                    value=(slider_start, slider_end),
+                    step=1,
+                    key=f"draft_slider_{i}",
+                    label_visibility="collapsed",
+                )
+                new_draft_start = float(selected_range[0])
+                new_draft_end = float(selected_range[1])
+                if new_draft_end <= new_draft_start:
+                    new_draft_end = new_draft_start + 1.0
+                st.session_state[draft_start_key] = new_draft_start
+                st.session_state[draft_end_key] = new_draft_end
+                slider_actions_c1, slider_actions_c2 = st.columns(2, gap="small")
+                with slider_actions_c1:
+                    st.button(
+                        "Reset slider to default",
+                        key=f"reset_slider_default_{i}",
+                        use_container_width=True,
+                        icon=theme.icon_shortcode("[X]"),
+                        on_click=_reset_slider_to_default,
+                        args=(draft_start_key, draft_end_key, f"draft_slider_{i}", reset_inputs_key, base_start, base_end),
+                    )
+                with slider_actions_c2:
+                    st.empty()
 
     # ── Full Run ──────────────────────────────────────────────────────────────
     if run_btn:
@@ -896,34 +1277,32 @@ with tab_manual:
                         for _ic in _new_clips:
                             _ic_name = os.path.basename(_ic)
                             with st.expander(_ic_name, expanded=False):
+                                st.video(_ic)
                                 with open(_ic, "rb") as _vf:
-                                    _vbytes = _vf.read()
-                                st.video(_vbytes)
-                                st.download_button(
-                                    "Download",
-                                    data=_vbytes,
-                                    file_name=_ic_name,
-                                    mime="video/mp4",
-                                    key=f"dl_run_ic_{_ic_name}",
-                                    use_container_width=True,
-                                    icon=theme.icon_shortcode("[DL]"),
-                                )
+                                    st.download_button(
+                                        "Download",
+                                        data=_vf.read(),
+                                        file_name=_ic_name,
+                                        mime="video/mp4",
+                                        key=f"dl_run_ic_{_ic_name}",
+                                        use_container_width=True,
+                                        icon=theme.icon_shortcode("[DL]"),
+                                    )
                 else:
                     _reel_path = os.path.join(final_out_dir, out_filename)
                     if os.path.exists(_reel_path):
                         st.markdown("**Preview:**")
+                        st.video(_reel_path)
                         with open(_reel_path, "rb") as _vf:
-                            _reel_bytes = _vf.read()
-                        st.video(_reel_bytes)
-                        st.download_button(
-                            "Download reel",
-                            data=_reel_bytes,
-                            file_name=out_filename,
-                            mime="video/mp4",
-                            key="dl_run_reel",
-                            use_container_width=True,
-                            icon=theme.icon_shortcode("[DL]"),
-                        )
+                            st.download_button(
+                                "Download reel",
+                                data=_vf.read(),
+                                file_name=out_filename,
+                                mime="video/mp4",
+                                key="dl_run_reel",
+                                use_container_width=True,
+                                icon=theme.icon_shortcode("[DL]"),
+                            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1082,17 +1461,6 @@ with tab_ai:
                 "half_filter":      filters.get("half_filter", "Both halves"),
                 "filter_types":     filters.get("filter_types", []),
                 "progressive_only":   filters.get("progressive_only", False),
-                "key_passes_only":    filters.get("key_passes_only", False),
-                "crosses_only":       filters.get("crosses_only", False),
-                "long_balls_only":    filters.get("long_balls_only", False),
-                "switches_only":      filters.get("switches_only", False),
-                "diagonals_only":     filters.get("diagonals_only", False),
-                "through_balls_only": filters.get("through_balls_only", False),
-                "corners_only":       filters.get("corners_only", False),
-                "freekicks_only":     filters.get("freekicks_only", False),
-                "headers_only":       filters.get("headers_only", False),
-                "big_chances_only":         filters.get("big_chances_only", False),
-                "big_chances_created_only": filters.get("big_chances_created_only", False),
                 "xt_min":             filters.get("xt_min", 0.0),
                 "top_n":              int(filters.get("top_n", 0)) or None,
                 "successful_only":    filters.get("successful_only", False),
@@ -1101,32 +1469,10 @@ with tab_ai:
                 "minute_max":         filters.get("minute_max", None),
                 "pitch_zone_filter":  filters.get("pitch_zone_filter", ""),
                 "depth_zone_filter":  filters.get("depth_zone_filter", ""),
-                "own_goals_only":             filters.get("own_goals_only", False),
-                "gk_saves_only":              filters.get("gk_saves_only", False),
-                "penalties_only":             filters.get("penalties_only", False),
-                "volleys_only":               filters.get("volleys_only", False),
-                "chipped_only":               filters.get("chipped_only", False),
-                "direct_from_corner_only":    filters.get("direct_from_corner_only", False),
-                "left_foot_only":             filters.get("left_foot_only", False),
-                "right_foot_only":            filters.get("right_foot_only", False),
-                "fast_break_only":            filters.get("fast_break_only", False),
-                "touch_in_box_only":          filters.get("touch_in_box_only", False),
-                "assist_throughball_only":    filters.get("assist_throughball_only", False),
-                "assist_cross_only":          filters.get("assist_cross_only", False),
-                "assist_corner_only":         filters.get("assist_corner_only", False),
-                "assist_freekick_only":       filters.get("assist_freekick_only", False),
-                "intentional_assists_only":   filters.get("intentional_assists_only", False),
-                "yellow_cards_only":          filters.get("yellow_cards_only", False),
-                "red_cards_only":             filters.get("red_cards_only", False),
-                "second_yellow_only":         filters.get("second_yellow_only", False),
-                "nutmegs_only":               filters.get("nutmegs_only", False),
-                "success_in_box_only":        filters.get("success_in_box_only", False),
-                "deep_completion_only":       filters.get("deep_completion_only", False),
-                "box_entry_pass_only":        filters.get("box_entry_pass_only", False),
-                "box_entry_carry_only":       filters.get("box_entry_carry_only", False),
-                "final_third_entry_pass_only":  filters.get("final_third_entry_pass_only", False),
-                "final_third_entry_carry_only": filters.get("final_third_entry_carry_only", False),
             }
+            # Auto-generate qualifier flags from the single source of truth
+            for flag in INTENT_FLAG_TO_BOOL_COL:
+                ai_config[flag] = filters.get(flag, False)
 
             ai_windows = _compute_windows_from_config(ai_config)
             st.session_state.pop("_ai_video_output", None)

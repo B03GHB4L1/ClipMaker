@@ -1,10 +1,10 @@
 @echo off
-title ClipMaker v1.2 by B4L1
+title ClipMaker v1.2.1 by B4L1
 cd /d "%~dp0"
 
 echo.
 echo  ================================================
-echo    ClipMaker v1.2 by B4L1 - Starting up...
+echo    ClipMaker v1.2.1 by B4L1 - Starting up...
 echo  ================================================
 echo.
 
@@ -175,14 +175,14 @@ if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
 :: Runs silently — user never sees this happen
 :: -----------------------------------------------
 set "DESKTOP=%USERPROFILE%\Desktop"
-set "SHORTCUT=%DESKTOP%\ClipMaker v1.2.lnk"
+set "SHORTCUT=%DESKTOP%\ClipMaker v1.2.1.lnk"
 if not exist "%SHORTCUT%" (
     powershell -NoProfile -NonInteractive -Command ^
         "$s=(New-Object -COM WScript.Shell).CreateShortcut('%SHORTCUT%');" ^
         "$s.TargetPath='%~dp0Launch_ClipMaker.bat';" ^
         "$s.WorkingDirectory='%~dp0';" ^
         "$s.IconLocation='%~dp0ClipMaker.ico';" ^
-        "$s.Description='ClipMaker v1.2 by B4L1';" ^
+        "$s.Description='ClipMaker v1.2.1 by B4L1';" ^
         "$s.Save()" >nul 2>&1
     echo  [OK] Shortcut added to your Desktop.
 )
@@ -190,7 +190,7 @@ if not exist "%SHORTCUT%" (
 :: -----------------------------------------------
 :: STEP 5 - Launch
 :: -----------------------------------------------
-echo  [..] Opening ClipMaker v1.2 in your browser...
+echo  [..] Opening ClipMaker v1.2.1 in your browser...
 echo.
 echo  Note: A browser tab will open automatically.
 echo  Keep this window open while using the app.

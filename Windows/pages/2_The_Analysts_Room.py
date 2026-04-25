@@ -8,10 +8,10 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
-from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map
+from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map, pressing_map
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
-    detect_progressive_chains, get_chain_actions,
+    detect_progressive_chains, detect_possession_carries, detect_press_wins, get_chain_actions,
 )
 
 try:
@@ -26,7 +26,7 @@ def _h(s):
     return _re.sub(r'\s{2,}', ' ', s.replace('\n', ' ')).strip()
 
 st.set_page_config(
-    page_title="The Analyst's Room",
+    page_title="The Analyst's Room — ClipMaker v1.2.1",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -54,7 +54,7 @@ PERIOD_MAP = {
 }
 
 DEF_ACTIONS = {"Tackle", "Interception", "Clearance", "Aerial", "Block",
-               "Challenge", "Dispossessed"}
+               "Challenge", "Dispossessed", "Error"}
 
 GK_ACTIONS = {"Punch", "Claim", "KeeperSweeper", "KeeperPickup", "PenaltyFaced"}
 
@@ -99,17 +99,85 @@ DEF_LABEL = {
     "Tackle": "[TKL] TACKLE", "Interception": "[INT] INTERCEPTION",
     "Clearance": "[CLR] CLEARANCE", "Aerial": "[AER] AERIAL",
     "Block": "[BLK] BLOCK", "Challenge": "[CHL] CHALLENGE",
-    "Dispossessed": "[DIS] DISPOSSESSED",
+    "Dispossessed": "[DIS] DISPOSSESSED", "Error": "[ERR] ERROR",
 }
 DEF_CLASS = {
     "Tackle": "badge badge-tackle", "Interception": "badge badge-interc",
     "Clearance": "badge badge-clear", "Aerial": "badge badge-aerial",
     "Block": "badge badge-block", "Challenge": "badge badge-challenge",
-    "Dispossessed": "badge badge-disp",
+    "Dispossessed": "badge badge-disp", "Error": "badge badge-missed",
 }
 
 HOME_COLOR = "#7ab4ff"
 AWAY_COLOR = "#ff7351"
+PLOTLY_EXPORT_BRAND = "ClipMaker v1.2.1 · @B03GHB4L1"
+PLOTLY_EXPORT_CONFIG = {
+    "displayModeBar": True,
+    "displaylogo": False,
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "clipmaker_plot",
+        "scale": 2,
+    },
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+}
+
+
+def brand_plotly_export(fig):
+    fig.update_layout(
+        paper_bgcolor="rgba(11,14,20,0)",
+        plot_bgcolor="#071008",
+        font=dict(color="#ecedf6", family="Space Grotesk, Inter, sans-serif"),
+        hoverlabel=dict(
+            bgcolor="#10131a",
+            bordercolor="rgba(142,255,113,0.35)",
+            font=dict(color="#ecedf6"),
+        ),
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(142,255,113,0.08)",
+        zerolinecolor="rgba(142,255,113,0.12)",
+        linecolor="rgba(142,255,113,0.18)",
+        tickfont=dict(color="#a9abb3"),
+    )
+    fig.update_yaxes(
+        gridcolor="rgba(142,255,113,0.08)",
+        zerolinecolor="rgba(142,255,113,0.12)",
+        linecolor="rgba(142,255,113,0.18)",
+        tickfont=dict(color="#a9abb3"),
+    )
+    fig.add_annotation(
+        text=PLOTLY_EXPORT_BRAND,
+        xref="paper",
+        yref="paper",
+        x=0.995,
+        y=0.015,
+        xanchor="right",
+        yanchor="bottom",
+        showarrow=False,
+        font=dict(size=10, color="rgba(240,240,240,0.62)", family="monospace"),
+        bgcolor="rgba(11,14,20,0.72)",
+        bordercolor="rgba(142,255,113,0.28)",
+        borderwidth=1,
+        borderpad=3,
+    )
+    return fig
+
+
+def defensive_actions_df(source_df):
+    defensive = source_df[source_df["type"].isin(DEF_ACTIONS)].copy()
+    if defensive.empty:
+        return defensive.reset_index(drop=True)
+
+    type_series = defensive["type"].astype(str)
+    if "depth_zone" in defensive.columns:
+        depth_series = defensive["depth_zone"].astype(str)
+    else:
+        depth_series = pd.Series("", index=defensive.index)
+
+    # Final-third aerials are usually attacking headed shots/passes, not defensive actions.
+    attacking_header_actions = type_series.eq("Aerial") & depth_series.eq("Attacking Third")
+    return defensive[~attacking_header_actions].copy().reset_index(drop=True)
 
 # =============================================================================
 # SESSION STATE
@@ -144,6 +212,7 @@ for _k, _v in [
     ("gk_selected_idx", None), ("gk_last_click_ts", None),
     ("gk_clip_path", None), ("gk_clip_key", None), ("gk_clip_error", None),
     ("bu_selected_chain_idx", None), ("bu_clip_path", None), ("bu_clip_key", None), ("bu_clip_error", None),
+    ("press_selected_idx", None), ("press_clip_path", None), ("press_clip_key", None), ("press_clip_error", None),
     ("comp_p1_reel_path", None), ("comp_p1_reel_key", None), ("comp_p1_reel_error", None),
     ("comp_p2_reel_path", None), ("comp_p2_reel_key", None), ("comp_p2_reel_error", None),
 ]:
@@ -170,7 +239,7 @@ if data_loaded:
             df_all = df_all[df_all["period"] != "PenaltyShootout"].copy()
         shots_df         = df_all[df_all["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
         passes_df        = df_all[df_all["type"] == "Pass"].copy().reset_index(drop=True)
-        def_df           = df_all[df_all["type"].isin(DEF_ACTIONS)].copy().reset_index(drop=True)
+        def_df           = defensive_actions_df(df_all)
         dribble_carry_df = df_all[df_all["type"].isin({"TakeOn", "Carry"})].copy().reset_index(drop=True)
         gk_df            = df_all[df_all["type"].isin(GK_ACTIONS)].copy().reset_index(drop=True)
         # Re-attribute own goals to the benefiting team so all filtering/display is correct
@@ -378,7 +447,7 @@ def render_def_stats(df):
     cells  = "".join(
         f'<div class="cm-stats-cell"><div class="cm-stats-label">{t}</div>'
         f'<div class="cm-stats-split"><span class="cm-stats-home">{counts.get(t, 0)}</span></div></div>'
-        for t in ["Tackle", "Interception", "Clearance", "Aerial", "Block", "Challenge", "Dispossessed"]
+        for t in ["Tackle", "Interception", "Clearance", "Aerial", "Block", "Challenge", "Dispossessed", "Error"]
         if counts.get(t, 0) > 0
     )
     st.markdown(_h(f'<div class="cm-stats-bar">{cells}</div>'), unsafe_allow_html=True)
@@ -398,6 +467,26 @@ def _filter_by_pitch_zone(df, selected_zone):
 
 
 # =============================================================================
+# CLIP HELPERS
+# =============================================================================
+def _delete_file(path):
+    """Silently delete a file if it exists (temp clip cleanup)."""
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _clear_clip(prefix):
+    """Delete the temp clip file and wipe all clip state for a given panel prefix."""
+    _delete_file(st.session_state.get(f"{prefix}_clip_path"))
+    st.session_state[f"{prefix}_clip_path"]  = None
+    st.session_state[f"{prefix}_clip_key"]   = None
+    st.session_state[f"{prefix}_clip_error"] = None
+
+
+# =============================================================================
 # WATCH PANEL
 # =============================================================================
 def render_watch_panel(row, prefix, label_fn):
@@ -405,42 +494,86 @@ def render_watch_panel(row, prefix, label_fn):
     second_val = row.get("second", 0)
     period_val = row.get("period", "FirstHalf")
     player_val = row.get("playerName", "")
-    event_key  = f"{minute_val}_{second_val}_{period_val}_{player_val}"
     clip_label = theme.ui_html(f"[CLIP]  {player_val} · {fmt_time(minute_val, second_val, period_val)}")
+
+    # Initialise per-panel buffer sliders from global defaults (only on first render)
+    _glob_before, _glob_after = _analysts_room_buffers()
+    _bk, _ak = f"{prefix}_clip_before", f"{prefix}_clip_after"
+    if _bk not in st.session_state:
+        st.session_state[_bk] = _glob_before
+    if _ak not in st.session_state:
+        st.session_state[_ak] = _glob_after
+
+    st.markdown(f"<div><strong>{clip_label}</strong></div>", unsafe_allow_html=True)
+
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        _before = st.slider("Before (s)", 0, 60, key=_bk, label_visibility="visible")
+    with _sc2:
+        _after  = st.slider("After (s)",  0, 60, key=_ak, label_visibility="visible")
+
+    # Cache key encodes both the event identity and the current buffer values
+    event_key = f"{minute_val}_{second_val}_{period_val}_{player_val}"
+    full_key  = f"{event_key}__{_before}_{_after}"
 
     existing_clip = st.session_state.get(f"{prefix}_clip_path")
     existing_key  = st.session_state.get(f"{prefix}_clip_key")
     clip_error    = st.session_state.get(f"{prefix}_clip_error")
 
-    st.markdown(f"<div><strong>{clip_label}</strong></div>", unsafe_allow_html=True)
+    # same_event: a clip exists for this event but with different buffer values
+    same_event = (
+        isinstance(existing_key, str)
+        and existing_key.startswith(event_key + "__")
+        and existing_key != full_key
+    )
 
-    if existing_key == event_key and existing_clip and os.path.exists(existing_clip):
-        with open(existing_clip, "rb") as _vf:
-            st.video(_vf.read())
+    if existing_key == full_key and existing_clip and os.path.exists(existing_clip):
+        st.video(existing_clip)
+        safe_name = re.sub(r"[^\w\-.]", "_", f"{player_val}_{minute_val}.mp4")
         with open(existing_clip, "rb") as _dl:
-            safe_name = re.sub(r"[^\w\-.]", "_", f"{player_val}_{minute_val}.mp4")
             st.download_button("Download clip", data=_dl.read(),
                                file_name=safe_name, mime="video/mp4",
                                use_container_width=True,
                                icon=theme.icon_shortcode("[DL]"))
-    elif clip_error and existing_key == event_key:
+        if st.button("Clear preview", use_container_width=True, key=f"{prefix}_clear",
+                     icon=theme.icon_shortcode("[X]")):
+            _clear_clip(prefix)
+            st.rerun()
+    elif clip_error and existing_key == full_key:
         st.error(f"Could not cut clip: {clip_error}")
         if st.button("Retry", use_container_width=True, key=f"{prefix}_retry", icon=theme.icon_shortcode("[RETRY]")):
             st.session_state[f"{prefix}_clip_error"] = None
             st.session_state[f"{prefix}_clip_key"]   = None
             st.rerun()
+    elif same_event:
+        # Buffer changed while a clip was showing — auto re-cut immediately
+        with st.spinner("Re-cutting clip…"):
+            try:
+                new_path = cut_clip(minute_val, second_val, period_val,
+                                    before=_before, after=_after)
+                _delete_file(existing_clip)
+                st.session_state[f"{prefix}_clip_path"]  = new_path
+                st.session_state[f"{prefix}_clip_key"]   = full_key
+                st.session_state[f"{prefix}_clip_error"] = None
+                st.rerun()
+            except Exception as e:
+                st.session_state[f"{prefix}_clip_error"] = str(e)
+                st.session_state[f"{prefix}_clip_key"]   = full_key
+                st.rerun()
     else:
         if st.button("Watch", type="primary", use_container_width=True, key=f"{prefix}_watch", icon=theme.icon_shortcode("[RUN]")):
             with st.spinner("Cutting clip…"):
                 try:
-                    path = cut_clip(minute_val, second_val, period_val)
-                    st.session_state[f"{prefix}_clip_path"]  = path
-                    st.session_state[f"{prefix}_clip_key"]   = event_key
+                    new_path = cut_clip(minute_val, second_val, period_val,
+                                        before=_before, after=_after)
+                    _delete_file(existing_clip)
+                    st.session_state[f"{prefix}_clip_path"]  = new_path
+                    st.session_state[f"{prefix}_clip_key"]   = full_key
                     st.session_state[f"{prefix}_clip_error"] = None
                     st.rerun()
                 except Exception as e:
                     st.session_state[f"{prefix}_clip_error"] = str(e)
-                    st.session_state[f"{prefix}_clip_key"]   = event_key
+                    st.session_state[f"{prefix}_clip_key"]   = full_key
                     st.rerun()
 
 # handle_click: only updates state, no rerun — fragment handles re-execution
@@ -480,13 +613,14 @@ if not data_loaded:
 # =============================================================================
 # TABS
 # =============================================================================
-tab_shot, tab_pass, tab_def, tab_dc, tab_gk, tab_bu, tab_comp = st.tabs([
+tab_shot, tab_pass, tab_def, tab_dc, tab_gk, tab_bu, tab_press, tab_comp = st.tabs([
     "◉ Shot Map",
     "◎ Pass Map",
     "■ Defensive Actions",
     "◈ Dribbles & Carries",
     "⊞ Goalkeeper",
     "↗ Build-Up",
+    "◆ Pressing",
     "⇄ Comparison",
 ])
 
@@ -728,16 +862,30 @@ def render_shot_tab():
         is_lfoot    = safe_bool(row.get("is_left_foot", ""))
         is_rfoot    = safe_bool(row.get("is_right_foot", ""))
         is_fb       = safe_bool(row.get("is_fast_break", ""))
+        is_scramble   = safe_bool(row.get("is_scramble", ""))
+        is_corner_sit = safe_bool(row.get("is_corner_situation", ""))
+        is_indiv      = safe_bool(row.get("is_individual_play", ""))
+        is_foll_drib  = safe_bool(row.get("is_follows_dribble", ""))
+        is_strong     = safe_bool(row.get("is_shot_strong", ""))
+        is_weak       = safe_bool(row.get("is_shot_weak", ""))
+        is_woodwork   = safe_bool(row.get("is_hit_woodwork", ""))
         extras      = " · ".join(x for x in [
-            "Header"            if is_head    else "",
-            "Big Chance"        if is_bc      else "",
-            "Penalty"           if is_penalty else "",
-            "Volley"            if is_volley  else "",
-            "Chipped"           if is_chipped else "",
-            "Direct from Corner" if is_dcfc   else "",
-            "Left Foot"         if is_lfoot   else "",
-            "Right Foot"        if is_rfoot   else "",
-            "Fast Break"        if is_fb      else "",
+            "Header"            if is_head       else "",
+            "Big Chance"        if is_bc         else "",
+            "Penalty"           if is_penalty    else "",
+            "Volley"            if is_volley     else "",
+            "Chipped"           if is_chipped    else "",
+            "Direct from Corner" if is_dcfc      else "",
+            "Left Foot"         if is_lfoot      else "",
+            "Right Foot"        if is_rfoot      else "",
+            "Fast Break"        if is_fb         else "",
+            "Scramble"          if is_scramble   else "",
+            "2nd Phase"         if is_corner_sit else "",
+            "Solo"              if is_indiv      else "",
+            "After Dribble"     if is_foll_drib  else "",
+            "Strong"            if is_strong     else "",
+            "Weak"              if is_weak       else "",
+            "Woodwork"          if is_woodwork   else "",
         ] if x) or "—"
         badge_cls  = OUTCOME_CLASS.get(s_type, "badge badge-missed")
         badge_lbl  = theme.ui_html(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"))
@@ -866,6 +1014,13 @@ def render_pass_tab():
             "Assist (corner)":     "is_assist_corner",
             "Assist (free kick)":  "is_assist_freekick",
             "Touch in box":        "is_touch_in_box",
+            "Goal kicks":          "is_goal_kick",
+            "Keeper throws":       "is_keeper_throw",
+            "Pull backs":          "is_pull_back",
+            "Lay-offs":            "is_lay_off",
+            "Flick-ons":           "is_flick_on",
+            "Assists":             "is_assist",
+            "Throw ins":           "is_throw_in",
         }
         available_pass_types = {k: v for k, v in bool_cols_present.items() if v in passes_df.columns}
         pass_type_sel = st.radio("Pass type", ["All passes"] + list(available_pass_types.keys()),
@@ -1128,21 +1283,10 @@ def render_def_tab():
                            key="dm_player")
     handle_click(raw_dm, "dm")
 
-    legend_items = " &nbsp;".join(
-        f"<span style='font-size:13px'>{icon}</span> <span style='color:#adaaaa;font-size:11px'>{label}</span>"
-        for label, icon in [
-            ("Tackle", theme.icon_span("[TKL]", size=14)), ("Interception", theme.icon_span("[INT]", size=14)), ("Clearance", theme.icon_span("[CLR]", size=14)),
-            ("Aerial", theme.icon_span("[AER]", size=14)), ("Block", theme.icon_span("[BLK]", size=14)), ("Challenge", theme.icon_span("[CHL]", size=14)), ("Dispossessed", theme.icon_span("[DIS]", size=14)),
-        ]
-        if label in player_def["type"].values
-    )
-    st.markdown(f"<div style='margin-top:-4px;margin-bottom:8px'>{legend_items}</div>",
-                unsafe_allow_html=True)
-
     def def_label(row):
         icon = {"Tackle": "Ⓣ", "Interception": "Ⓘ", "Clearance": "Ⓒ",
             "Aerial": "Ⓐ", "Block": "Ⓑ", "Challenge": "Ⓗ",
-            "Dispossessed": "Ⓓ"}.get(row.get("type", ""), "●")
+            "Dispossessed": "Ⓓ", "Error": "Ⓔ"}.get(row.get("type", ""), "●")
         return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {row.get('type','')}  ({row.get('outcomeType','')})"
 
     dm_indices = list(player_def.index)
@@ -1168,6 +1312,12 @@ def render_def_tab():
         atype  = row.get("type", "")
         badge_c = DEF_CLASS.get(atype, "badge badge-clear")
         badge_l = theme.ui_html(DEF_LABEL.get(atype, atype.upper()))
+        _def_ctx_badges = " ".join(filter(None, [
+            theme.ui_html("[LAST LINE]")   if safe_bool(row.get("is_last_line", False)) else "",
+            theme.ui_html("[FORCED OUT]")  if safe_bool(row.get("is_forced_out", False)) else "",
+            theme.ui_html("[LED TO SHOT]") if safe_bool(row.get("is_error_led_to_shot", False)) else "",
+            theme.ui_html("[LED TO GOAL]") if safe_bool(row.get("is_error_led_to_goal", False)) else "",
+        ]))
 
         st.divider()
         dc, vc = st.columns([1, 1], gap="large")
@@ -1175,7 +1325,7 @@ def render_def_tab():
             st.markdown(_h(f"""<div class="cm-event-panel">
                 <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
                 <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
-                <span class="{badge_c}">{badge_l}</span>
+                <span class="{badge_c}">{badge_l}</span>{" " + _def_ctx_badges if _def_ctx_badges else ""}
                 <div style="margin-top:12px">
                     <div class="cm-detail-label">Outcome</div>
                     <div class="cm-detail-value">{row.get('outcomeType','—')}</div>
@@ -1394,7 +1544,7 @@ def render_gk_tab():
                                  label_visibility="collapsed", key="gk_player_sel")
 
     gk_mode = st.radio(
-        "Mode", ["GK Actions", "Shots Faced"],
+        "Mode", ["GK Actions", "Shots Faced", "Distribution"],
         horizontal=True, key="gk_mode_radio", label_visibility="collapsed",
     )
 
@@ -1554,6 +1704,139 @@ def render_gk_tab():
                 render_watch_panel(row, "gk", sf_label)
         return
 
+    # ── DISTRIBUTION MODE ─────────────────────────────────────────────────────
+    if gk_mode == "Distribution":
+        if passes_df is None or passes_df.empty:
+            st.info("No pass data available.")
+            return
+
+        DIST_COLS = ["is_goal_kick", "is_keeper_throw", "is_gk_hoof", "is_gk_kick_from_hands"]
+        dist_passes = passes_df[
+            (passes_df["team"] == gk_team_sel) &
+            (passes_df["playerName"] == gk_player_sel)
+        ].copy()
+        avail_dist = [c for c in DIST_COLS if c in dist_passes.columns]
+        if avail_dist:
+            mask = dist_passes[avail_dist].apply(
+                lambda r: r.map(safe_bool).any(), axis=1
+            )
+            dist_passes = dist_passes[mask]
+        dist_passes = dist_passes.dropna(subset=["x", "endX"])
+
+        if dist_passes.empty:
+            st.info(f"No distribution passes (goal kicks, keeper throws, hoofs) found for {gk_player_sel}.")
+            return
+
+        total_dist = len(dist_passes)
+        endX_vals  = dist_passes["endX"].apply(lambda v: float(v or 0))
+        short_n = int((endX_vals < 40).sum())
+        med_n   = int(((endX_vals >= 40) & (endX_vals < 70)).sum())
+        long_n  = int((endX_vals >= 70).sum())
+        dist_cells = (
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Total</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{total_dist}</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Short (&lt;40)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(short_n/total_dist*100)}%</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Medium (40-70)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(med_n/total_dist*100)}%</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Long (&gt;70)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(long_n/total_dist*100)}%</span></div></div>'
+        )
+        st.markdown(_h(f'<div class="cm-stats-bar">{dist_cells}</div>'), unsafe_allow_html=True)
+
+        def _dist_type_label(row):
+            for label, col in [("Goal Kick", "is_goal_kick"), ("Keeper Throw", "is_keeper_throw"),
+                                ("GK Hoof", "is_gk_hoof"), ("GK Kick", "is_gk_kick_from_hands")]:
+                if col in row and safe_bool(row.get(col, False)):
+                    return label
+            return "Distribution"
+
+        dist_for_map = []
+        for idx, row in dist_passes.iterrows():
+            ex = float(row.get("endX", 0) or 0)
+            dist_for_map.append({
+                "df_idx": int(idx),
+                "playerName": str(row.get("playerName", "")),
+                "team": str(row.get("team", "")),
+                "is_home": bool(row.get("team", "") == home_team),
+                "minute": int(row.get("minute", 0)),
+                "second": int(row.get("second", 0)),
+                "period": str(row.get("period", "")),
+                "x": safe_float(row.get("x")),
+                "y": safe_float(row.get("y")),
+                "endX": safe_float(row.get("endX")),
+                "endY": safe_float(row.get("endY")),
+                "successful": str(row.get("outcomeType", "")).lower() == "successful",
+                "is_key_pass": False,
+                "is_cross": False,
+                "is_long_ball": ex >= 70,
+                "mode": "player",
+            })
+
+        gk_sel_idx = st.session_state.get("gk_selected_idx")
+        if gk_sel_idx is not None:
+            if st.button("Clear selection", key="gk_clear_sel"):
+                st.session_state["gk_selected_idx"] = None
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        raw_dist = pass_map(dist_for_map, home_team=home_team or "",
+                            away_team=away_team or "", selected_idx=gk_sel_idx,
+                            mode="player", key="gk_dist_map")
+        handle_click(raw_dist, "gk")
+
+        st.markdown("<div style='font-size:11px;color:#767575;margin-top:-4px'>"
+                    "<span style='color:#27ae60'>——</span> Successful &nbsp;"
+                    "<span style='color:#e74c3c'>——</span> Unsuccessful &nbsp;·&nbsp;"
+                    "Click to inspect</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        def dist_label(row):
+            ex   = float(row.get("endX", 0) or 0)
+            zone = "Short" if ex < 40 else ("Long" if ex >= 70 else "Med")
+            return f"▶  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {_dist_type_label(row)}  [{zone}]  endX={ex:.0f}"
+
+        dist_indices = list(dist_passes.index)
+        dist_labels  = ["— Select a distribution —"] + [dist_label(r) for _, r in dist_passes.iterrows()]
+        cur_dist     = st.session_state.get("gk_selected_idx")
+        dist_pos     = dist_indices.index(cur_dist) + 1 if cur_dist in dist_indices else 0
+        dist_chosen  = st.selectbox("Select a distribution", dist_labels, index=dist_pos, key="gk_dist_sel")
+
+        if dist_chosen != "— Select a distribution —":
+            new_dist_idx = dist_indices[dist_labels.index(dist_chosen) - 1]
+            if new_dist_idx != st.session_state.get("gk_selected_idx"):
+                st.session_state["gk_selected_idx"] = new_dist_idx
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        gk_sel = st.session_state.get("gk_selected_idx")
+        if gk_sel is not None and gk_sel in passes_df.index:
+            row    = passes_df.loc[gk_sel].to_dict()
+            team   = row.get("team", "")
+            accent = HOME_COLOR if team == home_team else AWAY_COLOR
+            ex     = float(row.get("endX", 0) or 0)
+            zone_l = "Short" if ex < 40 else ("Long" if ex >= 70 else "Medium")
+
+            st.divider()
+            gc, vc = st.columns([1, 1], gap="large")
+            with gc:
+                st.markdown(_h(f"""<div class="cm-event-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                    <span class="badge badge-clear">{theme.ui_html('[DIST] ' + zone_l.upper())}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Type · Distance</div>
+                        <div class="cm-detail-value">{_dist_type_label(row)} · endX {ex:.0f}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+            with vc:
+                render_watch_panel(row, "gk", dist_label)
+        return
+
     # ── GK ACTIONS MODE ───────────────────────────────────────────────────────
     player_gk = team_gk[team_gk["playerName"] == gk_player_sel].copy()
     player_gk = _filter_by_pitch_zone(player_gk, gk_pitch_zone)
@@ -1666,11 +1949,6 @@ def render_build_up_tab():
         st.info("No match data loaded.")
         return
 
-    has_prog = ("prog_pass" in df_all.columns) or ("prog_carry" in df_all.columns)
-    if not has_prog:
-        st.info("No progressive action columns (prog_pass / prog_carry) found in the data.")
-        return
-
     radio_opts = []
     if home_team: radio_opts.append(home_team)
     if away_team: radio_opts.append(away_team)
@@ -1680,16 +1958,35 @@ def render_build_up_tab():
     team_sel = st.radio("Team", radio_opts, horizontal=True, key="bu_team_radio",
                         label_visibility="collapsed")
 
-    min_chain = st.slider("Min actions per sequence", min_value=2, max_value=6, value=3,
-                          key="bu_min_chain")
+    mode_sel = st.radio(
+        "Mode",
+        ["Progressive Chains", "Possession Chains"],
+        horizontal=True,
+        key="bu_mode_radio",
+        help=(
+            "**Progressive Chains** — consecutive progressive passes/carries by the same team.\n\n"
+            "**Possession Chains** — full uninterrupted possession starting in own half, "
+            "ending when the ball is lost in the opponent's half or a shot is taken."
+        ),
+    )
 
-    all_chains  = detect_progressive_chains(df_all, min_chain_length=min_chain)
-    team_chains = [c for c in all_chains if c["team"] == team_sel]
-    # Only show progressive build-ups that start in the team's own half
-    # and finish in the opposition half.
-    entry_chains = [c for c in team_chains if c["starts_in_own_half"] and c["reaches_opp_half"]]
+    if mode_sel == "Progressive Chains":
+        has_prog = ("prog_pass" in df_all.columns) or ("prog_carry" in df_all.columns)
+        if not has_prog:
+            st.info("No progressive action columns (prog_pass / prog_carry) found in the data.")
+            return
+        min_chain = st.slider("Min actions per sequence", min_value=2, max_value=6, value=3,
+                              key="bu_min_chain")
+        all_chains   = detect_progressive_chains(df_all, min_chain_length=min_chain)
+        team_chains  = [c for c in all_chains if c["team"] == team_sel]
+        entry_chains = [c for c in team_chains if c["starts_in_own_half"] and c["reaches_opp_half"]]
+        _bu_fkey = f"{team_sel}|prog|{min_chain}"
+    else:
+        min_chain    = None
+        all_chains   = detect_possession_carries(df_all)
+        entry_chains = [c for c in all_chains if c["team"] == team_sel]
+        _bu_fkey = f"{team_sel}|carries"
 
-    _bu_fkey = f"{team_sel}|{min_chain}"
     if st.session_state.get("_bu_last_filter") != _bu_fkey:
         st.session_state["_bu_last_filter"]       = _bu_fkey
         st.session_state["bu_selected_chain_idx"] = None
@@ -1698,20 +1995,35 @@ def render_build_up_tab():
         st.session_state["bu_clip_error"]         = None
 
     if not entry_chains:
-        st.info(f"No build-up sequences starting in the team's own half and ending in the opposition half ({min_chain}+ actions) were found for {team_sel}.")
+        if mode_sel == "Progressive Chains":
+            st.info(f"No progressive build-up sequences ({min_chain}+ actions) from own half to opposition half found for {team_sel}.")
+        else:
+            st.info(f"No possession chain sequences (own half → loss in opp half or shot) found for {team_sel}.")
         return
 
-    avg_actions  = sum(c["action_count"] for c in entry_chains) / len(entry_chains)
-    direct_count = sum(1 for c in entry_chains if c["action_count"] <= 3)
-    direct_pct   = direct_count / len(entry_chains) * 100
-
+    avg_actions = sum(c["action_count"] for c in entry_chains) / len(entry_chains)
     m1, m2, m3 = st.columns(3)
-    m1.metric("Build-Up Entries", len(entry_chains),
-              help="Sequences that start in the team's own half and finish in the opposition half")
-    m2.metric("Avg Actions", f"{avg_actions:.1f}",
-              help="Average number of consecutive progressive actions per entry sequence")
-    m3.metric("Direct %", f"{direct_pct:.0f}%",
-              help="% of entries achieved in 3 or fewer progressive actions — higher = more direct play")
+
+    if mode_sel == "Progressive Chains":
+        direct_count = sum(1 for c in entry_chains if c["action_count"] <= 3)
+        direct_pct   = direct_count / len(entry_chains) * 100
+        m1.metric("Build-Up Entries", len(entry_chains),
+                  help="Sequences of consecutive progressive actions from own half to opposition half")
+        m2.metric("Avg Actions", f"{avg_actions:.1f}",
+                  help="Average number of consecutive progressive actions per sequence")
+        m3.metric("Direct %", f"{direct_pct:.0f}%",
+                  help="% of entries achieved in 3 or fewer progressive actions — higher = more direct")
+    else:
+        _SHOT_T = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost",
+                   "BlockedShot", "AttemptSaved", "Attempt"}
+        shot_count = sum(1 for c in entry_chains if c.get("terminal_type", "") in _SHOT_T)
+        shot_pct   = shot_count / len(entry_chains) * 100
+        m1.metric("Possession Chains", len(entry_chains),
+                  help="Uninterrupted possession sequences starting in own half, ending with ball lost or shot in opp half")
+        m2.metric("Avg Actions", f"{avg_actions:.1f}",
+                  help="Average number of team events per possession chain")
+        m3.metric("Shot %", f"{shot_pct:.0f}%",
+                  help="% of carries that ended with a shot — higher = more clinical progression")
 
     team_chains = entry_chains
 
@@ -1783,13 +2095,143 @@ def render_build_up_tab():
 
         if _bu_clip and os.path.exists(_bu_clip):
             st.divider()
-            with open(_bu_clip, "rb") as _vf:
-                st.video(_vf.read())
+            st.video(_bu_clip)
         elif _bu_err:
             st.error(f"Could not cut clip: {_bu_err}")
 
         if sel_idx is None and not _bu_clip and not _bu_err:
             st.caption("Select a sequence on the left to inspect it, or press ▶ to cut a clip.")
+
+
+# =============================================================================
+# TAB — PRESSING & HIGH TURNOVERS
+# =============================================================================
+@st.fragment
+def render_pressing_tab():
+    if df_all is None or df_all.empty:
+        st.info("No match data loaded.")
+        return
+
+    radio_opts = []
+    if home_team: radio_opts.append(home_team)
+    if away_team: radio_opts.append(away_team)
+    if not radio_opts:
+        radio_opts = sorted(df_all["team"].dropna().unique().tolist())[:2]
+
+    team_sel = st.radio("Team", radio_opts, horizontal=True, key="press_team_radio",
+                        label_visibility="collapsed")
+
+    zone_opts = ["All", "High Press (final third)", "Mid-Block"]
+    zone_sel  = st.radio("Zone", zone_opts, horizontal=True, key="press_zone_radio",
+                         label_visibility="collapsed")
+
+    _press_fkey = f"{team_sel}|{zone_sel}"
+    if st.session_state.get("_press_last_filter") != _press_fkey:
+        st.session_state["_press_last_filter"] = _press_fkey
+        st.session_state["press_selected_idx"] = None
+        st.session_state["press_clip_path"]    = None
+        st.session_state["press_clip_key"]     = None
+        st.session_state["press_clip_error"]   = None
+
+    all_wins = detect_press_wins(df_all, team_sel)
+    if zone_sel == "High Press (final third)":
+        wins = [w for w in all_wins if w["press_zone"] == "High"]
+    elif zone_sel == "Mid-Block":
+        wins = [w for w in all_wins if w["press_zone"] == "Mid"]
+    else:
+        wins = all_wins
+
+    if not wins:
+        st.info(f"No pressing wins found for {team_sel} with the current zone filter.")
+        return
+
+    total       = len(wins)
+    high_count  = sum(1 for w in all_wins if w["press_zone"] == "High")
+    high_pct    = high_count / len(all_wins) * 100 if all_wins else 0
+    avg_x       = sum(w["x"] for w in all_wins) / len(all_wins) if all_wins else 0
+    avg_press_height_m = avg_x / 100 * 105
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Press Wins", total if zone_sel == "All" else f"{total} / {len(all_wins)}",
+              help="Ball recoveries, interceptions and tackles in the opponent's half")
+    m2.metric("High Press %", f"{high_pct:.0f}%",
+              help="% of press wins in the opponent's final third")
+    m3.metric("Avg Press Height", f"{avg_press_height_m:.1f}m",
+              help="Average press-win distance from the team's own goal line")
+
+    is_home_team = (team_sel == home_team)
+
+    PERIOD_LABEL = {
+        "FirstHalf": "1H", "SecondHalf": "2H",
+        "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2",
+    }
+
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
+
+    # ── Full-width pressing map ────────────────────────────────────────────
+    pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main")
+
+    # ── Map click → video clip ─────────────────────────────────────────────
+    _map_state = st.session_state.get("press_map_main")
+    if _map_state and _map_state.get("selection") and _map_state["selection"].get("points"):
+        point = _map_state["selection"]["points"][0]
+        clicked_idx = point.get("customdata")
+        prev_clicked = st.session_state.get("_press_last_clicked_idx")
+        if clicked_idx is not None and str(clicked_idx) != str(prev_clicked):
+            st.session_state["_press_last_clicked_idx"] = clicked_idx
+            sel_win = next((w for w in wins if str(w["idx"]) == str(clicked_idx)), None)
+            if sel_win:
+                st.session_state["press_selected_idx"] = sel_win["idx"]
+                st.session_state["press_clip_path"]    = None
+                st.session_state["press_clip_key"]     = None
+                st.session_state["press_clip_error"]   = None
+                with st.spinner("Cutting clip…"):
+                    try:
+                        _path = cut_clip(sel_win["minute"], sel_win["second"], sel_win["period"])
+                        st.session_state["press_clip_path"] = _path
+                        st.session_state["press_clip_key"]  = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                    except Exception as _e:
+                        st.session_state["press_clip_error"] = str(_e)
+                        st.session_state["press_clip_key"]   = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                st.rerun()
+
+    # Re-read after potential rerun
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
+
+    # ── Selected press win detail ──────────────────────────────────────────
+    sel_win = next((w for w in wins if w["idx"] == sel_idx), None)
+    if sel_win:
+        st.divider()
+        p = PERIOD_LABEL.get(sel_win["period"], "")
+        dcol1, dcol2, dcol3 = st.columns(3)
+        dcol1.metric("Player", sel_win["playerName"])
+        dcol2.metric("Type", f"{sel_win['type']}  ·  {sel_win['minute']}'{sel_win['second']:02d}\" {p}")
+        dcol3.metric("Zone", "High Press" if sel_win["press_zone"] == "High" else "Mid-Block")
+
+    # ── Video player ───────────────────────────────────────────────────────
+    if _pr_clip and os.path.exists(_pr_clip):
+        st.video(_pr_clip)
+    elif _pr_err:
+        st.error(f"Could not cut clip: {_pr_err}")
+
+    # ── Clear button ───────────────────────────────────────────────────────
+    if sel_idx is not None or _pr_clip or _pr_err:
+        _, cc = st.columns([5, 1])
+        with cc:
+            if st.button("Clear", key="press_clear", use_container_width=True,
+                         icon=theme.icon_shortcode("[X]")):
+                st.session_state["press_selected_idx"]       = None
+                st.session_state["press_clip_path"]          = None
+                st.session_state["press_clip_key"]           = None
+                st.session_state["press_clip_error"]         = None
+                st.session_state["_press_last_clicked_idx"]  = None
+                st.rerun()
+    else:
+        st.caption("Click a press win marker on the pitch map to view the clip.")
 
 
 # =============================================================================
@@ -2231,14 +2673,15 @@ def render_comparison_tab():
         _p2_pct = _percentile_rank(_p2_raw, _pool)
 
     st.plotly_chart(
-        _build_radar_figure(
+        brand_plotly_export(_build_radar_figure(
             axes=_axes,
             p1_pct=_p1_pct, p2_pct=_p2_pct,
             p1_raw=_p1_raw, p2_raw=_p2_raw,
             player1=player1, player2=player2,
             color1="#E8FF4D", color2=AWAY_COLOR,
-        ),
+        )),
         use_container_width=True,
+        config=PLOTLY_EXPORT_CONFIG,
     )
 
     # ── Pitch Zone Activity ──────────────────────────────────────────────────
@@ -2253,12 +2696,12 @@ def render_comparison_tab():
                                marker=dict(color=color)))
         fig.update_layout(title=player_name, xaxis_title="Count",
                           height=320, margin=dict(t=40, b=0, l=0, r=0))
-        return fig
+        return brand_plotly_export(fig)
 
     with z1:
-        st.plotly_chart(_zone_bar(p1_ev, player1, HOME_COLOR), use_container_width=True)
+        st.plotly_chart(_zone_bar(p1_ev, player1, HOME_COLOR), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
     with z2:
-        st.plotly_chart(_zone_bar(p2_ev, player2, AWAY_COLOR), use_container_width=True)
+        st.plotly_chart(_zone_bar(p2_ev, player2, AWAY_COLOR), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
 
     # ── Top 5 Moments ─────────────────────────────────────────────────────────
     st.subheader("Top 5 Moments")
@@ -2354,8 +2797,7 @@ def render_comparison_tab():
         existing_error = st.session_state.get(f"{prefix}_reel_error")
 
         if existing_key == reel_key and existing_path and os.path.exists(existing_path):
-            with open(existing_path, "rb") as _vf:
-                st.video(_vf.read())
+            st.video(existing_path)
             with open(existing_path, "rb") as _dl:
                 st.download_button(
                     "Download reel", data=_dl.read(),
@@ -2411,6 +2853,9 @@ with tab_gk:
 
 with tab_bu:
     render_build_up_tab()
+
+with tab_press:
+    render_pressing_tab()
 
 with tab_comp:
     render_comparison_tab()
