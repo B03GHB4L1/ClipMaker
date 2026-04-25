@@ -727,6 +727,41 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                         )
                     ),
                     "is_final_third_entry_carry": False,
+                    # --- Throw-in / restart qualifiers ---
+                    "is_throw_in":           (type_name == "Pass" and ("ThrowIn" in qualifier_names or "Throw-in" in qualifier_names)),
+                    "is_goal_kick":          (type_name == "Pass" and "GoalKick" in qualifier_names),
+                    "is_keeper_throw":       (type_name == "Pass" and "KeeperThrow" in qualifier_names),
+                    "is_gk_hoof":            (type_name == "Pass" and "GKHoof" in qualifier_names),
+                    "is_gk_kick_from_hands": (type_name == "Pass" and "GKKickFromHands" in qualifier_names),
+                    # --- Pass pattern qualifiers ---
+                    "is_pull_back":          (type_name == "Pass" and "PullBack" in qualifier_names),
+                    "is_lay_off":            ("LayOff" in qualifier_names),
+                    "is_flick_on":           ("FlickOn" in qualifier_names),
+                    "is_launch":             (type_name == "Pass" and "Launch" in qualifier_names),
+                    "is_assist":             ("Assist" in qualifier_names),
+                    "is_attacking_pass":     (type_name == "Pass" and "AttackingPass" in qualifier_names),
+                    # --- Shot context qualifiers ---
+                    "is_scramble":           ("Scramble" in qualifier_names),
+                    "is_corner_situation":   ("CornerSituation" in qualifier_names),
+                    "is_throw_in_sp":        ("ThrowInSetPiece" in qualifier_names),
+                    "is_shot_strong":        ("Strong" in qualifier_names),
+                    "is_shot_weak":          ("Weak" in qualifier_names),
+                    "is_individual_play":    ("IndividualPlay" in qualifier_names),
+                    "is_follows_dribble":    ("FollowsADribble" in qualifier_names),
+                    "is_1on1":               ("1on1" in qualifier_names),
+                    "is_deflected":          ("Deflection" in qualifier_names),
+                    "is_hit_woodwork":       ("HitWoodwork" in qualifier_names),
+                    "is_back_heel":          ("BackHeel" in qualifier_names),
+                    "is_1on1_chip":          ("1on1Chip" in qualifier_names),
+                    "is_def_block":          ("DefBlock" in qualifier_names),
+                    # --- Defensive qualifiers ---
+                    "is_last_line":          ("LastLine" in qualifier_names),
+                    "is_forced_out":         ("OutOfPlay" in qualifier_names),
+                    "is_blocked_cross":      ("BlockedCross" in qualifier_names),
+                    # --- Error event qualifiers ---
+                    "is_error_led_to_shot":  (type_name == "Error" and "LeadingToAttempt" in qualifier_names),
+                    "is_error_led_to_goal":  (type_name == "Error" and "LeadingToGoal" in qualifier_names),
+                    # --- Original pass/shot/misc qualifiers ---
                     "is_through_ball": "Throughball" in qualifier_names,
                     "is_corner": "CornerTaken" in qualifier_names,
                     "is_freekick": "FreekickTaken" in qualifier_names,

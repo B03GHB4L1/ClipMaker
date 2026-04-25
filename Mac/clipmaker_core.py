@@ -29,24 +29,76 @@ DEFAULT_FOOTBALL_GLOSSARY = {
 }
 
 INTENT_FLAG_TO_BOOL_COL = {
-    "corners_only": "is_corner",
-    "freekicks_only": "is_freekick",
-    "headers_only": "is_header",
-    "big_chances_only": "is_big_chance_shot",
-    "big_chances_created_only": "is_big_chance",
-    "crosses_only": "is_cross",
-    "key_passes_only": "is_key_pass",
-    "through_balls_only": "is_through_ball",
-    "long_balls_only": "is_long_ball",
-    "switches_only": "is_switch_of_play",
-    "diagonals_only": "is_diagonal_long_ball",
-    "fast_break_only": "is_fast_break",
-    "touch_in_box_only": "is_touch_in_box",
+    # Pass types
+    "corners_only":                 "is_corner",
+    "freekicks_only":               "is_freekick",
+    "headers_only":                 "is_header",
+    "crosses_only":                 "is_cross",
+    "key_passes_only":              "is_key_pass",
+    "through_balls_only":           "is_through_ball",
+    "long_balls_only":              "is_long_ball",
+    "switches_only":                "is_switch_of_play",
+    "diagonals_only":               "is_diagonal_long_ball",
+    "touch_in_box_only":            "is_touch_in_box",
     "box_entry_pass_only":          "is_box_entry_pass",
     "deep_completion_only":         "is_deep_completion",
     "box_entry_carry_only":         "is_box_entry_carry",
     "final_third_entry_pass_only":  "is_final_third_entry_pass",
     "final_third_entry_carry_only": "is_final_third_entry_carry",
+    "throw_ins_only":               "is_throw_in",
+    "goal_kicks_only":              "is_goal_kick",
+    "keeper_throws_only":           "is_keeper_throw",
+    "gk_hoofs_only":                "is_gk_hoof",
+    "pull_backs_only":              "is_pull_back",
+    "lay_offs_only":                "is_lay_off",
+    "flick_ons_only":               "is_flick_on",
+    "launches_only":                "is_launch",
+    "assists_only":                 "is_assist",
+    "attacking_passes_only":        "is_attacking_pass",
+    # Shot subtypes
+    "own_goals_only":               "is_own_goal",
+    "gk_saves_only":                "is_gk_save",
+    "penalties_only":               "is_penalty",
+    "volleys_only":                 "is_volley",
+    "chipped_only":                 "is_chipped",
+    "direct_from_corner_only":      "is_direct_from_corner",
+    # Foot
+    "left_foot_only":               "is_left_foot",
+    "right_foot_only":              "is_right_foot",
+    # Assist subtypes
+    "assist_throughball_only":      "is_assist_throughball",
+    "assist_cross_only":            "is_assist_cross",
+    "assist_corner_only":           "is_assist_corner",
+    "assist_freekick_only":         "is_assist_freekick",
+    "intentional_assists_only":     "is_intentional_assist",
+    # Cards
+    "yellow_cards_only":            "is_yellow_card",
+    "red_cards_only":               "is_red_card",
+    "second_yellow_only":           "is_second_yellow",
+    # Dribble
+    "nutmegs_only":                 "is_nutmeg",
+    "success_in_box_only":          "is_success_in_box",
+    # Shot context
+    "big_chances_only":             "is_big_chance_shot",
+    "big_chances_created_only":     "is_big_chance",
+    "fast_break_only":              "is_fast_break",
+    "scrambles_only":               "is_scramble",
+    "corner_situations_only":       "is_corner_situation",
+    "shot_strong_only":             "is_shot_strong",
+    "shot_weak_only":               "is_shot_weak",
+    "individual_play_only":         "is_individual_play",
+    "follows_dribble_only":         "is_follows_dribble",
+    "one_on_one_only":              "is_1on1",
+    "deflected_only":               "is_deflected",
+    "woodwork_only":                "is_hit_woodwork",
+    "back_heel_only":               "is_back_heel",
+    # Defensive
+    "last_line_only":               "is_last_line",
+    "forced_out_only":              "is_forced_out",
+    "blocked_cross_only":           "is_blocked_cross",
+    # Errors
+    "errors_to_shot_only":          "is_error_led_to_shot",
+    "errors_to_goal_only":          "is_error_led_to_goal",
 }
 
 
@@ -101,18 +153,12 @@ def query_has_intent_alias(query_text, intent_key):
     return False
 
 def to_seconds(timestamp):
-    if not isinstance(timestamp, str):
-        timestamp = str(timestamp)
-    parts_raw = timestamp.strip().split(":")
-    try:
-        parts = [int(float(p)) for p in parts_raw]
-    except (ValueError, TypeError) as exc:
-        raise ValueError(f"Invalid timestamp: '{timestamp}' — use MM:SS or HH:MM:SS") from exc
+    parts = list(map(int, timestamp.strip().split(":")))
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     if len(parts) == 3:
         return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    raise ValueError(f"Invalid timestamp: '{timestamp}' — use MM:SS or HH:MM:SS")
+    raise ValueError(f"Invalid timestamp: '{timestamp}' â€” use MM:SS or HH:MM:SS")
 
 def assign_periods(df, period_column, fallback_row):
     if period_column:
@@ -331,6 +377,32 @@ def ensure_computed_event_flags(df):
             )
         ]
 
+    # ── Backfill new qualifier columns (scraper-level) that older CSVs lack ────
+    # These columns are set during scrape from WhoScored qualifier data.
+    # For older CSVs that were scraped before these columns existed, we default
+    # them to False so filters don't silently pass through all events.
+    _NEW_QUALIFIER_COLS = [
+        "is_throw_in", "is_goal_kick", "is_keeper_throw", "is_gk_hoof",
+        "is_gk_kick_from_hands", "is_pull_back", "is_lay_off", "is_flick_on",
+        "is_launch", "is_assist", "is_attacking_pass",
+        "is_scramble", "is_corner_situation", "is_throw_in_sp",
+        "is_shot_strong", "is_shot_weak", "is_individual_play",
+        "is_follows_dribble", "is_1on1", "is_deflected", "is_hit_woodwork",
+        "is_back_heel", "is_1on1_chip", "is_def_block",
+        "is_last_line", "is_forced_out", "is_blocked_cross",
+        "is_error_led_to_shot", "is_error_led_to_goal",
+    ]
+    for col in _NEW_QUALIFIER_COLS:
+        if col not in df.columns:
+            df[col] = False
+    # Also clean NaN values for all is_* columns (carry events may introduce them)
+    _BOOL_MAP = {"TRUE": True, "FALSE": False, "1": True, "0": False, "YES": True, "NO": False}
+    for col in df.columns:
+        if col.startswith("is_"):
+            if df[col].dtype == object or df[col].isna().any():
+                result = df[col].astype(str).str.strip().str.upper().map(_BOOL_MAP)
+                df[col] = result.where(result.notna(), other=False).astype(bool)
+
     return df
 
 
@@ -355,7 +427,7 @@ def apply_filters(df, config, log=None):
             if len(filtered) > 0:
                 df = filtered
             elif log:
-                log("  [WARN] progressive_only matched 0 events â€” ignoring flag")
+                log("  [WARN] progressive_only matched 0 events — ignoring flag")
 
     # Dedicated OR logic: all shots + key passes only (used by Attacking Chaos preset)
     if config.get("shots_and_key_passes_only") and "type" in df.columns and "is_key_pass" in df.columns:
@@ -364,68 +436,105 @@ def apply_filters(df, config, log=None):
         _kp_mask   = (df["type"] == "Pass") & df["is_key_pass"].astype(str).str.lower().isin(["true", "1", "yes"])
         df = df[_shot_mask | _kp_mask]
 
-    def _apply_qualifier(df, col):
-        """Apply a qualifier filter strictly to rows where the qualifier is true."""
-        is_true = df[col].astype(str).str.lower().isin(["true", "1", "yes"])
-        if not is_true.any():
-            return df  # qualifier has no True values â€” ignore it
-        return df[is_true]
+    def _apply_qualifier(df, col, label=""):
+        before = len(df)
+        result = df[df[col].fillna(False).astype(bool)]
+        if log and len(result) == 0 and before > 0:
+            log(f"  [WARN] Qualifier '{label or col}' matched 0/{before} events — column has no True values in filtered data")
+        return result
 
     if config.get("key_passes_only") and not config.get("shots_and_key_passes_only") and "is_key_pass" in df.columns:
-        df = _apply_qualifier(df, "is_key_pass")
+        df = _apply_qualifier(df, "is_key_pass", label="Key passes")
 
     # Special case: if both corners_only and freekicks_only are set, use OR logic
     if config.get("corners_only") and config.get("freekicks_only"):
         if "is_corner" in df.columns and "is_freekick" in df.columns:
             mask_corner = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"])
             mask_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"])
-            if (mask_corner | mask_freekick).any():
-                df = df[mask_corner | mask_freekick]
+            df = df[mask_corner | mask_freekick]
+            if log and len(df) == 0:
+                log("  [WARN] Qualifiers 'Corners/Freekicks' (OR) matched 0 events")
     else:
-        for flag, col in [
-            ("crosses_only",             "is_cross"),
-            ("long_balls_only",          "is_long_ball"),
-            ("switches_only",            "is_switch_of_play"),
-            ("diagonals_only",           "is_diagonal_long_ball"),
-            ("through_balls_only",       "is_through_ball"),
-            ("corners_only",             "is_corner"),
-            ("freekicks_only",           "is_freekick"),
-            ("headers_only",             "is_header"),
-            ("big_chances_only",         "is_big_chance_shot"),
-            ("big_chances_created_only", "is_big_chance"),
-            ("own_goals_only",           "is_own_goal"),
-            ("gk_saves_only",            "is_gk_save"),
-            ("penalties_only",           "is_penalty"),
-            ("volleys_only",             "is_volley"),
-            ("chipped_only",             "is_chipped"),
-            ("direct_from_corner_only",  "is_direct_from_corner"),
-            ("left_foot_only",           "is_left_foot"),
-            ("right_foot_only",          "is_right_foot"),
-            ("fast_break_only",          "is_fast_break"),
-            ("touch_in_box_only",        "is_touch_in_box"),
-            ("assist_throughball_only",  "is_assist_throughball"),
-            ("assist_cross_only",        "is_assist_cross"),
-            ("assist_corner_only",       "is_assist_corner"),
-            ("assist_freekick_only",     "is_assist_freekick"),
-            ("intentional_assists_only", "is_intentional_assist"),
-            ("yellow_cards_only",        "is_yellow_card"),
-            ("red_cards_only",           "is_red_card"),
-            ("second_yellow_only",       "is_second_yellow"),
-            ("nutmegs_only",             "is_nutmeg"),
-            ("success_in_box_only",      "is_success_in_box"),
-            ("box_entry_pass_only",          "is_box_entry_pass"),
-            ("deep_completion_only",         "is_deep_completion"),
-            ("box_entry_carry_only",         "is_box_entry_carry"),
-            ("final_third_entry_pass_only",  "is_final_third_entry_pass"),
-            ("final_third_entry_carry_only", "is_final_third_entry_carry"),
+        for flag, col, label in [
+            ("crosses_only",             "is_cross",                "Crosses"),
+            ("long_balls_only",          "is_long_ball",            "Long balls"),
+            ("switches_only",            "is_switch_of_play",       "Switches of play"),
+            ("diagonals_only",           "is_diagonal_long_ball",   "Diagonals"),
+            ("through_balls_only",       "is_through_ball",         "Through balls"),
+            ("corners_only",             "is_corner",               "Corners"),
+            ("freekicks_only",           "is_freekick",             "Freekicks"),
+            ("headers_only",             "is_header",               "Headers"),
+            ("big_chances_only",         "is_big_chance_shot",      "Big chances"),
+            ("big_chances_created_only", "is_big_chance",           "Big chances created"),
+            ("own_goals_only",           "is_own_goal",             "Own goal"),
+            ("gk_saves_only",            "is_gk_save",              "GK save"),
+            ("penalties_only",           "is_penalty",              "Penalties"),
+            ("volleys_only",             "is_volley",               "Volleys"),
+            ("chipped_only",             "is_chipped",              "Chipped shots"),
+            ("direct_from_corner_only",  "is_direct_from_corner",   "Direct from corner"),
+            ("left_foot_only",           "is_left_foot",            "Left foot"),
+            ("right_foot_only",          "is_right_foot",           "Right foot"),
+            ("fast_break_only",          "is_fast_break",           "Fast break"),
+            ("touch_in_box_only",        "is_touch_in_box",         "Touch in box"),
+            ("assist_throughball_only",  "is_assist_throughball",   "Assist (through ball)"),
+            ("assist_cross_only",        "is_assist_cross",         "Assist (cross)"),
+            ("assist_corner_only",       "is_assist_corner",        "Assist (corner)"),
+            ("assist_freekick_only",     "is_assist_freekick",      "Assist (free kick)"),
+            ("intentional_assists_only", "is_intentional_assist",   "Intentional assists"),
+            ("yellow_cards_only",        "is_yellow_card",          "Yellow card"),
+            ("red_cards_only",           "is_red_card",             "Red card"),
+            ("second_yellow_only",       "is_second_yellow",        "Second yellow"),
+            ("nutmegs_only",             "is_nutmeg",               "Nutmeg"),
+            ("success_in_box_only",      "is_success_in_box",       "Success in box"),
+            ("box_entry_pass_only",          "is_box_entry_pass",          "Box entry (pass)"),
+            ("deep_completion_only",         "is_deep_completion",         "Deep completion"),
+            ("box_entry_carry_only",         "is_box_entry_carry",         "Box entry (carry)"),
+            ("final_third_entry_pass_only",  "is_final_third_entry_pass",  "Final third entry (pass)"),
+            ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final third entry (carry)"),
+            ("throw_ins_only",               "is_throw_in",               "Throw ins"),
+            ("goal_kicks_only",              "is_goal_kick",              "Goal kicks"),
+            ("keeper_throws_only",           "is_keeper_throw",           "Keeper throws"),
+            ("gk_hoofs_only",                "is_gk_hoof",                "GK hoofs"),
+            ("pull_backs_only",              "is_pull_back",              "Pull backs"),
+            ("lay_offs_only",                "is_lay_off",                "Lay offs"),
+            ("flick_ons_only",               "is_flick_on",               "Flick ons"),
+            ("launches_only",                "is_launch",                 "Launches"),
+            ("assists_only",                 "is_assist",                 "Assists"),
+            ("attacking_passes_only",        "is_attacking_pass",         "Attacking passes"),
+            ("scrambles_only",               "is_scramble",               "Scrambles"),
+            ("corner_situations_only",       "is_corner_situation",       "Corner situations"),
+            ("shot_strong_only",             "is_shot_strong",            "Strong shots"),
+            ("shot_weak_only",               "is_shot_weak",              "Weak shots"),
+            ("individual_play_only",         "is_individual_play",        "Individual play"),
+            ("follows_dribble_only",         "is_follows_dribble",        "Follows dribble"),
+            ("one_on_one_only",              "is_1on1",                   "One on one"),
+            ("deflected_only",               "is_deflected",              "Deflected"),
+            ("woodwork_only",                "is_hit_woodwork",           "Woodwork"),
+            ("back_heel_only",               "is_back_heel",              "Back heel"),
+            ("last_line_only",               "is_last_line",              "Last line"),
+            ("forced_out_only",              "is_forced_out",             "Forced out"),
+            ("blocked_cross_only",           "is_blocked_cross",          "Blocked cross"),
+            ("errors_to_shot_only",          "is_error_led_to_shot",      "Error → shot"),
+            ("errors_to_goal_only",          "is_error_led_to_goal",      "Error → goal"),
         ]:
-            if config.get(flag) and col in df.columns:
-                df = _apply_qualifier(df, col)
+            if config.get(flag):
+                if col in df.columns:
+                    before = len(df)
+                    df = _apply_qualifier(df, col, label=label)
+                elif log:
+                    log(f"  [WARN] Qualifier '{label}' is active but column '{col}' not found in data — filter skipped")
 
     if config.get("successful_only") and "outcomeType" in df.columns:
+        before = len(df)
         df = df[df["outcomeType"] == "Successful"]
+        if log and len(df) == 0 and before > 0:
+            log("  [WARN] Qualifier 'Successful' matched 0 events")
     if config.get("unsuccessful_only") and "outcomeType" in df.columns:
+        before = len(df)
         df = df[df["outcomeType"] == "Unsuccessful"]
+        if log and len(df) == 0 and before > 0:
+            log("  [WARN] Qualifier 'Unsuccessful' matched 0 events")
+
 
     if config.get("xt_min") is not None and "xT" in df.columns:
         xt_min = config["xt_min"]
@@ -472,7 +581,7 @@ def run_clip_maker(config, log_queue, progress_queue):
         progress_queue.put({"current": current, "total": total, "elapsed": elapsed})
 
     try:
-        df = pd.read_csv(config["data_file"])
+        df = read_csv_safe(config["data_file"])
         for col in ["minute", "second", "type"]:
             if col not in df.columns:
                 raise ValueError(f"CSV missing column: '{col}'")
@@ -519,7 +628,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                       "assist_corner_only", "assist_freekick_only",
                       "intentional_assists_only", "yellow_cards_only",
                       "red_cards_only", "second_yellow_only",
-                      "nutmegs_only", "success_in_box_only"]:
+                       "nutmegs_only", "success_in_box_only",
+                       "throw_ins_only"]:
             if config.get(flag):
                 active_filters.append(flag)
         if active_filters:
@@ -576,7 +686,7 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         def get_video_duration(path, ffmpeg_bin):
             import subprocess, re
-            r = subprocess.run([ffmpeg_bin, "-analyzeduration", "100M", "-probesize", "100M", "-i", path], capture_output=True, text=True)
+            r = subprocess.run([ffmpeg_bin, "-i", path], capture_output=True, text=True)
             output = r.stdout + r.stderr
             m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", output)
             if not m:
@@ -852,9 +962,10 @@ def _read_csv_cached(path, _mtime):
     bool_cols = [c for c in df.columns if c.startswith("is_") or c in ("prog_pass", "prog_carry")]
     for col in bool_cols:
         if df[col].dtype == object:
-            df[col] = df[col].astype(str).str.strip().str.upper().map(
+            result = df[col].astype(str).str.strip().str.upper().map(
                 {"TRUE": True, "FALSE": False, "1": True, "0": False, "YES": True, "NO": False}
-            ).fillna(False).astype(bool)
+            )
+            df[col] = result.where(result.notna(), other=False).astype(bool)
     df = ensure_computed_event_flags(df)
     return df
 
@@ -1060,6 +1171,32 @@ def query_data(question, df):
         "is_second_yellow":      [r"\bsecond\s*yellow|\bdouble\s*yellow"],
         "is_nutmeg":             [r"\bnutmeg"],
         "is_success_in_box":     [r"\bsuccess.*in\s*(the\s*)?box|\btake.?on.*in\s*(the\s*)?box"],
+        "is_own_goal":           [r"\bown\s*goal|\bog\b"],
+        "is_throw_in":           [r"\bthrow\s*in|\bthrow[-]?in"],
+        "is_goal_kick":          [r"\bgoal\s*kick"],
+        "is_keeper_throw":       [r"\bkeeper\s*throw|\bgk\s*throw|\bgoalkeeper\s*throw"],
+        "is_gk_hoof":            [r"\bgk\s*hoof|\bgoalkeeper\s*hoof|\bkick\s*from\s*hands"],
+        "is_pull_back":          [r"\bpull[\s-]?back|\bcut[\s-]?back"],
+        "is_lay_off":            [r"\blay[\s-]?off|\blayoff"],
+        "is_flick_on":           [r"\bflick[\s-]?on|\bflickon"],
+        "is_launch":             [r"\blaunch(?:es)?\b|(?<!\w)hoof(?!\w)"],
+        "is_assist":             [r"(?<!\w)assists?\b(?!\s+(?:through\s*ball|cross|corner|free\s*kick))"],
+        "is_attacking_pass":     [r"\battacking\s*pass"],
+        "is_scramble":           [r"\bscramble"],
+        "is_corner_situation":   [r"\bcorner\s*situation|\bsecond\s*phase\s*corner"],
+        "is_shot_strong":        [r"\bstrong\s*shot"],
+        "is_shot_weak":          [r"\bweak\s*shot"],
+        "is_individual_play":    [r"\bindividual\s*play|\bsolo\s*effort"],
+        "is_follows_dribble":    [r"\bfollows?\s*dribble|\bafter\s+dribble"],
+        "is_1on1":               [r"\b1\s*(?:on\s*1|v\s*1)\b|\bone\s*on\s*one\b"],
+        "is_deflected":          [r"\bdeflect(?:ed|ion)\b"],
+        "is_hit_woodwork":       [r"\bwoodwork|\bhit\s+(?:the\s+)?(?:post|crossbar|bar)\b"],
+        "is_back_heel":          [r"\bback[\s-]?heel"],
+        "is_last_line":          [r"\blast\s*(?:line|man|defender)\b"],
+        "is_forced_out":         [r"\bforced\s*out|\bout\s*of\s*play\b"],
+        "is_blocked_cross":      [r"\bblocked\s*cross"],
+        "is_error_led_to_shot":  [r"\berror.*(?:leading|lead).*shot|\bmistake.*shot"],
+        "is_error_led_to_goal":  [r"\berror.*(?:leading|lead).*goal|\bmistake.*goal"],
     }
 
     TYPE_PATTERNS = {
@@ -1090,6 +1227,10 @@ def query_data(question, df):
         "keeper_pickup":  (r"\bkeeper\s*pick\s*up|\bpick\s*up\b", ["KeeperPickup"]),
         "keeper_sweeper": (r"\bsweeper\b|\bkeeper\s*sweep", ["KeeperSweeper"]),
         "corners_awarded":(r"\bcorner\s*awarded", ["CornerAwarded"]),
+        "errors":         (r"\berrors?\b|\bmistakes?\b", ["Error"]),
+        "foul_throws":    (r"\bfoul\s*throw", ["FoulThrowIn"]),
+        "caught_offside": (r"\bcaught\s*offside", ["CaughtOffside"]),
+        "blocked_passes": (r"\bblocked\s*pass", ["BlockedPass"]),
     }
 
     active_bools = {}
@@ -1427,6 +1568,39 @@ RULES:
     second yellow      -> df['is_second_yellow']==True
     nutmegs            -> df['is_nutmeg']==True
     success in box     -> df['is_success_in_box']==True
+    switches of play   -> df['is_switch_of_play']==True
+    diagonals          -> df['is_diagonal_long_ball']==True
+    own goals          -> df['is_own_goal']==True
+    box entry pass     -> df['is_box_entry_pass']==True
+    deep completion    -> df['is_deep_completion']==True
+    box entry carry    -> df['is_box_entry_carry']==True
+    final third entry pass  -> df['is_final_third_entry_pass']==True
+    final third entry carry -> df['is_final_third_entry_carry']==True
+    throw ins          -> df['is_throw_in']==True
+    goal kicks         -> df['is_goal_kick']==True
+    keeper throws      -> df['is_keeper_throw']==True
+    gk hoofs/hoofs     -> df['is_gk_hoof']==True
+    pull backs/cutbacks -> df['is_pull_back']==True
+    lay offs           -> df['is_lay_off']==True
+    flick ons          -> df['is_flick_on']==True
+    launches/hoofs     -> df['is_launch']==True
+    assists (any type) -> df['is_assist']==True
+    attacking passes   -> df['is_attacking_pass']==True
+    scrambles          -> df['is_scramble']==True
+    corner situations  -> df['is_corner_situation']==True
+    strong shots       -> df['is_shot_strong']==True
+    weak shots         -> df['is_shot_weak']==True
+    individual play/solo -> df['is_individual_play']==True
+    follows dribble    -> df['is_follows_dribble']==True
+    one on one/1v1     -> df['is_1on1']==True
+    deflected          -> df['is_deflected']==True
+    woodwork/post/crossbar -> df['is_hit_woodwork']==True
+    back heel          -> df['is_back_heel']==True
+    last line/man      -> df['is_last_line']==True
+    forced out/out of play -> df['is_forced_out']==True
+    blocked cross      -> df['is_blocked_cross']==True
+    error leading to shot -> df['is_error_led_to_shot']==True
+    error leading to goal -> df['is_error_led_to_goal']==True
 - shots = ONLY df['type'].isin(['MissedShot','SavedShot','Goal','ShotOnPost','BlockedShot'])
 - passes = ONLY df['type']=='Pass'
 - saves = ONLY df['type']=='Save'
@@ -1590,7 +1764,9 @@ BOOL_COL_TO_FLAG = {
     "is_box_entry_carry":           "box_entry_carry_only",
     "is_final_third_entry_pass":    "final_third_entry_pass_only",
     "is_final_third_entry_carry":   "final_third_entry_carry_only",
+    "is_throw_in":                  "throw_ins_only",
 }
+
 
 def parse_filters(instruction, df, available_types):
     import re as _re
@@ -1623,6 +1799,11 @@ def parse_filters(instruction, df, available_types):
     bool_flag_docs = "\n".join(
         f'  - Set "{flag}": true for {col.replace("is_","").replace("_"," ")} events'
         for col, flag in active_bool_cols.items()
+    )
+
+    # Auto-generate JSON template qualifier entries from the single source of truth
+    _json_qualifier_entries = ",\n  ".join(
+        f'"{flag}": false' for flag in sorted(INTENT_FLAG_TO_BOOL_COL.keys())
     )
 
     system = f"""You are a football video analysis assistant.
@@ -1699,9 +1880,39 @@ IMPORTANT RULES:
 - For second yellow cards: set "second_yellow_only": true and filter_types=["Card"]
 - For nutmegs: set "nutmegs_only": true (NOT filter_types)
 - For successful take-ons in the box: set "success_in_box_only": true (NOT filter_types)
+- For box entry passes: set "box_entry_pass_only": true (NOT filter_types)
+- For deep completions: set "deep_completion_only": true (NOT filter_types)
+- For box entry carries: set "box_entry_carry_only": true (NOT filter_types)
+- For final third entry passes: set "final_third_entry_pass_only": true (NOT filter_types)
+- For final third entry carries: set "final_third_entry_carry_only": true (NOT filter_types)
+- For throw ins: set "throw_ins_only": true (NOT filter_types)
+- For goal kicks: set "goal_kicks_only": true (NOT filter_types)
+- For keeper throws: set "keeper_throws_only": true (NOT filter_types)
+- For GK hoofs/kicks from hands: set "gk_hoofs_only": true (NOT filter_types)
+- For pull backs/cutbacks: set "pull_backs_only": true (NOT filter_types)
+- For lay offs: set "lay_offs_only": true (NOT filter_types)
+- For flick ons: set "flick_ons_only": true (NOT filter_types)
+- For launches: set "launches_only": true (NOT filter_types)
+- For assists (any type of assist): set "assists_only": true (NOT filter_types)
+- For attacking passes: set "attacking_passes_only": true (NOT filter_types)
+- For scrambles: set "scrambles_only": true (NOT filter_types)
+- For corner situations/second phase: set "corner_situations_only": true (NOT filter_types)
+- For strong shots: set "shot_strong_only": true (NOT filter_types)
+- For weak shots: set "shot_weak_only": true (NOT filter_types)
+- For individual play/solo effort: set "individual_play_only": true (NOT filter_types)
+- For actions following a dribble: set "follows_dribble_only": true (NOT filter_types)
+- For one on one/1v1: set "one_on_one_only": true (NOT filter_types)
+- For deflected actions: set "deflected_only": true (NOT filter_types)
+- For woodwork/post/crossbar hits: set "woodwork_only": true (NOT filter_types)
+- For back heels: set "back_heel_only": true (NOT filter_types)
+- For last line/last man defending: set "last_line_only": true (NOT filter_types)
+- For forced out/out of play: set "forced_out_only": true (NOT filter_types)
+- For blocked crosses: set "blocked_cross_only": true (NOT filter_types)
+- For errors leading to shot: set "errors_to_shot_only": true (NOT filter_types)
+- For errors leading to goal: set "errors_to_goal_only": true (NOT filter_types)
 
 Return ONLY valid JSON with these keys (no markdown):
-{{
+{{{{
   "filter_types": [],
   "progressive_only": false,
   "xt_min": 0.0,
@@ -1712,48 +1923,14 @@ Return ONLY valid JSON with these keys (no markdown):
   "before_buffer": 5,
   "after_buffer": 3,
   "individual_clips": false,
-  "key_passes_only": false,
-  "crosses_only": false,
-  "long_balls_only": false,
-  "switches_only": false,
-  "diagonals_only": false,
-  "through_balls_only": false,
-  "corners_only": false,
-  "freekicks_only": false,
-  "headers_only": false,
-  "big_chances_only": false,
-  "big_chances_created_only": false,
-  "own_goals_only": false,
-  "penalties_only": false,
-  "volleys_only": false,
-  "chipped_only": false,
-  "direct_from_corner_only": false,
-  "left_foot_only": false,
-  "right_foot_only": false,
-  "fast_break_only": false,
-  "touch_in_box_only": false,
-  "assist_throughball_only": false,
-  "assist_cross_only": false,
-  "assist_corner_only": false,
-  "assist_freekick_only": false,
-  "intentional_assists_only": false,
-  "yellow_cards_only": false,
-  "red_cards_only": false,
-  "second_yellow_only": false,
-  "nutmegs_only": false,
-  "success_in_box_only": false,
-  "deep_completion_only": false,
-  "box_entry_pass_only": false,
-  "box_entry_carry_only": false,
-  "final_third_entry_pass_only": false,
-  "final_third_entry_carry_only": false,
+  {_json_qualifier_entries},
   "successful_only": false,
   "unsuccessful_only": false,
   "minute_min": null,
   "minute_max": null,
   "dry_run": false,
   "explanation": ""
-}}"""
+}}}}"""
     raw = call_llm(system, f"Instruction: {instruction}").strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
@@ -1855,6 +2032,31 @@ Return ONLY valid JSON with these keys (no markdown):
         "box_entry_carry_only":         ["box entry carry", "box entry carries", "carry into the box", "carries into the box"],
         "final_third_entry_pass_only":  ["final third entry pass", "final third entry passes", "pass into the final third", "passes into the final third"],
         "final_third_entry_carry_only": ["final third entry carry", "final third entry carries", "carry into the final third", "carries into the final third"],
+        # New qualifier keywords
+        "throw_ins_only":     ["throw in", "throw-in", "throw ins"],
+        "goal_kicks_only":    ["goal kick", "goal kicks"],
+        "keeper_throws_only": ["keeper throw", "gk throw", "goalkeeper throw"],
+        "gk_hoofs_only":      ["gk hoof", "goalkeeper hoof", "keeper hoof"],
+        "pull_backs_only":    ["pull back", "pull-back", "cutback", "cut back"],
+        "lay_offs_only":      ["lay off", "lay-off", "layoff"],
+        "flick_ons_only":     ["flick on", "flick-on", "flickon"],
+        "launches_only":      ["launch", "launches", "hoof"],
+        "assists_only":       ["assist", "assists"],
+        "scrambles_only":     ["scramble", "scrambles"],
+        "corner_situations_only": ["corner situation", "second phase corner"],
+        "shot_strong_only":   ["strong shot"],
+        "shot_weak_only":     ["weak shot"],
+        "individual_play_only": ["individual play", "solo", "solo effort"],
+        "follows_dribble_only": ["follows dribble", "after dribble", "after a dribble"],
+        "one_on_one_only":    ["one on one", "1 on 1", "1v1"],
+        "deflected_only":     ["deflected", "deflection"],
+        "woodwork_only":      ["woodwork", "post", "crossbar", "hit the bar"],
+        "back_heel_only":     ["back heel", "backheel"],
+        "last_line_only":     ["last line", "last man", "last defender"],
+        "forced_out_only":    ["forced out", "out of play", "sent out"],
+        "blocked_cross_only": ["blocked cross"],
+        "errors_to_shot_only": ["error leading to shot", "mistake leading to shot"],
+        "errors_to_goal_only": ["error leading to goal", "mistake leading to goal"],
     }
 
     for flag, keywords in FLAG_KEYWORD_MAP.items():
@@ -2325,5 +2527,169 @@ def get_chain_actions(df_all, chain):
     """Return a DataFrame slice of all events belonging to a build-up chain."""
     mask = (df_all.index >= chain["start_idx"]) & (df_all.index <= chain["end_idx"])
     return df_all[mask].copy()
+
+
+def detect_possession_carries(df_all):
+    """
+    Detect full possession sequences where a team starts with the ball in their
+    own half (x < 50) and retains uninterrupted possession until they either:
+      (a) lose the ball while in the opponent's half (x > 50 on last own event), or
+      (b) take a shot (shot event terminates and is included in the sequence).
+
+    "Uninterrupted possession" = consecutive events belong to the same team.
+    Events with no team attribution (e.g. Out/ball-out-of-play markers) are
+    treated as neutral and skipped — the next event determines possession.
+
+    Returns a list of carry dicts with the same schema as detect_progressive_chains,
+    plus a 'terminal_type' key indicating what ended the sequence.
+    """
+    if df_all is None or df_all.empty:
+        return []
+
+    _SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost",
+                   "BlockedShot", "AttemptSaved", "Attempt"}
+
+    def _fx(row, k="x"):
+        try:
+            v = row.get(k)
+            return float(v) if v is not None and v != "" else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _build(events, team):
+        first_idx, first_row = events[0]
+        last_idx,  last_row  = events[-1]
+        sx = _fx(first_row, "x")
+        # Use max(x, endX) for the last event so a pass that crosses halfway
+        # is correctly classified as reaching the opponent's half.
+        ex = max(_fx(last_row, "x"), _fx(last_row, "endX"))
+        s0 = int(first_row.get("minute", 0) or 0) * 60 + int(first_row.get("second", 0) or 0)
+        s1 = int(last_row.get("minute",  0) or 0) * 60 + int(last_row.get("second",  0) or 0)
+        return {
+            "start_idx":          first_idx,
+            "end_idx":            last_idx,
+            "team":               team,
+            "start_minute":       int(first_row.get("minute", 0) or 0),
+            "start_second":       int(first_row.get("second", 0) or 0),
+            "end_minute":         int(last_row.get("minute",  0) or 0),
+            "end_second":         int(last_row.get("second",  0) or 0),
+            "start_period":       first_row.get("period", "FirstHalf"),
+            "end_period":         last_row.get("period",  "FirstHalf"),
+            "action_count":       len(events),
+            "start_x":            sx,
+            "end_x":              ex,
+            "starts_in_own_half": sx < 50,
+            "reaches_opp_half":   ex > 50,
+            "duration_seconds":   max(0, s1 - s0),
+            "terminal_type":      str(last_row.get("type", "")),
+        }
+
+    def _try_open(row_team, idx, row):
+        """Start a new spell only if the event is in the team's own half."""
+        if _fx(row, "x") < 50:
+            return True, row_team, [(idx, row)]
+        return False, None, []
+
+    carries     = []
+    in_spell    = False
+    spell_team  = None
+    spell_events = []
+
+    for idx, row in df_all.iterrows():
+        row_team = str(row.get("team", "") or "").strip()
+        row_type = str(row.get("type", "") or "").strip()
+
+        # Skip events with no team (Out/ball-out-of-play markers, neutral events).
+        # The next attributed event will determine who retook possession.
+        if not row_team:
+            continue
+
+        if not in_spell:
+            in_spell, spell_team, spell_events = _try_open(row_team, idx, row)
+
+        else:
+            if row_team == spell_team:
+                spell_events.append((idx, row))
+
+                # A shot terminates the spell; include it then evaluate
+                if row_type in _SHOT_TYPES:
+                    carry = _build(spell_events, spell_team)
+                    if carry["starts_in_own_half"] and carry["end_x"] > 50:
+                        carries.append(carry)
+                    in_spell, spell_team, spell_events = False, None, []
+
+            else:
+                # Possession changed — evaluate the completed spell
+                if spell_events:
+                    carry = _build(spell_events, spell_team)
+                    if carry["starts_in_own_half"] and carry["end_x"] > 50:
+                        carries.append(carry)
+
+                # Immediately try to open a new spell for the new team
+                in_spell, spell_team, spell_events = _try_open(row_team, idx, row)
+
+    # Finalise any open spell at end of data
+    if in_spell and spell_events:
+        carry = _build(spell_events, spell_team)
+        if carry["starts_in_own_half"] and carry["end_x"] > 50:
+            carries.append(carry)
+
+    return carries
+
+
+def detect_press_wins(df_all, team):
+    """
+    Detect high-press wins: moments where the given team wins possession in the
+    opponent's half (x > 50) via an active defensive action.
+
+    Qualifying event types:
+      - BallRecovery in opp half
+      - Interception (Successful) in opp half
+      - Tackle (Successful) in opp half
+
+    Returns a list of dicts, each representing one press win, sorted by time.
+    Each dict has: idx, team, playerName, minute, second, period, type, x, y,
+    press_zone ("High" if x>66, "Mid" if 50<x<=66).
+    """
+    if df_all is None or df_all.empty:
+        return []
+
+    _PRESS_TYPES = {"BallRecovery", "Interception", "Tackle"}
+
+    def _fx(row, k="x"):
+        try:
+            v = row.get(k)
+            return float(v) if v is not None and v != "" else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    wins = []
+    for idx, row in df_all.iterrows():
+        if str(row.get("team", "") or "") != team:
+            continue
+        row_type = str(row.get("type", "") or "")
+        if row_type not in _PRESS_TYPES:
+            continue
+        row_x = _fx(row, "x")
+        if row_x <= 50:
+            continue
+        # Tackles and interceptions must be successful; BallRecovery is always a win
+        if row_type in ("Interception", "Tackle"):
+            if str(row.get("outcomeType", "")) != "Successful":
+                continue
+        wins.append({
+            "idx":        idx,
+            "team":       team,
+            "playerName": str(row.get("playerName", "") or ""),
+            "minute":     int(row.get("minute", 0) or 0),
+            "second":     int(row.get("second", 0) or 0),
+            "period":     str(row.get("period", "FirstHalf") or "FirstHalf"),
+            "type":       row_type,
+            "x":          row_x,
+            "y":          _fx(row, "y"),
+            "press_zone": "High" if row_x > 66 else "Mid",
+        })
+
+    return wins
 
 
