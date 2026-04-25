@@ -8,7 +8,7 @@ If Launch_ClipMaker.command does not open, use this backup method.
 
 cd 
 
-3. Press Space once, then drag the "ClipMaker_v1.2_Mac" folder into the Terminal window.
+3. Press Space once, then drag the ClipMaker app folder into the Terminal window.
 
 4. Press Enter.
 
