@@ -47,6 +47,38 @@ def _ss(key, default=""):
     return st.session_state.get(key, default)
 
 
+def _scraped_match_paths():
+    paths = []
+    for path in st.session_state.get("multi_scraped_csv_paths", []) or []:
+        if path and os.path.exists(path) and path not in paths:
+            paths.append(path)
+    current = _ss("csv_path") or _ss("scraped_csv_path")
+    if current and os.path.exists(current) and current not in paths:
+        paths.insert(0, current)
+    return paths
+
+
+def _choose_active_match_csv(page_key, current_path):
+    paths = _scraped_match_paths()
+    if len(paths) <= 1:
+        return current_path
+    default_idx = paths.index(current_path) if current_path in paths else 0
+    with st.expander("Match Source", expanded=False):
+        selected = st.selectbox(
+            "Active match for this page",
+            paths,
+            index=default_idx,
+            format_func=os.path.basename,
+            key=f"{page_key}_active_match_csv",
+        )
+        st.caption("Multi-scrape batches are available here one match at a time because clip cutting uses one match video and one CSV clock.")
+    if selected != current_path:
+        st.session_state["csv_path"] = selected
+        st.session_state["scraped_csv_path"] = selected
+        return selected
+    return current_path
+
+
 _FILENAME_STOPWORDS = {
     "a", "an", "and", "all", "build", "clip", "clips", "create", "for", "from",
     "highlight", "highlights", "make", "made", "me", "of", "please", "reel",
@@ -223,6 +255,8 @@ fallback_row = 0
 _logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
 _logo_b64 = theme.load_logo_b64(_logo_path)
 st.markdown(theme.logo_header("Filtering/Output", "Filter events and generate your highlight reel", _logo_b64 or None), unsafe_allow_html=True)
+
+final_csv = _choose_active_match_csv("filtering", final_csv)
 
 # Context bar — show current loaded data state
 def _dot(ok): return f'<span class="ctx-dot-{"ok" if ok else "bad"}"></span>'

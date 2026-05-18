@@ -1,4 +1,4 @@
-# ClipMaker v1.2 for Linux
+# ClipMaker v1.2.1 for Linux
 
 ## Requirements
 

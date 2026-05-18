@@ -69,11 +69,7 @@ section[data-testid="stSidebar"] [aria-current="page"] {
     background: #202020 !important;
     border-right: 3px solid #DFFF00 !important;
 }
-/* Hide tooltip overlays */
-[data-baseweb="tooltip"],
-[role="tooltip"] {
-    display: none !important;
-}
+
 
 /* ── Inputs ── */
 [data-baseweb="input"] {
@@ -463,6 +459,7 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {
 .cm-badge-challenge{ background: rgba(0,220,200,0.1); color: #00dcc8; border: 1px solid #00dcc8; }
 .cm-badge-disp     { background: rgba(255,115,81,0.1); color: #ff7351; border: 1px solid #ff7351; }
 .cm-badge-no-data  { background: #262626; color: #767575; border: 1px solid #2c2c2c; }
+.cm-badge-beta     { background: rgba(0,220,200,0.08); color: #00dcc8; border: 1px solid #00dcc8; }
 
 .cm-no-data-msg {
     text-align: center; color: #767575;

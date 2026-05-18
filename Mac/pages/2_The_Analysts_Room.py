@@ -12,6 +12,7 @@ from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, 
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
     detect_progressive_chains, detect_possession_carries, detect_press_wins, get_chain_actions,
+    read_csv_safe,
 )
 
 try:
@@ -123,28 +124,56 @@ PLOTLY_EXPORT_CONFIG = {
 }
 
 
-def brand_plotly_export(fig):
+def brand_plotly_export(fig, light: bool = False):
+    if light:
+        bg        = "rgba(0,0,0,0)"
+        plot_bg   = "#ede8df"
+        font_col  = "#1a1a1a"
+        grid_col  = "rgba(80,60,30,0.12)"
+        zero_col  = "rgba(80,60,30,0.20)"
+        line_col  = "rgba(80,60,30,0.25)"
+        tick_col  = "#555048"
+        hover_bg  = "#f5f0e8"
+        hover_br  = "rgba(120,100,60,0.35)"
+        hover_fc  = "#1a1a1a"
+        ann_fc    = "rgba(80,60,30,0.65)"
+        ann_bc    = "rgba(120,100,60,0.28)"
+        ann_col   = "rgba(40,30,10,0.55)"
+    else:
+        bg        = "rgba(11,14,20,0)"
+        plot_bg   = "#071008"
+        font_col  = "#ecedf6"
+        grid_col  = "rgba(142,255,113,0.08)"
+        zero_col  = "rgba(142,255,113,0.12)"
+        line_col  = "rgba(142,255,113,0.18)"
+        tick_col  = "#a9abb3"
+        hover_bg  = "#10131a"
+        hover_br  = "rgba(142,255,113,0.35)"
+        hover_fc  = "#ecedf6"
+        ann_fc    = "rgba(240,240,240,0.62)"
+        ann_bc    = "rgba(142,255,113,0.28)"
+        ann_col   = "rgba(11,14,20,0.72)"
     fig.update_layout(
-        paper_bgcolor="rgba(11,14,20,0)",
-        plot_bgcolor="#071008",
-        font=dict(color="#ecedf6", family="Space Grotesk, Inter, sans-serif"),
+        paper_bgcolor=bg,
+        plot_bgcolor=plot_bg,
+        font=dict(color=font_col, family="Space Grotesk, Inter, sans-serif"),
         hoverlabel=dict(
-            bgcolor="#10131a",
-            bordercolor="rgba(142,255,113,0.35)",
-            font=dict(color="#ecedf6"),
+            bgcolor=hover_bg,
+            bordercolor=hover_br,
+            font=dict(color=hover_fc),
         ),
     )
     fig.update_xaxes(
-        gridcolor="rgba(142,255,113,0.08)",
-        zerolinecolor="rgba(142,255,113,0.12)",
-        linecolor="rgba(142,255,113,0.18)",
-        tickfont=dict(color="#a9abb3"),
+        gridcolor=grid_col,
+        zerolinecolor=zero_col,
+        linecolor=line_col,
+        tickfont=dict(color=tick_col),
     )
     fig.update_yaxes(
-        gridcolor="rgba(142,255,113,0.08)",
-        zerolinecolor="rgba(142,255,113,0.12)",
-        linecolor="rgba(142,255,113,0.18)",
-        tickfont=dict(color="#a9abb3"),
+        gridcolor=grid_col,
+        zerolinecolor=zero_col,
+        linecolor=line_col,
+        tickfont=dict(color=tick_col),
     )
     fig.add_annotation(
         text=PLOTLY_EXPORT_BRAND,
@@ -155,9 +184,9 @@ def brand_plotly_export(fig):
         xanchor="right",
         yanchor="bottom",
         showarrow=False,
-        font=dict(size=10, color="rgba(240,240,240,0.62)", family="monospace"),
-        bgcolor="rgba(11,14,20,0.72)",
-        bordercolor="rgba(142,255,113,0.28)",
+        font=dict(size=10, color=ann_fc, family="monospace"),
+        bgcolor=ann_col,
+        bordercolor=ann_bc,
         borderwidth=1,
         borderpad=3,
     )
@@ -185,7 +214,40 @@ def defensive_actions_df(source_df):
 def _ss(key, default=""):
     return st.session_state.get(key, default)
 
+
+def _scraped_match_paths():
+    paths = []
+    for path in st.session_state.get("multi_scraped_csv_paths", []) or []:
+        if path and os.path.exists(path) and path not in paths:
+            paths.append(path)
+    current = _ss("csv_path") or _ss("scraped_csv_path")
+    if current and os.path.exists(current) and current not in paths:
+        paths.insert(0, current)
+    return paths
+
+
+def _choose_active_match_csv(page_key, current_path):
+    paths = _scraped_match_paths()
+    if len(paths) <= 1:
+        return current_path
+    default_idx = paths.index(current_path) if current_path in paths else 0
+    with st.expander("Match Source", expanded=False):
+        selected = st.selectbox(
+            "Active match for this page",
+            paths,
+            index=default_idx,
+            format_func=os.path.basename,
+            key=f"{page_key}_active_match_csv",
+        )
+        st.caption("Analyst maps are match-specific. Pick which scraped match to inspect.")
+    if selected != current_path:
+        st.session_state["csv_path"] = selected
+        st.session_state["scraped_csv_path"] = selected
+        return selected
+    return current_path
+
 csv_path    = _ss("csv_path") or _ss("scraped_csv_path")
+csv_path    = _choose_active_match_csv("analysts_room", csv_path)
 video_path  = _ss("video_path")
 video2_path = _ss("video2_path")
 split_video = _ss("split_video", False)
@@ -232,8 +294,19 @@ gk_df            = None
 
 if data_loaded:
     try:
-        df_all           = pd.read_csv(csv_path)
-        pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy()
+        df_all           = read_csv_safe(csv_path)
+        # Derive team names from data if scraper didn't set them
+        if not home_team or not away_team:
+            if "homeTeam" in df_all.columns and "awayTeam" in df_all.columns:
+                ht = df_all["homeTeam"].dropna().iloc[0] if not df_all["homeTeam"].dropna().empty else ""
+                at = df_all["awayTeam"].dropna().iloc[0] if not df_all["awayTeam"].dropna().empty else ""
+                if ht and at:
+                    home_team, away_team = ht, at
+            elif "team" in df_all.columns:
+                teams = df_all["team"].dropna().unique().tolist()[:2]
+                if len(teams) >= 2:
+                    home_team, away_team = teams[0], teams[1]
+        pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy() if "period" in df_all.columns else pd.DataFrame()
         pso_shots_df     = pso_shots_df[pso_shots_df["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
         if "period" in df_all.columns:
             df_all = df_all[df_all["period"] != "PenaltyShootout"].copy()
@@ -603,11 +676,12 @@ st.markdown(theme.logo_header("The Analyst's Room", "Visualise match events as i
 st.divider()
 
 if not data_loaded:
-    st.markdown("""<div class="cm-no-data-msg">
-        <div style="font-size:40px;margin-bottom:16px">{}</div>
-        <b style="color:#ccc;font-size:17px">No match data loaded</b><br><br>
+    nd_gray = theme.light_color("#ccc", "#555")
+    st.markdown(f"""<div class="cm-no-data-msg">
+        <div style="font-size:40px;margin-bottom:16px">{theme.icon_span("[SEARCH]", color=nd_gray, size=40)}</div>
+        <b style="color:{nd_gray};font-size:17px">No match data loaded</b><br><br>
         Go to <b>Home</b> and scrape a match first.
-    </div>""".format(theme.icon_span("[SEARCH]", color="#ccc", size=40)), unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
     st.stop()
 
 # =============================================================================
@@ -679,12 +753,14 @@ def render_shot_tab():
             away_team=away_team or "",
             selected_idx=pso_sel_idx,
             key="smp_pso_main",
+            light_mode=st.session_state.get("light_mode", False),
         )
         handle_click(raw_click, "smp_pso")
 
         st.markdown(
-            "<div style=\'font-size:11px;color:#767575;margin-top:-4px\'>"
-            f"● Scored &nbsp;◯ Saved / Post &nbsp;<span style=\'color:{AWAY_COLOR};font-size:12px\'>✕</span> Missed &nbsp;·&nbsp;"
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+            "● Scored &nbsp;◯ Saved / Post &nbsp;"
+            f"<span style='color:{theme.light_color(AWAY_COLOR, '#c44232')};font-size:12px'>&#10005;</span> Missed &nbsp;·&nbsp;"
             "Click a player circle to inspect their penalty</div>",
             unsafe_allow_html=True,
         )
@@ -812,16 +888,19 @@ def render_shot_tab():
         sel_row  = disp_shots.loc[sel_idx]
         shot_map([shot_to_dict(sel_idx, sel_row)], home_team=home_team or "",
                  away_team=away_team or "", selected_idx=sel_idx,
-                 view="goalframe", key="smp_gf")
+                 view="goalframe", key="smp_gf",
+                 light_mode=st.session_state.get("light_mode", False))
 
     raw_click = shot_map(shots_for_comp, home_team=home_team or "",
                          away_team=away_team or "", selected_idx=sel_idx,
-                         view="halfpitch_vert", key="smp_pitch")
+                         view="halfpitch_vert", key="smp_pitch",
+                         light_mode=st.session_state.get("light_mode", False))
     handle_click(raw_click, "smp")
 
     st.markdown(
-        "<div style=\'font-size:11px;color:#767575;margin-top:-4px\'>"
-        f"● Goal &nbsp;◯ Saved / Post &nbsp;<span style=\'color:{AWAY_COLOR};font-size:12px\'>✕</span> Missed &nbsp;·&nbsp;"
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+        "● Goal &nbsp;◯ Saved / Post &nbsp;"
+        f"<span style='color:{theme.light_color(AWAY_COLOR, '#c44232')};font-size:12px'>&#10005;</span> Missed &nbsp;·&nbsp;"
         "Click a shot to inspect it</div>",
         unsafe_allow_html=True,
     )
@@ -983,9 +1062,10 @@ def render_pass_tab():
 
         pass_map(passes=all_net_passes, home_team=home_team or "",
                  away_team=away_team or "", selected_idx=None,
-                 mode="network", key="pm_network")
+                 mode="network", key="pm_network",
+                 light_mode=st.session_state.get("light_mode", False))
 
-        st.markdown("<div style='font-size:11px;color:#767575;margin-top:4px'>"
+        st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:4px'>"
                     "Node colour intensity = pass volume · "
                     "Line colour intensity = connection frequency</div>",
                     unsafe_allow_html=True)
@@ -1053,10 +1133,11 @@ def render_pass_tab():
             st.session_state["pm_clip_error"]   = None
 
         if player_sel == "— Select a player —":
-            st.markdown("""<div class="cm-no-data-msg" style="padding:40px 20px">
-                <div style="font-size:32px;margin-bottom:12px">{}</div>
+            nd_gray = theme.light_color("#ccc", "#555")
+            st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+                <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[PASS]", color=nd_gray, size=32)}</div>
                 Select a player above to view their pass map
-            </div>""".format(theme.icon_span("[PASS]", color="#ccc", size=32)), unsafe_allow_html=True)
+            </div>""", unsafe_allow_html=True)
         else:
             player_passes = team_passes[team_passes["playerName"] == player_sel].copy()
             if pass_type_sel != "All passes" and pass_type_sel in available_pass_types:
@@ -1116,12 +1197,13 @@ def render_pass_tab():
 
             raw_pm = pass_map(passes=passes_for_comp, home_team=home_team or "",
                               away_team=away_team or "", selected_idx=pm_sel_idx,
-                              mode="player", key="pm_player")
+                              mode="player", key="pm_player",
+                              light_mode=st.session_state.get("light_mode", False))
             handle_click(raw_pm, "pm")
 
-            st.markdown("<div style='font-size:11px;color:#767575;margin-top:-4px'>"
-                        "<span style='color:#7ab4ff'>●</span> Successful &nbsp;"
-                        "<span style='color:#ff7351'>●</span> Unsuccessful &nbsp;·&nbsp;"
+            st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+                        f"<span style='color:{theme.light_color('#7ab4ff', '#4a7fc4')}'>●</span> Successful &nbsp;"
+                        f"<span style='color:{theme.light_color('#ff7351', '#c44232')}'>●</span> Unsuccessful &nbsp;·&nbsp;"
                         "Click a pass endpoint to inspect it</div>",
                         unsafe_allow_html=True)
 
@@ -1237,10 +1319,11 @@ def render_def_tab():
 
     if def_player_sel == "— Select a player —":
         render_def_stats(team_def)
-        st.markdown("""<div class="cm-no-data-msg" style="padding:40px 20px">
-            <div style="font-size:32px;margin-bottom:12px">{}</div>
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[DEF]", color=nd_gray, size=32)}</div>
             Select a player above to view their defensive actions
-        </div>""".format(theme.icon_span("[DEF]", color="#ccc", size=32)), unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
         return
 
     player_def = team_def[team_def["playerName"] == def_player_sel].copy()
@@ -1280,7 +1363,8 @@ def render_def_tab():
 
     raw_dm = defensive_map(actions=def_for_comp, home_team=home_team or "",
                            away_team=away_team or "", selected_idx=dm_sel_idx,
-                           key="dm_player")
+                           key="dm_player",
+                           light_mode=st.session_state.get("light_mode", False))
     handle_click(raw_dm, "dm")
 
     def def_label(row):
@@ -1384,10 +1468,11 @@ def render_dc_tab():
         st.session_state["dcm_clip_error"]   = None
 
     if dc_player_sel == "— Select a player —":
-        st.markdown("""<div class="cm-no-data-msg" style="padding:40px 20px">
-            <div style="font-size:32px;margin-bottom:12px">{}</div>
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[RUN]", color=nd_gray, size=32)}</div>
             Select a player above to view their dribbles and carries
-        </div>""".format(theme.icon_span("[RUN]", color="#ccc", size=32)), unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
         return
 
     player_dc = team_dc[team_dc["playerName"] == dc_player_sel].copy()
@@ -1448,14 +1533,15 @@ def render_dc_tab():
 
     raw_dcm = dribble_carry_map(actions=dc_for_comp, home_team=home_team or "",
                                 away_team=away_team or "", selected_idx=dcm_sel_idx,
-                                key="dcm_player")
+                                key="dcm_player",
+                                light_mode=st.session_state.get("light_mode", False))
     handle_click(raw_dcm, "dcm")
 
     st.markdown(
-        "<div style='font-size:11px;color:#767575;margin-top:-4px'>"
-        "<span style='color:#27ae60'>●</span> Succ. dribble &nbsp;"
-        "<span style='color:#e74c3c'>●</span> Unsucc. dribble &nbsp;"
-        "<span style='color:#e0c860'>——</span> Carry &nbsp;·&nbsp;"
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+        f"<span style='color:{theme.light_color('#27ae60', '#1e7a42')}'>●</span> Succ. dribble &nbsp;"
+        f"<span style='color:{theme.light_color('#e74c3c', '#b83227')}'>●</span> Unsucc. dribble &nbsp;"
+        f"<span style='color:{theme.light_color('#e0c860', '#9a8530')}'>——</span> Carry &nbsp;·&nbsp;"
         "Click to inspect</div>",
         unsafe_allow_html=True,
     )
@@ -1575,10 +1661,11 @@ def render_gk_tab():
         st.session_state["gk_clip_error"]   = None
 
     if gk_player_sel == "— Select a goalkeeper —":
-        st.markdown("""<div class="cm-no-data-msg" style="padding:40px 20px">
-            <div style="font-size:32px;margin-bottom:12px">{}</div>
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[GK]", color=nd_gray, size=32)}</div>
             Select a goalkeeper above to view their actions
-        </div>""".format(theme.icon_span("[GK]", color="#ccc", size=32)), unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
         return
 
     # ── SHOTS FACED MODE ──────────────────────────────────────────────────────
@@ -1647,15 +1734,17 @@ def render_gk_tab():
             sel_row = opp_shots.loc[gk_sel_idx]
             shot_map([sf_shot_to_dict(gk_sel_idx, sel_row)],
                      home_team=home_team or "", away_team=away_team or "",
-                     selected_idx=gk_sel_idx, view="goalframe", key="gk_sf_gf")
+                     selected_idx=gk_sel_idx, view="goalframe", key="gk_sf_gf",
+                     light_mode=st.session_state.get("light_mode", False))
 
         raw_sf = goalkeeper_map(actions=sf_for_comp, home_team=home_team or "",
                                 away_team=away_team or "", selected_idx=gk_sel_idx,
-                                shots_faced=True, key="gk_sf_map")
+                                shots_faced=True, key="gk_sf_map",
+                                light_mode=st.session_state.get("light_mode", False))
         handle_click(raw_sf, "gk")
 
         st.markdown(
-            "<div style='font-size:11px;color:#767575;margin-top:-4px'>"
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
             "● Saved &nbsp;✕ Goal &nbsp;·&nbsp;Click to inspect</div>",
             unsafe_allow_html=True,
         )
@@ -1784,12 +1873,13 @@ def render_gk_tab():
 
         raw_dist = pass_map(dist_for_map, home_team=home_team or "",
                             away_team=away_team or "", selected_idx=gk_sel_idx,
-                            mode="player", key="gk_dist_map")
+                            mode="player", key="gk_dist_map",
+                            light_mode=st.session_state.get("light_mode", False))
         handle_click(raw_dist, "gk")
 
-        st.markdown("<div style='font-size:11px;color:#767575;margin-top:-4px'>"
-                    "<span style='color:#27ae60'>——</span> Successful &nbsp;"
-                    "<span style='color:#e74c3c'>——</span> Unsuccessful &nbsp;·&nbsp;"
+        st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+                    f"<span style='color:{theme.light_color('#27ae60', '#1e7a42')}'>——</span> Successful &nbsp;"
+                    f"<span style='color:{theme.light_color('#e74c3c', '#b83227')}'>——</span> Unsuccessful &nbsp;·&nbsp;"
                     "Click to inspect</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
@@ -1885,11 +1975,12 @@ def render_gk_tab():
 
     raw_gk = goalkeeper_map(actions=gk_for_comp, home_team=home_team or "",
                             away_team=away_team or "", selected_idx=gk_sel_idx,
-                            key="gk_player")
+                            key="gk_player",
+                            light_mode=st.session_state.get("light_mode", False))
     handle_click(raw_gk, "gk")
 
     st.markdown(
-        "<div style='font-size:11px;color:#767575;margin-top:-4px'>"
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
         "Punch (●) · Claim (●) · Sweep (●) · Pickup (●) · Penalty (●) · "
         "Click to inspect</div>",
         unsafe_allow_html=True,
@@ -2091,7 +2182,8 @@ def render_build_up_tab():
                     "endX":       float(row.get("endX", 0) or 0),
                     "endY":       float(row.get("endY", 0) or 0),
                 })
-            build_up_map(pitch_actions, is_home_team, key=f"bu_map_{sel_idx}")
+            build_up_map(pitch_actions, is_home_team, key=f"bu_map_{sel_idx}",
+                         light_mode=st.session_state.get("light_mode", False))
 
         if _bu_clip and os.path.exists(_bu_clip):
             st.divider()
@@ -2165,72 +2257,74 @@ def render_pressing_tab():
         "FirstHalf": "1H", "SecondHalf": "2H",
         "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2",
     }
-    ZONE_BADGE = {"High": "[HIGH]", "Mid": "[MID]"}
-    TYPE_SHORT = {"BallRecovery": "[REC]", "Interception": "[INT]", "Tackle": "[TKL]"}
 
-    col_list, col_detail = st.columns([2, 3])
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
 
-    with col_list:
-        st.subheader("Press Wins")
-        with st.container(height=480):
-            for w in wins:
-                p = PERIOD_LABEL.get(w["period"], "")
-                zone_b = ZONE_BADGE.get(w["press_zone"], "")
-                type_b = TYPE_SHORT.get(w["type"], f"[{w['type'][:3].upper()}]")
-                label  = (f"{w['minute']}'{w['second']:02d}\"  {p}  "
-                          f"{type_b} {zone_b}  ·  {w['playerName']}")
-                c_info, c_watch = st.columns([4, 1])
-                with c_info:
-                    if st.button(label, key=f"press_sel_{w['idx']}"):
-                        st.session_state["press_selected_idx"] = w["idx"]
-                        st.session_state["press_clip_path"]    = None
-                        st.session_state["press_clip_key"]     = None
-                        st.session_state["press_clip_error"]   = None
-                        st.rerun()
-                with c_watch:
-                    _clip_key = f"press_{w['idx']}_{w['minute']}_{w['second']}"
-                    if st.button("▶", key=f"press_watch_{w['idx']}"):
-                        existing   = st.session_state.get("press_clip_path")
-                        existing_k = st.session_state.get("press_clip_key")
-                        if existing_k == _clip_key and existing and os.path.exists(existing):
-                            pass
-                        else:
-                            with st.spinner("Cutting clip…"):
-                                try:
-                                    _path = cut_clip(w["minute"], w["second"], w["period"])
-                                    st.session_state["press_clip_path"]    = _path
-                                    st.session_state["press_clip_key"]     = _clip_key
-                                    st.session_state["press_clip_error"]   = None
-                                    st.session_state["press_selected_idx"] = w["idx"]
-                                except Exception as _e:
-                                    st.session_state["press_clip_error"] = str(_e)
-                                    st.session_state["press_clip_key"]   = _clip_key
-                        st.rerun()
+    # ── Full-width pressing map ────────────────────────────────────────────
+    pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main",
+                 light_mode=st.session_state.get("light_mode", False))
 
-    with col_detail:
-        sel_idx   = st.session_state.get("press_selected_idx")
-        _pr_clip  = st.session_state.get("press_clip_path")
-        _pr_err   = st.session_state.get("press_clip_error")
+    # ── Map click → video clip ─────────────────────────────────────────────
+    _map_state = st.session_state.get("press_map_main")
+    if _map_state and _map_state.get("selection") and _map_state["selection"].get("points"):
+        point = _map_state["selection"]["points"][0]
+        clicked_idx = point.get("customdata")
+        prev_clicked = st.session_state.get("_press_last_clicked_idx")
+        if clicked_idx is not None and str(clicked_idx) != str(prev_clicked):
+            st.session_state["_press_last_clicked_idx"] = clicked_idx
+            sel_win = next((w for w in wins if str(w["idx"]) == str(clicked_idx)), None)
+            if sel_win:
+                st.session_state["press_selected_idx"] = sel_win["idx"]
+                st.session_state["press_clip_path"]    = None
+                st.session_state["press_clip_key"]     = None
+                st.session_state["press_clip_error"]   = None
+                with st.spinner("Cutting clip…"):
+                    try:
+                        _path = cut_clip(sel_win["minute"], sel_win["second"], sel_win["period"])
+                        st.session_state["press_clip_path"] = _path
+                        st.session_state["press_clip_key"]  = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                    except Exception as _e:
+                        st.session_state["press_clip_error"] = str(_e)
+                        st.session_state["press_clip_key"]   = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                st.rerun()
 
-        sel_win = next((w for w in wins if w["idx"] == sel_idx), None)
-        if sel_win:
-            p = PERIOD_LABEL.get(sel_win["period"], "")
-            st.subheader(f"{sel_win['playerName']}  ·  {sel_win['minute']}'{sel_win['second']:02d}\" {p}")
-            dcols = st.columns(3)
-            dcols[0].metric("Type", sel_win["type"])
-            dcols[1].metric("Press Zone", "High Press" if sel_win["press_zone"] == "High" else "Mid-Block")
-            dcols[2].metric("Pitch Position", f"{sel_win['x'] / 100 * 105:.1f}m")
+    # Re-read after potential rerun
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
 
-        pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main")
+    # ── Selected press win detail ──────────────────────────────────────────
+    sel_win = next((w for w in wins if w["idx"] == sel_idx), None)
+    if sel_win:
+        st.divider()
+        p = PERIOD_LABEL.get(sel_win["period"], "")
+        dcol1, dcol2, dcol3 = st.columns(3)
+        dcol1.metric("Player", sel_win["playerName"])
+        dcol2.metric("Type", f"{sel_win['type']}  ·  {sel_win['minute']}'{sel_win['second']:02d}\" {p}")
+        dcol3.metric("Zone", "High Press" if sel_win["press_zone"] == "High" else "Mid-Block")
 
-        if _pr_clip and os.path.exists(_pr_clip):
-            st.divider()
-            st.video(_pr_clip)
-        elif _pr_err:
-            st.error(f"Could not cut clip: {_pr_err}")
+    # ── Video player ───────────────────────────────────────────────────────
+    if _pr_clip and os.path.exists(_pr_clip):
+        st.video(_pr_clip)
+    elif _pr_err:
+        st.error(f"Could not cut clip: {_pr_err}")
 
-        if sel_idx is None and not _pr_clip and not _pr_err:
-            st.caption("Select a press win on the left to highlight it on the map, or press ▶ to cut a clip.")
+    # ── Clear button ───────────────────────────────────────────────────────
+    if sel_idx is not None or _pr_clip or _pr_err:
+        _, cc = st.columns([5, 1])
+        with cc:
+            if st.button("Clear", key="press_clear", use_container_width=True,
+                         icon=theme.icon_shortcode("[X]")):
+                st.session_state["press_selected_idx"]       = None
+                st.session_state["press_clip_path"]          = None
+                st.session_state["press_clip_key"]           = None
+                st.session_state["press_clip_error"]         = None
+                st.session_state["_press_last_clicked_idx"]  = None
+                st.rerun()
+    else:
+        st.caption("Click a press win marker on the pitch map to view the clip.")
 
 
 # =============================================================================
@@ -2523,7 +2617,7 @@ def _percentile_rank(player_raw, pool):
 
 
 def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
-                         color1="#E8FF4D", color2="#ff7351"):
+                         color1="#E8FF4D", color2="#ff7351", light=False):
     closed_axes = axes + [axes[0]]
     p1_vals = [p1_pct.get(a, 0) for a in axes] + [p1_pct.get(axes[0], 0)]
     p2_vals = [p2_pct.get(a, 0) for a in axes] + [p2_pct.get(axes[0], 0)]
@@ -2560,32 +2654,52 @@ def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
     )
 
     fig = go.Figure(data=[trace1, trace2])
+    if light:
+        paper_bg = "#f5f0e8"
+        plot_bg  = "#f5f0e8"
+        font_c   = "#1a1a1a"
+        polar_bg = "#ede8df"
+        ang_tick = "#4a4035"
+        ang_line = "#c8bfb0"
+        rad_tick = "#7a7060"
+        leg_c    = "#1a1a1a"
+        leg_bc   = "#c8bfb0"
+    else:
+        paper_bg = "#0e0e0e"
+        plot_bg  = "#0e0e0e"
+        font_c   = "#ffffff"
+        polar_bg = "#131313"
+        ang_tick = "#adaaaa"
+        ang_line = "#2c2c2c"
+        rad_tick = "#767575"
+        leg_c    = "#ffffff"
+        leg_bc   = "#2c2c2c"
     fig.update_layout(
         height=520,
         margin=dict(t=60, b=40, l=60, r=60),
-        paper_bgcolor="#0e0e0e",
-        plot_bgcolor="#0e0e0e",
-        font=dict(color="#ffffff", family="Inter, sans-serif"),
+        paper_bgcolor=paper_bg,
+        plot_bgcolor=plot_bg,
+        font=dict(color=font_c, family="Inter, sans-serif"),
         polar=dict(
-            bgcolor="#131313",
+            bgcolor=polar_bg,
             angularaxis=dict(
-                tickfont=dict(size=12, color="#adaaaa"),
-                linecolor="#2c2c2c",
-                gridcolor="#2c2c2c",
+                tickfont=dict(size=12, color=ang_tick),
+                linecolor=ang_line,
+                gridcolor=ang_line,
             ),
             radialaxis=dict(
                 visible=True,
                 range=[0, 100],
                 tickvals=[0, 25, 50, 75, 100],
-                tickfont=dict(size=9, color="#767575"),
-                gridcolor="#2c2c2c",
-                linecolor="#2c2c2c",
+                tickfont=dict(size=9, color=rad_tick),
+                gridcolor=ang_line,
+                linecolor=ang_line,
             ),
         ),
         legend=dict(
-            font=dict(color="#ffffff", size=12),
+            font=dict(color=leg_c, size=12),
             bgcolor="rgba(0,0,0,0)",
-            bordercolor="#2c2c2c",
+            bordercolor=leg_bc,
         ),
         showlegend=True,
     )
@@ -2671,6 +2785,7 @@ def render_comparison_tab():
         _p1_pct = _percentile_rank(_p1_raw, _pool)
         _p2_pct = _percentile_rank(_p2_raw, _pool)
 
+    _light = st.session_state.get("light_mode", False)
     st.plotly_chart(
         brand_plotly_export(_build_radar_figure(
             axes=_axes,
@@ -2678,7 +2793,8 @@ def render_comparison_tab():
             p1_raw=_p1_raw, p2_raw=_p2_raw,
             player1=player1, player2=player2,
             color1="#E8FF4D", color2=AWAY_COLOR,
-        )),
+            light=_light,
+        ), light=_light),
         use_container_width=True,
         config=PLOTLY_EXPORT_CONFIG,
     )
@@ -2695,7 +2811,7 @@ def render_comparison_tab():
                                marker=dict(color=color)))
         fig.update_layout(title=player_name, xaxis_title="Count",
                           height=320, margin=dict(t=40, b=0, l=0, r=0))
-        return brand_plotly_export(fig)
+        return brand_plotly_export(fig, light=st.session_state.get("light_mode", False))
 
     with z1:
         st.plotly_chart(_zone_bar(p1_ev, player1, HOME_COLOR), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)

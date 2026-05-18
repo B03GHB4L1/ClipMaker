@@ -1,4 +1,4 @@
-# ClipMaker v1.2 for macOS
+# ClipMaker v1.2.1 for macOS
 
 ClipMaker is a local football video clipping and analysis app for macOS.
 
@@ -27,7 +27,7 @@ If Python is not already installed, download it from [python.org](https://www.py
 
 ## Subsequent Runs
 
-If you followed the instructions above, you should be able to run ClipMaker simply by double-clicking 'Lanch_ClipMaker.command' on subsequent runs.
+If you followed the instructions above, you should be able to run ClipMaker simply by double-clicking `Launch_ClipMaker.command` on subsequent runs.
 
 
 ## What the Folder Should Contain
@@ -70,13 +70,13 @@ Then try `Launch_ClipMaker.command` again.
 
 ## Using ClipMaker
 
-On macOS, ClipMaker uses native in-app `Browse` buttons for:
+On macOS, ClipMaker uses browser-safe in-app upload controls for:
 
 - video files
 - second-half video files
 - match CSV files
 
-You do not need to upload those files through the browser.
+This avoids macOS `tkinter` dialog issues while keeping all processing local.
 
 ## If the Browser Does Not Open Automatically
 
