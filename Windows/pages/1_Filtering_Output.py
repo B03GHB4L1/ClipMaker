@@ -114,6 +114,16 @@ def _clip_download_name(base_slug, window, index):
     return f"{base_slug}_{index:02d}_{_seconds_slug(start)}-{_seconds_slug(end)}.mp4"
 
 
+def _valid_player_selection(key, options):
+    raw = st.session_state.get(key, [])
+    if isinstance(raw, str):
+        raw = [] if raw == "All players" else [raw]
+    clean = [p for p in (raw or []) if p in options]
+    if clean != raw:
+        st.session_state[key] = clean
+    return clean
+
+
 def _compute_windows_from_config(cfg):
     if not cfg.get("data_file") or not cfg.get("half1_time") or not cfg.get("half2_time"):
         return []
@@ -152,7 +162,10 @@ def _compute_windows_from_config(cfg):
     for _, row in df.iterrows():
         ts = row["video_timestamp"]
         period = int(row["resolved_period"])
-        label = f"{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
+        player = str(row.get("playerName", "")).strip()
+        player = "" if player.lower() == "nan" else player
+        prefix = f"{player} - " if player else ""
+        label = f"{prefix}{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
         raw.append((ts - cfg["before_buffer"], ts + cfg["after_buffer"], label, period))
     return merge_overlapping_windows(raw, cfg["min_gap"])
 
@@ -396,11 +409,10 @@ with tab_manual:
 
     # ── Team / Player ────────────────────────────────────────────────────────
     team_filter = "All players"
-    player_filter = "All players"
+    selected_players = []
 
     if len(_all_players) == 1:
         st.caption(f"Player: **{_all_players[0]}**")
-        player_filter = _all_players[0]
     elif _home_team and _away_team:
         team_filter = st.radio(
             "Team",
@@ -408,15 +420,31 @@ with tab_manual:
             horizontal=True
         )
         if team_filter == _home_team:
-            _pool = ["All players"] + list(_home_players)
+            _pool = list(_home_players)
         elif team_filter == _away_team:
-            _pool = ["All players"] + list(_away_players)
+            _pool = list(_away_players)
         else:
             team_filter = "All players"
-            _pool = ["All players"] + _all_players
-        player_filter = st.selectbox("Player", options=_pool, index=0)
+            _pool = list(_all_players)
+        _player_key = "_cm_selected_players"
+        _valid_player_selection(_player_key, _pool)
+        selected_players = st.multiselect(
+            "Players",
+            options=_pool,
+            placeholder="All players",
+            key=_player_key,
+            help="Leave empty to include every player in the selected team scope.",
+        )
     elif _all_players:
-        player_filter = st.selectbox("Player", options=["All players"] + _all_players, index=0)
+        _player_key = "_cm_selected_players"
+        _valid_player_selection(_player_key, _all_players)
+        selected_players = st.multiselect(
+            "Players",
+            options=_all_players,
+            placeholder="All players",
+            key=_player_key,
+            help="Leave empty to include every player.",
+        )
 
     # ── Half filter ──────────────────────────────────────────────────────────
     half_filter = st.selectbox(
@@ -506,8 +534,8 @@ with tab_manual:
             _qual_df = _qual_df[_qual_df["type"].isin(_selected_types)]
         if team_filter != "All players" and "team" in _qual_df.columns:
             _qual_df = _qual_df[_qual_df["team"] == team_filter]
-        if player_filter != "All players" and "playerName" in _qual_df.columns:
-            _qual_df = _qual_df[_qual_df["playerName"] == player_filter]
+        if selected_players and "playerName" in _qual_df.columns:
+            _qual_df = _qual_df[_qual_df["playerName"].isin(selected_players)]
 
     def _col_has_true(df, col):
         return df[col].astype(str).str.lower().isin(["true", "1", "yes"]).any()
@@ -697,14 +725,14 @@ with tab_manual:
 
     # ── Shared: apply team / player filter to temp CSV ────────────────────────
     _team_data_file = final_csv or ""
-    _needs_filter = (team_filter != "All players") or (player_filter != "All players")
+    _needs_filter = (team_filter != "All players") or bool(selected_players)
     if _needs_filter and final_csv and os.path.exists(final_csv.strip().strip("\"'")):
         try:
             _tdf = read_csv_safe(final_csv.strip().strip("\"'"))
             if team_filter != "All players" and "team" in _tdf.columns:
                 _tdf = _tdf[_tdf["team"] == team_filter]
-            if player_filter != "All players" and "playerName" in _tdf.columns:
-                _tdf = _tdf[_tdf["playerName"] == player_filter]
+            if selected_players and "playerName" in _tdf.columns:
+                _tdf = _tdf[_tdf["playerName"].isin(selected_players)]
             if len(_tdf) > 0:
                 _tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w")
                 _tdf.to_csv(_tmp.name, index=False)

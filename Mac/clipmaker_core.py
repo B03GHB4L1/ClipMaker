@@ -667,7 +667,10 @@ def run_clip_maker(config, log_queue, progress_queue):
         for _, row in df.iterrows():
             ts = row["video_timestamp"]
             period = int(row["resolved_period"])
-            label = f"{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
+            player = str(row.get("playerName", "")).strip()
+            player = "" if player.lower() == "nan" else player
+            prefix = f"{player} - " if player else ""
+            label = f"{prefix}{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
