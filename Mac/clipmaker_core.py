@@ -228,12 +228,21 @@ def _effective_pitch_zone_series(df):
     """Return a Series of pitch zones relative to the away team's attacking direction.
     WhoScored's absolute y=0 is the away team's right touchline, so all events
     (both teams) must be mirrored (100 - y) to label zones from the away team's
-    attacking perspective â€” the consistent reference frame used throughout.
+    attacking perspective — the consistent reference frame used throughout.
     Falls back to the stored pitch_zone column if coordinate columns are absent."""
     from whoscored_scraper import _pitch_zone as _pz
-    if all(c in df.columns for c in ["y", "team", "homeTeam"]):
+    if all(c in df.columns for c in ["y", "team"]):
         y_num = pd.to_numeric(df["y"], errors="coerce")
-        flip_mask = df["homeTeam"].notna() & (df["homeTeam"] != "")
+        if "homeTeam" in df.columns:
+            flip_mask = df["homeTeam"].notna() & (df["homeTeam"] != "")
+        else:
+            # Assume first alphabetical team is home if homeTeam column missing
+            teams = df["team"].dropna().unique()
+            home_t = sorted(teams)[0] if len(teams) == 2 else (teams[0] if len(teams) else None)
+            if home_t:
+                flip_mask = df["team"].notna() & (df["team"] == home_t)
+            else:
+                flip_mask = pd.Series([False] * len(df), index=df.index)
         effective_y = y_num.where(~flip_mask, 100 - y_num)
         return effective_y.apply(lambda v: _pz(v) if pd.notna(v) else "")
     if "pitch_zone" in df.columns:
@@ -952,6 +961,13 @@ def read_csv_safe(path):
         _mtime = 0
     return _read_csv_cached(path, _mtime)
 
+def normalize_event_labels(df):
+    df = df.copy()
+    if {"type", "outcomeType"}.issubset(df.columns):
+        foul_drawn = df["type"].astype(str).eq("Foul") & df["outcomeType"].astype(str).eq("Successful")
+        df.loc[foul_drawn, "type"] = "Foul Drawn"
+    return df
+
 @__import__("functools").lru_cache(maxsize=16)
 def _read_csv_cached(path, _mtime):
     try:
@@ -959,6 +975,7 @@ def _read_csv_cached(path, _mtime):
     except UnicodeDecodeError:
         df = pd.read_csv(path, encoding="latin-1")
 
+    df = normalize_event_labels(df)
     bool_cols = [c for c in df.columns if c.startswith("is_") or c in ("prog_pass", "prog_carry")]
     for col in bool_cols:
         if df[col].dtype == object:
@@ -1214,7 +1231,7 @@ def query_data(question, df):
         "cards":          (r"\bcard|\byellow|\bred\b", ["Card"]),
         "blocks":         (r"\bblocks?\b", ["Block", "BlockedPass", "BlockedShot"]),
         "recoveries":     (r"\brecovery|\brecoveries|\brecover", ["BallRecovery"]),
-        "duels":          (r"\bduel", ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]),
+        "duels":          (r"\bduel", ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp", "Foul"]),
         "challenges":     (r"\bchallenge", ["Challenge"]),
         "ball_touches":   (r"\bball\s*touch|\btouches?\b", ["BallTouch"]),
         "dispossessed":   (r"\bdispossess", ["Dispossessed"]),
@@ -1836,7 +1853,7 @@ IMPORTANT RULES:
 - For interceptions: use filter_types=["Interception"]
 - For fouls: use filter_types=["Foul"]
 - For carries: use filter_types=["Carry"]
-- For duels: use filter_types=["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]
+- For duels: use filter_types=["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp", "Foul"]
 - For challenges: use filter_types=["Challenge"]
 - For ball touches: use filter_types=["BallTouch"]
 - For ball recoveries: use filter_types=["BallRecovery"]
@@ -1869,7 +1886,8 @@ IMPORTANT RULES:
 - For left foot actions: set "left_foot_only": true (NOT filter_types)
 - For right foot actions: set "right_foot_only": true (NOT filter_types)
 - For fast break/counter-attack: set "fast_break_only": true (NOT filter_types)
-- For actions with a touch in the box: set "touch_in_box_only": true (NOT filter_types)
+- For shots in/inside the box (e.g. "shots in the box", "shots inside the box"): use filter_types=["MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"] AND ALSO set "touch_in_box_only": true â you must set BOTH
+- For non-shot actions with a touch in the box (e.g. a pass, carry, or dribble in the box): set "touch_in_box_only": true (NOT filter_types)
 - For assists via through ball: set "assist_throughball_only": true (NOT filter_types)
 - For assists via cross: set "assist_cross_only": true (NOT filter_types)
 - For assists via corner: set "assist_corner_only": true (NOT filter_types)
@@ -2123,21 +2141,41 @@ Return ONLY valid JSON with these keys (no markdown):
     # The LLM often adds filter_types that the user didn't request.
     # e.g. "all big chances" â†’ LLM adds shot types, but big chances can be passes too.
     # Only keep filter_types if the user's words explicitly match a type keyword.
-    BOOL_FLAGS = ["key_passes_only", "crosses_only", "long_balls_only", "switches_only", "diagonals_only",
-                  "through_balls_only", "corners_only", "freekicks_only",
-                  "headers_only", "big_chances_only", "big_chances_created_only",
-                  "own_goals_only", "penalties_only", "volleys_only", "chipped_only",
-                  "direct_from_corner_only", "left_foot_only", "right_foot_only",
-                  "fast_break_only", "touch_in_box_only", "assist_throughball_only",
-                  "assist_cross_only", "assist_corner_only", "assist_freekick_only",
-                  "intentional_assists_only", "yellow_cards_only", "red_cards_only",
-                  "second_yellow_only", "nutmegs_only", "success_in_box_only",
-                  "deep_completion_only", "box_entry_pass_only", "box_entry_carry_only",
-                  "final_third_entry_pass_only", "final_third_entry_carry_only"]
-    if any(result.get(f) for f in BOOL_FLAGS) and result.get("filter_types"):
+    BOOL_FLAGS = [
+        # Pass / action qualifiers
+        "key_passes_only", "crosses_only", "long_balls_only", "switches_only", "diagonals_only",
+        "through_balls_only", "corners_only", "freekicks_only",
+        "headers_only", "big_chances_only", "big_chances_created_only",
+        "own_goals_only", "penalties_only", "volleys_only", "chipped_only",
+        "direct_from_corner_only", "left_foot_only", "right_foot_only",
+        "fast_break_only", "touch_in_box_only", "assist_throughball_only",
+        "assist_cross_only", "assist_corner_only", "assist_freekick_only",
+        "intentional_assists_only", "yellow_cards_only", "red_cards_only",
+        "second_yellow_only", "nutmegs_only", "success_in_box_only",
+        "deep_completion_only", "box_entry_pass_only", "box_entry_carry_only",
+        "final_third_entry_pass_only", "final_third_entry_carry_only",
+        # Flags added to INTENT_FLAG_TO_BOOL_COL after BOOL_FLAGS was originally written
+        "gk_saves_only", "throw_ins_only", "goal_kicks_only", "keeper_throws_only",
+        "gk_hoofs_only", "pull_backs_only", "lay_offs_only", "flick_ons_only",
+        "launches_only", "assists_only", "attacking_passes_only", "scrambles_only",
+        "corner_situations_only", "shot_strong_only", "shot_weak_only",
+        "individual_play_only", "follows_dribble_only", "one_on_one_only",
+        "deflected_only", "woodwork_only", "back_heel_only", "last_line_only",
+        "forced_out_only", "blocked_cross_only", "errors_to_shot_only", "errors_to_goal_only",
+    ]
+    if any(result.get(f) for f in BOOL_FLAGS):
+        # Resolve filter_types from the instruction's type keywords.
+        # Runs even when the LLM left filter_types empty (e.g. because the system
+        # prompt said "NOT filter_types" for a boolean flag) so that any
+        # type + boolean-flag combo is handled without per-combo hardcoding.
         # Check which type keywords the user actually mentioned
         USER_TYPE_KEYWORDS = {
-            r"\bshot":          {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
+            # Shot + all common plain-English synonyms
+            r"\bshots?\b":      {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
+            r"\battempts?\b":   {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
+            r"\bstrikes?\b":    {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
+            r"\bfinish(?:es)?\b": {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
+            r"\befforts?\s+(?:on|at)\s+(?:goal|target)": {"MissedShot", "SavedShot", "Goal", "ShotOnPost", "BlockedShot"},
             r"\bgoal":          {"Goal"},
             r"\bpass":          {"Pass"},
             r"\btackle":        {"Tackle"},
@@ -2151,7 +2189,7 @@ Return ONLY valid JSON with these keys (no markdown):
             r"\bsave":          {"Save"},
             r"\bcard":          {"Card"},
             r"\bblock":         {"Block", "BlockedPass", "BlockedShot"},
-            r"\bduel":          {"Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"},
+            r"\bduel":          {"Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp", "Foul"},
             r"\bchallenge":     {"Challenge"},
             r"\btouch":         {"BallTouch"},
             r"\bdispossess":    {"Dispossessed"},
@@ -2168,11 +2206,14 @@ Return ONLY valid JSON with these keys (no markdown):
                 user_requested_types |= types
 
         if user_requested_types:
-            # Keep only types the user explicitly mentioned
-            result["filter_types"] = [t for t in result["filter_types"]
-                                      if t in user_requested_types and t in available_types]
+            # Use the type keywords from the instruction directly.
+            # Do NOT intersect with the LLM's filter_types: the LLM may have left it
+            # empty (system-prompt "(NOT filter_types)" confusion) or set it partially
+            # (e.g. only "Goal" for "shots in the box"). The instruction's own words are
+            # the ground truth here. This handles every type + boolean-flag combo.
+            result["filter_types"] = [t for t in user_requested_types if t in available_types]
         else:
-            # User didn't mention any type â†’ clear filter_types, let boolean flag work alone
+            # User didn't mention any type â†’ clear filter_types, let the boolean flag work alone
             result["filter_types"] = []
 
     # For generic "set pieces" requests, prefer the restart flags alone.
@@ -2244,7 +2285,7 @@ Return ONLY valid JSON with these keys (no markdown):
 
     # "duel(s)" â†’ all duel types
     if _re.search(r"\bduel", instr_lower):
-        duel_types = [t for t in ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp"]
+        duel_types = [t for t in ["Tackle", "TakeOn", "Aerial", "Challenge", "ShieldBallOpp", "Foul"]
                       if t in available_types]
         if duel_types:
             result["filter_types"] = duel_types

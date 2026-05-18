@@ -650,6 +650,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                 outcome = event.get("outcomeType", {})
                 type_name = event_type.get("displayName", "Unknown") if isinstance(event_type, dict) else str(event_type)
                 outcome_name = outcome.get("displayName", "") if isinstance(outcome, dict) else str(outcome)
+                display_type_name = "Foul Drawn" if type_name == "Foul" and outcome_name == "Successful" else type_name
 
                 qualifiers = event.get("qualifiers", [])
                 qualifier_map = {}
@@ -668,7 +669,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                 rows.append({
                     "minute": int(minute),
                     "second": int(second),
-                    "type": type_name,
+                    "type": display_type_name,
                     "outcomeType": outcome_name,
                     "period": period_disp,
                     "playerName": player,

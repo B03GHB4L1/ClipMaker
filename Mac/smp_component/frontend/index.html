@@ -6,6 +6,10 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     @import url('https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
     body { background: #0e0e0e; overflow: hidden; font-family: 'Iosevka Charon Mono', monospace; color: #f0f0f0; }
+  body.cm-light { background: #f5f0e8; color: #1a1a1a; }
+  body.cm-light .modebar-btn svg,
+  body.cm-light svg [fill="#DFFF00"],
+  body.cm-light svg [stroke="#DFFF00"] { color: #2f5d16 !important; fill: #2f5d16 !important; stroke: #2f5d16 !important; }
     #plot { width: 100%; }
     #no-data {
       display: none;
@@ -51,7 +55,7 @@
   };
 
   // ════════════════════════════════════════════════════════════════════════════
-  // Constants
+  // Constants (dark mode defaults; lights override per render)
   // ════════════════════════════════════════════════════════════════════════════
   const HOME_RGB   = [0, 175, 254];
   const AWAY_RGB   = [255, 112, 118];
@@ -63,6 +67,21 @@
   const PITCH_BG   = "#071008";
   const PITCH_LINE = "rgba(142,255,113,0.16)";
   const PITCH_THICK= "rgba(142,255,113,0.34)";
+  const LIGHT_PITCH_BG   = "#d4e8c2";
+  const LIGHT_PITCH_LINE = "rgba(30,70,10,0.35)";
+  const LIGHT_PITCH_THICK= "rgba(30,70,10,0.60)";
+  const LIGHT_HUD_GREEN  = "#2d5a0e";
+  const LIGHT_GOAL_FILL     = "rgba(0,0,0,0.04)";
+  const LIGHT_GOALFRAME_FILL= "rgba(0,0,0,0.08)";
+  const LIGHT_GOAL_LINE     = "#555555";
+  const LIGHT_LEGEND_FONT   = "#1a1a1a";
+  const LIGHT_MARKER_BORDER = "rgba(0,0,0,0.25)";
+  const LIGHT_ANNO_COLOR    = "#555555";
+  const LIGHT_PASS_LABEL    = "#1a1a1a";
+  const LIGHT_CARRY_LINE    = "rgba(0,0,0,0.20)";
+  const LIGHT_DRIBBLE_LINE  = "rgba(0,0,0,0.25)";
+  const LIGHT_PENALTY       = "rgba(0,0,0,0.35)";
+  const LIGHT_SHADOW        = "rgba(0,0,0,0.30)";
   const MISSED     = new Set(["MissedShot","Attempt","MissedShots"]);
 
   // Standard football goal dimensions: 7.32m wide x 2.44m high.
@@ -109,100 +128,118 @@
     const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
     return `rgba(${r},${g},${b},${alpha})`;
   }
-  function attackDirectionAnnotation() {
+  function attackDirectionAnnotation(hudColor) {
+    const _hud = hudColor || HUD_GREEN;
+    const _isLight = _hud === LIGHT_HUD_GREEN;
     return {
       text: "ATTACK ->",
       x: 0.985, y: 0.985, xref: "paper", yref: "paper",
       xanchor: "right", yanchor: "bottom", showarrow: false,
-      font: { size: 11, color: HUD_GREEN, family: "Iosevka Charon Mono, monospace" },
-      bgcolor: "rgba(11,14,20,0.72)", bordercolor: "rgba(142,255,113,0.28)",
+      font: { size: 11, color: _hud, family: "Iosevka Charon Mono, monospace" },
+      bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(11,14,20,0.72)",
+      bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(142,255,113,0.28)",
       borderwidth: 1, borderpad: 4,
     };
   }
 
-  function horizontalPitchShapes() {
-    const shapes = pitchShapes();
+  function horizontalPitchShapes(pl, pt, pb, gf, gridColor, zoneFill, zoneLine) {
+    const shapes = pitchShapes(pl, pt, pb, gf);
+    const _grid = gridColor || "rgba(142,255,113,0.045)";
+    const _zoneFill = zoneFill || "rgba(142,255,113,0.035)";
+    const _zoneLine = zoneLine || "rgba(142,255,113,0.10)";
     for (let x = 10; x < 100; x += 10) {
-      shapes.push({ type:"line", x0:x, y0:0, x1:x, y1:100, line:{color:"rgba(142,255,113,0.045)", width:1}, layer:"below" });
+      shapes.push({ type:"line", x0:x, y0:0, x1:x, y1:100, line:{color:_grid, width:1}, layer:"below" });
     }
     for (let y = 10; y < 100; y += 10) {
-      shapes.push({ type:"line", x0:0, y0:y, x1:100, y1:y, line:{color:"rgba(142,255,113,0.045)", width:1}, layer:"below" });
+      shapes.push({ type:"line", x0:0, y0:y, x1:100, y1:y, line:{color:_grid, width:1}, layer:"below" });
     }
-    shapes.push({ type:"rect", x0:66, y0:0, x1:100, y1:100, fillcolor:"rgba(142,255,113,0.035)", line:{color:"rgba(142,255,113,0.10)", width:1}, layer:"below" });
+    shapes.push({ type:"rect", x0:66, y0:0, x1:100, y1:100, fillcolor:_zoneFill, line:{color:_zoneLine, width:1}, layer:"below" });
     return shapes;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   // Pitch shapes (from working Shot Map Parlour — proven correct)
   // ════════════════════════════════════════════════════════════════════════════
-  function pitchShapes() {
-    const lw  = { color: PITCH_LINE,  width: 1.5 };
-    const lw2 = { color: PITCH_THICK, width: 1.5 };
+  function pitchShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
     const t   = "rgba(0,0,0,0)";
-    const wh  = "rgba(255,255,255,0.04)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
     return [
-      { type:"rect",   x0:-3,    y0:0,    x1:103,   y1:100,  fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:-3,    y0:0,    x1:103,   y1:100,  fillcolor:_pb, line:lw2, layer:"below" },
       { type:"rect",   x0:0,     y0:0,    x1:100,   y1:100,  fillcolor:t,        line:lw2 },
       { type:"line",   x0:50,    y0:0,    x1:50,    y1:100,  line:lw },
       { type:"circle", x0:40.85, y0:35.9, x1:59.15, y1:64.1, fillcolor:t,        line:lw },
-      { type:"circle", x0:49.5,  y0:49.3, x1:50.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
+      { type:"circle", x0:49.5,  y0:49.3, x1:50.5,  y1:50.7, fillcolor:_pl, line:lw },
       { type:"rect",   x0:0,     y0:21.1, x1:17.0,  y1:78.9, fillcolor:t,        line:lw },
       { type:"rect",   x0:83.0,  y0:21.1, x1:100,   y1:78.9, fillcolor:t,        line:lw },
       { type:"rect",   x0:0,     y0:36.6, x1:5.5,   y1:63.4, fillcolor:t,        line:lw },
       { type:"rect",   x0:94.5,  y0:36.6, x1:100,   y1:63.4, fillcolor:t,        line:lw },
-      { type:"circle", x0:10.5,  y0:49.3, x1:11.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
-      { type:"circle", x0:88.5,  y0:49.3, x1:89.5,  y1:50.7, fillcolor:PITCH_LINE, line:lw },
-      { type:"rect",   x0:-3,    y0:44.5, x1:0,     y1:55.5, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
-      { type:"rect",   x0:100,   y0:44.5, x1:103,   y1:55.5, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"circle", x0:10.5,  y0:49.3, x1:11.5,  y1:50.7, fillcolor:_pl, line:lw },
+      { type:"circle", x0:88.5,  y0:49.3, x1:89.5,  y1:50.7, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:-3,    y0:44.5, x1:0,     y1:55.5, fillcolor:wh, line:{color:_pt, width:2} },
+      { type:"rect",   x0:100,   y0:44.5, x1:103,   y1:55.5, fillcolor:wh, line:{color:_pt, width:2} },
     ];
   }
 
-  function halfPitchVertShapes() {
-    const lw  = { color: PITCH_LINE,  width: 1.5 };
-    const lw2 = { color: PITCH_THICK, width: 1.5 };
+  function halfPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
     const t   = "rgba(0,0,0,0)";
-    const wh  = "rgba(255,255,255,0.04)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
     return [
-      { type:"rect",   x0:0,    y0:-3,   x1:100,  y1:53,   fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:-3,   x1:100,  y1:53,   fillcolor:_pb, line:lw2, layer:"below" },
       { type:"rect",   x0:0,    y0:0,    x1:100,  y1:50,   fillcolor:t,        line:lw2 },
       { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
       { type:"rect",   x0:21.1, y0:0,    x1:78.9, y1:17.0, fillcolor:t,        line:lw },
       { type:"rect",   x0:36.6, y0:0,    x1:63.4, y1:5.5,  fillcolor:t,        line:lw },
-      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:PITCH_LINE, line:lw },
-      { type:"rect",   x0:44.5, y0:-3,   x1:55.5, y1:0,    fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:44.5, y0:-3,   x1:55.5, y1:0,    fillcolor:wh, line:{color:_pt, width:2} },
     ];
   }
 
 
   // Defensive half pitch: own goal at bottom (y=100), centre line at top (y=50)
   // Used for goalkeeper maps — mirrors halfPitchVertShapes but shows own half
-  function defHalfPitchVertShapes() {
-    const lw  = { color: PITCH_LINE,  width: 1.5 };
-    const lw2 = { color: PITCH_THICK, width: 1.5 };
+  function defHalfPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
     const t   = "rgba(0,0,0,0)";
-    const wh  = "rgba(255,255,255,0.04)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
     return [
-      { type:"rect",   x0:0,    y0:47,   x1:100,  y1:103,  fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:47,   x1:100,  y1:103,  fillcolor:_pb, line:lw2, layer:"below" },
       { type:"rect",   x0:0,    y0:50,   x1:100,  y1:100,  fillcolor:t,        line:lw2 },
       { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
       { type:"rect",   x0:21.1, y0:83.0, x1:78.9, y1:100,  fillcolor:t,        line:lw },
       { type:"rect",   x0:36.6, y0:94.5, x1:63.4, y1:100,  fillcolor:t,        line:lw },
-      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:PITCH_LINE, line:lw },
-      { type:"rect",   x0:44.5, y0:100,  x1:55.5, y1:103,  fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:44.5, y0:100,  x1:55.5, y1:103,  fillcolor:wh, line:{color:_pt, width:2} },
       { type:"path",   path:"M 35.9 83.0 A 14.1 9.15 0 0 1 64.1 83.0", fillcolor:t, line:lw },
     ];
   }
 
   // Full pitch drawn vertically: x=0-100 (width), y=0-100 (length)
   // Goal at y=0 (top), own goal at y=100 (bottom), direction of play: bottom→top
-  function fullPitchVertShapes() {
-    const lw  = { color: PITCH_LINE,  width: 1.5 };
-    const lw2 = { color: PITCH_THICK, width: 1.5 };
+  function fullPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
     const t   = "rgba(0,0,0,0)";
-    const wh  = "rgba(255,255,255,0.04)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
     return [
       // Background
-      { type:"rect", x0:-3, y0:-3, x1:103, y1:103, fillcolor:PITCH_BG, line:lw2, layer:"below" },
+      { type:"rect", x0:-3, y0:-3, x1:103, y1:103, fillcolor:_pb, line:lw2, layer:"below" },
       // Pitch outline
       { type:"rect", x0:0, y0:0, x1:100, y1:100, fillcolor:t, line:lw2 },
       // Centre line
@@ -210,23 +247,23 @@
       // Centre circle
       { type:"circle", x0:35.9, y0:40.85, x1:64.1, y1:59.15, fillcolor:t, line:lw },
       // Centre spot
-      { type:"circle", x0:49.3, y0:49.5, x1:50.7, y1:50.5, fillcolor:PITCH_LINE, line:lw },
+      { type:"circle", x0:49.3, y0:49.5, x1:50.7, y1:50.5, fillcolor:_pl, line:lw },
       // Top penalty area (attacking end)
       { type:"rect", x0:21.1, y0:0, x1:78.9, y1:17.0, fillcolor:t, line:lw },
       // Top 6-yard box
       { type:"rect", x0:36.6, y0:0, x1:63.4, y1:5.5, fillcolor:t, line:lw },
       // Top penalty spot
-      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:PITCH_LINE, line:lw },
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:_pl, line:lw },
       // Top goal
-      { type:"rect", x0:44.5, y0:-3, x1:55.5, y1:0, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"rect", x0:44.5, y0:-3, x1:55.5, y1:0, fillcolor:wh, line:{color:_pt, width:2} },
       // Bottom penalty area (own goal end)
       { type:"rect", x0:21.1, y0:83.0, x1:78.9, y1:100, fillcolor:t, line:lw },
       // Bottom 6-yard box
       { type:"rect", x0:36.6, y0:94.5, x1:63.4, y1:100, fillcolor:t, line:lw },
       // Bottom penalty spot
-      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:PITCH_LINE, line:lw },
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:_pl, line:lw },
       // Bottom goal
-      { type:"rect", x0:44.5, y0:100, x1:55.5, y1:103, fillcolor:wh, line:{color:PITCH_THICK, width:2} },
+      { type:"rect", x0:44.5, y0:100, x1:55.5, y1:103, fillcolor:wh, line:{color:_pt, width:2} },
       // Penalty arcs (top)
       { type:"path", path:"M 35.9 17.0 A 14.1 9.15 0 0 0 64.1 17.0", fillcolor:t, line:lw },
       // Penalty arcs (bottom)
@@ -234,31 +271,33 @@
     ];
   }
 
-  function goalframeShapes(xRange, yRange) {
-    const goalLine = { color: "#ffffff", width: 3 };
+  function goalframeShapes(xRange, yRange, glColor, gfFill, bgColor, gridColor) {
+    const goalLine = { color: glColor || "#ffffff", width: 3 };
     const t = "rgba(0,0,0,0)";
+    const _bg = bgColor || PITCH_BG;
+    const _grid = gridColor || PITCH_LINE;
     // Goal dimensions: width (GOAL_Y_RIGHT - GOAL_Y_LEFT) = 9.6 units
     // Height (GOAL_Z_TOP = 33.3 z-units ≈ crossbar; goal is 3:1 w:h aspect ratio)
     // To ensure correct aspect ratio, the plot limits and scaling need to reflect this.
     return [
       // Background rectangle for the goalframe area. Adjusted y1 to match new GOAL_Z_TOP.
-      { type:"rect", x0:xRange[0], y0:yRange[0], x1:xRange[1], y1:yRange[1], fillcolor:PITCH_BG, line:{color:t}, layer:"below" },
+      { type:"rect", x0:xRange[0], y0:yRange[0], x1:xRange[1], y1:yRange[1], fillcolor:_bg, line:{color:t}, layer:"below" },
       // Goal frame outline.
       { type:"rect", x0:GOAL_Y_LEFT, y0:GOAL_Z_BOT, x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP,
-        fillcolor:"rgba(255,255,255,0.08)", line:goalLine },
+        fillcolor:gfFill || "rgba(255,255,255,0.08)", line:goalLine },
       // Ground line at the goal.
-      { type:"line", x0:xRange[0], y0:0, x1:xRange[1], y1:0, line:{color:PITCH_LINE, width:1} },
+      { type:"line", x0:xRange[0], y0:0, x1:xRange[1], y1:0, line:{color:_grid, width:1} },
       // Vertical grid lines inside the goal, adjusted to new GOAL_Z_TOP.
       { type:"line", x0:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
         x1:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
-        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+        line:{color:_grid, width:0.8, dash:"dot"} },
       { type:"line", x0:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
         x1:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
-        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+        line:{color:_grid, width:0.8, dash:"dot"} },
       // Horizontal grid line inside the goal, adjusted to new GOAL_Z_TOP.
       { type:"line", x0:GOAL_Y_LEFT, y0:GOAL_Z_TOP/2,
         x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP/2,
-        line:{color:PITCH_LINE, width:0.8, dash:"dot"} },
+        line:{color:_grid, width:0.8, dash:"dot"} },
       // Goalposts extending slightly below the ground line.
       { type:"line", x0:GOAL_Y_LEFT,  y0:0, x1:GOAL_Y_LEFT,  y1:-4, line:goalLine },
       { type:"line", x0:GOAL_Y_RIGHT, y0:0, x1:GOAL_Y_RIGHT, y1:-4, line:goalLine },
@@ -311,6 +350,7 @@
   // Shared Plotly config
   // ════════════════════════════════════════════════════════════════════════════
   const EXPORT_BRAND_TEXT = "ClipMaker v1.2.1<br>@B03GHB4L1";
+  let _exportBrandColor = "#DFFF00";
   const PLOTLY_CONFIG = {
     displayModeBar: true,
     displaylogo: false,
@@ -335,7 +375,7 @@
       xanchor: "right",
       yanchor: "bottom",
       showarrow: false,
-      font: { size: 10, color: "#DFFF00", family: "Iosevka Charon Mono, monospace" },
+      font: { size: 10, color: _exportBrandColor, family: "Iosevka Charon Mono, monospace" },
     });
     branded.annotations = annotations;
     return branded;
@@ -373,6 +413,16 @@
   }
 
   function renderShotMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _gfLine    = isLight ? LIGHT_GOAL_LINE : "#ffffff";
+    const _gfFrame   = isLight ? LIGHT_GOALFRAME_FILL : "rgba(255,255,255,0.08)";
+    const _legendFont= isLight ? LIGHT_LEGEND_FONT : "#ffffff";
+    const _annoColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
     const shots      = args.shots      || [];
     const homeTeam   = args.home_team  || "Home";
     const awayTeam   = args.away_team  || "Away";
@@ -412,9 +462,9 @@
 
     const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
     const annotations = isGF ? [
-      {x:GOAL_Y_LEFT,y:-6,text:"Post",showarrow:false,font:{color:"#adaaaa",size:10}},
-      {x:GOAL_Y_RIGHT,y:-6,text:"Post",showarrow:false,font:{color:"#adaaaa",size:10}},
-      {x:gMid,y:GOAL_Z_TOP+4,text:"Crossbar",showarrow:false,font:{color:"#adaaaa",size:10}},
+      {x:GOAL_Y_LEFT,y:-6,text:"Post",showarrow:false,font:{color:_annoColor,size:10}},
+      {x:GOAL_Y_RIGHT,y:-6,text:"Post",showarrow:false,font:{color:_annoColor,size:10}},
+      {x:gMid,y:GOAL_Z_TOP+4,text:"Crossbar",showarrow:false,font:{color:_annoColor,size:10}},
     ] : [];
 
     const selectedShot = selectedIdx != null ? toPlot.find(s => s.df_idx === selectedIdx) : null;
@@ -428,20 +478,20 @@
         NORMAL_GOALFRAME_EXPAND_MARGIN_X,
         NORMAL_GOALFRAME_EXPAND_MARGIN_Y
       );
-      xRange=expanded.xRange; yRange=expanded.yRange; scaleRatio=GOAL_SCALERATIO; shapes=goalframeShapes(xRange, yRange);
+      xRange=expanded.xRange; yRange=expanded.yRange; scaleRatio=GOAL_SCALERATIO; shapes=goalframeShapes(xRange, yRange, _gfLine, _gfFrame, _pitchBG, _pitchLine);
     } else if (isHPV) {
-      xRange=[-5,105]; yRange=[55,-5]; scaleRatio=0.65; shapes=halfPitchVertShapes();
+      xRange=[-5,105]; yRange=[55,-5]; scaleRatio=0.65; shapes=halfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     } else if (isHP) {
       xRange=[47,105]; yRange=[105,-5]; scaleRatio=0.65; shapes=halfPitchShapes();
     } else {
-      xRange=[-5,105]; yRange=[105,-5]; scaleRatio=0.65; shapes=pitchShapes();
+      xRange=[-5,105]; yRange=[105,-5]; scaleRatio=0.65; shapes=pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     }
 
     const layout = {
-      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
       margin:{l:0,r:0,t:isGF?20:0,b:0}, height:height,
       showlegend:!isGF,
-      legend:{orientation:"h",yanchor:"bottom",y:1.02,xanchor:"left",x:0,font:{color:"#ffffff",size:12},bgcolor:"rgba(0,0,0,0)"},
+      legend:{orientation:"h",yanchor:"bottom",y:1.02,xanchor:"left",x:0,font:{color:_legendFont,size:12},bgcolor:"rgba(0,0,0,0)"},
       xaxis:{range:xRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
       yaxis:{range:yRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:scaleRatio},
       shapes:shapes, annotations:annotations, dragmode:false,
@@ -463,6 +513,11 @@
   // PASS MAP — player passes and pass network
   // ════════════════════════════════════════════════════════════════════════════
   function renderPassMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
     const passes     = args.passes      || [];
     const homeTeam   = args.home_team   || "";
     const awayTeam   = args.away_team   || "";
@@ -474,14 +529,20 @@
     document.getElementById("plot").style.display = passes.length ? "block" : "none";
     if (!passes.length) { Streamlit.setHeight(100); return; }
 
-    if (mode === "network") renderPassNetwork(passes, homeTeam, awayTeam, height);
-    else renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height);
+    if (mode === "network") renderPassNetwork(passes, homeTeam, awayTeam, height, _pitchBG, _pitchLine, _pitchThick, isLight);
+    else renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height, _pitchBG, _pitchLine, _pitchThick, _hudGreen, isLight);
   }
 
 
-  function renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height) {
+  function renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height, _pitchBG, _pitchLine, _pitchThick, _hudGreen, isLight) {
     const plotEl = document.getElementById("plot");
-    const shapes = horizontalPitchShapes();
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG,
+      isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)",
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
     const dimmed = selectedIdx !== null;
     const traces = [];
 
@@ -510,11 +571,11 @@
     });
 
     const layout = {
-      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG || PITCH_BG,
       margin:{l:5,r:5,t:5,b:5}, height:height,
       xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
       yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:0.65},
-      shapes:shapes, annotations:[attackDirectionAnnotation()], dragmode:false, showlegend:false,
+      shapes:shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode:false, showlegend:false,
     };
 
     cmNewPlot(plotEl, traces, layout).then(() => {
@@ -527,8 +588,14 @@
     });
   }
 
-  function renderPassNetwork(passes, homeTeam, awayTeam, height) {
+  function renderPassNetwork(passes, homeTeam, awayTeam, height, _pitchBG, _pitchLine, _pitchThick, isLight) {
     const plotEl = document.getElementById("plot");
+    const _pl = _pitchLine || PITCH_LINE;
+    const _pt = _pitchThick || PITCH_THICK;
+    const _pb = _pitchBG || PITCH_BG;
+    const _gf = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _starterColor = isLight ? LIGHT_PASS_LABEL : "#ffffff";
+    const _subColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
 
     // Build player data with starter info
     const players = {};
@@ -599,7 +666,7 @@
             line:{color:baseHex,width:2},
           },
           text:starters.map(([name])=>name.split(" ").pop()),
-          textposition:"top center", textfont:{size:9,color:"#ffffff"},
+          textposition:"top center", textfont:{size:9,color:_starterColor},
           hovertext:starters.map(([name,n])=>`${name}<br>${n.count} passes`),
           hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
         });
@@ -617,7 +684,7 @@
             line:{color:baseHex,width:1.5},
           },
           text:subs.map(([name])=>name.split(" ").pop()),
-          textposition:"top center", textfont:{size:8,color:"#adaaaa"},
+          textposition:"top center", textfont:{size:8,color:_subColor},
           hovertext:subs.map(([name,n])=>`${name} (sub)<br>${n.count} passes`),
           hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
         });
@@ -632,8 +699,8 @@
     ];
 
     // Pitch shapes for both subplots
-    const shapes1=fullPitchVertShapes();
-    const shapes2=fullPitchVertShapes().map(s => {
+    const shapes1=fullPitchVertShapes(_pl, _pt, _pb, _gf);
+    const shapes2=fullPitchVertShapes(_pl, _pt, _pb, _gf).map(s => {
       const ns=Object.assign({},s);
       ns.xref="x2"; ns.yref="y2";
       if (ns.line) ns.line=Object.assign({},ns.line);
@@ -663,6 +730,13 @@
   // DEFENSIVE MAP — horizontal full pitch (left→right attack)
   // ════════════════════════════════════════════════════════════════════════════
   function renderDefensiveMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : "rgba(255,255,255,0.35)";
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
     const actions    = args.actions     || [];
     const homeTeam   = args.home_team   || "";
     const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
@@ -673,7 +747,12 @@
     if (!actions.length) { Streamlit.setHeight(100); return; }
 
     const plotEl = document.getElementById("plot");
-    const shapes = horizontalPitchShapes();
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG, _goalFill,
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
     const dimmed = selectedIdx !== null;
     const traces = [];
     const stackConnectorTraces = [];
@@ -760,7 +839,7 @@
             return `rgba(${r},${g},${b},${alpha})`;
           }),
           size:acts.map(a=>selectedIdx===a.df_idx?24:16), symbol:style.symbol,
-          line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:"rgba(255,255,255,0.35)"),
+           line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:_markerBorder),
                 width:acts.map(a=>selectedIdx===a.df_idx?2.5:1.5)},
         },
         text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}${a._stackSize > 1 ? `<br>Stacked with ${a._stackSize - 1} other action${a._stackSize > 2 ? "s" : ""}` : ""}`),
@@ -771,12 +850,11 @@
     });
 
     const layout = {
-      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
-      margin:{l:5,r:5,t:5,b:5}, height:height,
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
       xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
       yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:0.65},
-      shapes:shapes, annotations:[attackDirectionAnnotation()], dragmode:false,
-      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:"#adaaaa"}},
+      shapes:shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode:false,
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:_legendFont}},
       showlegend:true,
     };
 
@@ -947,6 +1025,13 @@
   };
 
   function renderGoalkeeperMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : "rgba(255,255,255,0.35)";
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
     const actions    = args.actions     || [];
     const homeTeam   = args.home_team   || "";
     const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
@@ -958,7 +1043,7 @@
     if (!actions.length) { Streamlit.setHeight(100); return; }
 
     const plotEl = document.getElementById("plot");
-    const shapes = defHalfPitchVertShapes();
+    const shapes = defHalfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     const dimmed = selectedIdx !== null;
     const traces = [];
 
@@ -987,7 +1072,7 @@
             }),
             size: acts.map(a => selectedIdx === a.df_idx ? 22 : 14),
             line: {
-              color: acts.map(a => selectedIdx === a.df_idx ? color : "rgba(255,255,255,0.35)"),
+              color: acts.map(a => selectedIdx === a.df_idx ? color : _markerBorder),
               width: acts.map(a => selectedIdx === a.df_idx ? 2.5 : 1.5),
             },
           },
@@ -1018,7 +1103,7 @@
               return `rgba(${r},${g},${b},${alpha})`;
             }),
             size:acts.map(a=>selectedIdx===a.df_idx?24:16), symbol:style.symbol,
-            line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:"rgba(255,255,255,0.35)"),
+          line:{color:acts.map(a=>(selectedIdx===a.df_idx)?style.color:_markerBorder),
                   width:acts.map(a=>selectedIdx===a.df_idx?2.5:1.5)},
           },
           text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}`),
@@ -1030,12 +1115,12 @@
     }
 
     const layout = {
-      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:PITCH_BG,
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
       margin:{l:0,r:0,t:0,b:60}, height:height,
       xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
       yaxis:{range:[105,45],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
       shapes:shapes, dragmode:false,
-      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:"#adaaaa"}},
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:_legendFont}},
       showlegend:true,
     };
 
@@ -1049,11 +1134,23 @@
     });
   }
 
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // DRIBBLE & CARRY MAP — horizontal pitch
   // ════════════════════════════════════════════════════════════════════════════
   // Dribble & Carry Map
   // ════════════════════════════════════════════════════════════════════════════
   function renderDribbleCarryMap(args) {
-    const actions     = args.actions      || [];
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : "rgba(255,255,255,0.35)";
+    const _carryLineColor = isLight ? LIGHT_CARRY_LINE : "rgba(255,255,255,0.3)";
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
+    const actions    = args.actions     || [];
     const selectedIdx = args.selected_idx != null ? args.selected_idx : null;
     const height      = args.height       || 700;
 
@@ -1062,7 +1159,12 @@
     if (!actions.length) { Streamlit.setHeight(100); return; }
 
     const plotEl = document.getElementById("plot");
-    const shapes = horizontalPitchShapes();
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG, _goalFill,
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
     const dimmed = selectedIdx !== null;
     const traces = [];
 
@@ -1110,7 +1212,7 @@
         ey.push(100 - c.endY);
         ec.push(`rgba(224,200,96,${alpha})`);
         es.push(isSel ? 16 : 10);
-        elc.push(isSel ? CARRY_COLOR : "rgba(255,255,255,0.3)");
+        elc.push(isSel ? CARRY_COLOR : _carryLineColor);
         elw.push(isSel ? 2.5 : 1.5);
         et.push(`${c.playerName}<br>${c.minute}'${String(c.second).padStart(2,"0")}"<br>Carry`);
         ecd.push([c.df_idx, Date.now()]);
@@ -1144,7 +1246,7 @@
           }),
           size: grp.map(d => selectedIdx === d.df_idx ? 20 : 13),
           line: {
-            color: grp.map(d => selectedIdx === d.df_idx ? color : "rgba(255,255,255,0.35)"),
+            color: grp.map(d => selectedIdx === d.df_idx ? color : _markerBorder),
             width: grp.map(d => selectedIdx === d.df_idx ? 2.5 : 1.5),
           },
         },
@@ -1156,12 +1258,12 @@
     });
 
     const layout = {
-      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: PITCH_BG,
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
       margin: {l:5, r:5, t:5, b:5}, height: height,
       xaxis: {range:[-5,105], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true},
       yaxis: {range:[105,-5], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true, scaleanchor:"x", scaleratio:0.65},
-      shapes: shapes, annotations:[attackDirectionAnnotation()], dragmode: false,
-      legend: {orientation:"h", y:-0.04, x:0.5, xanchor:"center", bgcolor:"rgba(0,0,0,0)", font:{size:11, color:"#adaaaa"}},
+      shapes: shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode: false,
+      legend: {orientation:"h", y:-0.04, x:0.5, xanchor:"center", bgcolor:"rgba(0,0,0,0)", font:{size:11, color:_legendFont}},
       showlegend: true,
     };
 
@@ -1179,7 +1281,13 @@
   // BUILD-UP MAP — horizontal pitch, plots a single sequence's ball path
   // ════════════════════════════════════════════════════════════════════════════
   function renderBuildUpMap(args) {
-    const actions   = args.actions   || [];
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const actions     = args.actions      || [];
     const isHome    = args.is_home   || false;
     const height    = args.height    || 260;
     const teamColor = isHome ? HOME_HEX : AWAY_HEX;
@@ -1189,7 +1297,7 @@
     document.getElementById("no-data").style.display = "none";
     document.getElementById("plot").style.display    = "block";
 
-    const shapes      = pitchShapes();
+    const shapes      = pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     const annotations = [];
     const traces      = [];
 
@@ -1276,8 +1384,7 @@
     }
 
     const layout = {
-      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: PITCH_BG,
-      margin: { l: 0, r: 0, t: 0, b: 0 }, height: height,
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
       xaxis: { range: [-5, 105], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true },
       yaxis: { range: [105, -5], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true,
                scaleanchor: "x", scaleratio: 0.65 },
@@ -1296,11 +1403,14 @@
   // Clicking a player circle sends back [df_idx, timestamp]
   // ════════════════════════════════════════════════════════════════════════════
   function renderPenaltyShootout(args) {
+    const isLight    = args.light_mode === true;
     const shots      = args.shots      || [];
     const homeTeam   = args.home_team  || "Home";
     const awayTeam   = args.away_team  || "Away";
     const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
     const height     = args.height     || 560;
+    const _annoColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
+    const _penaltySpot = isLight ? LIGHT_PENALTY : "rgba(255,255,255,0.5)";
 
     const plotEl = document.getElementById("plot");
     document.getElementById("no-data").style.display = shots.length ? "none" : "block";
@@ -1408,7 +1518,7 @@
       x: [50], y: [-5.2], mode: "markers", type: "scatter",
       xaxis: "x2", yaxis: "y2",
       marker: { size: 10, color: "rgba(0,0,0,0)", symbol: "circle-open",
-                line: { color: "rgba(255,255,255,0.5)", width: 2 } },
+                line: { color: _penaltySpot, width: 2 } },
       hoverinfo: "none", showlegend: false,
     });
 
@@ -1417,18 +1527,18 @@
 
     // ── Annotations ─────────────────────────────────────────────────────────
     const annotations = [
-      { text: "GOALFRAME",           x: 0.50, y: 1.03, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: "#adaaaa" } },
+      { text: "GOALFRAME",           x: 0.50, y: 1.03, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: _annoColor } },
       { text: `<b>${homeTeam}</b>`,  x: 0.25, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: HOME_HEX } },
       { text: `<b>${awayTeam}</b>`,  x: 0.75, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: AWAY_HEX } },
-      { text: "Penalty spot",        x: 50,   y: -7.1, xref: "x2",    yref: "y2",    showarrow: false, font: { size: 9, color: "#767575" } },
+      { text: "Penalty spot",        x: 50,   y: -7.1, xref: "x2",    yref: "y2",    showarrow: false, font: { size: 9, color: _annoColor } },
     ];
 
     // Goalframe post / crossbar annotations
     const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
     [{x: GOAL_Y_LEFT, t: "Post"}, {x: GOAL_Y_RIGHT, t: "Post"}].forEach(p => {
-      annotations.push({ x: p.x, y: -7.1, xref: "x2", yref: "y2", text: p.t, showarrow: false, font: { size: 9, color: "#adaaaa" } });
+      annotations.push({ x: p.x, y: -7.1, xref: "x2", yref: "y2", text: p.t, showarrow: false, font: { size: 9, color: _annoColor } });
     });
-    annotations.push({ x: gMid, y: GOAL_Z_TOP + 1, xref: "x2", yref: "y2", text: "Bar", showarrow: false, font: { size: 9, color: "#adaaaa" } });
+    annotations.push({ x: gMid, y: GOAL_Z_TOP + 1, xref: "x2", yref: "y2", text: "Bar", showarrow: false, font: { size: 9, color: _annoColor } });
 
     const layout = {
       paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
@@ -1471,6 +1581,10 @@
   }
 
   function renderTimelineWindow(args) {
+    const isLight = args.light_mode === true;
+    const _shadowColor = isLight ? LIGHT_SHADOW : "rgba(255,255,255,0.45)";
+    const _labelColor = isLight ? "#555555" : "#d9d9d9";
+    const _captionColor = isLight ? "#555555" : "#8e8e8e";
     const currentWindow = Math.max(1, Number(args.current_window_seconds || 0));
     const beforeLimit = Math.max(0, Number(args.before_limit_seconds || 180));
     const afterLimit = Math.max(0, Number(args.after_limit_seconds || 180));
@@ -1496,20 +1610,20 @@
 
     plotEl.innerHTML = `
       <div style="padding:8px 0 4px 0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:#8e8e8e;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:${_captionColor};font-size:11px;letter-spacing:0.12em;text-transform:uppercase;">
           <span>${toMMSS(beforeLimit)} before</span>
           <span>&nbsp;</span>
           <span>${toMMSS(afterLimit)} after</span>
         </div>
         <div id="cm-timeline-wrap" style="position:relative;height:54px;padding:14px 0 10px 0;">
           <div style="position:absolute;left:0;right:0;top:24px;height:6px;border-radius:999px;background:linear-gradient(90deg, rgba(120,120,120,0.25), rgba(170,170,170,0.18));"></div>
-          <div id="cm-before-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:linear-gradient(90deg, rgba(223,255,0,0.25), rgba(223,255,0,0.75));"></div>
-          <div id="cm-after-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:linear-gradient(90deg, rgba(223,255,0,0.75), rgba(223,255,0,0.25));"></div>
-          <div id="cm-current-window" style="position:absolute;top:14px;height:26px;border-radius:999px;background:#f4f1e8;color:#111;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;box-shadow:0 0 0 1px rgba(255,255,255,0.45), 0 10px 26px rgba(0,0,0,0.28);padding:0 10px;white-space:nowrap;pointer-events:none;"></div>
-          <button id="cm-left-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid #dfff00;background:#161616;box-shadow:0 0 0 3px rgba(223,255,0,0.15);cursor:ew-resize;"></button>
-          <button id="cm-right-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid #dfff00;background:#161616;box-shadow:0 0 0 3px rgba(223,255,0,0.15);cursor:ew-resize;"></button>
+          <div id="cm-before-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:${args.light_mode === true ? 'linear-gradient(90deg, rgba(47,93,22,0.25), rgba(47,93,22,0.75))' : 'linear-gradient(90deg, rgba(223,255,0,0.25), rgba(223,255,0,0.75))'};"></div>
+          <div id="cm-after-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:${args.light_mode === true ? 'linear-gradient(90deg, rgba(47,93,22,0.75), rgba(47,93,22,0.25))' : 'linear-gradient(90deg, rgba(223,255,0,0.75), rgba(223,255,0,0.25))'};"></div>
+          <div id="cm-current-window" style="position:absolute;top:14px;height:26px;border-radius:999px;background:#f4f1e8;color:#111;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;box-shadow:0 0 0 1px ${_shadowColor}, 0 10px 26px rgba(0,0,0,0.28);padding:0 10px;white-space:nowrap;pointer-events:none;"></div>
+          <button id="cm-left-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid ${args.light_mode === true ? '#2f5d16' : '#dfff00'};background:${args.light_mode === true ? '#fcf8f2' : '#161616'};box-shadow:0 0 0 3px ${args.light_mode === true ? 'rgba(47,93,22,0.15)' : 'rgba(223,255,0,0.15)'};cursor:ew-resize;"></button>
+          <button id="cm-right-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid ${args.light_mode === true ? '#2f5d16' : '#dfff00'};background:${args.light_mode === true ? '#fcf8f2' : '#161616'};box-shadow:0 0 0 3px ${args.light_mode === true ? 'rgba(47,93,22,0.15)' : 'rgba(223,255,0,0.15)'};cursor:ew-resize;"></button>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:#d9d9d9;font-size:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:${_labelColor};font-size:12px;">
           <span id="cm-before-label">Before ${toMMSS(initialBefore)}</span>
           <span id="cm-after-label">After ${toMMSS(initialAfter)}</span>
         </div>
@@ -1633,6 +1747,8 @@
   // Router
   // ════════════════════════════════════════════════════════════════════════════
   function render(args) {
+    document.body.classList.toggle("cm-light", args.light_mode === true);
+    _exportBrandColor = args.light_mode === true ? "#2f5d16" : "#DFFF00";
     const t = args.component_type || "";
     if (t === "penalty_shootout")       renderPenaltyShootout(args);
     else if (t === "shot_map")         renderShotMap(args);

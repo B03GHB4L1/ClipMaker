@@ -11,20 +11,16 @@ _analyst_component = components.declare_component(
 
 
 def penalty_shootout_map(shots, home_team, away_team, selected_idx=None, key=None):
-    """
-    Penalty shootout view: goalframe centre, home circles left, away circles right.
-    Clicking a player circle returns [df_idx, timestamp].
-    """
     return _analyst_component(
         component_type="penalty_shootout",
         shots=shots, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
-        height=820, key=key, default=None,
+        height=820, key=key, default=None, light_mode=False,
     )
 
 
 def shot_map(shots, home_team, away_team, selected_idx=None,
-             view="pitch", key=None):
+             view="pitch", key=None, light_mode=False):
     height_map = {
         "pitch": 460, "halfpitch": 460,
         "halfpitch_vert": 520, "goalframe": 320,
@@ -34,42 +30,42 @@ def shot_map(shots, home_team, away_team, selected_idx=None,
         component_type="shot_map",
         shots=shots, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, view=view,
-        height=height, key=key, default=None,
+        height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
 def pass_map(passes, home_team, away_team, selected_idx=None,
-             mode="player", key=None):
+             mode="player", key=None, light_mode=False):
     height = 800 if mode == "network" else 470
     return _analyst_component(
         component_type="pass_map",
         passes=passes, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, mode=mode,
-        height=height, key=key, default=None,
+        height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
-def defensive_map(actions, home_team, away_team, selected_idx=None, key=None):
+def defensive_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False):
     height = 500
     return _analyst_component(
         component_type="defensive_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
-        height=height, key=key, default=None,
+        height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
-def dribble_carry_map(actions, home_team, away_team, selected_idx=None, key=None):
+def dribble_carry_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False):
     height = 500
     return _analyst_component(
         component_type="dribble_carry_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
-        height=height, key=key, default=None,
+        height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
-def build_up_map(actions, is_home, key=None):
+def build_up_map(actions, is_home, key=None, light_mode=False):
     return _analyst_component(
         component_type="build_up_map",
         actions=actions,
@@ -77,17 +73,18 @@ def build_up_map(actions, is_home, key=None):
         height=260,
         key=key,
         default=None,
+        light_mode=light_mode,
     )
 
 
 def goalkeeper_map(actions, home_team, away_team, selected_idx=None,
-                   shots_faced=False, key=None):
+                   shots_faced=False, key=None, light_mode=False):
     height = 520
     return _analyst_component(
         component_type="goalkeeper_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, shots_faced=shots_faced,
-        height=height, key=key, default=None,
+        height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
@@ -131,7 +128,7 @@ def timeline_window(
     )
 
 
-def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
+def pressing_map(press_wins, is_home_team, selected_idx=None, key=None, light_mode=False):
     """
     Render a full-pitch scatter of high-press wins using Plotly.
     press_wins: list of dicts from detect_press_wins, each with x, y, type,
@@ -196,10 +193,47 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
     final_third_x = PITCH_LENGTH * 0.66
 
     # ── Pitch markings ──────────────────────────────────────────────────────
-    _line = dict(color="#555555", width=1.5)
+    if light_mode:
+        _pitch_fill = "#d4e8c2"
+        _line = dict(color="rgba(30,70,10,0.60)", width=1.5)
+        _zone_mid_bg  = "rgba(80,120,40,0.08)"
+        _zone_mid_ln  = "rgba(80,120,40,0.20)"
+        _zone_high_bg  = "rgba(47,93,22,0.10)"
+        _zone_high_ln  = "rgba(47,93,22,0.30)"
+        _sep_line      = "rgba(80,60,30,0.18)"
+        _sep_final     = "rgba(47,93,22,0.42)"
+        _ann_font_mid  = "#4a7020"
+        _ann_bg        = "rgba(220,200,170,0.50)"
+        _ann_font_high = "#234610"
+        _leg_font      = "#444444"
+        _plot_bg       = "#f0ece4"
+        _paper_bg      = "#f0ece4"
+        _brand_col     = "#2f5d16"
+        _brand_bg      = "rgba(40,30,10,0.50)"
+        _marker_border = "#333333"
+        _high_color    = "#2f5d16"
+    else:
+        _pitch_fill = "#1a2a1a"
+        _line = dict(color="#555555", width=1.5)
+        _zone_mid_bg  = "rgba(106,159,0,0.12)"
+        _zone_mid_ln  = "rgba(106,159,0,0.28)"
+        _zone_high_bg  = "rgba(200,255,0,0.10)"
+        _zone_high_ln  = "rgba(200,255,0,0.35)"
+        _sep_line      = "rgba(255,255,255,0.18)"
+        _sep_final     = "rgba(200,255,0,0.55)"
+        _ann_font_mid  = "#94b65b"
+        _ann_bg        = "rgba(0,0,0,0.28)"
+        _ann_font_high = "#d8ff6a"
+        _leg_font      = "#cccccc"
+        _plot_bg       = "#1a2a1a"
+        _paper_bg      = "#111111"
+        _brand_col     = "#DFFF00"
+        _brand_bg      = "rgba(0,0,0,0.50)"
+        _marker_border = "white"
+        _high_color    = "#c8ff00"
     # Outer boundary
     fig.add_shape(type="rect", x0=0, y0=0, x1=PITCH_LENGTH, y1=PITCH_WIDTH,
-                  line=_line, fillcolor="#1a2a1a", layer="below")
+                  line=_line, fillcolor=_pitch_fill, layer="below")
     # Halfway line
     fig.add_shape(type="line", x0=PITCH_LENGTH/2, y0=0, x1=PITCH_LENGTH/2, y1=PITCH_WIDTH, line=_line, layer="below")
     # Centre circle (approx radius 9.15m)
@@ -210,7 +244,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
     # Centre spot
     fig.add_trace(go.Scatter(x=[PITCH_LENGTH/2], y=[PITCH_WIDTH/2],
                              mode="markers",
-                             marker=dict(color="#555555", size=4),
+                             marker=dict(color=_line["color"], size=4),
                              showlegend=False, hoverinfo="skip"))
     # Penalty areas (attacking = right side when is_home_team=True)
     for side in ("left", "right"):
@@ -230,8 +264,8 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         y0=0,
         x1=final_third_x,
         y1=PITCH_WIDTH,
-        fillcolor="rgba(106,159,0,0.12)",
-        line=dict(color="rgba(106,159,0,0.28)", width=1),
+        fillcolor=_zone_mid_bg,
+        line=dict(color=_zone_mid_ln, width=1),
         layer="below",
     )
     fig.add_shape(
@@ -240,8 +274,8 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         y0=0,
         x1=PITCH_LENGTH,
         y1=PITCH_WIDTH,
-        fillcolor="rgba(200,255,0,0.10)",
-        line=dict(color="rgba(200,255,0,0.35)", width=1),
+        fillcolor=_zone_high_bg,
+        line=dict(color=_zone_high_ln, width=1),
         layer="below",
     )
     fig.add_shape(
@@ -250,7 +284,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         y0=0,
         x1=half_line_x,
         y1=PITCH_WIDTH,
-        line=dict(color="rgba(255,255,255,0.18)", width=1, dash="dot"),
+        line=dict(color=_sep_line, width=1, dash="dot"),
         layer="below",
     )
     fig.add_shape(
@@ -259,7 +293,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         y0=0,
         x1=final_third_x,
         y1=PITCH_WIDTH,
-        line=dict(color="rgba(200,255,0,0.55)", width=1, dash="dot"),
+        line=dict(color=_sep_final, width=1, dash="dot"),
         layer="below",
     )
     fig.add_annotation(
@@ -267,21 +301,21 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         y=PITCH_WIDTH - 3,
         text="Mid-Block",
         showarrow=False,
-        font=dict(color="#94b65b", size=11),
-        bgcolor="rgba(0,0,0,0.28)",
+        font=dict(color=_ann_font_mid, size=11),
+        bgcolor=_ann_bg,
     )
     fig.add_annotation(
         x=(final_third_x + PITCH_LENGTH) / 2,
         y=PITCH_WIDTH - 3,
         text="High Press / Final Third",
         showarrow=False,
-        font=dict(color="#d8ff6a", size=11),
-        bgcolor="rgba(0,0,0,0.28)",
+        font=dict(color=_ann_font_high, size=11),
+        bgcolor=_ann_bg,
     )
 
     # ── Press win scatter traces ────────────────────────────────────────────
     for zone_wins, colour, label in [
-        (high_wins, "#c8ff00", "High Press"),
+        (high_wins, _high_color, "High Press"),
         (mid_wins,  "#6a9f00", "Mid-Block"),
     ]:
         if not zone_wins:
@@ -302,7 +336,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
             mode="markers+text",
             marker=dict(
                 color=colour, size=sizes,
-                line=dict(color="white", width=borders),
+                line=dict(color=_marker_border, width=borders),
                 symbol="circle",
                 opacity=0.95,
             ),
@@ -316,15 +350,15 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
         ))
 
     fig.update_layout(
-        plot_bgcolor="#1a2a1a",
-        paper_bgcolor="#111111",
+        plot_bgcolor=_plot_bg,
+        paper_bgcolor=_paper_bg,
         margin=dict(l=5, r=5, t=5, b=5),
         xaxis=dict(range=[-2, PITCH_LENGTH+2], showgrid=False, zeroline=False,
                    showticklabels=False, fixedrange=True),
         yaxis=dict(range=[-2, PITCH_WIDTH+2], showgrid=False, zeroline=False,
                    showticklabels=False, scaleanchor="x", scaleratio=1, fixedrange=True),
         legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0,
-                    font=dict(color="#cccccc", size=11)),
+                    font=dict(color=_leg_font, size=11)),
         height=440,
         annotations=list(fig.layout.annotations) + [
             dict(
@@ -333,7 +367,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
                 text="Opponent goal -> higher press height",
                 showarrow=False,
                 xanchor="right",
-                font=dict(color="#8a8a8a", size=10),
+                font=dict(color=_leg_font, size=10),
             ),
             dict(
                 text="ClipMaker v1.2.1<br>@B03GHB4L1",
@@ -345,7 +379,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None):
                 yanchor="bottom",
                 showarrow=False,
                 align="right",
-                font=dict(size=10, color="#DFFF00", family="monospace"),
+                font=dict(size=10, color=_brand_col, family="monospace"),
             ),
         ],
     )

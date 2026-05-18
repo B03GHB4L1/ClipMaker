@@ -7,7 +7,7 @@ import platform
 import streamlit as st
 
 from whoscored_scraper import scrape_whoscored, save_scraped_match_csv
-from clipmaker_core import ping_proxy
+from clipmaker_core import normalize_event_labels, ping_proxy, read_csv_safe
 import theme
 
 # =============================================================================
@@ -30,7 +30,7 @@ theme.render_top_nav("home")
 # =============================================================================
 IS_MAC = platform.system() == "Darwin"
 
-# ── macOS helpers (use osascript — tkinter cannot run off the main thread on Mac) ──
+# -- macOS helpers (use osascript; tkinter can fail from Streamlit worker threads on Mac) --
 
 def _browse_file_mac():
     """Open a native macOS file picker via AppleScript. Safe from any thread."""
@@ -47,6 +47,7 @@ def _browse_file_mac():
         pass
     return ""
 
+
 def _browse_folder_mac():
     """Open a native macOS folder picker via AppleScript. Safe from any thread."""
     import subprocess
@@ -62,7 +63,6 @@ def _browse_folder_mac():
         pass
     return ""
 
-# ── Windows / Linux helpers (use tkinter in a thread) ──
 
 def _pick_file_thread(result_queue, filetypes):
     import tkinter as tk
@@ -126,6 +126,14 @@ for key, default in [
 
 if "scraper_full_df" not in st.session_state:
     st.session_state["scraper_full_df"] = None
+if "multi_scraped_csv_paths" not in st.session_state:
+    st.session_state["multi_scraped_csv_paths"] = []
+if "scraper_batch_results" not in st.session_state:
+    st.session_state["scraper_batch_results"] = []
+if "match_setup_by_csv" not in st.session_state:
+    st.session_state["match_setup_by_csv"] = {}
+if "active_setup_csv_path" not in st.session_state:
+    st.session_state["active_setup_csv_path"] = st.session_state.get("csv_path", "")
 
 _scraped = st.session_state.get("scraped_csv_path", "")
 if _scraped and _scraped != st.session_state.csv_path:
@@ -157,10 +165,11 @@ st.markdown(theme.step_header(1, "WhoScored Scraper"), unsafe_allow_html=True)
 
 scrape_c1, scrape_c2 = st.columns([9.6, 1.0], gap="small")
 with scrape_c1:
-    scraper_url = st.text_input(
-        "WhoScored match URL",
+    scraper_url = st.text_area(
+        "WhoScored match URLs",
         value=st.session_state.get("whoscored_url", ""),
-        placeholder="Paste a WhoScored match URL here to load events automatically",
+        placeholder="Paste one WhoScored match URL per line to scrape a batch",
+        height=84,
         label_visibility="collapsed",
     )
     if scraper_url != st.session_state.get("whoscored_url", ""):
@@ -169,7 +178,7 @@ with scrape_c2:
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     scrape_btn = st.button("Scrape", use_container_width=True)
 
-st.caption("WhoScored is the data source. Paste a match URL above and click Scrape to load all events.")
+st.caption("WhoScored is the data source. Paste one match URL for normal use, or one URL per line for a multi-match scrape.")
 
 # Scraper steps — shown during and after a run
 _SCRAPER_STEPS = [
@@ -183,34 +192,152 @@ _SCRAPER_STEPS = [
 scraper_status_ph = st.empty()
 scraper_error_ph  = st.empty()
 
+def _parse_scraper_urls(text):
+    urls = []
+    seen = set()
+    for raw in str(text or "").replace(",", "\n").splitlines():
+        url = raw.strip()
+        if not url or url in seen:
+            continue
+        urls.append(url)
+        seen.add(url)
+    return urls
+
+
+_MATCH_SETUP_KEYS = [
+    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
+    "half3_time", "half4_time", "half5_time", "had_extra_time",
+    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+]
+
+
+def _match_setup_label(path):
+    for item in st.session_state.get("scraper_batch_results", []) or []:
+        if item.get("path") == path:
+            label = f"{item.get('home_team', '')} vs {item.get('away_team', '')}".strip(" vs ")
+            return label or os.path.basename(path)
+    return os.path.basename(path)
+
+
+def _capture_match_setup(path):
+    if not path:
+        return
+    st.session_state["match_setup_by_csv"][path] = {
+        key: st.session_state.get(key)
+        for key in _MATCH_SETUP_KEYS
+        if key != "csv_path"
+    }
+
+
+def _restore_match_setup(path):
+    setup = st.session_state.get("match_setup_by_csv", {}).get(path, {})
+    st.session_state["csv_path"] = path
+    st.session_state["scraped_csv_path"] = path
+    for key, value in setup.items():
+        st.session_state[key] = value
+
+
+def _render_match_setup_selector():
+    paths = [p for p in st.session_state.get("multi_scraped_csv_paths", []) or [] if p and os.path.exists(p)]
+    if len(paths) <= 1:
+        if st.session_state.get("csv_path"):
+            st.session_state["active_setup_csv_path"] = st.session_state.get("csv_path")
+        return
+    current = st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path") or paths[0]
+    if current not in paths:
+        current = paths[0]
+    selected = st.selectbox(
+        "Setup match",
+        paths,
+        index=paths.index(current),
+        format_func=_match_setup_label,
+        key="home_match_setup_selector",
+        help="Choose which scraped match the video, timestamps and clip settings apply to.",
+    )
+    st.caption("Each scraped match keeps its own video file, kick-off timestamps and clip settings.")
+    if selected != current:
+        _capture_match_setup(current)
+        st.session_state["active_setup_csv_path"] = selected
+        _restore_match_setup(selected)
+        st.rerun()
+
+
+def _scrape_url_batch(urls, out_queue, app_dir, save_dir):
+    results = []
+    errors = []
+    total = len(urls)
+    for idx, url in enumerate(urls, 1):
+        out_queue.put({"type": "log", "msg": f"Starting match {idx}/{total}: {url}"})
+        local_queue = queue.Queue()
+        try:
+            scrape_whoscored(url, local_queue, app_dir)
+        except Exception as exc:
+            local_queue.put({"type": "error", "msg": str(exc)})
+
+        result = None
+        last_log = ""
+        while not local_queue.empty():
+            msg = local_queue.get_nowait()
+            if msg["type"] == "log":
+                last_log = msg["msg"]
+                out_queue.put({"type": "log", "msg": f"[{idx}/{total}] {msg['msg']}"})
+            elif msg["type"] == "data":
+                result = msg
+            elif msg["type"] == "error":
+                errors.append({"url": url, "error": msg.get("msg") or last_log or "Unknown error"})
+
+        if result is not None:
+            out_queue.put({"type": "log", "msg": f"[{idx}/{total}] Saving CSV"})
+            saved_path = save_scraped_match_csv(
+                result["df"],
+                result.get("home_team", ""),
+                result.get("away_team", ""),
+                save_dir,
+            )
+            item = {
+                "url": url,
+                "path": saved_path,
+                "rows": len(result["df"]),
+                "home_team": result.get("home_team", ""),
+                "away_team": result.get("away_team", ""),
+                "df": result["df"],
+            }
+            results.append(item)
+            out_queue.put({"type": "saved", "result": item})
+            out_queue.put({"type": "log", "msg": f"[{idx}/{total}] Saved {os.path.basename(saved_path)}"})
+
+    out_queue.put({"type": "done", "results": results, "errors": errors})
+
 def _render_scraper_steps(active_step, done=False, error_msg=None):
     """Render a clean step-by-step progress list."""
+    ok_green = theme.light_color("#DFFF00", "#3a5000")
     rows = []
     for i, label in enumerate(_SCRAPER_STEPS):
         if done and error_msg is None:
-            icon = theme.icon_span("[OK]", color="#DFFF00", size=14)
+            icon = theme.icon_span("[OK]", color=ok_green, size=14)
         elif i < active_step:
-            icon = theme.icon_span("[OK]", color="#DFFF00", size=14)
+            icon = theme.icon_span("[OK]", color=ok_green, size=14)
         elif i == active_step:
             if error_msg:
                 icon = theme.icon_span("[ERR]", color="#ff7351", size=14)
             else:
                 icon = (
                     '<span style="display:inline-block;width:10px;height:10px;' +
-                    'border:2px solid #DFFF00;border-top-color:transparent;' +
+                    'border:2px solid ' + ok_green + ';border-top-color:transparent;' +
                     'border-radius:50%;animation:spin 0.8s linear infinite;' +
                     'vertical-align:middle;margin-right:2px"></span>'
                 )
         else:
             icon = f'<span style="color:#2c2c2c;font-size:11px">·</span>'
 
-        color = "#DFFF00" if (i < active_step or done and not error_msg) else (
+        active_gray = theme.light_color("#767575", "#555555")
+        color = ok_green if (i < active_step or done and not error_msg) else (
                 "#ff7351" if (i == active_step and error_msg) else
-                "#767575" if i == active_step else "#2c2c2c"
+                active_gray if i == active_step else "#2c2c2c"
         )
         rows.append(
             f'<div style="display:flex;align-items:center;gap:10px;padding:5px 0;' +
-            f'border-bottom:1px solid #1a1a1a">' +
+            f'border-bottom:1px solid var(--cm-border, #1a1a1a)">' +
             f'<span style="width:16px;text-align:center;flex-shrink:0">{icon}</span>' +
             f'<span style="font-family:monospace;font-size:11px;' +
             f'color:{color};letter-spacing:0.06em;text-transform:uppercase">{label}</span>' +
@@ -231,8 +358,7 @@ def _render_scraper_steps(active_step, done=False, error_msg=None):
         )
 
     html = (
-        f'<div style="background:#131313;border:1px solid #2c2c2c;border-radius:2px;' +
-        f'padding:14px 16px;margin:10px 0">' +
+        f'<div class="cm-log-box" style="height:auto;margin-top:0;padding:14px 16px;border:1px solid var(--cm-border, #2c2c2c);background:var(--cm-surface, #131313);">' +
         spin_css +
         "".join(rows) +
         err_row +
@@ -241,19 +367,21 @@ def _render_scraper_steps(active_step, done=False, error_msg=None):
     scraper_status_ph.markdown(html, unsafe_allow_html=True)
 
 if scrape_btn:
-    if not scraper_url.strip():
-        scraper_error_ph.error("Please enter a WhoScored match URL.")
+    scraper_urls = _parse_scraper_urls(scraper_url)
+    if not scraper_urls:
+        scraper_error_ph.error("Please enter at least one WhoScored match URL.")
     else:
         scraper_error_ph.empty()
         scraper_queue = queue.Queue()
         scraper_logs  = []
-        scraper_result = None
+        scraper_results = []
         scraper_error  = None
         app_dir = os.path.dirname(os.path.abspath(__file__))
+        save_dir = st.session_state.output_dir or app_dir
 
         scraper_thread = threading.Thread(
-            target=scrape_whoscored,
-            args=(scraper_url.strip(), scraper_queue, app_dir),
+            target=_scrape_url_batch,
+            args=(scraper_urls, scraper_queue, app_dir, save_dir),
             daemon=True,
         )
         scraper_thread.start()
@@ -279,12 +407,20 @@ if scrape_btn:
                         if keyword in ml and step >= active_step:
                             active_step = step
                             updated = True
-                elif msg["type"] == "data":
-                    scraper_result = msg
+                elif msg["type"] == "saved":
+                    scraper_results.append(msg["result"])
                     active_step = len(_SCRAPER_STEPS) - 1
                     updated = True
                 elif msg["type"] == "error":
-                    scraper_error = scraper_logs[-1] if scraper_logs else "Unknown error"
+                    scraper_error = msg.get("msg") or (scraper_logs[-1] if scraper_logs else "Unknown error")
+                    updated = True
+                elif msg["type"] == "done":
+                    scraper_results = msg.get("results", scraper_results)
+                    errors = msg.get("errors", [])
+                    if errors and not scraper_results:
+                        scraper_error = errors[0].get("error", "Unknown error")
+                    elif errors:
+                        scraper_logs.extend(f"FAILED {e['url']}: {e['error']}" for e in errors)
                     updated = True
             if updated:
                 _render_scraper_steps(active_step, error_msg=scraper_error)
@@ -292,21 +428,29 @@ if scrape_btn:
 
         scraper_thread.join()
 
-        if scraper_result is not None:
-            save_dir = st.session_state.output_dir or os.path.dirname(os.path.abspath(__file__))
-            saved_path = save_scraped_match_csv(
-                scraper_result["df"],
-                scraper_result.get("home_team", ""),
-                scraper_result.get("away_team", ""),
-                save_dir,
-            )
-            st.session_state["scraper_full_df"]   = scraper_result["df"]
-            st.session_state["scraper_home_team"]  = scraper_result.get("home_team", "")
-            st.session_state["scraper_away_team"]  = scraper_result.get("away_team", "")
-            st.session_state["scraped_csv_path"]   = saved_path
-            st.session_state["scraped_csv_df"]     = scraper_result["df"].to_csv(index=False)
-            st.session_state["csv_path"]           = saved_path
-            st.session_state["shot_map_df"]        = scraper_result["df"]
+        if scraper_results:
+            first = scraper_results[0]
+            saved_paths = [item["path"] for item in scraper_results]
+            st.session_state["scraper_full_df"] = first["df"]
+            st.session_state["scraper_home_team"] = first.get("home_team", "")
+            st.session_state["scraper_away_team"] = first.get("away_team", "")
+            st.session_state["scraped_csv_path"] = first["path"]
+            st.session_state["scraped_csv_df"] = first["df"].to_csv(index=False)
+            st.session_state["csv_path"] = first["path"]
+            st.session_state["shot_map_df"] = first["df"]
+            st.session_state["multi_scraped_csv_paths"] = saved_paths
+            st.session_state["scraper_batch_results"] = [
+                {k: v for k, v in item.items() if k != "df"} for item in scraper_results
+            ]
+            existing_setups = st.session_state.get("match_setup_by_csv", {})
+            st.session_state["match_setup_by_csv"] = {
+                path: existing_setups.get(path, {})
+                for path in saved_paths
+            }
+            st.session_state["active_setup_csv_path"] = first["path"]
+            if len(saved_paths) > 1:
+                st.session_state["tl_multi_mode"] = True
+                st.session_state["tl_selected_matches"] = saved_paths
             _render_scraper_steps(active_step, done=True)
         elif scraper_error:
             _render_scraper_steps(active_step, error_msg=scraper_error)
@@ -315,19 +459,54 @@ if scrape_btn:
 
 if st.session_state.get("scraper_full_df") is not None:
     import pandas as pd
-    _df_scraped = st.session_state["scraper_full_df"]
+    _df_scraped = normalize_event_labels(st.session_state["scraper_full_df"])
     _ht = st.session_state.get("scraper_home_team","")
     _at = st.session_state.get("scraper_away_team","")
     _match_label = f"{_ht} vs {_at}" if _ht and _at else "match"
-    st.success(f"{len(_df_scraped)} events loaded from **{_match_label}**", icon=theme.icon_shortcode("[OK]"))
-    with st.expander(f"View scraped data ({len(_df_scraped)} rows)", expanded=False):
-        st.dataframe(_df_scraped, use_container_width=True, hide_index=True)
+    _batch = st.session_state.get("scraper_batch_results", [])
+    if len(_batch) > 1:
+        st.success(f"{len(_batch)} matches scraped and saved for multi-match analysis.", icon=theme.icon_shortcode("[OK]"))
+        with st.expander("Scraped match batch", expanded=True):
+            for item in _batch:
+                label = f"{item.get('home_team', '')} vs {item.get('away_team', '')}".strip(" vs ") or os.path.basename(item.get("path", ""))
+                st.caption(f"{theme.icon_shortcode('[OK]')} {label} · {item.get('rows', 0)} events · `{os.path.basename(item.get('path', ''))}`")
+    else:
+        st.success(f"{len(_df_scraped)} events loaded from **{_match_label}**", icon=theme.icon_shortcode("[OK]"))
+    _preview_df = _df_scraped
+    _preview_label = _match_label
+    if len(_batch) > 1:
+        _batch_options = [item for item in _batch if item.get("path") and os.path.exists(item.get("path"))]
+        if _batch_options:
+            with st.expander("View scraped data", expanded=False):
+                _selected_item = st.selectbox(
+                    "Scraped match",
+                    _batch_options,
+                    format_func=lambda item: (
+                        f"{item.get('home_team', '')} vs {item.get('away_team', '')}".strip(" vs ")
+                        or os.path.basename(item.get("path", ""))
+                    ),
+                    key="scraped_data_preview_match",
+                )
+                try:
+                    _preview_df = read_csv_safe(_selected_item["path"])
+                    _preview_label = (
+                        f"{_selected_item.get('home_team', '')} vs {_selected_item.get('away_team', '')}".strip(" vs ")
+                        or os.path.basename(_selected_item.get("path", "match"))
+                    )
+                    st.caption(f"{_preview_label} · {len(_preview_df)} rows · `{os.path.basename(_selected_item['path'])}`")
+                    st.dataframe(_preview_df, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.error(f"Could not load scraped preview: {exc}")
+    else:
+        with st.expander(f"View scraped data ({len(_preview_df)} rows)", expanded=False):
+            st.dataframe(_preview_df, use_container_width=True, hide_index=True)
 
 
 # =============================================================================
 # STEP 2 — FILES
 # =============================================================================
 st.markdown(theme.step_header(2, "Files"), unsafe_allow_html=True)
+_render_match_setup_selector()
 
 split_video = st.checkbox(
     "Match is split into two separate video files (1st / 2nd half)",
@@ -337,48 +516,78 @@ st.session_state["split_video"] = split_video
 
 # Video 1
 lbl1 = "1st Half Video" if split_video else "Video file"
-vc1, vc2 = st.columns([5, 1])
-with vc1:
-    video_path = st.text_input(lbl1, value=st.session_state.video_path,
-                                placeholder="Click Browse or paste full path")
-with vc2:
-    st.write(""); st.write("")
-    if st.button("Browse", key="browse_video"):
-        picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
-        if picked:
-            st.session_state.video_path = picked
+if IS_MAC:
+    _up1 = st.file_uploader(lbl1, type=["mp4","mkv","avi","mov"], key="up_video1")
+    if _up1:
+        _p = _save_uploaded_file(_up1)
+        if _p != st.session_state.video_path:
+            st.session_state.video_path = _p
             st.rerun()
+    video_path = st.session_state.video_path
+    if video_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video_path)}")
+else:
+    vc1, vc2 = st.columns([5, 1])
+    with vc1:
+        video_path = st.text_input(lbl1, value=st.session_state.video_path,
+                                    placeholder="Click Browse or paste full path")
+    with vc2:
+        st.write(""); st.write("")
+        if st.button("Browse", key="browse_video"):
+            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
+            if picked:
+                st.session_state.video_path = picked
+                st.rerun()
 
 # Video 2 (split mode)
 if split_video:
-    v2c1, v2c2 = st.columns([5, 1])
-    with v2c1:
-        video2_path = st.text_input("2nd Half Video", value=st.session_state.video2_path,
-                                    placeholder="Click Browse or paste full path")
-    with v2c2:
-        st.write(""); st.write("")
-        if st.button("Browse", key="browse_video2"):
-            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
-            if picked:
-                st.session_state.video2_path = picked
+    if IS_MAC:
+        _up2 = st.file_uploader("2nd Half Video", type=["mp4","mkv","avi","mov"], key="up_video2")
+        if _up2:
+            _p2 = _save_uploaded_file(_up2)
+            if _p2 != st.session_state.video2_path:
+                st.session_state.video2_path = _p2
                 st.rerun()
+        video2_path = st.session_state.video2_path
+        if video2_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video2_path)}")
+    else:
+        v2c1, v2c2 = st.columns([5, 1])
+        with v2c1:
+            video2_path = st.text_input("2nd Half Video", value=st.session_state.video2_path,
+                                        placeholder="Click Browse or paste full path")
+        with v2c2:
+            st.write(""); st.write("")
+            if st.button("Browse", key="browse_video2"):
+                picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
+                if picked:
+                    st.session_state.video2_path = picked
+                    st.rerun()
 else:
     video2_path = ""
 
 # CSV
-_from_scraper = bool(st.session_state.get("scraped_csv_path")
+_from_scraper = (st.session_state.get("scraped_csv_path")
                  and st.session_state.csv_path == st.session_state.scraped_csv_path)
-cc1, cc2 = st.columns([5, 1])
-with cc1:
-    csv_path = st.text_input("Match data CSV", value=st.session_state.csv_path,
-                              placeholder="Click Browse — or scrape a match first")
-with cc2:
-    st.write(""); st.write("")
-    if st.button("Browse", key="browse_csv", disabled=_from_scraper):
-        picked = browse_file([("CSV files", "*.csv"), ("All files", "*.*")])
-        if picked:
-            st.session_state.csv_path = picked
-            st.rerun()
+if IS_MAC:
+    if not _from_scraper:
+        _upc = st.file_uploader("Match data CSV", type=["csv"], key="up_csv")
+        if _upc:
+            _pc = _save_uploaded_file(_upc)
+            if _pc != st.session_state.csv_path:
+                st.session_state.csv_path = _pc
+                st.rerun()
+    csv_path = st.session_state.csv_path
+else:
+    cc1, cc2 = st.columns([5, 1])
+    with cc1:
+        csv_path = st.text_input("Match data CSV", value=st.session_state.csv_path,
+                                  placeholder="Click Browse — or scrape a match first")
+    with cc2:
+        st.write(""); st.write("")
+        if st.button("Browse", key="browse_csv"):
+            picked = browse_file([("CSV files", "*.csv"), ("All files", "*.*")])
+            if picked:
+                st.session_state.csv_path = picked
+                st.rerun()
 
 if _from_scraper:
     c1, c2 = st.columns([3, 1])
@@ -452,11 +661,11 @@ st.markdown(theme.step_header(4, "Clip Settings"), unsafe_allow_html=True)
 
 cs1, cs2, cs3 = st.columns(3)
 with cs1:
-    before_buf = st.number_input("Seconds before event", value=int(st.session_state.get("before_buffer") or 5), min_value=0, step=1)
+    before_buf = st.number_input("Seconds before event", value=int(st.session_state.get("before_buffer", 5)), min_value=0)
 with cs2:
-    after_buf = st.number_input("Seconds after event", value=int(st.session_state.get("after_buffer") or 8), min_value=0, step=1)
+    after_buf = st.number_input("Seconds after event", value=int(st.session_state.get("after_buffer", 8)), min_value=0)
 with cs3:
-    min_gap = st.number_input("Merge gap (s)", value=int(st.session_state.get("min_gap") or 6), min_value=0, step=1,
+    min_gap = st.number_input("Merge gap (s)", value=int(st.session_state.get("min_gap", 6)), min_value=0,
                                help="Events within this many seconds are merged into one clip")
 
 if before_buf != st.session_state.get("before_buffer"):
@@ -465,10 +674,12 @@ if after_buf != st.session_state.get("after_buffer"):
     st.session_state["after_buffer"] = after_buf
 if min_gap != st.session_state.get("min_gap"):
     st.session_state["min_gap"] = min_gap
+_capture_match_setup(st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path"))
 
 st.caption("These values are used when you run ClipMaker from the **Filtering/Output** page.")
+timing_color = theme.light_color("#DFFF00", "#3a5000")
 st.markdown(
-    "<div style='color:#DFFF00;font-size:0.78rem;margin-top:-0.1rem;'>"
+    f"<div style='color:{timing_color};font-size:0.78rem;margin-top:-0.1rem;'>"
     "Timing note: event data can sometimes be tagged a few seconds early or late depending on the broadcast or data source. "
     "Adjust the before/after buffer as needed if clips start too early or too late."
     "</div>",

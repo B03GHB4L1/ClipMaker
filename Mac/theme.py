@@ -6,6 +6,7 @@ Reference: Kinetic Analyst dashboard mockup.
 
 import os
 import re
+import functools as _functools
 
 _LOCAL_FONTS_CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts", "fonts.css")
 _USE_LOCAL_FONTS = os.path.exists(_LOCAL_FONTS_CSS)
@@ -130,12 +131,449 @@ BLUE   = "#7ab4ff"
 HOME_HEX = "#7ab4ff"
 AWAY_HEX = "#ff7351"
 
+LIGHT_PALETTE = {
+    "BG_BASE":       "#f5f0e8",
+    "BG_SURFACE":    "#fcf8f2",
+    "BG_ELEVATED":   "#f0ebe2",
+    "BG_HIGH":       "#e8e2d6",
+    "BG_HIGHEST":    "#ddd6c8",
+    "BG_BORDER":     "#c8bfb0",
+    "ACCENT":        "#2f5d16",
+    "ACCENT_DIM":    "#234610",
+    "ACCENT_GLOW":   "rgba(47,93,22,0.18)",
+    "ACCENT_SOFT":   "rgba(47,93,22,0.10)",
+    "TEXT_PRIMARY":  "#111111",
+    "TEXT_SECONDARY":"#444444",
+    "TEXT_MUTED":    "#888888",
+}
+
+LIGHT_MODE_CSS = """
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   LIGHT MODE OVERRIDE — injected after the dark base when toggled.
+   Selectors are specific enough to win without !important wars.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* CSS variable overrides — fixes logo_header and all var() references */
+:root {
+    --cm-bg:       #f5f0e8 !important;
+    --cm-surface:  #fcf8f2 !important;
+    --cm-border:   #c8bfb0 !important;
+    --cm-title:    #111111 !important;
+    --cm-subtitle: #666666 !important;
+    --cm-accent:   #2f5d16 !important;
+    --cm-accent-dim: #234610 !important;
+    --cm-accent-soft: rgba(47,93,22,0.10) !important;
+    --cm-accent-glow: rgba(47,93,22,0.18) !important;
+    --cm-icon:     #2f5d16 !important;
+    --text-color:  #111111 !important;
+    --background-color: #f5f0e8 !important;
+}
+
+/* Page & container backgrounds */
+html, body, [class*="css"]                { color: #111111 !important; background-color: #f5f0e8 !important; }
+.block-container                          { background-color: #f5f0e8 !important; }
+[data-testid="stApp"]                     { background-color: #f5f0e8 !important; }
+[data-testid="stAppViewBlockContainer"]   { background-color: #f5f0e8 !important; }
+[data-testid="stMain"]                    { background-color: #f5f0e8 !important; }
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 { color: #111111 !important; }
+
+/* Body / markdown text */
+p, .stMarkdown p, [data-testid="stMarkdownContainer"] p { color: #333333 !important; }
+
+/* Widget labels */
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"]             { color: #333333 !important; }
+
+/* Captions */
+.stCaption, [data-testid="stCaptionContainer"] p { color: #666666 !important; }
+
+/* Topnav page links */
+[data-testid="stPageLink"] a {
+    background: #f0ebe2 !important;
+    border-color: #c8bfb0 !important;
+    color: #444444 !important;
+}
+[data-testid="stPageLink"] a:hover {
+    border-color: #2f5d16 !important;
+    color: #2f5d16 !important;
+    background: rgba(47,93,22,0.10) !important;
+}
+
+/* Topnav divider */
+.cm-topnav-divider { background: linear-gradient(90deg, rgba(47,93,22,0.65), transparent) !important; }
+
+/* Inputs & textareas */
+[data-baseweb="input"]                    { background: #ddd6c8 !important; border-bottom-color: #c8bfb0 !important; }
+[data-baseweb="input"] input,
+input, textarea                           { background: #ddd6c8 !important; border-bottom-color: #c8bfb0 !important;
+                                            color: #111111 !important; }
+[data-baseweb="input"] *,
+[data-testid="stTextInput"] *,
+[data-testid="stTextArea"] *,
+[data-testid="stNumberInput"] *           { color: #111111 !important; }
+[data-baseweb="input"] input::placeholder,
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder,
+input::placeholder,
+textarea::placeholder                     { color: #6f685f !important; opacity: 1 !important; }
+[data-baseweb="input"]:focus-within      { border-bottom-color: #2f5d16 !important; }
+input:focus, textarea:focus              { border-bottom-color: #2f5d16 !important; }
+
+/* Select / multiselect */
+[data-baseweb="select"] > div            { background: #ddd6c8 !important; border-bottom-color: #c8bfb0 !important;
+                                           color: #111111 !important; }
+[data-baseweb="select"] *,
+[data-baseweb="select"] input,
+[data-baseweb="select"] [role="combobox"],
+[data-baseweb="select"] [role="button"]  { color: #111111 !important; }
+[data-baseweb="select"] svg              { color: #444444 !important; fill: #444444 !important; }
+[data-baseweb="tag"]                     { background: rgba(47,93,22,0.12) !important;
+                                           color: #234610 !important;
+                                           border-color: #2f5d16 !important; }
+
+/* Number input */
+[data-testid="stNumberInput"] input      { background: #ddd6c8 !important; border-bottom-color: #c8bfb0 !important;
+                                           color: #111111 !important; }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"]        { border-bottom-color: #c8bfb0 !important; }
+.stTabs [data-baseweb="tab"]             { color: #888888 !important; }
+.stTabs [data-baseweb="tab"]:hover       { color: #111111 !important; background: #e8e2d6 !important; }
+.stTabs [aria-selected="true"]           { color: #234610 !important; background: rgba(47,93,22,0.10) !important;
+                                           border-bottom-color: #2f5d16 !important; }
+
+/* Expander */
+[data-testid="stExpander"]              { background: #fcf8f2 !important; border-color: #c8bfb0 !important; }
+[data-testid="stExpander"] summary      { color: #444444 !important; }
+
+/* Alerts / info boxes */
+.stAlert                                { background: #fcf8f2 !important; }
+
+/* Dataframe */
+[data-testid="stDataFrame"]             { background: #fcf8f2 !important; border-color: #c8bfb0 !important; }
+
+/* Plotly figures */
+.js-plotly-plot .plotly .gtitle,
+.js-plotly-plot .plotly .xtitle,
+.js-plotly-plot .plotly .ytitle,
+.js-plotly-plot .plotly .legendtitletext,
+.js-plotly-plot .plotly .legendtext,
+.js-plotly-plot .plotly .xtick text,
+.js-plotly-plot .plotly .ytick text,
+.js-plotly-plot .plotly .annotation-text,
+.js-plotly-plot .plotly .colorbar text {
+    fill: #111111 !important;
+    color: #111111 !important;
+}
+.js-plotly-plot .plotly .gridlayer path,
+.js-plotly-plot .plotly .zerolinelayer path {
+    stroke: rgba(80,60,30,0.16) !important;
+}
+.js-plotly-plot .plotly .modebar-btn svg {
+    fill: #555048 !important;
+}
+
+/* Divider */
+hr, [data-testid="stDivider"]           { border-color: #c8bfb0 !important; }
+
+/* Metrics */
+[data-testid="stMetric"]                { color: #111111 !important; }
+[data-testid="stMetricValue"]           { color: #111111 !important; }
+[data-testid="stMetricLabel"]           { color: #555555 !important; }
+
+/* Checkbox */
+[data-testid="stCheckbox"]              { color: #444444 !important; }
+
+/* Icons */
+.material-symbols-outlined,
+span.material-symbols-outlined,
+[class*="material-symbols"],
+[data-testid="stIconMaterial"],
+[data-testid="stPageLink"] svg,
+[data-testid="stPageLink"] span,
+[data-testid="stButton"] svg,
+.stButton button svg,
+button svg,
+[role="button"] svg,
+[data-baseweb="checkbox"] svg,
+[data-baseweb="radio"] svg,
+[data-testid="stToggle"] svg,
+[data-testid="stCheckbox"] svg,
+[data-testid="stFileUploader"] svg,
+[data-testid="stDownloadButton"] svg,
+.cm-icon,
+span[aria-hidden="true"]                { color: #3a5000 !important;
+                                          fill: #3a5000 !important;
+                                          stroke: #3a5000 !important; }
+[data-testid="stPageLink"] a:hover svg,
+[data-testid="stPageLink"] a:hover span,
+button:hover svg,
+[role="button"]:hover svg               { color: #234610 !important;
+                                          fill: #234610 !important;
+                                          stroke: #234610 !important; }
+
+/* Buttons and primary actions */
+.stButton > button,
+[data-testid="stButton"] button,
+[data-testid="stDownloadButton"] button,
+[data-testid="stFormSubmitButton"] button,
+button[kind="primary"],
+button[data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #234610 0%, #2f5d16 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 8px 18px rgba(47,93,22,0.22) !important;
+}
+.stButton > button *,
+[data-testid="stButton"] button *,
+[data-testid="stDownloadButton"] button *,
+[data-testid="stFormSubmitButton"] button *,
+button[kind="primary"] *,
+button[data-testid="baseButton-primary"] *,
+.stButton > button .material-symbols-outlined,
+[data-testid="stButton"] button .material-symbols-outlined,
+[data-testid="stDownloadButton"] button .material-symbols-outlined,
+[data-testid="stFormSubmitButton"] button .material-symbols-outlined {
+    color: #ffffff !important;
+    fill: #ffffff !important;
+    stroke: #ffffff !important;
+}
+.stButton > button svg,
+[data-testid="stButton"] button svg,
+[data-testid="stDownloadButton"] button svg,
+[data-testid="stFormSubmitButton"] button svg,
+button[kind="primary"] svg,
+button[data-testid="baseButton-primary"] svg {
+    color: #ffffff !important;
+    fill: #ffffff !important;
+    stroke: #ffffff !important;
+}
+.stButton > button:hover,
+[data-testid="stButton"] button:hover,
+[data-testid="stDownloadButton"] button:hover,
+[data-testid="stFormSubmitButton"] button:hover {
+    background: linear-gradient(135deg, #1f3f0f 0%, #285013 100%) !important;
+    box-shadow: 0 10px 22px rgba(47,93,22,0.30) !important;
+}
+.stButton > button:hover *,
+[data-testid="stButton"] button:hover *,
+[data-testid="stDownloadButton"] button:hover *,
+[data-testid="stFormSubmitButton"] button:hover *,
+.stButton > button:hover svg,
+[data-testid="stButton"] button:hover svg,
+[data-testid="stDownloadButton"] button:hover svg,
+[data-testid="stFormSubmitButton"] button:hover svg {
+    color: #ffffff !important;
+    fill: #ffffff !important;
+    stroke: #ffffff !important;
+}
+
+/* Help / tooltip trigger buttons */
+[data-testid="stTooltipHoverTarget"],
+[data-testid="stWidgetLabel"] button,
+[data-testid="stMarkdownContainer"] button[aria-label*="help" i],
+button[aria-label*="help" i],
+button[title*="help" i] {
+    background: transparent !important;
+    color: #2f5d16 !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+[data-testid="stTooltipHoverTarget"] *,
+[data-testid="stTooltipHoverTarget"] svg,
+[data-testid="stWidgetLabel"] button *,
+[data-testid="stWidgetLabel"] button svg,
+[data-testid="stMarkdownContainer"] button[aria-label*="help" i] *,
+[data-testid="stMarkdownContainer"] button[aria-label*="help" i] svg,
+button[aria-label*="help" i] *,
+button[aria-label*="help" i] svg,
+button[title*="help" i] *,
+button[title*="help" i] svg {
+    color: #2f5d16 !important;
+    fill: none !important;
+    stroke: #2f5d16 !important;
+}
+[data-testid="stTooltipHoverTarget"]:hover,
+[data-testid="stWidgetLabel"] button:hover,
+button[aria-label*="help" i]:hover,
+button[title*="help" i]:hover {
+    background: #e8e2d6 !important;
+    color: #234610 !important;
+}
+
+/* Tooltips, popovers, menus, and dropdown options */
+[data-testid="stTooltipContent"],
+[data-baseweb="tooltip"],
+[data-baseweb="popover"],
+[role="tooltip"],
+[role="listbox"],
+[data-baseweb="menu"],
+[data-baseweb="popover"] > div          { background: #fcf8f2 !important;
+                                          border-color: #c8bfb0 !important;
+                                          color: #111111 !important; }
+[data-testid="stTooltipContent"] *,
+[data-baseweb="tooltip"] *,
+[data-baseweb="popover"] *,
+[role="tooltip"] *,
+[role="listbox"] *,
+[data-baseweb="menu"] *                 { color: #111111 !important; }
+[role="option"],
+[data-baseweb="menu"] li,
+[data-baseweb="menu"] [role="option"]   { background: #fcf8f2 !important;
+                                          color: #111111 !important; }
+[role="option"]:hover,
+[data-baseweb="menu"] li:hover,
+[data-baseweb="menu"] [role="option"]:hover {
+                                          background: #e8e2d6 !important;
+                                          color: #111111 !important; }
+[aria-selected="true"][role="option"]   { background: rgba(47,93,22,0.14) !important;
+                                          color: #234610 !important; }
+
+/* Scrollbars */
+::-webkit-scrollbar-track               { background: #f5f0e8 !important; }
+::-webkit-scrollbar-thumb               { background: #ddd6c8 !important; }
+::-webkit-scrollbar-thumb:hover         { background: #c8bfb0 !important; }
+
+/* Sidebar (if visible) */
+section[data-testid="stSidebar"]        { background: #fcf8f2 !important;
+                                          border-right-color: rgba(0,0,0,0.08) !important; }
+
+/* ── CM component classes ── */
+.cm-step-num {
+    background: #2f5d16 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 12px rgba(47,93,22,0.28) !important;
+}
+.cm-step-label          { color: #234610 !important; }
+.cm-log-box             { background: #e8e2d6 !important; color: #3a5000 !important;
+                          border-color: #c8bfb0 !important; }
+.cm-status-ready        { background: rgba(47,93,22,0.12) !important; color: #234610 !important;
+                          border-left-color: #2f5d16 !important; }
+.cm-status-empty        { background: #fcf8f2 !important; color: #888888 !important;
+                          border-left-color: #c8bfb0 !important; }
+.cm-context-bar         { background: #fcf8f2 !important; border-color: #c8bfb0 !important;
+                          color: #444444 !important; }
+.cm-ctx-dot-ok          { background: #2f5d16 !important; box-shadow: 0 0 6px rgba(47,93,22,0.45) !important; }
+.cm-stats-bar           { background: #fcf8f2 !important; border-color: #c8bfb0 !important; }
+.cm-stats-cell          { border-right-color: #c8bfb0 !important; }
+.cm-stats-label         { color: #888888 !important; }
+.cm-shot-panel,
+.cm-event-panel         { background: #fcf8f2 !important; border-color: #c8bfb0 !important; }
+.cm-shot-panel:hover,
+.cm-event-panel:hover   { border-left-color: #2f5d16 !important; }
+.cm-panel-title         { color: #111111 !important; }
+.cm-panel-sub           { color: #888888 !important; }
+.cm-detail-label        { color: #888888 !important; }
+.cm-detail-value        { color: #111111 !important; }
+.cm-no-data-msg         { color: #888888 !important; }
+.cm-ai-box              { background: #e8e2d6 !important; color: #111111 !important;
+                          border-color: #c8bfb0 !important; }
+.cm-progress-label      { color: #888888 !important; }
+.cm-progress-fill,
+[data-testid="stProgress"] [role="progressbar"] > div,
+[data-testid="stProgress"] div div div { background: #2f5d16 !important; }
+.cm-footer              { color: #888888 !important; }
+.cm-support-footer      { border-top-color: #c8bfb0 !important; }
+.cm-support-panel       { background: #fcf8f2 !important; border-color: #c8bfb0 !important; }
+.cm-support-kicker      { color: #234610 !important; }
+.cm-support-title       { color: #111111 !important; }
+.cm-support-copy        { color: #444444 !important; }
+.cm-support-meta        { color: #888888 !important; }
+.cm-support-qr-caption  { color: #888888 !important; }
+.cm-support-btn         { background: linear-gradient(180deg, #234610 0%, #2f5d16 100%) !important;
+                          box-shadow: 0 10px 24px rgba(47,93,22,0.20) !important; }
+
+/* Badge colours that use dark backgrounds */
+.cm-badge-goal,
+.cm-badge-success,
+.cm-badge-interc        { background: rgba(47,93,22,0.12) !important;
+                          color: #234610 !important;
+                          border-color: #2f5d16 !important; }
+.cm-badge-missed        { background: #e8e2d6 !important; color: #888888 !important;
+                          border-color: #c8bfb0 !important; }
+.cm-badge-blocked       { background: #e8e2d6 !important; color: #666666 !important;
+                          border-color: #c8bfb0 !important; }
+.cm-badge-clear         { background: #e8e2d6 !important; color: #666666 !important;
+                          border-color: #c8bfb0 !important; }
+.cm-badge-no-data       { background: #e8e2d6 !important; color: #888888 !important;
+                          border-color: #c8bfb0 !important; }
+
+/* Inline legend/caption strings — ensure visible on light bg */
+[style*="color:#767575"]   { color: #555555 !important; }
+[style*="color: #767575"]  { color: #555555 !important; }
+[style*="color:#adaaaa"]   { color: #555555 !important; }
+[style*="color: #adaaaa"]  { color: #555555 !important; }
+[style*="color:#ccc;"]     { color: #555555 !important; }
+[style*="color: #ccc;"]    { color: #555555 !important; }
+[style*="color:#ccc\""]    { color: #555555 !important; }
+[style*="color: #ccc\""]   { color: #555555 !important; }
+/* Catch inline neon-green (DFFF00) text — switch to dark green on light bg */
+[style*="color:#DFFF00"],
+[style*="color: #DFFF00"],
+[style*="color:#dfff00"],
+[style*="color: #dfff00"],
+[style*="color:#b8d400"],
+[style*="color: #b8d400"],
+[style*="color:#9ab200"],
+[style*="color: #9ab200"]  { color: #234610 !important; }
+[style*="background:#DFFF00"],
+[style*="background: #DFFF00"],
+[style*="background:#dfff00"],
+[style*="background: #dfff00"],
+[style*="background:#b8d400"],
+[style*="background: #b8d400"],
+[style*="background:#9ab200"],
+[style*="background: #9ab200"] { background: #2f5d16 !important; }
+[style*="border-color:#DFFF00"],
+[style*="border-color: #DFFF00"],
+[style*="border-color:#dfff00"],
+[style*="border-color: #dfff00"],
+[style*="border-color:#b8d400"],
+[style*="border-color: #b8d400"],
+[style*="border-color:#9ab200"],
+[style*="border-color: #9ab200"] { border-color: #2f5d16 !important; }
+[style*="rgba(223,255,0"],
+[style*="rgba(223, 255, 0"],
+[style*="rgba(184,212,0"],
+[style*="rgba(184, 212, 0"] {
+    color: #234610 !important;
+    border-color: #2f5d16 !important;
+    box-shadow: none !important;
+}
+[style*="linear-gradient"][style*="223,255,0"],
+[style*="linear-gradient"][style*="223, 255, 0"],
+[style*="linear-gradient"][style*="184,212,0"],
+[style*="linear-gradient"][style*="184, 212, 0"],
+[style*="linear-gradient"][style*="#DFFF00"],
+[style*="linear-gradient"][style*="#dfff00"] {
+    background: linear-gradient(90deg, rgba(47,93,22,0.65), transparent) !important;
+}
+</style>
+"""
+
+
 GLOBAL_CSS = f"""
 <style>
 /* fonts injected dynamically by inject() */
 
 :root {{
     --cm-sidebar-width: 18rem;
+    --cm-bg: {BG_BASE};
+    --cm-surface: {BG_SURFACE};
+    --cm-border: {BG_BORDER};
+    --cm-title: {TEXT_PRIMARY};
+    --cm-subtitle: {TEXT_MUTED};
+}}
+
+/* Hide Streamlit top header bar entirely */
+header[data-testid="stHeader"],
+[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"] {{
+    display: none !important;
+    height: 0 !important;
 }}
 
 /* Navbar mode: hide Streamlit sidebar navigation entirely */
@@ -548,7 +986,7 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {{
 }}
 
 .cm-log-box {{
-    background: #000000;
+    background: {BG_HIGHEST};
     color: {ACCENT};
     font-family: 'Iosevka Charon Mono', monospace;
     font-size: 11px;
@@ -714,7 +1152,7 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {{
 }}
 
 .cm-ai-box {{
-    background: #000000;
+    background: {BG_HIGHEST};
     color: {TEXT_PRIMARY};
     font-family: 'Iosevka Charon Mono', monospace;
     font-size: 13px; line-height: 1.8;
@@ -748,11 +1186,11 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {{
 .cm-support-footer {{
     margin-top: 32px;
     padding-top: 22px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid {BG_BORDER};
 }}
 
 .cm-support-panel {{
-    background: linear-gradient(180deg, #151515 0%, #111111 100%);
+    background: {BG_SURFACE};
     border: 1px solid {BG_BORDER};
     border-radius: 4px;
     padding: 18px 20px;
@@ -846,17 +1284,109 @@ p, .stMarkdown p, [data-testid="stMarkdownContainer"] p {{
 """
 
 
-_CSS_CACHE = None
+_CSS_CACHE = {}
+_LIGHT_QUERY_PARAM = "cm_light"
+_LIGHT_STORAGE_KEY = "clipmaker_light_mode"
+_THEME_PREF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".clipmaker_theme")
 
-def _build_css() -> str:
-    global _CSS_CACHE
-    if _CSS_CACHE is None:
-        _CSS_CACHE = GLOBAL_CSS.replace(
+
+def _read_query_light_value():
+    import streamlit as st
+
+    try:
+        raw = st.query_params.get(_LIGHT_QUERY_PARAM)
+    except Exception:
+        try:
+            raw = st.experimental_get_query_params().get(_LIGHT_QUERY_PARAM)
+        except Exception:
+            return None
+
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if raw is None:
+        return None
+
+    raw = str(raw).strip().lower()
+    if raw in {"1", "true", "yes", "on", "light"}:
+        return True
+    if raw in {"0", "false", "no", "off", "dark"}:
+        return False
+    return None
+
+
+def _set_query_light_value(light: bool):
+    import streamlit as st
+
+    value = "1" if light else "0"
+    try:
+        if st.query_params.get(_LIGHT_QUERY_PARAM) != value:
+            st.query_params[_LIGHT_QUERY_PARAM] = value
+    except Exception:
+        try:
+            st.experimental_set_query_params(**{_LIGHT_QUERY_PARAM: value})
+        except Exception:
+            pass
+
+
+def _read_persisted_light_mode():
+    try:
+        with open(_THEME_PREF_PATH, "r", encoding="utf-8") as f:
+            raw = f.read().strip().lower()
+    except Exception:
+        return None
+
+    if raw in {"1", "true", "yes", "on", "light"}:
+        return True
+    if raw in {"0", "false", "no", "off", "dark"}:
+        return False
+    return None
+
+
+def _write_persisted_light_mode(light: bool):
+    try:
+        with open(_THEME_PREF_PATH, "w", encoding="utf-8") as f:
+            f.write("1" if light else "0")
+    except Exception:
+        pass
+
+
+def _sync_light_mode_from_query():
+    import streamlit as st
+
+    if "light_mode" in st.session_state:
+        return
+
+    query_light = _read_query_light_value()
+    if query_light is None:
+        persisted_light = _read_persisted_light_mode()
+        st.session_state["light_mode"] = bool(persisted_light) if persisted_light is not None else False
+        return
+
+    st.session_state["light_mode"] = query_light
+    _write_persisted_light_mode(query_light)
+
+def _build_css(light: bool = False) -> str:
+    key = "light" if light else "dark"
+    if key not in _CSS_CACHE:
+        # Always start from the dark base (which has correct font injection).
+        # For light mode we append a comprehensive override block rather than
+        # doing fragile string-replacement (which breaks when the same hex value
+        # appears in multiple semantic roles, e.g. #0e0e0e as background AND
+        # as button-text colour).
+        css = GLOBAL_CSS.replace(
             "/* fonts injected dynamically by inject() */",
             _fonts_import(),
             1,
         )
-    return _CSS_CACHE
+        if light:
+            css = css + LIGHT_MODE_CSS
+        _CSS_CACHE[key] = css
+    return _CSS_CACHE[key]
+
+
+@_functools.lru_cache(maxsize=4)
+def _cached_css(light: bool) -> str:
+    return _build_css(light=light)
 
 
 def _sidebar_branding_css(logo_b64: str = "", first_nav_label: str = "") -> str:
@@ -903,11 +1433,9 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
     import streamlit as st
     import streamlit.components.v1 as _cv1
 
-    @st.cache_resource
-    def _once():
-        return _build_css()
-
-    st.markdown(_once(), unsafe_allow_html=True)
+    _sync_light_mode_from_query()
+    light = st.session_state.get("light_mode", False)
+    st.markdown(_cached_css(light), unsafe_allow_html=True)
     # Sidebar branding is intentionally disabled in navbar mode.
 
     # Runtime guardrails for Streamlit DOM mutations:
@@ -916,22 +1444,36 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
     _sel = "[data-baseweb=\'tag\']"
     _js = (
         "<script>(function(){"
+        "var w=window.parent||window;"
+        "var d=w.document||document;"
+        "var storageKey='" + _LIGHT_STORAGE_KEY + "';"
+        "var queryKey='" + _LIGHT_QUERY_PARAM + "';"
+        "try{"
+        "var stored=w.localStorage&&w.localStorage.getItem(storageKey);"
+        "var url=new URL(w.location.href);"
+        "var current=url.searchParams.get(queryKey);"
+        "if((stored==='1'||stored==='0')&&(current===null||current==='')){"
+        "url.searchParams.set(queryKey,stored);"
+        "w.location.replace(url.toString());"
+        "return;"
+        "}"
+        "}catch(e){}"
         "var sel='" + _sel + "';"
-        "var qs=new URLSearchParams(window.location.search);"
+        "var qs=new URLSearchParams(w.location.search);"
         "var safeSidebar=qs.get('safeSidebar')==='1';"
         "if(safeSidebar){"
-        "var st=document.createElement('style');"
+        "var st=d.createElement('style');"
         "st.textContent='"
         "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarContent\"]::before,"
         "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarContent\"]::after{content:none!important;}"
         "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarNav\"]{margin-top:0!important;}"
         "section[data-testid=\"stSidebar\"] [data-testid=\"stSidebarNavLink\"] svg{display:inline-block!important;}"
         "';"
-        "document.head.appendChild(st);"
+        "d.head.appendChild(st);"
         "return;"
         "}"
         "function fixTags(){"
-        "document.querySelectorAll(sel).forEach(function(t){"
+        "d.querySelectorAll(sel).forEach(function(t){"
         "t.style.setProperty('max-width','none','important');"
         "t.style.setProperty('overflow','visible','important');"
         "t.querySelectorAll('*').forEach(function(c){"
@@ -944,12 +1486,19 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
         "stabilize();setTimeout(stabilize,250);setTimeout(stabilize,800);setTimeout(stabilize,1600);"
         "var runs=0,maxRuns=8;"
         "var iv=setInterval(function(){stabilize();runs+=1;if(runs>=maxRuns){clearInterval(iv);}},220);"
-        "window.addEventListener('resize',stabilize,{passive:true});"
-        "window.addEventListener('popstate',stabilize,{passive:true});"
-        "document.addEventListener('visibilitychange',function(){if(!document.hidden){stabilize();}},{passive:true});"
+        "w.addEventListener('resize',stabilize,{passive:true});"
+        "w.addEventListener('popstate',stabilize,{passive:true});"
+        "d.addEventListener('visibilitychange',function(){if(!d.hidden){stabilize();}},{passive:true});"
         "})();</script>"
     )
     _cv1.html(_js, height=0, scrolling=False)
+
+
+def light_color(dark_val: str, light_val: str) -> str:
+    """Return the appropriate color for the current theme.
+    Call from any page to get theme-aware inline colours."""
+    import streamlit as st
+    return light_val if st.session_state.get("light_mode", False) else dark_val
 
 
 SHARED_STATE_DEFAULTS = {
@@ -977,6 +1526,8 @@ SHARED_STATE_DEFAULTS = {
 def init_shared_state():
     import streamlit as st
 
+    _sync_light_mode_from_query()
+
     for key, default in SHARED_STATE_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = default
@@ -988,18 +1539,63 @@ def init_shared_state():
 
 def render_top_nav(current_page: str = ""):
     import streamlit as st
+    import streamlit.components.v1 as _cv1
 
     items = [
         ("home", "ClipMaker.py", "Home", "[SETUP]"),
         ("filtering", "pages/1_Filtering_Output.py", "Filtering", "[FILTER]"),
         ("analyst", "pages/2_The_Analysts_Room.py", "Analyst's Room", "[RESULT]"),
+        ("tactical", "pages/3_Tactical_Lab.py", "Tactical Lab", "[DATA]"),
     ]
 
-    cols = st.columns([1.35, 1.75, 2.85, 8.0], gap="small")
+    cols = st.columns([1.35, 1.75, 2.85, 2.25, 3.75, 2.0], gap="small")
+    light_mode = st.session_state.get("light_mode", False)
     for col, (page_key, page_path, label, token) in zip(cols[:len(items)], items):
         with col:
             nav_label = f"{label} ·" if page_key == current_page else label
             st.page_link(page_path, label=nav_label, icon=icon_shortcode(token))
+
+    with cols[4]:
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        prev = st.session_state.get("light_mode", False)
+        light_mode = st.toggle("☀ Light", key="light_mode", help="Toggle light/dark theme")
+        if light_mode != prev:
+            _set_query_light_value(light_mode)
+            _write_persisted_light_mode(light_mode)
+            _CSS_CACHE.clear()
+            _cached_css.cache_clear()
+            st.rerun()
+        _set_query_light_value(light_mode)
+        _write_persisted_light_mode(light_mode)
+
+        _cv1.html(
+            (
+                "<script>(function(){"
+                "var w=window.parent||window;"
+                "try{"
+                "var value='" + ("1" if light_mode else "0") + "';"
+                "var queryKey='" + _LIGHT_QUERY_PARAM + "';"
+                "w.localStorage&&w.localStorage.setItem('" + _LIGHT_STORAGE_KEY + "',value);"
+                "var url=new URL(w.location.href);"
+                "if(url.searchParams.get(queryKey)!==value){"
+                "url.searchParams.set(queryKey,value);"
+                "w.history.replaceState({},'',url.toString());"
+                "}"
+                "function syncThemeLinks(){"
+                "var links=w.document.querySelectorAll('[data-testid=\"stPageLink\"] a,a[href*=\"ClipMaker.py\"],a[href*=\"1_Filtering_Output.py\"],a[href*=\"2_The_Analysts_Room.py\"],a[href*=\"3_Tactical_Lab.py\"]');"
+                "links.forEach(function(a){"
+                "try{var u=new URL(a.getAttribute('href'),w.location.href);u.searchParams.set(queryKey,value);a.setAttribute('href',u.pathname+u.search+u.hash);}catch(e){}"
+                "});"
+                "}"
+                "syncThemeLinks();setTimeout(syncThemeLinks,100);setTimeout(syncThemeLinks,400);setTimeout(syncThemeLinks,1000);"
+                "var mo=new MutationObserver(syncThemeLinks);"
+                "mo.observe(w.document.body,{childList:true,subtree:true});"
+                "}catch(e){}"
+                "})();</script>"
+            ),
+            height=0,
+            scrolling=False,
+        )
 
     st.markdown('<div class="cm-topnav-divider"></div>', unsafe_allow_html=True)
 
@@ -1047,6 +1643,10 @@ def render_support_footer(page_label: str = ""):
 
 import functools as _functools
 
+@_functools.lru_cache(maxsize=4)
+def _cached_css(light: bool) -> str:
+    return _build_css(light=light)
+
 @_functools.lru_cache(maxsize=8)
 def load_logo_b64(path: str) -> str:
     """Read and base64-encode a logo file, cached by path."""
@@ -1074,17 +1674,17 @@ def logo_header(title: str, subtitle: str, logo_b64: str = None, uppercase_title
             f'filter:drop-shadow(0 0 10px rgba(223,255,0,0.25))"/>' 
         )
     else:
-        img = '<span style="font-size:18px;font-family:Inter,sans-serif;font-weight:800;letter-spacing:.12em">CM</span>'
+        img = '<span style="font-size:18px;font-family:Inter,sans-serif;font-weight:800;letter-spacing:.12em;color:var(--cm-title,#111111)">CM</span>'
     title_transform = "none" if not uppercase_title else "uppercase"
     return (
         f"<div style='display:flex;align-items:center;gap:16px;margin-bottom:10px;overflow:visible'>"
         f"  {img}"
         f"  <div style='overflow:visible;padding-top:4px'>"
         f"    <div style='font-family:\"Iosevka Charon Mono\",monospace;font-size:1.75rem;font-weight:700;"
-        f"                color:#ffffff;letter-spacing:0.06em;line-height:1.3;"
+        f"                color:var(--cm-title,#111111);letter-spacing:0.06em;line-height:1.3;"
         f"                text-transform:{title_transform};"
         f"                overflow:visible;white-space:nowrap'>{title}</div>"
-        f"    <div style='color:#767575;font-size:9px;margin-top:4px;"
+        f"    <div style='color:var(--cm-subtitle,#767575);font-size:9px;margin-top:4px;"
         f"                font-family:Inter,sans-serif;font-weight:700;"
         f"                letter-spacing:0.2em;text-transform:uppercase'>{subtitle}</div>"
         f"  </div>"
@@ -1171,8 +1771,10 @@ def icon_span(token: str, color: str = "", size: int = 14) -> str:
     style = [f"font-size:{int(size)}px", "line-height:1", "display:inline-flex", "align-items:center"]
     if color:
         style.append(f"color:{color}")
+    else:
+        style.append("color:var(--cm-icon, currentColor)")
     return (
-        f"<span aria-hidden='true' style='{' ; '.join(style)}'>"
+        f"<span class='cm-icon' aria-hidden='true' style='{' ; '.join(style)}'>"
         f"{icon_glyph(token)}"
         "</span>"
     )

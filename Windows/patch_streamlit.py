@@ -20,16 +20,8 @@ MARKER_END   = "<!-- CLIPMAKER_THEME_END -->"
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400;1,500&family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,500,0,0');
-html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-color:#0e0e0e;}
-.block-container{background-color:#0e0e0e!important;}
-section[data-testid="stSidebar"]{background:#131313!important;border-right:1px solid rgba(255,255,255,0.05)!important;}
 section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] span,
-section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] p{font-family:'Iosevka Charon Mono',monospace!important;font-size:14px!important;font-weight:500!important;letter-spacing:0.18em!important;text-transform:uppercase!important;color:#adaaaa!important;transition:none!important;}
-section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover span,
-section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover p{color:#DFFF00!important;}
-section[data-testid="stSidebar"] [aria-current="page"] span,
-section[data-testid="stSidebar"] [aria-current="page"] p{color:#DFFF00!important;}
-section[data-testid="stSidebar"] [aria-current="page"]{background:#202020!important;border-right:3px solid #DFFF00!important;}
+section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] p{font-family:'Iosevka Charon Mono',monospace!important;font-size:14px!important;font-weight:500!important;letter-spacing:0.18em!important;text-transform:uppercase!important;transition:none!important;}
 h1,h2,h3,h4,h5,h6{font-family:'Iosevka Charon Mono',monospace!important;text-transform:uppercase!important;}
 h1{font-weight:700!important;}
 h2,h3,h4,h5,h6{font-weight:500!important;}
