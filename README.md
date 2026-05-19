@@ -8,6 +8,8 @@
   **Football video clipping and analysis workstation built from match event data**
 
 Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
+
+Current version: **v1.2.2**
 </div>
 
 ---
@@ -21,10 +23,11 @@ You can use it to:
 - scrape match events from WhoScored
 - load your own event CSV and match video files
 - explore the match inside an interactive Analyst Room
+- profile team style, transitions, and set pieces inside the Tactical Lab
 - filter events manually or with AI-assisted prompts
 - generate individual clips or a combined highlight reel automatically
 
-It started as a clip cutter. In `v1.2`, it is much closer to a full analyst toolkit.
+It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst toolkit.
 
 ---
 
@@ -48,6 +51,7 @@ It started as a clip cutter. In `v1.2`, it is much closer to a full analyst tool
 
 ### Manual filtering
 
+- **Multi-player reel building** from the Manual Filters tab
 - **Action type filters** for passes, carries, shots, defensive actions, and more
 - **xT threshold filter**
 - **Top N by xT**
@@ -123,6 +127,35 @@ Recent improvements also include:
 - dedicated penalty shootout layout
 - chronological shootout ordering
 - wrapped shootout rows after 5 penalties
+
+---
+
+## Tactical Lab
+
+The Tactical Lab is a team-level analysis workspace for style and phase-of-play profiling.
+
+It includes:
+
+- **Style Profile radar**
+  - possession control
+  - PPDA-based pressing intensity
+  - directness
+  - wide play share
+  - final-third penetration
+  - set-piece reliance
+  - transition threat
+- **Radar Info** explanations for every radar metric
+- **Threat split chart** showing pass xT versus carry xT
+- **Defensive Transitions**
+  - possession-loss locations
+  - recovery, progression conceded, box entry conceded, and shot conceded outcomes
+- **Attacking Transitions**
+  - recovery locations
+  - threat and progression after ball-wins
+- **Set-Piece and Restart Profile**
+  - restart delivery map
+  - restart mix and outcome table
+  - corner normalization so `Corner` and `CornerAwarded` are treated as one restart type
 
 ---
 
@@ -217,6 +250,20 @@ Useful optional columns:
 ---
 
 ## Changelog
+
+### v1.2.2
+
+- Added the **Tactical Lab** for team style, transition, and set-piece analysis
+- Added **multi-player reels** in the Manual Filters tab
+- Updated pressing intensity to use **PPDA**
+- Added complete **Radar Info** explanations for style radar metrics
+- Changed wide play to a simple percentage of in-possession actions in the left and right wing zones
+- Updated final-third penetration to measure against passes, carries, and set pieces
+- Added pass xT versus carry xT share chart
+- Normalized `Foul + Successful` events to **Foul Drawn**
+- Normalized `CornerAwarded` into **Corner** and removed `OffsidePass` from restart mix charts
+- Refined transition tabs by removing outcome donut charts and standardizing map sizing
+- Restored macOS file/folder picker behavior from the legacy build
 
 ### v1.2
 
