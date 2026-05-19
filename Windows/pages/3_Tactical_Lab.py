@@ -21,7 +21,7 @@ except ImportError:
 
 
 st.set_page_config(
-    page_title="Tactical Lab - ClipMaker v1.2.1",
+    page_title="Tactical Lab - ClipMaker v1.2.2",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -59,6 +59,7 @@ PLOTLY_EXPORT_CONFIG = {
     "toImageButtonOptions": {"format": "png", "filename": "clipmaker_tactical_lab", "scale": 2},
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
 }
+TRANSITION_PITCH_HEIGHT = 510
 
 
 def _is_light():
@@ -156,10 +157,10 @@ def _pitch_layout(fig, title="", height=520):
     return fig
 
 
-def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None):
+def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, height=520):
     fig = go.Figure()
     if df.empty:
-        return _pitch_layout(fig, title)
+        return _pitch_layout(fig, title, height=height)
     hover_cols = hover_cols or []
     work = df.copy()
     work["x_plot"] = _num(work, "x")
@@ -184,7 +185,7 @@ def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None):
             text=hover, hovertemplate="%{text}<extra></extra>",
             marker=dict(size=12, color=ACCENT, line=dict(width=1, color="#0e0e0e"), opacity=0.84),
         ))
-    return _pitch_layout(fig, title)
+    return _pitch_layout(fig, title, height=height)
 
 
 def _arrow_pitch(df, title, color=ACCENT, limit=80):
@@ -924,7 +925,7 @@ def render_defensive_transitions(df, team):
         "Shot conceded": "#ff7351",
     }
     st.plotly_chart(
-        _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"]),
+        _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"], height=TRANSITION_PITCH_HEIGHT),
         use_container_width=True,
         config=PLOTLY_EXPORT_CONFIG,
     )
@@ -970,7 +971,7 @@ def render_attacking_transitions(df, team):
         "Stalled": MUTED,
     }
     st.plotly_chart(
-        _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"]),
+        _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"], height=TRANSITION_PITCH_HEIGHT),
         use_container_width=True,
         config=PLOTLY_EXPORT_CONFIG,
     )

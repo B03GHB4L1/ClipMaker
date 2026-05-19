@@ -370,7 +370,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None, light_mo
                 font=dict(color=_leg_font, size=10),
             ),
             dict(
-                text="ClipMaker v1.2.1<br>@B03GHB4L1",
+                text="ClipMaker v1.2.2<br>@B03GHB4L1",
                 xref="paper",
                 yref="paper",
                 x=0.995,
