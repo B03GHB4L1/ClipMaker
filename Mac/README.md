@@ -1,4 +1,4 @@
-# ClipMaker v1.2.1 for macOS
+# ClipMaker v1.2.2 for macOS
 
 ClipMaker is a local football video clipping and analysis app for macOS.
 
