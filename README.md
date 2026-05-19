@@ -257,6 +257,16 @@ Useful optional columns:
 - Added **multi-player reels** in the Manual Filters tab
 - Normalized `Foul + Successful` events to **Foul Drawn**
   
+### v1.2.1
+
+- Added a **Pressing Map** to The Analyst's Room for viewing high ball-wins by press zone
+- Added a **timeline scrubber** and per-clip buffer controls so individual clips can be trimmed and re-cut directly from preview
+- Improved manual filtering with smarter qualifier options that only appear when relevant to the current player, team, and action type
+- Made clip previews load faster by streaming videos instead of loading whole files into memory
+- Added clearer controls for dismissing AI video output and individual clip previews
+- Fixed individual clip and highlight reel download issues
+- Cleaned up filter labels while preserving compatibility with saved v1.2 filters
+
 ### v1.2
 
 - Expanded from a simple clip generator into a **multi-page analysis + clipping app**
