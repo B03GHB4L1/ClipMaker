@@ -255,16 +255,8 @@ Useful optional columns:
 
 - Added the **Tactical Lab** for team style, transition, and set-piece analysis
 - Added **multi-player reels** in the Manual Filters tab
-- Updated pressing intensity to use **PPDA**
-- Added complete **Radar Info** explanations for style radar metrics
-- Changed wide play to a simple percentage of in-possession actions in the left and right wing zones
-- Updated final-third penetration to measure against passes, carries, and set pieces
-- Added pass xT versus carry xT share chart
 - Normalized `Foul + Successful` events to **Foul Drawn**
-- Normalized `CornerAwarded` into **Corner** and removed `OffsidePass` from restart mix charts
-- Refined transition tabs by removing outcome donut charts and standardizing map sizing
-- Restored macOS file/folder picker behavior from the legacy build
-
+  
 ### v1.2
 
 - Expanded from a simple clip generator into a **multi-page analysis + clipping app**
