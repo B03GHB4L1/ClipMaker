@@ -1,5 +1,5 @@
-﻿"""
-clipmaker_core.py  â€”  Shared backend logic for ClipMaker v1.2
+"""
+clipmaker_core.py  â€”  Shared backend logic for ClipMaker v1.2.2
 Imported by ClipMaker.py (Home) and pages/1_Filtering.py
 """
 
@@ -904,7 +904,7 @@ def ping_proxy():
                 "max_tokens": 1,
                 "temperature": 0
             }).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2"},
+            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.2"},
             method="POST"
         )
         urllib.request.urlopen(req, timeout=15)
@@ -932,7 +932,7 @@ def call_llm(system_prompt, user_message):
         req = urllib.request.Request(
             GROQ_PROXY_URL,
             data=payload,
-            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2"},
+            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.2"},
             method="POST"
         )
         for attempt in range(2):
