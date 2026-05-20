@@ -226,6 +226,32 @@ def _scraped_match_paths():
     return paths
 
 
+_MATCH_SETUP_KEYS = [
+    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
+    "half3_time", "half4_time", "half5_time", "had_extra_time",
+    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+]
+
+
+def _capture_match_setup(path):
+    if not path:
+        return
+    st.session_state.setdefault("match_setup_by_csv", {})[path] = {
+        key: st.session_state.get(key)
+        for key in _MATCH_SETUP_KEYS
+        if key != "csv_path"
+    }
+
+
+def _restore_match_setup(path):
+    setup = st.session_state.get("match_setup_by_csv", {}).get(path, {})
+    st.session_state["csv_path"] = path
+    st.session_state["scraped_csv_path"] = path
+    st.session_state["active_setup_csv_path"] = path
+    for key, value in setup.items():
+        st.session_state[key] = value
+
+
 def _choose_active_match_csv(page_key, current_path):
     paths = _scraped_match_paths()
     if len(paths) <= 1:
@@ -241,9 +267,9 @@ def _choose_active_match_csv(page_key, current_path):
         )
         st.caption("Analyst maps are match-specific. Pick which scraped match to inspect.")
     if selected != current_path:
-        st.session_state["csv_path"] = selected
-        st.session_state["scraped_csv_path"] = selected
-        return selected
+        _capture_match_setup(current_path)
+        _restore_match_setup(selected)
+        st.rerun()
     return current_path
 
 csv_path    = _ss("csv_path") or _ss("scraped_csv_path")
@@ -401,7 +427,12 @@ def cut_clip(minute, second, period_str, before=None, after=None):
     video_ts = period_start[period_int] + elapsed
     start_ts = max(0.0, video_ts - before)
     duration = (video_ts + after) - start_ts
-    src = (video2_path if split_video and period_int >= 2 and video2_path else video_path)
+    if split_video and period_int >= 2:
+        if not video2_path:
+            raise ValueError("2nd half video file is required for this second-half clip.")
+        src = video2_path
+    else:
+        src = video_path
     ffmpeg = get_ffmpeg()
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     out = tmp.name; tmp.close()
@@ -450,7 +481,12 @@ def cut_build_up_clip(chain, df_source):
     clip_end_ts    = max(clip_start_ts, end_video_ts + _after_buf)
     duration       = max(1.0, clip_end_ts - clip_start_ts)
 
-    src = (video2_path if split_video and period_int >= 2 and video2_path else video_path)
+    if split_video and period_int >= 2:
+        if not video2_path:
+            raise ValueError("2nd half video file is required for this second-half clip.")
+        src = video2_path
+    else:
+        src = video_path
     ffmpeg = get_ffmpeg()
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     out = tmp.name

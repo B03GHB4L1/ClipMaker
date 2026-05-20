@@ -58,6 +58,32 @@ def _scraped_match_paths():
     return paths
 
 
+_MATCH_SETUP_KEYS = [
+    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
+    "half3_time", "half4_time", "half5_time", "had_extra_time",
+    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+]
+
+
+def _capture_match_setup(path):
+    if not path:
+        return
+    st.session_state.setdefault("match_setup_by_csv", {})[path] = {
+        key: st.session_state.get(key)
+        for key in _MATCH_SETUP_KEYS
+        if key != "csv_path"
+    }
+
+
+def _restore_match_setup(path):
+    setup = st.session_state.get("match_setup_by_csv", {}).get(path, {})
+    st.session_state["csv_path"] = path
+    st.session_state["scraped_csv_path"] = path
+    st.session_state["active_setup_csv_path"] = path
+    for key, value in setup.items():
+        st.session_state[key] = value
+
+
 def _choose_active_match_csv(page_key, current_path):
     paths = _scraped_match_paths()
     if len(paths) <= 1:
@@ -73,9 +99,9 @@ def _choose_active_match_csv(page_key, current_path):
         )
         st.caption("Multi-scrape batches are available here one match at a time because clip cutting uses one match video and one CSV clock.")
     if selected != current_path:
-        st.session_state["csv_path"] = selected
-        st.session_state["scraped_csv_path"] = selected
-        return selected
+        _capture_match_setup(current_path)
+        _restore_match_setup(selected)
+        st.rerun()
     return current_path
 
 
@@ -168,6 +194,16 @@ def _compute_windows_from_config(cfg):
         label = f"{prefix}{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
         raw.append((ts - cfg["before_buffer"], ts + cfg["after_buffer"], label, period))
     return merge_overlapping_windows(raw, cfg["min_gap"])
+
+
+def _video_source_for_period(cfg, period):
+    if cfg.get("split_video") and int(period) >= 2:
+        return cfg.get("video2_file") or ""
+    return cfg.get("video_file") or ""
+
+
+def _video_sources_for_windows(cfg, windows):
+    return [_video_source_for_period(cfg, window[3]) for window in windows]
 
 
 def _recent_mp4s(directory, started_at):
@@ -813,11 +849,12 @@ with tab_manual:
 
     # ── Helper: compute clip windows from current filters ─────────────────────
     def _compute_windows():
-        """Return (windows, video_file) using the same pipeline as run_clip_maker."""
+        """Return (windows, video_sources) using the same pipeline as run_clip_maker."""
         if not final_csv or not half1 or not half2:
-            return [], ""
+            return [], []
         cfg = _build_config(dry_run=True)
-        return _compute_windows_from_config(cfg), cfg["video_file"]
+        windows = _compute_windows_from_config(cfg)
+        return windows, _video_sources_for_windows(cfg, windows)
 
     # ── Helper: cut a single clip with ffmpeg ─────────────────────────────────
     def _get_ffmpeg():
@@ -1004,6 +1041,7 @@ with tab_manual:
             _cleanup_preview_clip(j)
         st.session_state.pop("_preview_windows", None)
         st.session_state.pop("_preview_video", None)
+        st.session_state.pop("_preview_video_sources", None)
 
     # ── Preview Clip List ─────────────────────────────────────────────────────
     if preview_btn:
@@ -1011,6 +1049,10 @@ with tab_manual:
         errors = []
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
+        if not (final_video and os.path.exists(final_video)):
+            errors.append("Video file is required (set it on the Home page).")
+        if split_video and not (final_video2 and os.path.exists(final_video2)):
+            errors.append("2nd half video file is required when split-video mode is enabled.")
         if not half1:
             errors.append("1st half kick-off time is required (set it on the Home page).")
         if not half2:
@@ -1019,12 +1061,13 @@ with tab_manual:
             for e in errors: st.error(e)
         else:
             try:
-                windows, vid_src = _compute_windows()
+                windows, vid_sources = _compute_windows()
                 if not windows:
                     st.info("No clips match the current filters.")
                 else:
                     st.session_state["_preview_windows"] = windows
-                    st.session_state["_preview_video"] = vid_src
+                    st.session_state["_preview_video"] = vid_sources[0] if vid_sources else ""
+                    st.session_state["_preview_video_sources"] = vid_sources
                     st.rerun()
             except Exception as ex:
                 st.error(f"Could not compute clip list: {ex}")
@@ -1032,7 +1075,13 @@ with tab_manual:
     # ── Show persisted preview list ───────────────────────────────────────────
     _pw = st.session_state.get("_preview_windows")
     _pv = st.session_state.get("_preview_video", "")
-    _preview_video_duration = _get_media_duration(_pv) if _pv and os.path.exists(_pv) else 0.0
+    _preview_sources = st.session_state.get("_preview_video_sources") or []
+    if _pw and len(_preview_sources) != len(_pw):
+        for j in range(len(_pw)):
+            _cleanup_preview_clip(j)
+        _preview_sources = _video_sources_for_windows(_build_config(dry_run=True), _pw)
+        st.session_state["_preview_video_sources"] = _preview_sources
+        st.session_state["_preview_video"] = _preview_sources[0] if _preview_sources else _pv
     if _pw:
         _hdr1, _hdr2 = st.columns([5, 1])
         with _hdr1:
@@ -1042,6 +1091,8 @@ with tab_manual:
                 _clear_preview()
                 st.rerun()
         for i, (s, e, lbl, p) in enumerate(_pw):
+            clip_src = _preview_sources[i] if i < len(_preview_sources) else _pv
+            clip_src_duration = _get_media_duration(clip_src) if clip_src and os.path.exists(clip_src) else 0.0
             dur = e - s
             with st.expander(
                 f"**Clip {i+1}** · {_fmt(s)} → {_fmt(e)} · {dur:.0f}s · {lbl}",
@@ -1051,8 +1102,8 @@ with tab_manual:
                 base_end = max(base_start + 0.25, float(e))
                 min_start = max(0.0, base_start - 180.0)
                 max_end = base_end + 180.0
-                if _preview_video_duration > 0:
-                    max_end = min(_preview_video_duration, max_end)
+                if clip_src_duration > 0:
+                    max_end = min(clip_src_duration, max_end)
                 max_end = max(base_end, max_end)
 
                 editor_c1, editor_c2 = st.columns([0.34, 0.66], gap="large")
@@ -1176,7 +1227,7 @@ with tab_manual:
 
                     preview_label = "Update preview" if clip_path and os.path.exists(clip_path) else "Preview this window"
                     preview_help = "Use the current draft window to render the preview clip."
-                    if _pv and os.path.exists(_pv):
+                    if clip_src and os.path.exists(clip_src):
                         if st.button(
                             preview_label,
                             key=f"preview_draft_{i}",
@@ -1186,7 +1237,7 @@ with tab_manual:
                         ):
                             with st.spinner("Rendering preview clip…"):
                                 try:
-                                    _render_preview_clip_window(i, _pv, s, e, draft_start, draft_end)
+                                    _render_preview_clip_window(i, clip_src, s, e, draft_start, draft_end)
                                     st.rerun()
                                 except Exception as ex:
                                     st.error(f"Could not render clip: {ex}")
@@ -1245,8 +1296,10 @@ with tab_manual:
     if run_btn:
         _clear_preview()
         errors = []
-        if not final_video:
+        if not (final_video and os.path.exists(final_video)):
             errors.append("Video file is required (set it on the Home page).")
+        if split_video and not (final_video2 and os.path.exists(final_video2)):
+            errors.append("2nd half video file is required when split-video mode is enabled.")
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
         if not half1:
@@ -1432,8 +1485,10 @@ with tab_ai:
 
     # ── Make clips with AI ────────────────────────────────────────────────────
     if make_clips_ai_btn:
-        if not final_video:
+        if not (final_video and os.path.exists(final_video)):
             st.error("Video file is required. Set it on the Home page.")
+        elif split_video and not (final_video2 and os.path.exists(final_video2)):
+            st.error("2nd half video file is required when split-video mode is enabled.")
         elif not final_csv:
             st.error("CSV file is required. Set it on the Home page.")
         elif not ai_input.strip():
