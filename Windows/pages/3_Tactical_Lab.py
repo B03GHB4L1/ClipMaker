@@ -245,13 +245,17 @@ def _match_label(path):
 def _load_matches():
     session_path = st.session_state.get("csv_path") or st.session_state.get("scraped_csv_path") or ""
     samples = _sample_paths()
+    options = []
+    for path in (st.session_state.get("multi_scraped_csv_paths", []) or []) + samples + ([session_path] if session_path else []):
+        if path and os.path.exists(path) and path not in options:
+            options.append(path)
 
     with st.expander("Match Source", expanded=False):
         st.toggle("Analyze across matches", key="tl_multi_mode", value=False)
         if st.session_state.get("tl_multi_mode", False):
             selected = st.multiselect(
                 "Select matches (1-10)",
-                options=samples,
+                options=options,
                 format_func=os.path.basename,
                 max_selections=10,
                 key="tl_selected_matches",
@@ -276,8 +280,8 @@ def _load_matches():
         df["match_label"] = _match_label(session_path)
         return _prepare_df(df), [os.path.basename(session_path)]
 
-    if samples:
-        choice = st.selectbox("Sample match", samples, format_func=os.path.basename)
+    if options:
+        choice = st.selectbox("Sample match", options, format_func=os.path.basename)
         df = _load_csv(choice).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(choice)
@@ -473,7 +477,11 @@ def _video_state():
 
 def _video_ready():
     state = _video_state()
-    return bool(state["video_path"] and os.path.exists(state["video_path"]))
+    if not (state["video_path"] and os.path.exists(state["video_path"])):
+        return False
+    if state["split_video"] and not (state["video2_path"] and os.path.exists(state["video2_path"])):
+        return False
+    return True
 
 
 def _get_ffmpeg():
@@ -521,7 +529,9 @@ def _video_timestamp(row):
 def _source_video(row):
     state = _video_state()
     period = _period_int(row.get("period", "FirstHalf"))
-    if state["split_video"] and period >= 2 and state["video2_path"]:
+    if state["split_video"] and period >= 2:
+        if not state["video2_path"]:
+            raise ValueError("2nd half video file is required for this second-half clip.")
         return state["video2_path"]
     return state["video_path"]
 
