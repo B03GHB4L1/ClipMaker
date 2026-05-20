@@ -771,8 +771,10 @@ def run_clip_maker(config, log_queue, progress_queue):
         video1_duration = get_video_duration(video1_path, ffmpeg_bin)
         log(f"  Video 1 duration: {video1_duration:.2f}s")
 
-        if split_video and config.get("video2_file"):
-            video2_path_str = config["video2_file"].strip().strip("\"'")
+        if split_video:
+            video2_path_str = str(config.get("video2_file", "")).strip().strip("\"'")
+            if not video2_path_str:
+                raise ValueError("Split-video mode is enabled, but no 2nd half video file was provided.")
             video2_duration = get_video_duration(video2_path_str, ffmpeg_bin)
             log(f"  Video 2 duration: {video2_duration:.2f}s")
             log("  Two-file mode: 1st half from file 1, 2nd half from file 2.")
