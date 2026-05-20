@@ -97,6 +97,61 @@ if "match_setup_by_csv" not in st.session_state:
 if "active_setup_csv_path" not in st.session_state:
     st.session_state["active_setup_csv_path"] = st.session_state.get("csv_path", "")
 
+def _saved_whoscored_csv_paths():
+    match_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "match data")
+    if not os.path.isdir(match_dir):
+        return []
+    return sorted(
+        os.path.join(match_dir, name)
+        for name in os.listdir(match_dir)
+        if name.lower().startswith("whoscored_") and name.lower().endswith(".csv")
+    )
+
+
+def _match_names_from_saved_csv(path):
+    try:
+        df = read_csv_safe(path)
+        home = str(df["homeTeam"].dropna().iloc[0]) if "homeTeam" in df.columns and not df["homeTeam"].dropna().empty else ""
+        away = str(df["awayTeam"].dropna().iloc[0]) if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty else ""
+        if home or away:
+            return home, away, len(df)
+        if "team" in df.columns:
+            teams = df["team"].dropna().astype(str).unique().tolist()[:2]
+            return (teams + ["", ""])[:2] + [len(df)]
+        return "", "", len(df)
+    except Exception:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        label = stem.replace("whoscored_", "").replace("_all_events", "")
+        if "_vs_" in label:
+            home, away = label.split("_vs_", 1)
+            return home.replace("_", " "), away.replace("_", " "), 0
+        return label.replace("_", " "), "", 0
+
+
+def _batch_item_from_saved_csv(path):
+    home, away, rows = _match_names_from_saved_csv(path)
+    return {"url": "", "path": path, "rows": rows, "home_team": home, "away_team": away}
+
+
+saved_match_paths = _saved_whoscored_csv_paths()
+current_paths = st.session_state.get("multi_scraped_csv_paths", []) or []
+all_match_paths = []
+for path in current_paths + saved_match_paths:
+    if path and os.path.exists(path) and path not in all_match_paths:
+        all_match_paths.append(path)
+
+if all_match_paths:
+    st.session_state["multi_scraped_csv_paths"] = all_match_paths
+    existing_batch = {
+        item.get("path"): item
+        for item in st.session_state.get("scraper_batch_results", []) or []
+        if item.get("path") and os.path.exists(item.get("path"))
+    }
+    if len(existing_batch) < len(all_match_paths):
+        st.session_state["scraper_batch_results"] = [
+            existing_batch.get(path) or _batch_item_from_saved_csv(path)
+            for path in all_match_paths
+        ]
 _scraped = st.session_state.get("scraped_csv_path", "")
 if _scraped and _scraped != st.session_state.csv_path:
     st.session_state.csv_path = _scraped
@@ -111,14 +166,6 @@ if "proxy_warmed" not in st.session_state:
 # =============================================================================
 _logo_b64 = theme.load_logo_b64(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ClipMaker_logo.png"))
 st.markdown(theme.logo_header("CLIPMAKER v1.2.2", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
-
-# Status banner
-if st.session_state.csv_path and os.path.exists(st.session_state.csv_path):
-    _name = os.path.basename(st.session_state.csv_path)
-    st.markdown(theme.status_ready(_name), unsafe_allow_html=True)
-else:
-    st.markdown(theme.status_empty(), unsafe_allow_html=True)
-
 
 # =============================================================================
 # STEP 1 — WHOSCORED SCRAPER
@@ -174,6 +221,8 @@ _MATCH_SETUP_KEYS = [
 
 
 def _match_setup_label(path):
+    if not path:
+        return "Select a saved match..."
     for item in st.session_state.get("scraper_batch_results", []) or []:
         if item.get("path") == path:
             label = f"{item.get('home_team', '')} vs {item.get('away_team', '')}".strip(" vs ")
@@ -205,18 +254,21 @@ def _render_match_setup_selector():
         if st.session_state.get("csv_path"):
             st.session_state["active_setup_csv_path"] = st.session_state.get("csv_path")
         return
-    current = st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path") or paths[0]
-    if current not in paths:
-        current = paths[0]
+    current = st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path") or ""
+    if current and current not in paths:
+        current = ""
+    options = [""] + paths
     selected = st.selectbox(
         "Setup match",
-        paths,
-        index=paths.index(current),
+        options,
+        index=options.index(current),
         format_func=_match_setup_label,
         key="home_match_setup_selector",
         help="Choose which scraped match the video, timestamps and clip settings apply to.",
     )
     st.caption("Each scraped match keeps its own video file, kick-off timestamps and clip settings.")
+    if not selected:
+        return
     if selected != current:
         _capture_match_setup(current)
         st.session_state["active_setup_csv_path"] = selected
@@ -392,7 +444,15 @@ if scrape_btn:
 
         if scraper_results:
             first = scraper_results[0]
-            saved_paths = [item["path"] for item in scraper_results]
+            scraped_by_path = {
+                item["path"]: {k: v for k, v in item.items() if k != "df"}
+                for item in scraper_results
+                if item.get("path")
+            }
+            saved_paths = []
+            for path in [item["path"] for item in scraper_results if item.get("path")] + _saved_whoscored_csv_paths():
+                if path and os.path.exists(path) and path not in saved_paths:
+                    saved_paths.append(path)
             st.session_state["scraper_full_df"] = first["df"]
             st.session_state["scraper_home_team"] = first.get("home_team", "")
             st.session_state["scraper_away_team"] = first.get("away_team", "")
@@ -401,8 +461,14 @@ if scrape_btn:
             st.session_state["csv_path"] = first["path"]
             st.session_state["shot_map_df"] = first["df"]
             st.session_state["multi_scraped_csv_paths"] = saved_paths
+            existing_batch = {
+                item.get("path"): item
+                for item in st.session_state.get("scraper_batch_results", []) or []
+                if item.get("path") and os.path.exists(item.get("path"))
+            }
             st.session_state["scraper_batch_results"] = [
-                {k: v for k, v in item.items() if k != "df"} for item in scraper_results
+                scraped_by_path.get(path) or existing_batch.get(path) or _batch_item_from_saved_csv(path)
+                for path in saved_paths
             ]
             existing_setups = st.session_state.get("match_setup_by_csv", {})
             st.session_state["match_setup_by_csv"] = {
@@ -652,7 +718,10 @@ st.markdown(
 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 ready = bool(
     st.session_state.csv_path and os.path.exists(st.session_state.csv_path) and
-    st.session_state.video_path and
+    st.session_state.video_path and os.path.exists(st.session_state.video_path) and
+    (not st.session_state.get("split_video") or (
+        st.session_state.get("video2_path") and os.path.exists(st.session_state.get("video2_path"))
+    )) and
     st.session_state.half1_time and st.session_state.half2_time
 )
 if ready:
@@ -660,7 +729,12 @@ if ready:
 else:
     missing = []
     if not st.session_state.csv_path:   missing.append("CSV file")
-    if not st.session_state.video_path: missing.append("video file")
+    if not (st.session_state.video_path and os.path.exists(st.session_state.video_path)):
+        missing.append("video file")
+    if st.session_state.get("split_video") and not (
+        st.session_state.get("video2_path") and os.path.exists(st.session_state.get("video2_path"))
+    ):
+        missing.append("2nd half video file")
     if not st.session_state.half1_time: missing.append("1st half kick-off")
     if not st.session_state.half2_time: missing.append("2nd half kick-off")
     if missing:
