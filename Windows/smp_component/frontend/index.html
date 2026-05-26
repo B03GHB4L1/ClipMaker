@@ -734,6 +734,7 @@
     const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
     const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
     const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
     const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
     const _markerBorder = isLight ? LIGHT_MARKER_BORDER : "rgba(255,255,255,0.35)";
     const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
@@ -851,6 +852,7 @@
 
     const layout = {
       paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
+      margin:{l:5,r:5,t:5,b:5}, height:height,
       xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
       yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:0.65},
       shapes:shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode:false,
@@ -1290,6 +1292,9 @@
     const actions     = args.actions      || [];
     const isHome    = args.is_home   || false;
     const height    = args.height    || 260;
+    const selectedIdx = args.selected_idx != null ? Number(args.selected_idx) : null;
+    const entryMode = args.entry_mode || "";
+    const isEntryMap = entryMode === "final_third" || entryMode === "box";
     const teamColor = isHome ? HOME_HEX : AWAY_HEX;
     const [tr, tg, tb] = isHome ? HOME_RGB : AWAY_RGB;
 
@@ -1297,24 +1302,76 @@
     document.getElementById("no-data").style.display = "none";
     document.getElementById("plot").style.display    = "block";
 
-    const shapes      = pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    const shapes      = isEntryMap
+      ? fullPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill)
+      : pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     const annotations = [];
     const traces      = [];
 
     const carryX = [], carryY = [];
     const stepX  = [], stepY  = [], stepText = [], stepHover = [];
+    const endX = [], endY = [], endHover = [], endCustom = [], endSize = [], endLine = [], endColor = [];
+    const plotPoint = (x, y) => {
+      if (isEntryMap) return { x: 100 - y, y: 100 - x };
+      return { x: x, y: 100 - y };
+    };
+
+    if (entryMode === "final_third") {
+      shapes.push({
+        type: "rect", x0: 0, y0: 0, x1: 100, y1: 33,
+        fillcolor: isLight ? "rgba(47,93,22,0.10)" : "rgba(223,255,0,0.09)",
+        line: { color: isLight ? "rgba(47,93,22,0.35)" : "rgba(223,255,0,0.38)", width: 1, dash: "dot" },
+        layer: "below",
+      });
+      annotations.push({
+        x: 50, y: 6, xref: "x", yref: "y",
+        text: "Final 3rd", showarrow: false,
+        font: { color: _hudGreen, size: 11 },
+        bgcolor: isLight ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.28)",
+      });
+    } else if (entryMode === "box") {
+      shapes.push({
+        type: "rect", x0: 21, y0: 0, x1: 79, y1: 17,
+        fillcolor: isLight ? "rgba(47,93,22,0.12)" : "rgba(223,255,0,0.11)",
+        line: { color: isLight ? "rgba(47,93,22,0.42)" : "rgba(223,255,0,0.48)", width: 1.5, dash: "dot" },
+        layer: "below",
+      });
+      annotations.push({
+        x: 50, y: 8, xref: "x", yref: "y",
+        text: "Box", showarrow: false,
+        font: { color: _hudGreen, size: 11 },
+        bgcolor: isLight ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.28)",
+      });
+    }
 
     actions.forEach(a => {
       if (a.endX == null || a.endY == null) return;
-      const sx = a.x,    sy = 100 - a.y;
-      const ex = a.endX, ey = 100 - a.endY;
+      const startPt = plotPoint(a.x, a.y);
+      const endPt = plotPoint(a.endX, a.endY);
+      const sx = startPt.x, sy = startPt.y;
+      const ex = endPt.x, ey = endPt.y;
+      const dfIdx = a.df_idx != null ? Number(a.df_idx) : null;
+      const isSelected = selectedIdx != null && dfIdx === selectedIdx;
+      const entryKind = a.entry_kind || a.type || "Action";
 
       stepX.push(sx);
       stepY.push(sy);
-      stepText.push(String(a.step));
+      stepText.push(isEntryMap ? "" : String(a.step));
       stepHover.push(
         `${a.step}. ${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,"0")}" (${a.type})`
       );
+      if (dfIdx != null) {
+        endX.push(ex);
+        endY.push(ey);
+        endCustom.push(dfIdx);
+        endSize.push(isSelected ? 18 : 12);
+        endLine.push(isSelected ? 3 : 1.5);
+        endColor.push(entryKind === "Carry" ? `rgba(${tr},${tg},${tb},0.78)` : teamColor);
+        endHover.push(
+          `<b>${a.entry_label || "Entry"}</b><br>${a.playerName}<br>` +
+          `${a.minute}'${String(a.second).padStart(2,"0")}" (${entryKind})`
+        );
+      }
 
       if (a.type === "Pass" || a.type === "SuccessfulFinalThirdPass") {
         annotations.push({
@@ -1342,11 +1399,12 @@
     }
 
     // Terminal end-point dot (last action's end position)
-    if (actions.length > 0) {
+    if (!isEntryMap && actions.length > 0) {
       const last = actions[actions.length - 1];
       if (last.endX != null && last.endY != null) {
+        const lastPt = plotPoint(last.endX, last.endY);
         traces.push({
-          x: [last.endX], y: [100 - last.endY], mode: "markers",
+          x: [lastPt.x], y: [lastPt.y], mode: "markers",
           marker: { symbol: "circle", size: 10,
                     color: `rgba(${tr},${tg},${tb},0.9)`,
                     line: { color: teamColor, width: 1.5 } },
@@ -1355,17 +1413,34 @@
       }
     }
 
+    if (endX.length) {
+      traces.push({
+        x: endX, y: endY, mode: "markers",
+        marker: {
+          symbol: "circle",
+          size: endSize,
+          color: endColor,
+          line: { color: isLight ? "#222222" : "#ffffff", width: endLine },
+          opacity: 0.96,
+        },
+        hovertext: endHover,
+        hovertemplate: "%{hovertext}<extra></extra>",
+        customdata: endCustom,
+        showlegend: false,
+      });
+    }
+
     // Numbered start markers (drawn last so they sit on top)
     if (stepX.length) {
       traces.push({
-        x: stepX, y: stepY, mode: "markers+text",
+        x: stepX, y: stepY, mode: isEntryMap ? "markers" : "markers+text",
         text: stepText,
         textposition: "middle center",
         textfont: { size: 9, color: "#0d0d0d", family: "Iosevka Charon Mono, monospace" },
         marker: {
-          symbol: "circle", size: 20,
-          color: `rgba(${tr},${tg},${tb},0.9)`,
-          line: { color: teamColor, width: 1.5 },
+          symbol: "circle", size: isEntryMap ? 7 : 20,
+          color: isEntryMap ? `rgba(${tr},${tg},${tb},0.28)` : `rgba(${tr},${tg},${tb},0.9)`,
+          line: { color: teamColor, width: isEntryMap ? 0.7 : 1.5 },
         },
         hovertext: stepHover,
         hovertemplate: "%{hovertext}<extra></extra>",
@@ -1386,14 +1461,31 @@
     const layout = {
       paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
       xaxis: { range: [-5, 105], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true },
-      yaxis: { range: [105, -5], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true,
-               scaleanchor: "x", scaleratio: 0.65 },
+      yaxis: {
+        range: [105, -5],
+        showgrid: false,
+        zeroline: false,
+        showticklabels: false,
+        fixedrange: true,
+        scaleanchor: "x",
+        scaleratio: isEntryMap ? 1.54 : 0.65,
+      },
       shapes: shapes, annotations: annotations,
       dragmode: false, showlegend: false,
+      height: height,
+      margin: { l: 8, r: 8, t: 8, b: 8 },
     };
 
     cmNewPlot(plotEl, traces, layout).then(() => {
       Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata != null) {
+          Streamlit.setValue([pt.customdata, Date.now()]);
+        }
+      });
     });
   }
 

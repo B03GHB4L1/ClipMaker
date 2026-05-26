@@ -1441,7 +1441,7 @@ def inject(logo_path: str = "", first_nav_label: str = ""):
     # Runtime guardrails for Streamlit DOM mutations:
     # keep select tags from clipping without forcing sidebar state/width.
     # Must use components.html — st.markdown strips <script> tags.
-    _sel = "[data-baseweb=\'tag\']"
+    _sel = '[data-baseweb="tag"]'
     _js = (
         "<script>(function(){"
         "var w=window.parent||window;"

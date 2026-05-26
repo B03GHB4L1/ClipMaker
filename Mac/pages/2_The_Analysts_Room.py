@@ -300,6 +300,8 @@ for _k, _v in [
     ("gk_selected_idx", None), ("gk_last_click_ts", None),
     ("gk_clip_path", None), ("gk_clip_key", None), ("gk_clip_error", None),
     ("bu_selected_chain_idx", None), ("bu_clip_path", None), ("bu_clip_key", None), ("bu_clip_error", None),
+    ("bu_entry_selected_idx", None), ("bu_entry_last_click_ts", None),
+    ("bu_entry_clip_path", None), ("bu_entry_clip_key", None), ("bu_entry_clip_error", None),
     ("press_selected_idx", None), ("press_clip_path", None), ("press_clip_key", None), ("press_clip_error", None),
     ("comp_p1_reel_path", None), ("comp_p1_reel_key", None), ("comp_p1_reel_error", None),
     ("comp_p2_reel_path", None), ("comp_p2_reel_key", None), ("comp_p2_reel_error", None),
@@ -697,9 +699,9 @@ def handle_click(raw_click, prefix):
     if clicked_idx is not None and click_ts != last_ts:
         st.session_state[f"{prefix}_last_click_ts"]  = click_ts
         st.session_state[f"{prefix}_selected_idx"]   = clicked_idx
-        st.session_state["smp_clip_path"]            = None
-        st.session_state["smp_clip_key"]             = None
-        st.session_state["smp_clip_error"]           = None
+        st.session_state[f"{prefix}_clip_path"]      = None
+        st.session_state[f"{prefix}_clip_key"]       = None
+        st.session_state[f"{prefix}_clip_error"]     = None
         st.rerun()
 
 # =============================================================================
@@ -2070,6 +2072,90 @@ def render_gk_tab():
 # =============================================================================
 # TAB 6 — BUILD-UP SEQUENCES (D2)
 # =============================================================================
+
+def _bu_float(row, key, default=0.0):
+    try:
+        value = row.get(key, default)
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _bu_end_coord(row, axis):
+    if axis == "x":
+        keys = ("endX", "carry_end_x", "carryEndX")
+    else:
+        keys = ("endY", "carry_end_y", "carryEndY")
+    for key in keys:
+        value = row.get(key)
+        if value is not None and value != "":
+            return _bu_float(row, key)
+    return _bu_float(row, axis)
+
+
+def _fallback_entry_mask(df, entry_mode):
+    x = pd.to_numeric(df.get("x"), errors="coerce").fillna(0)
+    y = pd.to_numeric(df.get("y"), errors="coerce").fillna(0)
+    end_x = pd.to_numeric(df.get("endX"), errors="coerce").fillna(x)
+    end_y = pd.to_numeric(df.get("endY"), errors="coerce").fillna(y)
+    if entry_mode == "final_third":
+        return (x < 67) & (end_x >= 67)
+    start_in_box = (x > 83) & (y > 21) & (y < 79)
+    end_in_box = (end_x > 83) & (end_y > 21) & (end_y < 79)
+    return (~start_in_box) & end_in_box
+
+
+def build_up_entry_events(df_source, team, entry_mode):
+    if df_source is None or df_source.empty:
+        return pd.DataFrame()
+    if entry_mode == "final_third":
+        pass_col, carry_col = "is_final_third_entry_pass", "is_final_third_entry_carry"
+    else:
+        pass_col, carry_col = "is_box_entry_pass", "is_box_entry_carry"
+
+    team_df = df_source[df_source["team"] == team].copy()
+    if team_df.empty:
+        return team_df
+
+    pass_mask = pd.Series(False, index=team_df.index)
+    carry_mask = pd.Series(False, index=team_df.index)
+    if pass_col in team_df.columns:
+        pass_mask = team_df[pass_col].map(safe_bool)
+    else:
+        pass_mask = (team_df["type"] == "Pass") & _fallback_entry_mask(team_df, entry_mode)
+    if carry_col in team_df.columns:
+        carry_mask = team_df[carry_col].map(safe_bool)
+    else:
+        carry_mask = (team_df["type"] == "Carry") & _fallback_entry_mask(team_df, entry_mode)
+
+    entries = team_df[pass_mask | carry_mask].copy()
+    if entries.empty:
+        return entries
+    entries["_entry_kind"] = entries["type"].apply(lambda t: "Carry" if str(t) == "Carry" else "Pass")
+    entries["_end_x"] = entries.apply(lambda r: _bu_end_coord(r, "x"), axis=1)
+    entries["_end_y"] = entries.apply(lambda r: _bu_end_coord(r, "y"), axis=1)
+    return entries.sort_index()
+
+
+def entry_to_pitch_dict(idx, row, step, entry_label):
+    return {
+        "df_idx":      int(idx),
+        "step":        int(step),
+        "type":        str(row.get("type", "")),
+        "entry_kind":  str(row.get("_entry_kind", row.get("type", ""))),
+        "entry_label": entry_label,
+        "playerName":  str(row.get("playerName", "")),
+        "minute":      int(row.get("minute", 0) or 0),
+        "second":      int(row.get("second", 0) or 0),
+        "x":           _bu_float(row, "x"),
+        "y":           _bu_float(row, "y"),
+        "endX":        _bu_float(row, "_end_x", _bu_end_coord(row, "x")),
+        "endY":        _bu_float(row, "_end_y", _bu_end_coord(row, "y")),
+    }
+
+
 @st.fragment
 def render_build_up_tab():
     if df_all is None or df_all.empty:
@@ -2087,15 +2173,131 @@ def render_build_up_tab():
 
     mode_sel = st.radio(
         "Mode",
-        ["Progressive Chains", "Possession Chains"],
+        ["Progressive Chains", "Possession Chains", "Final 3rd Entries", "Box Entries"],
         horizontal=True,
         key="bu_mode_radio",
         help=(
             "**Progressive Chains** — consecutive progressive passes/carries by the same team.\n\n"
             "**Possession Chains** — full uninterrupted possession starting in own half, "
-            "ending when the ball is lost in the opponent's half or a shot is taken."
+            "ending when the ball is lost in the opponent's half or a shot is taken.\n\n"
+            "**Final 3rd Entries / Box Entries** — passes and carries that enter the selected zone. "
+            "Click an endpoint on the pitch to inspect and watch the clip."
         ),
     )
+
+    if mode_sel in ("Final 3rd Entries", "Box Entries"):
+        entry_mode = "final_third" if mode_sel == "Final 3rd Entries" else "box"
+        entry_label = "Final 3rd Entry" if entry_mode == "final_third" else "Box Entry"
+        entry_plural = "Final 3rd Entries" if entry_mode == "final_third" else "Box Entries"
+        entries_df = build_up_entry_events(df_all, team_sel, entry_mode)
+        _bu_fkey = f"{team_sel}|entry|{entry_mode}"
+
+        if st.session_state.get("_bu_last_filter") != _bu_fkey:
+            st.session_state["_bu_last_filter"] = _bu_fkey
+            st.session_state["bu_selected_chain_idx"] = None
+            st.session_state["bu_clip_path"] = None
+            st.session_state["bu_clip_key"] = None
+            st.session_state["bu_clip_error"] = None
+            st.session_state["bu_entry_selected_idx"] = None
+            st.session_state["bu_entry_clip_path"] = None
+            st.session_state["bu_entry_clip_key"] = None
+            st.session_state["bu_entry_clip_error"] = None
+
+        if entries_df.empty:
+            st.info(f"No {entry_label.lower()} passes or carries found for {team_sel}.")
+            return
+
+        pass_count = int((entries_df["_entry_kind"] == "Pass").sum())
+        carry_count = int((entries_df["_entry_kind"] == "Carry").sum())
+        success_count = int((entries_df.get("outcomeType", pd.Series(index=entries_df.index, dtype=object)) == "Successful").sum())
+        m1, m2, m3 = st.columns(3)
+        m1.metric(entry_plural, len(entries_df),
+                  help=f"Passes and carries that enter the {entry_label.lower()} zone")
+        m2.metric("Pass / Carry", f"{pass_count} / {carry_count}",
+                  help="Split between pass entries and carry entries")
+        m3.metric("Successful Passes", success_count,
+                  help="Successful pass entries; carries are counted separately in the split")
+
+        pitch_actions = [
+            entry_to_pitch_dict(idx, row, step, entry_label)
+            for step, (idx, row) in enumerate(entries_df.iterrows(), 1)
+        ]
+        is_home_team = (team_sel == home_team)
+        bu_entry_sel = st.session_state.get("bu_entry_selected_idx")
+        _map_pad_l, _map_col, _map_pad_r = st.columns([1, 5, 1])
+        with _map_col:
+            raw_entry_click = build_up_map(
+                pitch_actions,
+                is_home_team,
+                selected_idx=bu_entry_sel,
+                key=f"bu_entry_map_{entry_mode}_{team_sel}",
+                light_mode=st.session_state.get("light_mode", False),
+                entry_mode=entry_mode,
+                height=680,
+            )
+        handle_click(raw_entry_click, "bu_entry")
+        st.markdown(
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+            "Click an entry endpoint on the pitch to inspect it and cut the clip</div>",
+            unsafe_allow_html=True,
+        )
+
+        def entry_row_label(row):
+            kind = row.get("_entry_kind", row.get("type", "Entry"))
+            return f"{int(row.get('minute',0))}'{int(row.get('second',0)):02d}\"  {kind}  {row.get('playerName','Unknown')}"
+
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        list_col, detail_col = st.columns([2, 3], gap="large")
+        with list_col:
+            st.subheader(entry_plural)
+            entry_indices = list(entries_df.index)
+            entry_labels = ["— Select an entry to inspect —"] + [
+                entry_row_label(row) for _, row in entries_df.iterrows()
+            ]
+            cur_entry = st.session_state.get("bu_entry_selected_idx")
+            entry_pos = entry_indices.index(cur_entry) + 1 if cur_entry in entry_indices else 0
+            chosen_entry = st.selectbox("Select entry", entry_labels, index=entry_pos,
+                                        key=f"bu_entry_select_{entry_mode}")
+            if chosen_entry != "— Select an entry to inspect —":
+                new_entry_idx = entry_indices[entry_labels.index(chosen_entry) - 1]
+                if new_entry_idx != st.session_state.get("bu_entry_selected_idx"):
+                    st.session_state["bu_entry_selected_idx"] = new_entry_idx
+                    st.session_state["bu_entry_clip_path"] = None
+                    st.session_state["bu_entry_clip_key"] = None
+                    st.session_state["bu_entry_clip_error"] = None
+                    st.rerun()
+
+            if cur_entry is not None and st.button("Clear selection", key=f"bu_entry_clear_{entry_mode}",
+                                                   use_container_width=True):
+                st.session_state["bu_entry_selected_idx"] = None
+                st.session_state["bu_entry_clip_path"] = None
+                st.session_state["bu_entry_clip_key"] = None
+                st.session_state["bu_entry_clip_error"] = None
+                st.rerun()
+
+        with detail_col:
+            cur_entry = st.session_state.get("bu_entry_selected_idx")
+            if cur_entry is not None and cur_entry in entries_df.index:
+                row = entries_df.loc[cur_entry].to_dict()
+                team = row.get("team", "")
+                accent = HOME_COLOR if team == home_team else AWAY_COLOR
+                kind = row.get("_entry_kind", row.get("type", "Entry"))
+                outcome = str(row.get("outcomeType", "") or "")
+                badge_c = "badge badge-success" if outcome == "Successful" else "badge badge-clear"
+                badge_l = theme.ui_html(f"[ZONE] {entry_label.upper()} · {str(kind).upper()}")
+                st.markdown(_h(f"""<div class="cm-event-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                    <span class="{badge_c}">{badge_l}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Outcome</div>
+                        <div class="cm-detail-value">{outcome or 'Carry / movement'}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+                render_watch_panel(row, "bu_entry", entry_row_label)
+            else:
+                st.caption("Select an entry from the map or list to inspect it.")
+        return
 
     if mode_sel == "Progressive Chains":
         has_prog = ("prog_pass" in df_all.columns) or ("prog_carry" in df_all.columns)
@@ -2219,7 +2421,8 @@ def render_build_up_tab():
                     "endY":       float(row.get("endY", 0) or 0),
                 })
             build_up_map(pitch_actions, is_home_team, key=f"bu_map_{sel_idx}",
-                         light_mode=st.session_state.get("light_mode", False))
+                         light_mode=st.session_state.get("light_mode", False),
+                         height=520)
 
         if _bu_clip and os.path.exists(_bu_clip):
             st.divider()
