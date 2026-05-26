@@ -206,6 +206,71 @@ def _video_sources_for_windows(cfg, windows):
     return [_video_source_for_period(cfg, window[3]) for window in windows]
 
 
+def _pick_output_folder_thread(result_queue, initial_dir=""):
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.wm_attributes("-topmost", True)
+            root.lift()
+            root.focus_force()
+        except Exception:
+            pass
+        kwargs = {}
+        if initial_dir and os.path.isdir(initial_dir):
+            kwargs["initialdir"] = initial_dir
+        picked = filedialog.askdirectory(parent=root, **kwargs)
+        root.destroy()
+        result_queue.put(picked or "")
+    except Exception as exc:
+        result_queue.put({"error": str(exc)})
+
+
+def _start_output_folder_picker():
+    existing = st.session_state.get("_output_folder_picker_thread")
+    if existing is not None and existing.is_alive():
+        return
+    q = queue.Queue()
+    initial_dir = st.session_state.get("output_dir") or st.session_state.get("_output_dir_input", "")
+    t = threading.Thread(
+        target=_pick_output_folder_thread,
+        args=(q, initial_dir),
+        daemon=True,
+    )
+    st.session_state["_output_folder_picker_queue"] = q
+    st.session_state["_output_folder_picker_thread"] = t
+    st.session_state["_output_folder_picker_error"] = None
+    st.session_state["_output_folder_picker_pending"] = True
+    t.start()
+
+
+def _poll_output_folder_picker():
+    if not st.session_state.get("_output_folder_picker_pending"):
+        return
+    q = st.session_state.get("_output_folder_picker_queue")
+    t = st.session_state.get("_output_folder_picker_thread")
+    if q is None:
+        st.session_state["_output_folder_picker_pending"] = False
+        return
+    try:
+        result = q.get_nowait()
+    except queue.Empty:
+        if t is not None and t.is_alive():
+            return
+        st.session_state["_output_folder_picker_pending"] = False
+        return
+
+    st.session_state["_output_folder_picker_pending"] = False
+    if isinstance(result, dict) and result.get("error"):
+        st.session_state["_output_folder_picker_error"] = result["error"]
+        return
+    if result:
+        st.session_state["output_dir"] = result
+        st.session_state["_output_dir_input"] = result
+
+
 def _recent_mp4s(directory, started_at):
     if not directory or not os.path.isdir(directory):
         return []
@@ -718,38 +783,47 @@ with tab_manual:
     # ── Output ───────────────────────────────────────────────────────────────
     st.markdown("##### Output")
 
+    if "_output_dir_input" not in st.session_state:
+        st.session_state["_output_dir_input"] = output_dir or ""
+    elif output_dir and output_dir != st.session_state.get("_last_synced_output_dir"):
+        st.session_state["_output_dir_input"] = output_dir
+    st.session_state["_last_synced_output_dir"] = output_dir or ""
+
     if IS_MAC:
-        out_dir_input = st.text_input("Output Folder", value=output_dir,
-                                       placeholder="Paste folder path, e.g. /Users/yourname/Desktop/Clips")
+        out_dir_input = st.text_input(
+            "Output Folder",
+            key="_output_dir_input",
+            placeholder="Paste folder path, e.g. /Users/yourname/Desktop/Clips",
+        )
     else:
-        import queue as _q_mod
-        oc1, oc2 = st.columns([5, 1])
+        _poll_output_folder_picker()
+        oc1, oc2 = st.columns([6, 1])
         with oc1:
-            out_dir_input = st.text_input("Output Folder", value=output_dir,
-                                           placeholder="Click Browse to choose folder")
+            out_dir_input = st.text_input(
+                "Output Folder",
+                key="_output_dir_input",
+                placeholder="Click Browse to choose folder or paste full path",
+            )
         with oc2:
             st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-            if st.button("Browse", key="browse_out"):
-                import tkinter as tk
-                from tkinter import filedialog
-                _q = _q_mod.Queue()
-                def _pick():
-                    r = tk.Tk(); r.withdraw()
-                    try: r.wm_attributes("-topmost", True)
-                    except: pass
-                    p = filedialog.askdirectory(); r.destroy(); _q.put(p)
-                _t = threading.Thread(target=_pick, daemon=True); _t.start(); _t.join(timeout=60)
-                try:
-                    picked = _q.get_nowait()
-                    if picked:
-                        st.session_state["output_dir"] = picked
-                        st.rerun()
-                except: pass
+            picker_pending = st.session_state.get("_output_folder_picker_pending", False)
+            if st.button("Browse", key="browse_out", disabled=picker_pending):
+                _start_output_folder_picker()
+                st.rerun()
 
-    if out_dir_input and out_dir_input != st.session_state.get("output_dir", ""):
-        st.session_state["output_dir"] = out_dir_input
+        picker_error = st.session_state.get("_output_folder_picker_error")
+        if picker_error:
+            st.warning(f"Folder picker could not open: {picker_error}")
+        if st.session_state.get("_output_folder_picker_pending"):
+            st.caption("Folder picker is open. Choose a folder or cancel the dialog.")
+            time.sleep(1)
+            st.rerun()
 
-    final_out_dir = st.session_state.get("output_dir") or out_dir_input or "output"
+    cleaned_out_dir = (out_dir_input or "").strip().strip('"')
+    if cleaned_out_dir != st.session_state.get("output_dir", ""):
+        st.session_state["output_dir"] = cleaned_out_dir
+
+    final_out_dir = st.session_state.get("output_dir") or "output"
 
     individual = st.checkbox("Save individual clips instead of one combined reel")
     if not individual:

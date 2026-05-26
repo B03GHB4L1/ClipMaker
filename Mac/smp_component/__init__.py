@@ -65,12 +65,15 @@ def dribble_carry_map(actions, home_team, away_team, selected_idx=None, key=None
     )
 
 
-def build_up_map(actions, is_home, key=None, light_mode=False):
+def build_up_map(actions, is_home, selected_idx=None, key=None, light_mode=False,
+                 entry_mode="", height=520):
     return _analyst_component(
         component_type="build_up_map",
         actions=actions,
         is_home=bool(is_home),
-        height=260,
+        selected_idx=selected_idx,
+        entry_mode=entry_mode or "",
+        height=height,
         key=key,
         default=None,
         light_mode=light_mode,
