@@ -256,6 +256,7 @@ Useful optional columns:
 - Added the **Tactical Lab** for team style, transition, and set-piece analysis
 - Added **multi-player reels** in the Manual Filters tab
 - Normalized `Foul + Successful` events to **Foul Drawn**
+- Added **multi-match scraping**
   
 ### v1.2.1
 
