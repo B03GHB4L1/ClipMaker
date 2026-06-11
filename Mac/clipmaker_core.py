@@ -1,5 +1,5 @@
 """
-clipmaker_core.py  â€”  Shared backend logic for ClipMaker v1.2.2
+clipmaker_core.py  â€”  Shared backend logic for ClipMaker v1.2.3
 Imported by ClipMaker.py (Home) and pages/1_Filtering.py
 """
 
@@ -7,6 +7,7 @@ import os
 import threading
 import time
 import json
+import re
 import pandas as pd
 
 _FOOTBALL_GLOSSARY_CACHE = None
@@ -179,14 +180,89 @@ def assign_periods(df, period_column, fallback_row):
         return df
     raise ValueError("No period column or fallback row set.")
 
+def _clock_seconds_for_period(minute, second, period):
+    return int(minute) * 60 + int(second)
+
 def match_clock_to_video_time(minute, second, period, period_start, period_offset):
     if period not in period_start:
         raise ValueError(f"Period {period} not in PERIOD_START_IN_VIDEO.")
     offset_min, offset_sec = period_offset[period]
-    elapsed = (minute * 60 + second) - (offset_min * 60 + offset_sec)
+    elapsed = _clock_seconds_for_period(minute, second, period) - (offset_min * 60 + offset_sec)
     if elapsed < 0:
         raise ValueError(f"Negative elapsed at {minute}:{second:02d} P{period}.")
     return period_start[period] + elapsed
+
+def _row_match_seconds(row, period=None):
+    minute = safe_clock_int(row.get("minute"))
+    second = safe_clock_int(row.get("second"))
+    if minute is None or second is None:
+        return None
+    if period is None:
+        period = _row_period_int(row)
+    return _clock_seconds_for_period(minute, second, period or 0)
+
+def _row_period_int(row):
+    period = safe_clock_int(row.get("resolved_period"))
+    if period is not None:
+        return period
+    return PERIOD_MAP.get(row.get("period"))
+
+def find_penalty_shootout_anchor_clock(df):
+    """Return the match-clock second of the first real penalty kick in period 5."""
+    if df is None or getattr(df, "empty", True):
+        return None
+    candidates = []
+    fallback = []
+    for order, (_, row) in enumerate(df.iterrows()):
+        if _row_period_int(row) != 5:
+            continue
+        clock = _row_match_seconds(row, 5)
+        if clock is None:
+            continue
+        event_type = str(row.get("type", "") or "").strip()
+        if event_type.lower() == "start":
+            continue
+        item = (clock, order)
+        fallback.append(item)
+        if "penalty" in event_type.lower():
+            candidates.append(item)
+    pool = candidates or fallback
+    if not pool:
+        return None
+    return min(pool)[0]
+
+def resolve_period_starts_for_video(df, period_start, log=None):
+    """
+    Treat half5_time as the timestamp of the first penalty kick, then derive
+    the underlying 120:00 period-start anchor used by the normal clock math.
+    """
+    resolved = dict(period_start)
+    if 5 not in resolved:
+        return resolved
+    anchor_clock = find_penalty_shootout_anchor_clock(df)
+    if anchor_clock is None:
+        return resolved
+    penalty_offset = max(0, anchor_clock - 120 * 60)
+    original = resolved[5]
+    resolved[5] = original - penalty_offset
+    if log and penalty_offset:
+        mins, secs = divmod(penalty_offset, 60)
+        log(
+            f"Penalty shootout anchored to first penalty kick "
+            f"({120 + mins}:{secs:02d}); derived period-5 start is {resolved[5]:.1f}s."
+        )
+    return resolved
+
+def safe_clock_int(value):
+    try:
+        if pd.isna(value):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
 
 def monitor_file_progress(out_path, total_frames, fps, progress_queue, stop_event):
     for _ in range(20):
@@ -431,12 +507,28 @@ def apply_filters(df, config, log=None):
     if config.get("progressive_only"):
         prog_cols = [c for c in ["prog_pass", "prog_carry"] if c in df.columns]
         if prog_cols:
-            mask = df[prog_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
-            filtered = df[(mask > 0).any(axis=1)]
-            if len(filtered) > 0:
-                df = filtered
-            elif log:
-                log("  [WARN] progressive_only matched 0 events — ignoring flag")
+            prog_values = df[prog_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+            progressive_mask = (prog_values > 0).any(axis=1)
+
+            selected_types = set(config.get("filter_types") or [])
+            progressive_types = set()
+            if "prog_pass" in prog_cols:
+                progressive_types.add("Pass")
+            if "prog_carry" in prog_cols:
+                progressive_types.add("Carry")
+
+            if selected_types:
+                # In mixed reels, progressive-only should narrow only selected
+                # event types that can carry progressive values.
+                type_series = df["type"].astype(str) if "type" in df.columns else pd.Series("", index=df.index)
+                non_progressive_selected_mask = ~type_series.isin(progressive_types)
+                filtered = df[progressive_mask | non_progressive_selected_mask]
+            else:
+                filtered = df[progressive_mask]
+
+            if log and len(filtered) == 0 and len(df) > 0:
+                log("  [WARN] progressive_only matched 0 events")
+            df = filtered
 
     # Dedicated OR logic: all shots + key passes only (used by Attacking Chaos preset)
     if config.get("shots_and_key_passes_only") and "type" in df.columns and "is_key_pass" in df.columns:
@@ -548,7 +640,14 @@ def apply_filters(df, config, log=None):
     if config.get("xt_min") is not None and "xT" in df.columns:
         xt_min = config["xt_min"]
         if xt_min > 0:
-            df = df[pd.to_numeric(df["xT"], errors="coerce").fillna(0) >= xt_min]
+            xt_values = pd.to_numeric(df["xT"], errors="coerce").fillna(0)
+            selected_types = set(config.get("filter_types") or [])
+            if selected_types and "type" in df.columns:
+                type_series = df["type"].astype(str)
+                xt_type_mask = type_series.isin({"Pass", "Carry"})
+                df = df[(xt_values >= xt_min) | ~xt_type_mask]
+            else:
+                df = df[xt_values >= xt_min]
 
     if config.get("minute_min") is not None and "minute" in df.columns:
         df = df[pd.to_numeric(df["minute"], errors="coerce").fillna(0) >= config["minute_min"]]
@@ -559,7 +658,14 @@ def apply_filters(df, config, log=None):
         n = config["top_n"]
         df = df.copy()
         df["_xt_num"] = pd.to_numeric(df["xT"], errors="coerce").fillna(0)
-        df = df.nlargest(n, "_xt_num").drop(columns=["_xt_num"])
+        selected_types = set(config.get("filter_types") or [])
+        if selected_types and "type" in df.columns:
+            xt_type_mask = df["type"].astype(str).isin({"Pass", "Carry"})
+            top_xt = df[xt_type_mask].nlargest(n, "_xt_num")
+            df = pd.concat([top_xt, df[~xt_type_mask]], ignore_index=False)
+        else:
+            df = df.nlargest(n, "_xt_num")
+        df = df.drop(columns=["_xt_num"])
 
     if config.get("pitch_zone_filter"):
         zone_series = _effective_pitch_zone_series(df)
@@ -613,6 +719,7 @@ def run_clip_maker(config, log_queue, progress_queue):
         fallback = config["fallback_row"]
         period_col = config["period_column"] or None
         df = assign_periods(df, period_col, fallback)
+        period_start = resolve_period_starts_for_video(df, period_start, log=log)
 
         half_filter = config.get("half_filter", "Both halves")
         if half_filter == "1st half only":
@@ -648,29 +755,54 @@ def run_clip_maker(config, log_queue, progress_queue):
         if filtered_count > 0:
             log(f"Filters removed {filtered_count} events.")
 
+        df = df.copy()
+        df["_clip_order"] = range(len(df))
         timestamps = []
         for _, row in df.iterrows():
+            minute = safe_clock_int(row.get("minute"))
+            second = safe_clock_int(row.get("second"))
+            period = safe_clock_int(row.get("resolved_period"))
+            if minute is None or second is None or period is None:
+                event_type = str(row.get("type", "")).strip() or "event"
+                player = str(row.get("playerName", "")).strip()
+                player = "" if player.lower() == "nan" else player
+                suffix = f" for {player}" if player else ""
+                log(f"  WARNING: Skipping {event_type}{suffix} with missing match clock.")
+                timestamps.append(None)
+                continue
             try:
                 ts = match_clock_to_video_time(
-                    int(row["minute"]), int(row["second"]),
-                    int(row["resolved_period"]), period_start, period_offset
+                    minute, second, period, period_start, period_offset
                 )
                 timestamps.append(ts)
-            except ValueError as e:
+            except (TypeError, ValueError) as e:
                 log(f"  WARNING: {e}")
                 timestamps.append(None)
 
         df["video_timestamp"] = timestamps
-        df = df.dropna(subset=["video_timestamp"]).sort_values("video_timestamp")
+        df["_match_minute"] = pd.to_numeric(df["minute"], errors="coerce")
+        df["_match_second"] = pd.to_numeric(df["second"], errors="coerce")
+        df = (
+            df.dropna(subset=["video_timestamp"])
+            .sort_values(
+                ["resolved_period", "_match_minute", "_match_second", "_clip_order"],
+                kind="mergesort",
+            )
+            .drop(columns=["_match_minute", "_match_second", "_clip_order"], errors="ignore")
+        )
 
         raw_windows = []
         for _, row in df.iterrows():
             ts = row["video_timestamp"]
-            period = int(row["resolved_period"])
+            minute = safe_clock_int(row.get("minute"))
+            second = safe_clock_int(row.get("second"))
+            period = safe_clock_int(row.get("resolved_period"))
+            if minute is None or second is None or period is None:
+                continue
             player = str(row.get("playerName", "")).strip()
             player = "" if player.lower() == "nan" else player
             prefix = f"{player} - " if player else ""
-            label = f"{prefix}{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
+            label = f"{prefix}{row['type']} @ {minute}:{second:02d} (P{period})"
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
@@ -714,8 +846,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                 "-i", src_path,
                 "-t", str(duration),
                 "-map", "0:v:0", "-map", "0:a:0",
-                "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
-                "-c:a", "aac",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-threads", "0",
+                "-c:a", "aac", "-b:a", "128k",
                 "-avoid_negative_ts", "make_zero",
                 out_path
             ]
@@ -771,20 +903,36 @@ def run_clip_maker(config, log_queue, progress_queue):
         video1_duration = get_video_duration(video1_path, ffmpeg_bin)
         log(f"  Video 1 duration: {video1_duration:.2f}s")
 
+        period_video_sources = {1: (video1_path, video1_duration)}
         if split_video:
             video2_path_str = str(config.get("video2_file", "")).strip().strip("\"'")
             if not video2_path_str:
                 raise ValueError("Split-video mode is enabled, but no 2nd half video file was provided.")
             video2_duration = get_video_duration(video2_path_str, ffmpeg_bin)
             log(f"  Video 2 duration: {video2_duration:.2f}s")
-            log("  Two-file mode: 1st half from file 1, 2nd half from file 2.")
+            period_video_sources[2] = (video2_path_str, video2_duration)
+
+            extra_period_labels = {
+                3: "ET 1st half",
+                4: "ET 2nd half",
+                5: "Penalty shootout",
+            }
+            for period, label in extra_period_labels.items():
+                extra_path = str(config.get(f"video{period}_file", "")).strip().strip("\"'")
+                if extra_path:
+                    extra_duration = get_video_duration(extra_path, ffmpeg_bin)
+                    period_video_sources[period] = (extra_path, extra_duration)
+                    log(f"  Video {period} duration ({label}): {extra_duration:.2f}s")
+                else:
+                    period_video_sources[period] = (video2_path_str, video2_duration)
+            log("  Split-video mode: each period uses its matching file when provided; ET/penalties fall back to the 2nd-half file.")
         else:
             video2_path_str = None
             video2_duration = None
 
         def get_src_and_duration(period):
-            if split_video and video2_path_str and period >= 2:
-                return video2_path_str, video2_duration
+            if split_video:
+                return period_video_sources.get(int(period), (video1_path, video1_duration))
             return video1_path, video1_duration
 
         out_dir = config["output_dir"]
@@ -888,11 +1036,10 @@ GROQ_PROXY_URL = "https://groq-proxy-eight.vercel.app/api/chat"
 GROQ_CHAT_MODELS = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "moonshotai/kimi-k2-instruct",
-    "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "qwen/qwen3-32b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-120b",
 ]
 
 def ping_proxy():
@@ -906,7 +1053,7 @@ def ping_proxy():
                 "max_tokens": 1,
                 "temperature": 0
             }).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.2"},
+            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.3"},
             method="POST"
         )
         urllib.request.urlopen(req, timeout=15)
@@ -914,11 +1061,8 @@ def ping_proxy():
         pass
 
 def call_llm(system_prompt, user_message):
-    import urllib.request, urllib.error, random, time as _time
-    preferred = GROQ_CHAT_MODELS[0]
-    rest = GROQ_CHAT_MODELS[1:]
-    random.shuffle(rest)
-    models_to_try = [preferred] + rest
+    import urllib.request, urllib.error, time as _time
+    models_to_try = list(GROQ_CHAT_MODELS)
 
     last_error = None
     for model in models_to_try:
@@ -934,7 +1078,7 @@ def call_llm(system_prompt, user_message):
         req = urllib.request.Request(
             GROQ_PROXY_URL,
             data=payload,
-            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.2"},
+            headers={"Content-Type": "application/json", "User-Agent": "ClipMaker/1.2.3"},
             method="POST"
         )
         for attempt in range(2):
@@ -1360,7 +1504,7 @@ def query_data(question, df):
             if col in result.columns:
                 result = result[result[col].astype(str).str.lower().isin(["true", "1", "yes"])]
 
-    if active_types and not active_bools:
+    if active_types:
         result = result[result["type"].isin(active_types)]
 
     if successful_only and "outcomeType" in result.columns:
@@ -1489,6 +1633,51 @@ def query_data(question, df):
 
     # Default: show the filtered table
     return {"type": "table", "data": display_df, "count": total_rows}
+
+
+def _validate_safe_pandas_expr(code):
+    import ast
+
+    allowed_names = {"df", "pd"}
+    allowed_pd_calls = {"to_numeric", "isna", "notna"}
+    allowed_method_calls = {
+        "all", "any", "astype", "between", "clip", "contains", "count", "dropna",
+        "eq", "fillna", "groupby", "head", "idxmax", "idxmin", "isin", "isna",
+        "max", "mean", "min", "nlargest", "notna", "nunique", "rename",
+        "reset_index", "round", "size", "sort_index", "sort_values", "str",
+        "sum", "tail", "to_dict", "tolist", "unique", "value_counts",
+    }
+    allowed_nodes = (
+        ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Lambda,
+        ast.IfExp, ast.Dict, ast.Set, ast.List, ast.Tuple, ast.Load,
+        ast.Compare, ast.Call, ast.keyword, ast.Subscript, ast.Slice,
+        ast.Constant, ast.Name, ast.Attribute, ast.And, ast.Or, ast.Not,
+        ast.Invert, ast.USub, ast.UAdd, ast.Add, ast.Sub, ast.Mult, ast.Div,
+        ast.FloorDiv, ast.Mod, ast.Pow, ast.BitAnd, ast.BitOr, ast.BitXor,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot,
+        ast.In, ast.NotIn,
+    )
+
+    tree = ast.parse(code, mode="eval")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed_nodes):
+            raise ValueError(f"Unsafe expression element: {type(node).__name__}")
+        if isinstance(node, ast.Name) and node.id not in allowed_names:
+            raise ValueError(f"Unsafe name in expression: {node.id}")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+            raise ValueError("Private attributes are not allowed in AI data expressions.")
+        if isinstance(node, ast.Call):
+            func = node.func
+            if not isinstance(func, ast.Attribute):
+                raise ValueError("Only pandas/DataFrame method calls are allowed.")
+            if isinstance(func.value, ast.Name) and func.value.id == "pd":
+                if func.attr not in allowed_pd_calls:
+                    raise ValueError(f"pd.{func.attr} is not allowed in AI data expressions.")
+            elif func.attr not in allowed_method_calls:
+                raise ValueError(f"Method {func.attr} is not allowed in AI data expressions.")
+
+    return tree
 
 
 def answer_with_pandas(question, df):
@@ -1707,7 +1896,8 @@ RULES:
         return result[ordered + extras].reset_index(drop=True)
 
     try:
-        result = eval(code_norm, {"df": df_norm, "pd": pd})
+        tree = _validate_safe_pandas_expr(code_norm)
+        result = eval(compile(tree, "<clipmaker-ai-query>", "eval"), {"__builtins__": {}}, {"df": df_norm, "pd": pd})
         if isinstance(result, str) and not result.strip():
             return "No matching events found."
 
@@ -1788,6 +1978,76 @@ BOOL_COL_TO_FLAG = {
     "is_final_third_entry_carry":   "final_third_entry_carry_only",
     "is_throw_in":                  "throw_ins_only",
 }
+
+
+def _extract_balanced_json_object(text):
+    text = str(text or "").strip()
+    if not text:
+        return ""
+
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+
+    start = text.find("{")
+    if start < 0:
+        return text
+
+    in_string = False
+    escape = False
+    depth = 0
+    quote = ""
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                in_string = False
+            continue
+        if ch in ("'", '"'):
+            in_string = True
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:idx + 1].strip()
+    return text[start:].strip()
+
+
+def _parse_llm_json(raw):
+    import ast
+
+    candidate = _extract_balanced_json_object(raw).strip()
+    # Older prompts accidentally showed {{...}}. Recover that shape safely.
+    while candidate.startswith("{{") and candidate.endswith("}}"):
+        candidate = candidate[1:-1].strip()
+
+    attempts = [candidate]
+    repaired = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:", r'\1"\2":', candidate)
+    if repaired != candidate:
+        attempts.append(repaired)
+
+    for text in attempts:
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+    preview = candidate.replace("\n", " ")[:240] or "(empty)"
+    raise ValueError(f"AI returned a malformed filter config. Preview: {preview}")
 
 
 def parse_filters(instruction, df, available_types):
@@ -1935,7 +2195,7 @@ IMPORTANT RULES:
 - For errors leading to goal: set "errors_to_goal_only": true (NOT filter_types)
 
 Return ONLY valid JSON with these keys (no markdown):
-{{{{
+{{
   "filter_types": [],
   "progressive_only": false,
   "xt_min": 0.0,
@@ -1953,38 +2213,16 @@ Return ONLY valid JSON with these keys (no markdown):
   "minute_max": null,
   "dry_run": false,
   "explanation": ""
-}}}}"""
+}}"""
     raw = call_llm(system, f"Instruction: {instruction}").strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-
-    # If the response doesn't look like JSON, retry once with a stricter prompt
-    if not raw or not raw.startswith("{"):
-        # Try to extract JSON from mixed text/JSON response
-        import re as _re2
-        json_match = _re2.search(r'\{[^{}]*([CLR]:\{[^{}]*\}[^{}]*)*\}', raw or "")
-        if json_match:
-            raw = json_match.group(0)
-        else:
-            # Retry with explicit instruction
-            raw = call_llm(system + "\n\nCRITICAL: Return ONLY the JSON object. No text before or after it.",
-                           f"Instruction: {instruction}").strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            raw = raw.strip()
-            if not raw or not raw.startswith("{"):
-                json_match2 = _re2.search(r'\{[^{}]*([CLR]:\{[^{}]*\}[^{}]*)*\}', raw or "")
-                if json_match2:
-                    raw = json_match2.group(0)
-                else:
-                    raise ValueError(f"AI did not return valid JSON. Response: {(raw or '(empty)')[:200]}")
-
-    result = json.loads(raw)
+    try:
+        result = _parse_llm_json(raw)
+    except ValueError:
+        raw = call_llm(
+            system + "\n\nCRITICAL: Return one plain JSON object with single outer braces. No markdown, no comments, no text before or after it.",
+            f"Instruction: {instruction}"
+        ).strip()
+        result = _parse_llm_json(raw)
 
     # Clamp half_filter to valid values â€” LLM can confuse "right half space" with a half
     _valid_halves = {"1st half only", "2nd half only", "Both halves"}

@@ -162,11 +162,12 @@ def _slugify_filename_part(value):
     return value or "match"
 
 
-def save_scraped_match_csv(df, home_team, away_team, save_dir):
+def save_scraped_match_csv(df, home_team, away_team, save_dir, source="whoscored"):
     save_dir = os.path.join(save_dir, "match data")
     os.makedirs(save_dir, exist_ok=True)
+    source = _slugify_filename_part(source or "whoscored").lower()
     filename = (
-        f"whoscored_{_slugify_filename_part(home_team)}"
+        f"{source}_{_slugify_filename_part(home_team)}"
         f"_vs_{_slugify_filename_part(away_team)}_all_events.csv"
     )
     save_path = os.path.join(save_dir, filename)
@@ -194,6 +195,34 @@ def _fuzzy_player_match(ws_name, fm_name):
     if last_a == last_b and len(last_a) > 2:
         return True
     return last_a in b or last_b in a
+
+
+NON_CARRY_EVENT_TYPES = {
+    "BlockedShot", "Card", "CollectionEnd", "CornerAwarded", "DeletedEvent",
+    "End", "EndDelay", "Foul", "FoulThrowIn", "FormationChange", "Goal",
+    "MissedShot", "MissedShots", "Out", "PlayerChangedPosition", "PlayerOff",
+    "PlayerOn", "PlayerRetired", "PlayerReturns", "RefereeDropBall",
+    "SavedShot", "ShotOnPost", "Start", "StartDelay", "Substitution",
+    "TeamSetUp",
+}
+
+NON_CARRY_RESTART_FLAGS = {
+    "is_corner", "is_freekick", "is_throw_in", "is_goal_kick", "is_keeper_throw",
+    "is_gk_hoof", "is_gk_kick_from_hands", "is_penalty",
+}
+
+
+def _truthy_flag(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y"}
+    return bool(value)
+
+
+def _is_dead_ball_or_restart_event(event):
+    event_type = event.get("type", "")
+    if event_type in NON_CARRY_EVENT_TYPES:
+        return True
+    return any(_truthy_flag(event.get(flag, False)) for flag in NON_CARRY_RESTART_FLAGS)
 
 
 def insert_ball_carries(events_df, log_func=None, home_team=None):
@@ -338,6 +367,7 @@ def insert_ball_carries(events_df, log_func=None, home_team=None):
                     "matchName": next_evt.get("matchName", ""),
                     "homeTeam": next_evt.get("homeTeam", ""),
                     "awayTeam": next_evt.get("awayTeam", ""),
+                    "matchDate": next_evt.get("matchDate", ""),
                 }
                 match_carries = pd.concat([match_carries, pd.DataFrame([carry])], ignore_index=True, sort=False)
 
@@ -351,7 +381,7 @@ def insert_ball_carries(events_df, log_func=None, home_team=None):
     return events_df
 
 
-def _apply_xt_and_progressive(df, app_dir, log):
+def _apply_xt_and_progressive(df, app_dir, log, carry_inserter=None):
     df = df.copy()
     for col in ["x", "y", "endX", "endY"]:
         if col in df.columns:
@@ -415,7 +445,8 @@ def _apply_xt_and_progressive(df, app_dir, log):
     except Exception as exc:
         log(f"  Warning: Could not calculate progressive pass/carry: {exc}")
 
-    df = insert_ball_carries(df, log_func=log)  # home_team resolved from df["homeTeam"]
+    inserter = carry_inserter or insert_ball_carries
+    df = inserter(df, log_func=log)  # home_team resolved from df["homeTeam"]
     if "endX" in df.columns and "x" in df.columns:
         df.loc[df["endX"].isna(), "endX"] = df.loc[df["endX"].isna(), "x"]
     if "endY" in df.columns and "y" in df.columns:
@@ -803,6 +834,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "matchName": match_name,
                     "homeTeam": home_team,
                     "awayTeam": away_team,
+                    "matchDate": match_date or "",
                 })
             except Exception:
                 continue

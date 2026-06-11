@@ -12,7 +12,7 @@ from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, 
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
     detect_progressive_chains, detect_possession_carries, detect_press_wins, get_chain_actions,
-    read_csv_safe,
+    read_csv_safe, resolve_period_starts_for_video, match_clock_to_video_time,
 )
 
 try:
@@ -27,7 +27,7 @@ def _h(s):
     return _re.sub(r'\s{2,}', ' ', s.replace('\n', ' ')).strip()
 
 st.set_page_config(
-    page_title="The Analyst's Room — ClipMaker v1.2.2",
+    page_title="The Analyst's Room — ClipMaker v1.2.3",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -111,22 +111,42 @@ DEF_CLASS = {
 
 HOME_COLOR = "#7ab4ff"
 AWAY_COLOR = "#ff7351"
-PLOTLY_EXPORT_BRAND = "ClipMaker v1.2.2 · @B03GHB4L1"
+PLOTLY_EXPORT_BRAND = "ClipMaker v1.2.3 · @B03GHB4L1"
 PLOTLY_EXPORT_CONFIG = {
     "displayModeBar": True,
     "displaylogo": False,
     "toImageButtonOptions": {
         "format": "png",
-        "filename": "clipmaker_plot",
+        "filename": "analyst_room_export",
         "scale": 2,
     },
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
 }
 
 
+def _plotly_export_filename(*parts, fallback="analyst_room_export"):
+    text = "_".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._-").lower()
+    return (text or fallback)[:110]
+
+
+def plotly_export_config(*parts, fallback="analyst_room_export"):
+    config = dict(PLOTLY_EXPORT_CONFIG)
+    image_options = dict(config.get("toImageButtonOptions", {}))
+    image_options["filename"] = _plotly_export_filename(*parts, fallback=fallback)
+    config["toImageButtonOptions"] = image_options
+    return config
+
+
+def plotly_clean_static_config(*parts, fallback="analyst_room_export"):
+    config = plotly_export_config(*parts, fallback=fallback)
+    config["displayModeBar"] = False
+    return config
+
+
 def brand_plotly_export(fig, light: bool = False):
     if light:
-        bg        = "rgba(0,0,0,0)"
+        bg        = "#f5f0e8"
         plot_bg   = "#ede8df"
         font_col  = "#1a1a1a"
         grid_col  = "rgba(80,60,30,0.12)"
@@ -136,11 +156,11 @@ def brand_plotly_export(fig, light: bool = False):
         hover_bg  = "#f5f0e8"
         hover_br  = "rgba(120,100,60,0.35)"
         hover_fc  = "#1a1a1a"
-        ann_fc    = "rgba(80,60,30,0.65)"
-        ann_bc    = "rgba(120,100,60,0.28)"
-        ann_col   = "rgba(40,30,10,0.55)"
+        ann_fc    = "#ffffff"
+        ann_bc    = "rgba(60,48,30,0.36)"
+        ann_col   = "rgba(54,47,36,0.74)"
     else:
-        bg        = "rgba(11,14,20,0)"
+        bg        = "#0b0e14"
         plot_bg   = "#071008"
         font_col  = "#ecedf6"
         grid_col  = "rgba(142,255,113,0.08)"
@@ -150,7 +170,7 @@ def brand_plotly_export(fig, light: bool = False):
         hover_bg  = "#10131a"
         hover_br  = "rgba(142,255,113,0.35)"
         hover_fc  = "#ecedf6"
-        ann_fc    = "rgba(240,240,240,0.62)"
+        ann_fc    = "#ffffff"
         ann_bc    = "rgba(142,255,113,0.28)"
         ann_col   = "rgba(11,14,20,0.72)"
     fig.update_layout(
@@ -168,12 +188,14 @@ def brand_plotly_export(fig, light: bool = False):
         zerolinecolor=zero_col,
         linecolor=line_col,
         tickfont=dict(color=tick_col),
+        automargin=True,
     )
     fig.update_yaxes(
         gridcolor=grid_col,
         zerolinecolor=zero_col,
         linecolor=line_col,
         tickfont=dict(color=tick_col),
+        automargin=True,
     )
     fig.add_annotation(
         text=PLOTLY_EXPORT_BRAND,
@@ -232,6 +254,22 @@ _MATCH_SETUP_KEYS = [
     "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
 ]
 
+_MATCH_SETUP_DEFAULTS = {
+    "video_path": "",
+    "video2_path": "",
+    "half1_time": "",
+    "half2_time": "",
+    "half3_time": "",
+    "half4_time": "",
+    "half5_time": "",
+    "had_extra_time": False,
+    "had_penalties": False,
+    "split_video": False,
+    "before_buffer": 5,
+    "after_buffer": 8,
+    "min_gap": 6,
+}
+
 
 def _capture_match_setup(path):
     if not path:
@@ -248,8 +286,19 @@ def _restore_match_setup(path):
     st.session_state["csv_path"] = path
     st.session_state["scraped_csv_path"] = path
     st.session_state["active_setup_csv_path"] = path
-    for key, value in setup.items():
-        st.session_state[key] = value
+    for key, default in _MATCH_SETUP_DEFAULTS.items():
+        st.session_state[key] = setup.get(key, default)
+
+
+def _clear_analyst_filters_for_match_switch():
+    prefixes = (
+        "smp_", "pm_", "dm_", "dcm_", "gk_", "bu_", "press_", "comp_",
+        "_smp_", "_pm_", "_dm_", "_dcm_", "_gk_", "_bu_", "_press_",
+    )
+    keep = {"analysts_room_active_match_csv"}
+    for key in list(st.session_state.keys()):
+        if key not in keep and key.startswith(prefixes):
+            del st.session_state[key]
 
 
 def _choose_active_match_csv(page_key, current_path):
@@ -268,9 +317,172 @@ def _choose_active_match_csv(page_key, current_path):
         st.caption("Analyst maps are match-specific. Pick which scraped match to inspect.")
     if selected != current_path:
         _capture_match_setup(current_path)
+        _clear_analyst_filters_for_match_switch()
         _restore_match_setup(selected)
         st.rerun()
-    return current_path
+    return selected
+
+
+def _resolve_event_team_names(df):
+    if "team" not in df.columns:
+        return "", ""
+    event_teams = [str(team) for team in df["team"].dropna().astype(str).unique().tolist() if str(team)]
+    if len(event_teams) < 2:
+        return (event_teams + ["", ""])[:2]
+
+    home_label = ""
+    away_label = ""
+    if "homeTeam" in df.columns and not df["homeTeam"].dropna().empty:
+        home_label = str(df["homeTeam"].dropna().iloc[0])
+    if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty:
+        away_label = str(df["awayTeam"].dropna().iloc[0])
+
+    def match_label(label, used):
+        label_norm = label.casefold().strip()
+        if not label_norm:
+            return ""
+        for team in event_teams:
+            if team not in used and team.casefold() == label_norm:
+                return team
+        for team in event_teams:
+            team_norm = team.casefold()
+            if team not in used and (label_norm in team_norm or team_norm in label_norm):
+                return team
+        return ""
+
+    used = set()
+    home = match_label(home_label, used)
+    if home:
+        used.add(home)
+    away = match_label(away_label, used)
+    if away:
+        used.add(away)
+
+    remaining = [team for team in event_teams if team not in used]
+    if not home and remaining:
+        home = remaining.pop(0)
+    if not away and remaining:
+        away = remaining.pop(0)
+    return home, away
+
+
+def _first_nonempty(df, columns):
+    for col in columns:
+        if col in df.columns:
+            values = df[col].dropna().astype(str)
+            values = values[values.str.strip() != ""]
+            if not values.empty:
+                return values.iloc[0].strip()
+    return ""
+
+
+def _match_export_context(df):
+    if df is None or df.empty:
+        return ""
+    match_name = _first_nonempty(df, ["matchName"])
+    if match_name.lower().endswith(".csv") or "_all_events" in match_name:
+        match_name = os.path.basename(match_name)
+        match_name = match_name.replace("whoscored_", "").replace("scoresway_", "")
+        match_name = match_name.replace("_all_events.csv", "").replace(".csv", "")
+        match_name = match_name.replace("_", " ")
+    if not match_name:
+        home = _first_nonempty(df, ["homeTeam"])
+        away = _first_nonempty(df, ["awayTeam"])
+        match_name = f"{home} vs {away}".strip(" vs ")
+
+    match_date = _first_nonempty(df, ["matchDate", "match_date", "date", "startTime", "kickOffTime", "dtStamp"])
+    if match_date:
+        match_date = match_date[:10]
+
+    parts = [part for part in [match_name, match_date] if part]
+    return " · ".join(parts)
+
+
+def _plotly_header(fig, title, subtitle="", note="", light=False, height=None):
+    def _wrap_export_text(text, width=104):
+        import textwrap
+        return "<br>".join(textwrap.wrap(str(text or ""), width=width, break_long_words=False))
+
+    font_col = "#1a1a1a" if light else "#ecedf6"
+    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(11,14,20,0.78)"
+    note_border = "rgba(120,100,60,0.30)" if light else "rgba(142,255,113,0.24)"
+    title_text = f"<b>{title}</b>"
+    if subtitle:
+        title_text += f"<br><sup>{_wrap_export_text(subtitle, 96)}</sup>"
+    bottom_margin = 118 if note else 88
+    layout_update = dict(
+        title=dict(
+            text=title_text,
+            x=0.01,
+            xanchor="left",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=21, color=font_col, family="Space Grotesk, Inter, sans-serif"),
+        ),
+        margin=dict(t=118, b=bottom_margin, l=60, r=60),
+    )
+    if height:
+        layout_update["height"] = height
+    fig.update_layout(**layout_update)
+    if note:
+        fig.add_annotation(
+            text=_wrap_export_text(note, 108),
+            xref="paper",
+            yref="paper",
+            x=0.01,
+            y=-0.08,
+            xanchor="left",
+            yanchor="top",
+            showarrow=False,
+            align="left",
+            font=dict(size=10, color=font_col, family="Inter, sans-serif"),
+            bgcolor=note_bg,
+            bordercolor=note_border,
+            borderwidth=1,
+            borderpad=4,
+        )
+    return fig
+
+
+def _scope_line(*parts):
+    cleaned = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            cleaned.append(text)
+    return " | ".join(cleaned)
+
+
+def _count_scope(count, singular="event", plural=None):
+    irregular = {
+        "pass": "passes",
+        "entry": "entries",
+        "penalty": "penalties",
+    }
+    plural = plural or irregular.get(singular, f"{singular}s")
+    try:
+        value = int(count)
+    except (TypeError, ValueError):
+        return ""
+    return f"{value} {singular if value == 1 else plural}"
+
+
+def _zone_scope(pitch_zone="", depth_zone=""):
+    return _scope_line(
+        pitch_zone or "Any pitch zone",
+        depth_zone or "Any depth zone",
+    )
+
+
+def _map_context(title, team="", player="", subset="", pitch_zone="", depth_zone="",
+                 count=None, unit="event", note=""):
+    match = _match_export_context(globals().get("df_all"))
+    subtitle = _scope_line(match, team, player, subset, _zone_scope(pitch_zone, depth_zone), _count_scope(count, unit))
+    return {
+        "context_title": title,
+        "context_subtitle": subtitle,
+        "context_note": note,
+    }
 
 csv_path    = _ss("csv_path") or _ss("scraped_csv_path")
 csv_path    = _choose_active_match_csv("analysts_room", csv_path)
@@ -282,8 +494,8 @@ half2_time  = _ss("half2_time")
 half3_time  = _ss("half3_time")
 half4_time  = _ss("half4_time")
 half5_time  = _ss("half5_time")
-home_team   = _ss("scraper_home_team")
-away_team   = _ss("scraper_away_team")
+home_team   = ""
+away_team   = ""
 
 data_loaded = bool(csv_path and os.path.exists(csv_path))
 
@@ -323,17 +535,8 @@ gk_df            = None
 if data_loaded:
     try:
         df_all           = read_csv_safe(csv_path)
-        # Derive team names from data if scraper didn't set them
-        if not home_team or not away_team:
-            if "homeTeam" in df_all.columns and "awayTeam" in df_all.columns:
-                ht = df_all["homeTeam"].dropna().iloc[0] if not df_all["homeTeam"].dropna().empty else ""
-                at = df_all["awayTeam"].dropna().iloc[0] if not df_all["awayTeam"].dropna().empty else ""
-                if ht and at:
-                    home_team, away_team = ht, at
-            elif "team" in df_all.columns:
-                teams = df_all["team"].dropna().unique().tolist()[:2]
-                if len(teams) >= 2:
-                    home_team, away_team = teams[0], teams[1]
+        # The selected CSV is the source of truth; use event team names for filters/maps.
+        home_team, away_team = _resolve_event_team_names(df_all)
         pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy() if "period" in df_all.columns else pd.DataFrame()
         pso_shots_df     = pso_shots_df[pso_shots_df["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
         if "period" in df_all.columns:
@@ -422,11 +625,10 @@ def cut_clip(minute, second, period_str, before=None, after=None):
     if half3_time: period_start[3] = to_seconds(half3_time)
     if half4_time: period_start[4] = to_seconds(half4_time)
     if half5_time: period_start[5] = to_seconds(half5_time)
+    period_start = resolve_period_starts_for_video(globals().get("df_all"), period_start)
     if period_int not in period_start:
         raise ValueError(f"No kick-off time set for period {period_int}.")
-    off_min, off_sec = period_offset.get(period_int, (0, 0))
-    elapsed  = max(0, int(minute)*60 + int(second) - (off_min*60 + off_sec))
-    video_ts = period_start[period_int] + elapsed
+    video_ts = match_clock_to_video_time(int(minute), int(second), period_int, period_start, period_offset)
     start_ts = max(0.0, video_ts - before)
     duration = (video_ts + after) - start_ts
     if split_video and period_int >= 2:
@@ -470,15 +672,12 @@ def cut_build_up_clip(chain, df_source):
     if half3_time: period_start[3] = to_seconds(half3_time)
     if half4_time: period_start[4] = to_seconds(half4_time)
     if half5_time: period_start[5] = to_seconds(half5_time)
+    period_start = resolve_period_starts_for_video(df_source, period_start)
     if period_int not in period_start:
         raise ValueError(f"No kick-off time set for period {period_int}.")
 
-    off_min, off_sec = period_offset.get(period_int, (0, 0))
-    start_elapsed = max(0, start_minute * 60 + start_second - (off_min * 60 + off_sec))
-    end_elapsed   = max(0, end_minute * 60 + end_second - (off_min * 60 + off_sec))
-
-    start_video_ts = period_start[period_int] + start_elapsed
-    end_video_ts   = period_start[period_int] + end_elapsed
+    start_video_ts = match_clock_to_video_time(start_minute, start_second, period_int, period_start, period_offset)
+    end_video_ts   = match_clock_to_video_time(end_minute, end_second, period_int, period_start, period_offset)
     clip_start_ts  = max(0.0, start_video_ts - _before_buf)
     clip_end_ts    = max(clip_start_ts, end_video_ts + _after_buf)
     duration       = max(1.0, clip_end_ts - clip_start_ts)
@@ -792,6 +991,14 @@ def render_shot_tab():
             selected_idx=pso_sel_idx,
             key="smp_pso_main",
             light_mode=st.session_state.get("light_mode", False),
+            **_map_context(
+                "Penalty Shootout Map",
+                team=_scope_line(home_team, away_team),
+                subset="Penalty shootout attempts",
+                count=len(pso_shots),
+                unit="penalty",
+                note="Subset: penalty shootout attempts only. Goalframe shows selected placement; player circles are ordered chronologically by team.",
+            ),
         )
         handle_click(raw_click, "smp_pso")
 
@@ -927,12 +1134,30 @@ def render_shot_tab():
         shot_map([shot_to_dict(sel_idx, sel_row)], home_team=home_team or "",
                  away_team=away_team or "", selected_idx=sel_idx,
                  view="goalframe", key="smp_gf",
-                 light_mode=st.session_state.get("light_mode", False))
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     f"Shot Placement - {sel_row.get('playerName', 'Unknown')}",
+                     team=sel_row.get("team", ""),
+                     subset=reclassify_shot(sel_row),
+                     count=1,
+                     unit="shot",
+                     note="Goal-mouth placement for the selected shot. Posts and crossbar are shown for export context.",
+                 ))
 
     raw_click = shot_map(shots_for_comp, home_team=home_team or "",
                          away_team=away_team or "", selected_idx=sel_idx,
                          view="halfpitch_vert", key="smp_pitch",
-                         light_mode=st.session_state.get("light_mode", False))
+                         light_mode=st.session_state.get("light_mode", False),
+                         **_map_context(
+                             f"Shot Map - {team_sel if player_filter_shot == 'All players' else player_filter_shot}",
+                             team=team_sel,
+                             player="" if player_filter_shot == "All players" else player_filter_shot,
+                             subset="Shots",
+                             pitch_zone=smp_pitch_zone,
+                             count=len(disp_shots),
+                             unit="shot",
+                             note="Subset: shots after the selected team/player/pitch-zone filters. The half-pitch view points toward the attacking goal.",
+                         ))
     handle_click(raw_click, "smp")
 
     st.markdown(
@@ -1043,7 +1268,8 @@ def render_pass_tab():
     if view_sel == PASS_NETWORK:
         subs_on = set()
         if df_all is not None and "type" in df_all.columns:
-            subs_on = set(df_all[df_all["type"] == "SubstitutionOn"]["playerName"].dropna().unique())
+            sub_on_types = {"SubstitutionOn", "PlayerOn"}
+            subs_on = set(df_all[df_all["type"].isin(sub_on_types)]["playerName"].dropna().unique())
 
         all_net_passes = []
         for idx, row in passes_df.iterrows():
@@ -1101,7 +1327,15 @@ def render_pass_tab():
         pass_map(passes=all_net_passes, home_team=home_team or "",
                  away_team=away_team or "", selected_idx=None,
                  mode="network", key="pm_network",
-                 light_mode=st.session_state.get("light_mode", False))
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     "Pass Network",
+                     team=_scope_line(home_team, away_team),
+                     subset="All team passes",
+                     count=len(all_net_passes),
+                     unit="pass",
+                     note="Subset: all passes in the selected match source. Node size shows pass volume; line width shows connection frequency.",
+                 ))
 
         st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:4px'>"
                     "Node colour intensity = pass volume · "
@@ -1236,7 +1470,18 @@ def render_pass_tab():
             raw_pm = pass_map(passes=passes_for_comp, home_team=home_team or "",
                               away_team=away_team or "", selected_idx=pm_sel_idx,
                               mode="player", key="pm_player",
-                              light_mode=st.session_state.get("light_mode", False))
+                              light_mode=st.session_state.get("light_mode", False),
+                              **_map_context(
+                                  f"Pass Map - {player_sel}",
+                                  team=view_sel,
+                                  player=player_sel,
+                                  subset=pass_type_sel,
+                                  pitch_zone=pm_pitch_zone,
+                                  depth_zone=pm_depth_zone,
+                                  count=len(player_passes),
+                                  unit="pass",
+                                  note="Subset: selected player's passes after pass-type, pitch-zone and depth-zone filters. Lines show start-to-end direction.",
+                              ))
             handle_click(raw_pm, "pm")
 
             st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
@@ -1402,7 +1647,18 @@ def render_def_tab():
     raw_dm = defensive_map(actions=def_for_comp, home_team=home_team or "",
                            away_team=away_team or "", selected_idx=dm_sel_idx,
                            key="dm_player",
-                           light_mode=st.session_state.get("light_mode", False))
+                           light_mode=st.session_state.get("light_mode", False),
+                           **_map_context(
+                               f"Defensive Actions - {def_player_sel}",
+                               team=def_team_sel,
+                               player=def_player_sel,
+                               subset="Defensive actions",
+                               pitch_zone=dm_pitch_zone,
+                               depth_zone=dm_depth_zone,
+                               count=len(player_def),
+                               unit="action",
+                               note="Subset: tackles, interceptions, clearances, aerials, blocks and related defensive events after the active filters.",
+                           ))
     handle_click(raw_dm, "dm")
 
     def def_label(row):
@@ -1572,7 +1828,18 @@ def render_dc_tab():
     raw_dcm = dribble_carry_map(actions=dc_for_comp, home_team=home_team or "",
                                 away_team=away_team or "", selected_idx=dcm_sel_idx,
                                 key="dcm_player",
-                                light_mode=st.session_state.get("light_mode", False))
+                                light_mode=st.session_state.get("light_mode", False),
+                                **_map_context(
+                                    f"Dribbles And Carries - {dc_player_sel}",
+                                    team=dc_team_sel,
+                                    player=dc_player_sel,
+                                    subset="Carries and take-ons",
+                                    pitch_zone=dcm_pitch_zone,
+                                    depth_zone=dcm_depth_zone,
+                                    count=len(player_dc),
+                                    unit="action",
+                                    note="Subset: selected player's carries and take-ons after the active pitch-zone and depth-zone filters. Dotted lines are carries.",
+                                ))
     handle_click(raw_dcm, "dcm")
 
     st.markdown(
@@ -1773,12 +2040,31 @@ def render_gk_tab():
             shot_map([sf_shot_to_dict(gk_sel_idx, sel_row)],
                      home_team=home_team or "", away_team=away_team or "",
                      selected_idx=gk_sel_idx, view="goalframe", key="gk_sf_gf",
-                     light_mode=st.session_state.get("light_mode", False))
+                     light_mode=st.session_state.get("light_mode", False),
+                     **_map_context(
+                         f"Shot Faced Placement - {sel_row.get('playerName', 'Unknown')}",
+                         team=sel_row.get("team", ""),
+                         subset=reclassify_shot(sel_row),
+                         count=1,
+                         unit="shot",
+                         note=f"Goal-mouth placement for the selected on-target shot faced by {gk_player_sel}.",
+                     ))
 
         raw_sf = goalkeeper_map(actions=sf_for_comp, home_team=home_team or "",
                                 away_team=away_team or "", selected_idx=gk_sel_idx,
                                 shots_faced=True, key="gk_sf_map",
-                                light_mode=st.session_state.get("light_mode", False))
+                                light_mode=st.session_state.get("light_mode", False),
+                                **_map_context(
+                                    f"Shots Faced - {gk_player_sel}",
+                                    team=gk_team_sel,
+                                    player=gk_player_sel,
+                                    subset=f"On-target shots by {opp_team}",
+                                    pitch_zone=gk_pitch_zone,
+                                    depth_zone=gk_depth_zone,
+                                    count=len(opp_shots),
+                                    unit="shot",
+                                    note="Subset: opposition on-target shots after the active pitch-zone and depth-zone filters. The map is drawn from the goalkeeper's defensive-half view.",
+                                ))
         handle_click(raw_sf, "gk")
 
         st.markdown(
@@ -1912,7 +2198,16 @@ def render_gk_tab():
         raw_dist = pass_map(dist_for_map, home_team=home_team or "",
                             away_team=away_team or "", selected_idx=gk_sel_idx,
                             mode="player", key="gk_dist_map",
-                            light_mode=st.session_state.get("light_mode", False))
+                            light_mode=st.session_state.get("light_mode", False),
+                            **_map_context(
+                                f"Goalkeeper Distribution - {gk_player_sel}",
+                                team=gk_team_sel,
+                                player=gk_player_sel,
+                                subset="Goal kicks, throws and GK kicks",
+                                count=len(dist_passes),
+                                unit="pass",
+                                note="Subset: goalkeeper distribution events only. Short/medium/long buckets are based on pass endX distance.",
+                            ))
         handle_click(raw_dist, "gk")
 
         st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
@@ -2014,7 +2309,18 @@ def render_gk_tab():
     raw_gk = goalkeeper_map(actions=gk_for_comp, home_team=home_team or "",
                             away_team=away_team or "", selected_idx=gk_sel_idx,
                             key="gk_player",
-                            light_mode=st.session_state.get("light_mode", False))
+                            light_mode=st.session_state.get("light_mode", False),
+                            **_map_context(
+                                f"Goalkeeper Actions - {gk_player_sel}",
+                                team=gk_team_sel,
+                                player=gk_player_sel,
+                                subset=gk_mode,
+                                pitch_zone=gk_pitch_zone,
+                                depth_zone=gk_depth_zone,
+                                count=len(player_gk),
+                                unit="action",
+                                note="Subset: goalkeeper actions after the active pitch-zone and depth-zone filters. The map is drawn from the goalkeeper's defensive-half view.",
+                            ))
     handle_click(raw_gk, "gk")
 
     st.markdown(
@@ -2234,6 +2540,14 @@ def render_build_up_tab():
                 light_mode=st.session_state.get("light_mode", False),
                 entry_mode=entry_mode,
                 height=680,
+                **_map_context(
+                    f"{entry_plural} - {team_sel}",
+                    team=team_sel,
+                    subset=entry_plural,
+                    count=len(entries_df),
+                    unit="entry",
+                    note=f"Subset: {entry_label.lower()} passes and carries for the selected team. Numbered markers follow event order; endpoints are clickable.",
+                ),
             )
         handle_click(raw_entry_click, "bu_entry")
         st.markdown(
@@ -2422,7 +2736,20 @@ def render_build_up_tab():
                 })
             build_up_map(pitch_actions, is_home_team, key=f"bu_map_{sel_idx}",
                          light_mode=st.session_state.get("light_mode", False),
-                         height=520)
+                         height=520,
+                         **_map_context(
+                             f"{mode_sel} - {team_sel}",
+                             team=team_sel,
+                             subset=(
+                                 "Sequence "
+                                 f"{int(chain['start_minute'])}:{int(chain.get('start_second', 0) or 0):02d}"
+                                 " to "
+                                 f"{int(chain['end_minute'])}:{int(chain.get('end_second', 0) or 0):02d}"
+                             ),
+                             count=len(pitch_actions),
+                             unit="action",
+                             note="Subset: the selected build-up sequence only. Numbered markers show action order and arrows show progression.",
+                         ))
 
         if _bu_clip and os.path.exists(_bu_clip):
             st.divider()
@@ -2503,7 +2830,15 @@ def render_pressing_tab():
 
     # ── Full-width pressing map ────────────────────────────────────────────
     pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main",
-                 light_mode=st.session_state.get("light_mode", False))
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     f"Pressing Wins - {team_sel}",
+                     team=team_sel,
+                     subset=zone_sel,
+                     count=len(wins),
+                     unit="win",
+                     note="Subset: ball recoveries, interceptions and tackles in the selected press zone. High press is the final third; mid-block is the middle band.",
+                 ))
 
     # ── Map click → video clip ─────────────────────────────────────────────
     _map_state = st.session_state.get("press_map_main")
@@ -2856,7 +3191,8 @@ def _percentile_rank(player_raw, pool):
 
 
 def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
-                         color1="#E8FF4D", color2="#ff7351", light=False):
+                         color1="#E8FF4D", color2="#ff7351", light=False,
+                         match_context=""):
     closed_axes = axes + [axes[0]]
     p1_vals = [p1_pct.get(a, 0) for a in axes] + [p1_pct.get(axes[0], 0)]
     p2_vals = [p2_pct.get(a, 0) for a in axes] + [p2_pct.get(axes[0], 0)]
@@ -2914,12 +3250,13 @@ def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
         leg_c    = "#ffffff"
         leg_bc   = "#2c2c2c"
     fig.update_layout(
-        height=520,
-        margin=dict(t=60, b=40, l=60, r=60),
+        height=600,
+        margin=dict(t=96, b=54, l=60, r=60),
         paper_bgcolor=paper_bg,
         plot_bgcolor=plot_bg,
         font=dict(color=font_c, family="Inter, sans-serif"),
         polar=dict(
+            domain=dict(y=[0.0, 0.88]),
             bgcolor=polar_bg,
             angularaxis=dict(
                 tickfont=dict(size=12, color=ang_tick),
@@ -2941,6 +3278,14 @@ def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
             bordercolor=leg_bc,
         ),
         showlegend=True,
+    )
+    _plotly_header(
+        fig,
+        f"Performance Radar - {player1} vs {player2}",
+        subtitle=match_context,
+        note="Subset: selected players' events from the match source. Outfield values are percentile indexes; goalkeeper values are head-to-head normalized.",
+        light=light,
+        height=600,
     )
     return fig
 
@@ -3025,6 +3370,7 @@ def render_comparison_tab():
         _p2_pct = _percentile_rank(_p2_raw, _pool)
 
     _light = st.session_state.get("light_mode", False)
+    _match_context = _match_export_context(df_all)
     st.plotly_chart(
         brand_plotly_export(_build_radar_figure(
             axes=_axes,
@@ -3033,9 +3379,10 @@ def render_comparison_tab():
             player1=player1, player2=player2,
             color1="#E8FF4D", color2=AWAY_COLOR,
             light=_light,
+            match_context=_match_context,
         ), light=_light),
         use_container_width=True,
-        config=PLOTLY_EXPORT_CONFIG,
+        config=plotly_export_config("performance_radar", player1, "vs", player2, _match_context),
     )
 
     # ── Pitch Zone Activity ──────────────────────────────────────────────────
@@ -3048,14 +3395,33 @@ def render_comparison_tab():
         counts = [zs.get(z, 0) for z in _zones]
         fig = go.Figure(go.Bar(y=_zones, x=counts, orientation="h",
                                marker=dict(color=color)))
-        fig.update_layout(title=player_name, xaxis_title="Count",
-                          height=320, margin=dict(t=40, b=0, l=0, r=0))
+        fig.update_layout(
+            xaxis_title="Event count",
+            yaxis_title="Pitch zone",
+            height=390,
+            margin=dict(t=118, b=44, l=90, r=30),
+        )
+        _plotly_header(
+            fig,
+            f"Pitch Zone Activity - {player_name}",
+            subtitle=_match_context,
+            light=st.session_state.get("light_mode", False),
+            height=390,
+        )
         return brand_plotly_export(fig, light=st.session_state.get("light_mode", False))
 
     with z1:
-        st.plotly_chart(_zone_bar(p1_ev, player1, HOME_COLOR), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _zone_bar(p1_ev, player1, HOME_COLOR),
+            use_container_width=True,
+            config=plotly_clean_static_config("pitch_zone_activity", player1, _match_context),
+        )
     with z2:
-        st.plotly_chart(_zone_bar(p2_ev, player2, AWAY_COLOR), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _zone_bar(p2_ev, player2, AWAY_COLOR),
+            use_container_width=True,
+            config=plotly_clean_static_config("pitch_zone_activity", player2, _match_context),
+        )
 
     # ── Top 5 Moments ─────────────────────────────────────────────────────────
     st.subheader("Top 5 Moments")

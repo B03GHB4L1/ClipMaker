@@ -1,4 +1,4 @@
-# ClipMaker v1.2.2 for Windows
+# ClipMaker v1.2.3 for Windows
 
 ## Requirements
 

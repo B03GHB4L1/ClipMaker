@@ -8,17 +8,20 @@ import platform
 import tempfile
 import subprocess
 import shutil
+import importlib
 import streamlit as st
 import pandas as pd
 
 # Add parent directory so we can import clipmaker_core
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
+import clipmaker_core as _clipmaker_core
+_clipmaker_core = importlib.reload(_clipmaker_core)
 from clipmaker_core import (
     run_clip_maker, apply_filters, read_csv_safe,
     query_data, parse_filters, render_stats_panel,
     to_seconds, assign_periods, match_clock_to_video_time,
-    merge_overlapping_windows,
+    merge_overlapping_windows, resolve_period_starts_for_video,
     save_filter_snapshot, load_filter_snapshot, list_snapshots, delete_snapshot,
     INTENT_FLAG_TO_BOOL_COL,
 )
@@ -27,7 +30,7 @@ from clipmaker_core import (
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="Filtering/Output — ClipMaker v1.2.2",
+    page_title="Filtering/Output — ClipMaker v1.2.3",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -59,9 +62,11 @@ def _scraped_match_paths():
 
 
 _MATCH_SETUP_KEYS = [
-    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
+    "video_path", "video2_path", "video3_path", "video4_path", "video5_path",
+    "csv_path", "half1_time", "half2_time",
     "half3_time", "half4_time", "half5_time", "had_extra_time",
-    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+    "had_penalties", "split_extra_time_video", "split_penalties_video",
+    "split_video", "before_buffer", "after_buffer", "min_gap",
 ]
 
 
@@ -140,6 +145,18 @@ def _clip_download_name(base_slug, window, index):
     return f"{base_slug}_{index:02d}_{_seconds_slug(start)}-{_seconds_slug(end)}.mp4"
 
 
+def _safe_clock_int(value):
+    try:
+        if pd.isna(value):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
 def _valid_player_selection(key, options):
     raw = st.session_state.get(key, [])
     if isinstance(raw, str):
@@ -159,6 +176,7 @@ def _compute_windows_from_config(cfg):
             return []
     period_col_val = cfg.get("period_column") or None
     df = assign_periods(df, period_col_val, cfg.get("fallback_row"))
+    anchor_df = df.copy()
     hf = cfg.get("half_filter", "Both halves")
     if hf == "1st half only":
         df = df[df["resolved_period"] == 1]
@@ -173,32 +191,59 @@ def _compute_windows_from_config(cfg):
     if cfg.get("half5_time", "").strip():
         ps[5] = to_seconds(cfg["half5_time"])
     po = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
+    ps = resolve_period_starts_for_video(anchor_df, ps)
+    df = df.copy()
+    df["_clip_order"] = range(len(df))
     timestamps = []
     for _, row in df.iterrows():
+        minute = _safe_clock_int(row.get("minute"))
+        second = _safe_clock_int(row.get("second"))
+        period = _safe_clock_int(row.get("resolved_period"))
+        if minute is None or second is None or period is None:
+            timestamps.append(None)
+            continue
         try:
             timestamps.append(match_clock_to_video_time(
-                int(row["minute"]), int(row["second"]),
-                int(row["resolved_period"]), ps, po
+                minute, second, period, ps, po
             ))
-        except ValueError:
+        except (TypeError, ValueError):
             timestamps.append(None)
     df["video_timestamp"] = timestamps
-    df = df.dropna(subset=["video_timestamp"]).sort_values("video_timestamp")
+    df["_match_minute"] = pd.to_numeric(df["minute"], errors="coerce")
+    df["_match_second"] = pd.to_numeric(df["second"], errors="coerce")
+    df = (
+        df.dropna(subset=["video_timestamp"])
+        .sort_values(
+            ["resolved_period", "_match_minute", "_match_second", "_clip_order"],
+            kind="mergesort",
+        )
+        .drop(columns=["_match_minute", "_match_second", "_clip_order"], errors="ignore")
+    )
     raw = []
     for _, row in df.iterrows():
         ts = row["video_timestamp"]
-        period = int(row["resolved_period"])
+        minute = _safe_clock_int(row.get("minute"))
+        second = _safe_clock_int(row.get("second"))
+        period = _safe_clock_int(row.get("resolved_period"))
+        if minute is None or second is None or period is None:
+            continue
         player = str(row.get("playerName", "")).strip()
         player = "" if player.lower() == "nan" else player
         prefix = f"{player} - " if player else ""
-        label = f"{prefix}{row['type']} @ {int(row['minute'])}:{int(row['second']):02d} (P{period})"
+        label = f"{prefix}{row['type']} @ {minute}:{second:02d} (P{period})"
         raw.append((ts - cfg["before_buffer"], ts + cfg["after_buffer"], label, period))
     return merge_overlapping_windows(raw, cfg["min_gap"])
 
 
 def _video_source_for_period(cfg, period):
-    if cfg.get("split_video") and int(period) >= 2:
-        return cfg.get("video2_file") or ""
+    if cfg.get("split_video"):
+        period_sources = {
+            2: cfg.get("video2_file") or "",
+            3: cfg.get("video3_file") or cfg.get("video2_file") or "",
+            4: cfg.get("video4_file") or cfg.get("video2_file") or "",
+            5: cfg.get("video5_file") or cfg.get("video2_file") or "",
+        }
+        return period_sources.get(int(period), cfg.get("video_file") or "")
     return cfg.get("video_file") or ""
 
 
@@ -347,7 +392,14 @@ def _iconize_log_lines(lines):
 final_csv     = _ss("csv_path") or _ss("scraped_csv_path")
 final_video   = _ss("video_path")
 final_video2  = _ss("video2_path")
+final_video3  = _ss("video3_path")
+final_video4  = _ss("video4_path")
+final_video5  = _ss("video5_path")
 split_video   = _ss("split_video", False)
+had_et        = _ss("had_extra_time", False)
+had_pso       = _ss("had_penalties", False)
+split_et_video = _ss("split_extra_time_video", False)
+split_pso_video = _ss("split_penalties_video", False)
 half1         = _ss("half1_time")
 half2         = _ss("half2_time")
 half3         = _ss("half3_time")
@@ -361,6 +413,22 @@ output_dir    = _ss("output_dir")
 period_col  = "period"
 use_fallback = False
 fallback_row = 0
+
+
+def _missing_video_setup_errors():
+    errors = []
+    if not (final_video and os.path.exists(final_video)):
+        errors.append("Video file is required (set it on the Home page).")
+    if split_video and not (final_video2 and os.path.exists(final_video2)):
+        errors.append("2nd half video file is required when split-video mode is enabled.")
+    if split_video and split_et_video:
+        if not (final_video3 and os.path.exists(final_video3)):
+            errors.append("ET 1st half video file is required when extra time uses separate files.")
+        if not (final_video4 and os.path.exists(final_video4)):
+            errors.append("ET 2nd half video file is required when extra time uses separate files.")
+    if split_video and split_pso_video and not (final_video5 and os.path.exists(final_video5)):
+        errors.append("Penalty shootout video file is required when penalties use a separate file.")
+    return errors
 
 
 # =============================================================================
@@ -856,6 +924,9 @@ with tab_manual:
         return {
             "video_file":       final_video or "",
             "video2_file":      final_video2 or "",
+            "video3_file":      final_video3 if split_et_video else "",
+            "video4_file":      final_video4 if split_et_video else "",
+            "video5_file":      final_video5 if split_pso_video else "",
             "split_video":      split_video,
             "data_file":        _team_data_file,
             "half1_time":       half1,
@@ -1123,10 +1194,7 @@ with tab_manual:
         errors = []
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
-        if not (final_video and os.path.exists(final_video)):
-            errors.append("Video file is required (set it on the Home page).")
-        if split_video and not (final_video2 and os.path.exists(final_video2)):
-            errors.append("2nd half video file is required when split-video mode is enabled.")
+        errors.extend(_missing_video_setup_errors())
         if not half1:
             errors.append("1st half kick-off time is required (set it on the Home page).")
         if not half2:
@@ -1369,11 +1437,7 @@ with tab_manual:
     # ── Full Run ──────────────────────────────────────────────────────────────
     if run_btn:
         _clear_preview()
-        errors = []
-        if not (final_video and os.path.exists(final_video)):
-            errors.append("Video file is required (set it on the Home page).")
-        if split_video and not (final_video2 and os.path.exists(final_video2)):
-            errors.append("2nd half video file is required when split-video mode is enabled.")
+        errors = _missing_video_setup_errors()
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
         if not half1:
@@ -1559,10 +1623,10 @@ with tab_ai:
 
     # ── Make clips with AI ────────────────────────────────────────────────────
     if make_clips_ai_btn:
-        if not (final_video and os.path.exists(final_video)):
-            st.error("Video file is required. Set it on the Home page.")
-        elif split_video and not (final_video2 and os.path.exists(final_video2)):
-            st.error("2nd half video file is required when split-video mode is enabled.")
+        video_setup_errors = _missing_video_setup_errors()
+        if video_setup_errors:
+            for e in video_setup_errors:
+                st.error(e)
         elif not final_csv:
             st.error("CSV file is required. Set it on the Home page.")
         elif not ai_input.strip():
@@ -1633,6 +1697,9 @@ with tab_ai:
             ai_config = {
                 "video_file":       final_video,
                 "video2_file":      final_video2 or "",
+                "video3_file":      final_video3 if split_et_video else "",
+                "video4_file":      final_video4 if split_et_video else "",
+                "video5_file":      final_video5 if split_pso_video else "",
                 "split_video":      split_video,
                 "data_file":        ai_data_file,
                 "half1_time":       half1 or "0:00",

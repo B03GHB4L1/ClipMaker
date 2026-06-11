@@ -7,6 +7,7 @@ import platform
 import streamlit as st
 
 from whoscored_scraper import scrape_whoscored, save_scraped_match_csv
+from scoresway_scraper import scrape_scoresway
 from clipmaker_core import normalize_event_labels, ping_proxy, read_csv_safe
 import theme
 
@@ -14,7 +15,7 @@ import theme
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="ClipMaker v1.2.2 by B4L1",
+    page_title="ClipMaker v1.2.3 by B4L1",
     page_icon="ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -77,9 +78,11 @@ def _save_uploaded_file(uploaded_file):
 # SESSION STATE
 # =============================================================================
 for key, default in [
-    ("video_path", ""), ("video2_path", ""), ("csv_path", ""), ("output_dir", ""),
+    ("video_path", ""), ("video2_path", ""), ("video3_path", ""), ("video4_path", ""), ("video5_path", ""),
+    ("csv_path", ""), ("output_dir", ""),
     ("half1_time", ""), ("half2_time", ""), ("half3_time", ""), ("half4_time", ""),
     ("half5_time", ""), ("had_extra_time", False), ("had_penalties", False),
+    ("split_extra_time_video", False), ("split_penalties_video", False),
     ("split_video", False), ("whoscored_url", ""),
     ("before_buffer", 5), ("after_buffer", 8), ("min_gap", 6),
 ]:
@@ -97,14 +100,24 @@ if "match_setup_by_csv" not in st.session_state:
 if "active_setup_csv_path" not in st.session_state:
     st.session_state["active_setup_csv_path"] = st.session_state.get("csv_path", "")
 
-def _saved_whoscored_csv_paths():
+
+if "scraper_url_input" not in st.session_state:
+    st.session_state["scraper_url_input"] = st.session_state.get("whoscored_url", "")
+
+
+def _sync_scraper_url_input():
+    text = st.session_state.get("scraper_url_input", "")
+    st.session_state["whoscored_url"] = text
+
+def _saved_scraped_csv_paths():
     match_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "match data")
     if not os.path.isdir(match_dir):
         return []
     return sorted(
         os.path.join(match_dir, name)
         for name in os.listdir(match_dir)
-        if name.lower().startswith("whoscored_") and name.lower().endswith(".csv")
+        if name.lower().endswith(".csv")
+        and (name.lower().startswith("whoscored_") or name.lower().startswith("scoresway_"))
     )
 
 
@@ -121,7 +134,7 @@ def _match_names_from_saved_csv(path):
         return "", "", len(df)
     except Exception:
         stem = os.path.splitext(os.path.basename(path))[0]
-        label = stem.replace("whoscored_", "").replace("_all_events", "")
+        label = stem.replace("whoscored_", "").replace("scoresway_", "").replace("_all_events", "")
         if "_vs_" in label:
             home, away = label.split("_vs_", 1)
             return home.replace("_", " "), away.replace("_", " "), 0
@@ -133,7 +146,7 @@ def _batch_item_from_saved_csv(path):
     return {"url": "", "path": path, "rows": rows, "home_team": home, "away_team": away}
 
 
-saved_match_paths = _saved_whoscored_csv_paths()
+saved_match_paths = _saved_scraped_csv_paths()
 current_paths = st.session_state.get("multi_scraped_csv_paths", []) or []
 all_match_paths = []
 for path in current_paths + saved_match_paths:
@@ -165,33 +178,35 @@ if "proxy_warmed" not in st.session_state:
 # HEADER
 # =============================================================================
 _logo_b64 = theme.load_logo_b64(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ClipMaker_logo.png"))
-st.markdown(theme.logo_header("CLIPMAKER v1.2.2", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
+st.markdown(theme.logo_header("CLIPMAKER v1.2.3", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
 
 # =============================================================================
-# STEP 1 — WHOSCORED SCRAPER
+# STEP 1 — MATCH SCRAPER
 # =============================================================================
-st.markdown(theme.step_header(1, "WhoScored Scraper"), unsafe_allow_html=True)
+st.markdown(theme.step_header(1, "Match Scraper"), unsafe_allow_html=True)
 
 scrape_c1, scrape_c2 = st.columns([9.6, 1.0], gap="small")
 with scrape_c1:
     scraper_url = st.text_area(
-        "WhoScored match URLs",
-        value=st.session_state.get("whoscored_url", ""),
-        placeholder="Paste one WhoScored match URL per line to scrape a batch",
+        "Match URLs",
+        key="scraper_url_input",
+        placeholder="Scoresway: paste any match tab URL. WhoScored: paste the Match Centre tab URL. One match per line.",
         height=84,
         label_visibility="collapsed",
+        on_change=_sync_scraper_url_input,
     )
     if scraper_url != st.session_state.get("whoscored_url", ""):
-        st.session_state["whoscored_url"] = scraper_url
+        _sync_scraper_url_input()
 with scrape_c2:
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     scrape_btn = st.button("Scrape", use_container_width=True)
 
-st.caption("WhoScored is the data source. Paste one match URL for normal use, or one URL per line for a multi-match scrape.")
+st.caption("Paste one match URL per line. Scoresway links can come from any match tab; WhoScored links must be from the Match Centre tab. ClipMaker auto-detects the source.")
+st.caption("Note: Scoresway data is not identical to WhoScored data and may produce unexplained event tags or slight differences in the analysis tools.")
 
 # Scraper steps — shown during and after a run
 _SCRAPER_STEPS = [
-    "Connecting to WhoScored",
+    "Detecting source",
     "Loading match page",
     "Extracting event data",
     "Calculating xT & progressive metrics",
@@ -213,10 +228,21 @@ def _parse_scraper_urls(text):
     return urls
 
 
+def detect_source(url):
+    lowered = str(url or "").lower()
+    if "scoresway.com" in lowered or "api.performfeeds.com" in lowered:
+        return "scoresway"
+    if "whoscored.com" in lowered:
+        return "whoscored"
+    return None
+
+
 _MATCH_SETUP_KEYS = [
-    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
-    "half3_time", "half4_time", "half5_time", "had_extra_time",
-    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+    "video_path", "video2_path", "video3_path", "video4_path", "video5_path",
+    "csv_path", "half1_time", "half2_time", "half3_time", "half4_time",
+    "half5_time", "had_extra_time", "had_penalties",
+    "split_extra_time_video", "split_penalties_video", "split_video",
+    "before_buffer", "after_buffer", "min_gap",
 ]
 
 
@@ -284,7 +310,15 @@ def _scrape_url_batch(urls, out_queue, app_dir, save_dir):
         out_queue.put({"type": "log", "msg": f"Starting match {idx}/{total}: {url}"})
         local_queue = queue.Queue()
         try:
-            scrape_whoscored(url, local_queue, app_dir)
+            source = detect_source(url)
+            if source == "scoresway":
+                out_queue.put({"type": "log", "msg": f"[{idx}/{total}] Detected Scoresway source"})
+                scrape_scoresway(url, local_queue, app_dir)
+            elif source == "whoscored":
+                out_queue.put({"type": "log", "msg": f"[{idx}/{total}] Detected WhoScored source"})
+                scrape_whoscored(url, local_queue, app_dir)
+            else:
+                raise ValueError("Unsupported URL. Paste a WhoScored or Scoresway match URL.")
         except Exception as exc:
             local_queue.put({"type": "error", "msg": str(exc)})
 
@@ -307,6 +341,7 @@ def _scrape_url_batch(urls, out_queue, app_dir, save_dir):
                 result.get("home_team", ""),
                 result.get("away_team", ""),
                 save_dir,
+                source=result.get("source", detect_source(url) or "whoscored"),
             )
             item = {
                 "url": url,
@@ -314,6 +349,7 @@ def _scrape_url_batch(urls, out_queue, app_dir, save_dir):
                 "rows": len(result["df"]),
                 "home_team": result.get("home_team", ""),
                 "away_team": result.get("away_team", ""),
+                "source": result.get("source", detect_source(url) or ""),
                 "df": result["df"],
             }
             results.append(item)
@@ -383,7 +419,7 @@ def _render_scraper_steps(active_step, done=False, error_msg=None):
 if scrape_btn:
     scraper_urls = _parse_scraper_urls(scraper_url)
     if not scraper_urls:
-        scraper_error_ph.error("Please enter at least one WhoScored match URL.")
+        scraper_error_ph.error("Please enter at least one WhoScored or Scoresway match URL.")
     else:
         scraper_error_ph.empty()
         scraper_queue = queue.Queue()
@@ -402,8 +438,9 @@ if scrape_btn:
 
         # Map log message keywords → step index so the UI advances as work progresses
         _STEP_SIGNALS = [
-            ("connect", 0), ("loading", 1), ("loaded", 1),
-            ("primary event", 2), ("extracting", 2), ("event data", 2),
+            ("connect", 0), ("detected", 0), ("source", 0),
+            ("performfeeds", 1), ("loading", 1), ("loaded", 1),
+            ("primary event", 2), ("extracting", 2), ("event data", 2), ("matchevent", 2),
             ("xt values", 3), ("progressive", 3), ("xT", 3),
             ("saving", 4), ("saved", 4), ("csv", 4),
         ]
@@ -450,7 +487,7 @@ if scrape_btn:
                 if item.get("path")
             }
             saved_paths = []
-            for path in [item["path"] for item in scraper_results if item.get("path")] + _saved_whoscored_csv_paths():
+            for path in [item["path"] for item in scraper_results if item.get("path")] + _saved_scraped_csv_paths():
                 if path and os.path.exists(path) and path not in saved_paths:
                     saved_paths.append(path)
             st.session_state["scraper_full_df"] = first["df"]
@@ -537,60 +574,86 @@ st.markdown(theme.step_header(2, "Files"), unsafe_allow_html=True)
 _render_match_setup_selector()
 
 split_video = st.checkbox(
-    "Match is split into two separate video files (1st / 2nd half)",
+    "Match is split into separate video files",
     value=st.session_state.get("split_video", False)
 )
 st.session_state["split_video"] = split_video
 
+def _render_video_input(label, state_key, browse_key, upload_key):
+    if IS_MAC:
+        uploaded = st.file_uploader(label, type=["mp4","mkv","avi","mov","ts"], key=upload_key)
+        if uploaded:
+            picked_path = _save_uploaded_file(uploaded)
+            if picked_path != st.session_state[state_key]:
+                st.session_state[state_key] = picked_path
+                st.rerun()
+        current_path = st.session_state[state_key]
+        if current_path:
+            st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(current_path)}")
+        return current_path
+
+    path_col, browse_col = st.columns([5, 1])
+    with path_col:
+        current_path = st.text_input(label, value=st.session_state[state_key],
+                                     placeholder="Click Browse or paste full path")
+    with browse_col:
+        st.write(""); st.write("")
+        if st.button("Browse", key=browse_key):
+            picked_path = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
+            if picked_path:
+                st.session_state[state_key] = picked_path
+                st.rerun()
+    return current_path
+
 # Video 1
 lbl1 = "1st Half Video" if split_video else "Video file"
-if IS_MAC:
-    _up1 = st.file_uploader(lbl1, type=["mp4","mkv","avi","mov"], key="up_video1")
-    if _up1:
-        _p = _save_uploaded_file(_up1)
-        if _p != st.session_state.video_path:
-            st.session_state.video_path = _p
-            st.rerun()
-    video_path = st.session_state.video_path
-    if video_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video_path)}")
-else:
-    vc1, vc2 = st.columns([5, 1])
-    with vc1:
-        video_path = st.text_input(lbl1, value=st.session_state.video_path,
-                                    placeholder="Click Browse or paste full path")
-    with vc2:
-        st.write(""); st.write("")
-        if st.button("Browse", key="browse_video"):
-            picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
-            if picked:
-                st.session_state.video_path = picked
-                st.rerun()
+video_path = _render_video_input(lbl1, "video_path", "browse_video", "up_video1")
 
 # Video 2 (split mode)
 if split_video:
-    if IS_MAC:
-        _up2 = st.file_uploader("2nd Half Video", type=["mp4","mkv","avi","mov"], key="up_video2")
-        if _up2:
-            _p2 = _save_uploaded_file(_up2)
-            if _p2 != st.session_state.video2_path:
-                st.session_state.video2_path = _p2
-                st.rerun()
-        video2_path = st.session_state.video2_path
-        if video2_path: st.caption(f"{theme.icon_shortcode('[OK]')} {os.path.basename(video2_path)}")
-    else:
-        v2c1, v2c2 = st.columns([5, 1])
-        with v2c1:
-            video2_path = st.text_input("2nd Half Video", value=st.session_state.video2_path,
-                                        placeholder="Click Browse or paste full path")
-        with v2c2:
-            st.write(""); st.write("")
-            if st.button("Browse", key="browse_video2"):
-                picked = browse_file([("Video files", "*.mp4 *.mkv *.avi *.mov *.ts"), ("All files", "*.*")])
-                if picked:
-                    st.session_state.video2_path = picked
-                    st.rerun()
+    video2_path = _render_video_input("2nd Half Video", "video2_path", "browse_video2", "up_video2")
 else:
     video2_path = ""
+
+if split_video and st.session_state.get("had_extra_time"):
+    split_et_video = st.checkbox(
+        "Extra time is in separate video files",
+        value=st.session_state.get("split_extra_time_video", False)
+    )
+    st.session_state.split_extra_time_video = split_et_video
+    if split_et_video:
+        etv1, etv2 = st.columns(2)
+        with etv1:
+            video3_path = _render_video_input("ET 1st Half Video", "video3_path", "browse_video3", "up_video3")
+        with etv2:
+            video4_path = _render_video_input("ET 2nd Half Video", "video4_path", "browse_video4", "up_video4")
+    else:
+        video3_path = ""
+        video4_path = ""
+        st.session_state.video3_path = ""
+        st.session_state.video4_path = ""
+else:
+    video3_path = ""
+    video4_path = ""
+    st.session_state.split_extra_time_video = False
+    st.session_state.video3_path = ""
+    st.session_state.video4_path = ""
+
+if split_video and st.session_state.get("had_penalties"):
+    split_pso_video = st.checkbox(
+        "Penalty shootout is in a separate video file",
+        value=st.session_state.get("split_penalties_video", False)
+    )
+    st.session_state.split_penalties_video = split_pso_video
+    if split_pso_video:
+        video5_path = _render_video_input("Penalty Shootout Video", "video5_path", "browse_video5", "up_video5")
+    else:
+        video5_path = ""
+        st.session_state.video5_path = ""
+else:
+    video5_path = ""
+    st.session_state.split_penalties_video = False
+    st.session_state.video5_path = ""
 
 # CSV
 _from_scraper = (st.session_state.get("scraped_csv_path")
@@ -619,7 +682,7 @@ else:
 
 if _from_scraper:
     c1, c2 = st.columns([3, 1])
-    c1.caption(f"{theme.icon_shortcode('[OK]')} Loaded from WhoScored Scraper")
+    c1.caption(f"{theme.icon_shortcode('[OK]')} Loaded from Match Scraper")
     if c2.button("Clear", key="clear_csv", icon=theme.icon_shortcode("[X]")):
         st.session_state.csv_path = ""
         st.session_state["scraped_csv_path"] = ""
@@ -633,8 +696,21 @@ if video_path and video_path != st.session_state.video_path:
     st.session_state.video_path = video_path
 if not split_video:
     st.session_state.video2_path = ""
+    st.session_state.video3_path = ""
+    st.session_state.video4_path = ""
+    st.session_state.video5_path = ""
+    st.session_state.split_extra_time_video = False
+    st.session_state.split_penalties_video = False
 elif video2_path and video2_path != st.session_state.video2_path:
     st.session_state.video2_path = video2_path
+if split_video and st.session_state.get("split_extra_time_video"):
+    if video3_path and video3_path != st.session_state.video3_path:
+        st.session_state.video3_path = video3_path
+    if video4_path and video4_path != st.session_state.video4_path:
+        st.session_state.video4_path = video4_path
+if split_video and st.session_state.get("split_penalties_video"):
+    if video5_path and video5_path != st.session_state.video5_path:
+        st.session_state.video5_path = video5_path
 if csv_path and csv_path != st.session_state.csv_path:
     st.session_state.csv_path = csv_path
 
@@ -664,9 +740,11 @@ st.session_state.had_extra_time = had_et
 if had_et:
     et1, et2 = st.columns(2)
     with et1:
-        half3 = st.text_input("ET 1st Half kick-off", value=st.session_state.half3_time, placeholder="e.g. 1:35:10")
+        half3 = st.text_input("ET 1st Half kick-off", value=st.session_state.half3_time,
+                              placeholder="e.g. 0:00" if split_video else "e.g. 1:35:10")
     with et2:
-        half4 = st.text_input("ET 2nd Half kick-off", value=st.session_state.half4_time, placeholder="e.g. 1:50:45")
+        half4 = st.text_input("ET 2nd Half kick-off", value=st.session_state.half4_time,
+                              placeholder="e.g. 0:00" if split_video else "e.g. 1:50:45")
     if half3: st.session_state.half3_time = half3
     if half4: st.session_state.half4_time = half4
 else:
@@ -676,7 +754,12 @@ else:
 had_pso = st.checkbox("Match went to Penalty Shootout", value=st.session_state.had_penalties)
 st.session_state.had_penalties = had_pso
 if had_pso:
-    half5 = st.text_input("Penalty Shootout start", value=st.session_state.half5_time, placeholder="e.g. 2:05:30")
+    half5 = st.text_input(
+        "First penalty kick timestamp",
+        value=st.session_state.half5_time,
+        placeholder="e.g. 0:20" if split_video else "e.g. 2:05:30",
+        help="Use the video timestamp where the first penalty taker strikes the ball. ClipMaker derives the 120:00 period anchor from the event data."
+    )
     if half5: st.session_state.half5_time = half5
 else:
     st.session_state.half5_time = ""
@@ -721,6 +804,13 @@ ready = bool(
     st.session_state.video_path and os.path.exists(st.session_state.video_path) and
     (not st.session_state.get("split_video") or (
         st.session_state.get("video2_path") and os.path.exists(st.session_state.get("video2_path"))
+        and (not st.session_state.get("split_extra_time_video") or (
+            st.session_state.get("video3_path") and os.path.exists(st.session_state.get("video3_path")) and
+            st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path"))
+        ))
+        and (not st.session_state.get("split_penalties_video") or (
+            st.session_state.get("video5_path") and os.path.exists(st.session_state.get("video5_path"))
+        ))
     )) and
     st.session_state.half1_time and st.session_state.half2_time
 )
@@ -735,6 +825,15 @@ else:
         st.session_state.get("video2_path") and os.path.exists(st.session_state.get("video2_path"))
     ):
         missing.append("2nd half video file")
+    if st.session_state.get("split_video") and st.session_state.get("split_extra_time_video"):
+        if not (st.session_state.get("video3_path") and os.path.exists(st.session_state.get("video3_path"))):
+            missing.append("ET 1st half video file")
+        if not (st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path"))):
+            missing.append("ET 2nd half video file")
+    if st.session_state.get("split_video") and st.session_state.get("split_penalties_video") and not (
+        st.session_state.get("video5_path") and os.path.exists(st.session_state.get("video5_path"))
+    ):
+        missing.append("penalty shootout video file")
     if not st.session_state.half1_time: missing.append("1st half kick-off")
     if not st.session_state.half2_time: missing.append("2nd half kick-off")
     if missing:

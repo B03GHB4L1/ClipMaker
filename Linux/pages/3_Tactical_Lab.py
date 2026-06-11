@@ -10,7 +10,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
-from clipmaker_core import read_csv_safe, to_seconds
+from clipmaker_core import read_csv_safe, to_seconds, resolve_period_starts_for_video, match_clock_to_video_time
 
 try:
     import plotly.graph_objects as go
@@ -21,7 +21,7 @@ except ImportError:
 
 
 st.set_page_config(
-    page_title="Tactical Lab - ClipMaker v1.2.2",
+    page_title="Tactical Lab - ClipMaker v1.2.3",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -56,14 +56,42 @@ PERIOD_ORDER = {
 PLOTLY_EXPORT_CONFIG = {
     "displayModeBar": True,
     "displaylogo": False,
-    "toImageButtonOptions": {"format": "png", "filename": "clipmaker_tactical_lab", "scale": 2},
+    "toImageButtonOptions": {"format": "png", "filename": "tactical_lab_export", "scale": 2},
     "modeBarButtonsToRemove": ["lasso2d", "select2d"],
 }
 TRANSITION_PITCH_HEIGHT = 510
 
 
+def _plotly_export_filename(*parts, fallback="tactical_lab_export"):
+    import re
+
+    text = "_".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._-").lower()
+    return (text or fallback)[:110]
+
+
+def _plotly_export_config(*parts, fallback="tactical_lab_export"):
+    config = dict(PLOTLY_EXPORT_CONFIG)
+    image_options = dict(config.get("toImageButtonOptions", {}))
+    image_options["filename"] = _plotly_export_filename(*parts, fallback=fallback)
+    config["toImageButtonOptions"] = image_options
+    return config
+
+
 def _is_light():
     return bool(st.session_state.get("light_mode", False))
+
+
+def _pitch_accent(color=None):
+    if not _is_light():
+        return color or ACCENT
+    palette = {
+        ACCENT.lower(): "#8a6f00",
+        "#e8ff4d": "#8a6f00",
+        HOME_COLOR.lower(): "#1f69b3",
+        AWAY_COLOR.lower(): "#b9352d",
+    }
+    return palette.get(str(color or ACCENT).lower(), color or "#8a6f00")
 
 
 def _bool_series(df, col):
@@ -98,7 +126,112 @@ def _fmt_metric(value, suffix="", decimals=0):
     return f"{int(round(float(value)))}{suffix}"
 
 
-def _brand_fig(fig, height=None):
+def _clean_match_label(label):
+    text = os.path.basename(str(label or "").strip())
+    text = text.replace("whoscored_", "").replace("scoresway_", "")
+    text = text.replace("_all_events.csv", "").replace(".csv", "")
+    return text.replace("_", " ").strip()
+
+
+def _team_match_scope_label(team_name):
+    df = globals().get("df_all")
+    fallback = _clean_match_label(globals().get("match_name", ""))
+    if df is None or getattr(df, "empty", True):
+        return fallback
+
+    scoped = df
+    if team_name and "team" in df.columns:
+        team_scoped = df[df["team"].astype(str).eq(team_name)].copy()
+        if not team_scoped.empty:
+            scoped = team_scoped
+
+    if "match_id" in scoped.columns:
+        match_ids = scoped["match_id"].dropna().unique().tolist()
+        if len(match_ids) > 1:
+            return f"{len(match_ids)} matches"
+        if len(match_ids) == 1:
+            match_rows = scoped[scoped["match_id"].eq(match_ids[0])]
+        else:
+            match_rows = scoped
+    else:
+        match_rows = scoped
+
+    if "match_label" in match_rows.columns:
+        labels = match_rows["match_label"].dropna().astype(str)
+        labels = labels[labels.str.strip() != ""]
+        if not labels.empty:
+            return _clean_match_label(labels.iloc[0])
+
+    if "matchName" in match_rows.columns:
+        names = match_rows["matchName"].dropna().astype(str)
+        names = names[names.str.strip() != ""]
+        if not names.empty:
+            return _clean_match_label(names.iloc[0])
+
+    return fallback
+
+
+def _export_scope_label():
+    active_team = str(globals().get("team", "") or "").strip()
+    match = _team_match_scope_label(active_team)
+    parts = []
+    if active_team:
+        parts.append(active_team)
+    if match:
+        parts.append(match)
+    return " | ".join(parts)
+
+
+def _annotate_plotly_export(fig, title="", subtitle="", note="", height=None, top=98, bottom=78):
+    def _wrap_export_text(text, width=104):
+        import textwrap
+        return "<br>".join(textwrap.wrap(str(text or ""), width=width, break_long_words=False))
+
+    light = _is_light()
+    font = "#111111" if light else "#ecedf6"
+    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(11,14,20,0.78)"
+    note_border = "rgba(120,100,60,0.30)" if light else "rgba(142,255,113,0.24)"
+    title = str(title or "").strip()
+    subtitle = str(subtitle or "").strip()
+    if title:
+        title_text = f"<b>{title}</b>"
+        if subtitle:
+            title_text += f"<br><sup>{_wrap_export_text(subtitle, 96)}</sup>"
+        fig.update_layout(
+            title=dict(
+                text=title_text,
+                x=0.01,
+                xanchor="left",
+                y=0.91,
+                yanchor="top",
+                font=dict(size=19, color=font, family="Space Grotesk, Inter, sans-serif"),
+            )
+        )
+    bottom_margin = max(bottom, 116) if note else bottom
+    fig.update_layout(margin=dict(l=36, r=36, t=top, b=bottom_margin))
+    if height:
+        fig.update_layout(height=height)
+    if note:
+        fig.add_annotation(
+            text=_wrap_export_text(note, 108),
+            xref="paper",
+            yref="paper",
+            x=0.01,
+            y=-0.08,
+            xanchor="left",
+            yanchor="top",
+            showarrow=False,
+            align="left",
+            font=dict(size=10, color=font, family="Inter, sans-serif"),
+            bgcolor=note_bg,
+            bordercolor=note_border,
+            borderwidth=1,
+            borderpad=4,
+        )
+    return fig
+
+
+def _brand_fig(fig, height=None, note="Values are calculated from the selected match source. Hover for exact values."):
     light = _is_light()
     if light:
         paper = "#f5f0e8"
@@ -116,13 +249,12 @@ def _brand_fig(fig, height=None):
         paper_bgcolor=paper,
         plot_bgcolor=plot,
         font=dict(color=font, family="Inter, sans-serif"),
-        margin=dict(l=18, r=18, t=42, b=24),
         hoverlabel=dict(bgcolor=plot, bordercolor=line, font=dict(color=font)),
     )
-    fig.update_xaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font))
-    fig.update_yaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font))
-    if height:
-        fig.update_layout(height=height)
+    fig.update_xaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font), automargin=True)
+    fig.update_yaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font), automargin=True)
+    title = fig.layout.title.text if fig.layout.title and fig.layout.title.text else ""
+    _annotate_plotly_export(fig, title=title, subtitle=_export_scope_label(), note=note, height=height)
     return fig
 
 
@@ -132,13 +264,11 @@ def _pitch_layout(fig, title="", height=520):
     pitch = "#d4e8c2" if light else "#172617"
     line = "rgba(30,70,10,0.58)" if light else "rgba(220,220,220,0.42)"
     fig.update_layout(
-        title=title,
         height=height,
         xaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False),
         yaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=0.68),
         plot_bgcolor=pitch,
         paper_bgcolor=paper,
-        margin=dict(l=10, r=10, t=42, b=10),
         font=dict(color="#111111" if light else "#ecedf6", family="Inter, sans-serif"),
         hoverlabel=dict(
             bgcolor="#f0ebe2" if light else "#10131a",
@@ -154,6 +284,15 @@ def _pitch_layout(fig, title="", height=520):
         dict(type="circle", x0=41.5, y0=35, x1=58.5, y1=65, line=dict(color=line, width=1.3)),
     ]
     fig.update_layout(shapes=shapes)
+    _annotate_plotly_export(
+        fig,
+        title=title,
+        subtitle=_export_scope_label(),
+        note="Pitch coordinates use a 0-100 event-data scale. Hover points or lines for event details.",
+        height=height,
+        top=92,
+        bottom=52,
+    )
     return fig
 
 
@@ -167,7 +306,7 @@ def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, h
     work["y_plot"] = _num(work, "y")
     if color_col and color_col in work.columns:
         for label, group in work.groupby(color_col, dropna=False):
-            color = (color_map or {}).get(label, ACCENT)
+            color = _pitch_accent((color_map or {}).get(label, ACCENT))
             hover = []
             for _, row in group.iterrows():
                 bits = [f"<b>{row.get('team', '')}</b>", f"{row.get('playerName', '')} - {_event_clock(row)}"]
@@ -176,20 +315,23 @@ def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, h
             fig.add_trace(go.Scatter(
                 x=group["x_plot"], y=group["y_plot"], mode="markers",
                 name=str(label), text=hover, hovertemplate="%{text}<extra></extra>",
-                marker=dict(size=12, color=color, line=dict(width=1, color="#0e0e0e"), opacity=0.84),
+                marker=dict(size=12, color=color, line=dict(width=1.2, color="#0e0e0e"), opacity=0.90 if _is_light() else 0.84),
             ))
     else:
         hover = [f"<b>{r.get('team', '')}</b><br>{r.get('playerName', '')} - {_event_clock(r)}" for _, r in work.iterrows()]
         fig.add_trace(go.Scatter(
             x=work["x_plot"], y=work["y_plot"], mode="markers",
             text=hover, hovertemplate="%{text}<extra></extra>",
-            marker=dict(size=12, color=ACCENT, line=dict(width=1, color="#0e0e0e"), opacity=0.84),
+            marker=dict(size=12, color=_pitch_accent(ACCENT), line=dict(width=1.2, color="#0e0e0e"), opacity=0.90 if _is_light() else 0.84),
         ))
     return _pitch_layout(fig, title, height=height)
 
 
 def _arrow_pitch(df, title, color=ACCENT, limit=80):
     fig = go.Figure()
+    draw_color = _pitch_accent(color)
+    draw_opacity = 0.84 if _is_light() else 0.58
+    draw_width = 2.2 if _is_light() else 1.8
     if not df.empty:
         work = df.head(limit).copy()
         for _, row in work.iterrows():
@@ -197,9 +339,9 @@ def _arrow_pitch(df, title, color=ACCENT, limit=80):
             x1, y1 = float(row.get("endX", x0) or x0), float(row.get("endY", y0) or y0)
             fig.add_trace(go.Scatter(
                 x=[x0, x1], y=[y0, y1], mode="lines+markers",
-                line=dict(color=color, width=1.8),
-                marker=dict(size=[5, 8], color=color),
-                opacity=0.58,
+                line=dict(color=draw_color, width=draw_width),
+                marker=dict(size=[5, 8], color=draw_color, line=dict(color="#17330f" if _is_light() else "#0e0e0e", width=0.8)),
+                opacity=draw_opacity,
                 hovertemplate=f"{row.get('playerName','')}<br>{row.get('type','')} - {_event_clock(row)}<extra></extra>",
                 showlegend=False,
             ))
@@ -238,8 +380,7 @@ def _load_csv(path):
 
 
 def _match_label(path):
-    label = os.path.basename(path)
-    return label.replace("whoscored_", "").replace("_all_events.csv", "").replace("_", " ")
+    return _clean_match_label(path)
 
 
 def _load_matches():
@@ -253,11 +394,16 @@ def _load_matches():
     with st.expander("Match Source", expanded=False):
         st.toggle("Analyze across matches", key="tl_multi_mode", value=False)
         if st.session_state.get("tl_multi_mode", False):
+            saved_matches = st.session_state.get("tl_selected_matches", [])
+            if saved_matches:
+                trimmed = [path for path in saved_matches if path in options][:20]
+                if trimmed != saved_matches:
+                    st.session_state["tl_selected_matches"] = trimmed
             selected = st.multiselect(
-                "Select matches (1-10)",
+                "Select matches (1-20)",
                 options=options,
                 format_func=os.path.basename,
-                max_selections=10,
+                max_selections=20,
                 key="tl_selected_matches",
             )
             if not selected:
@@ -270,7 +416,7 @@ def _load_matches():
                 frame["match_id"] = idx
                 frame["match_label"] = _match_label(path)
                 frames.append(frame)
-                labels.append(os.path.basename(path))
+                labels.append(_match_label(path))
             merged = _prepare_df(pd.concat(frames, ignore_index=True))
             return merged, labels
 
@@ -278,14 +424,14 @@ def _load_matches():
         df = _load_csv(session_path).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(session_path)
-        return _prepare_df(df), [os.path.basename(session_path)]
+        return _prepare_df(df), [_match_label(session_path)]
 
     if options:
         choice = st.selectbox("Sample match", options, format_func=os.path.basename)
         df = _load_csv(choice).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(choice)
-        return _prepare_df(df), [os.path.basename(choice)]
+        return _prepare_df(df), [_match_label(choice)]
 
     return None, []
 
@@ -510,7 +656,7 @@ def _period_starts():
     for period, value in values.items():
         if value:
             starts[period] = to_seconds(value)
-    return starts
+    return resolve_period_starts_for_video(globals().get("df"), starts)
 
 
 def _match_seconds(row):
@@ -522,8 +668,14 @@ def _video_timestamp(row):
     starts = _period_starts()
     if period not in starts:
         raise ValueError(f"No kick-off video time set for period {period}.")
-    offset = {1: 0, 2: 45 * 60, 3: 90 * 60, 4: 105 * 60, 5: 120 * 60}.get(period, 0)
-    return starts[period] + max(0, _match_seconds(row) - offset)
+    offsets = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
+    return match_clock_to_video_time(
+        int(row.get("minute", 0) or 0),
+        int(row.get("second", 0) or 0),
+        period,
+        starts,
+        offsets,
+    )
 
 
 def _source_video(row):
@@ -841,7 +993,7 @@ def render_video_lab(df, team):
             st.plotly_chart(
                 _sequence_trace(window, selected.get("event_id"), team),
                 use_container_width=True,
-                config=PLOTLY_EXPORT_CONFIG,
+                config=_plotly_export_config("event_trace", team, playlist, selected.get("playerName"), selected.get("time")),
             )
         except Exception as exc:
             st.error(f"Could not render event trace: {exc}")
@@ -937,7 +1089,7 @@ def render_defensive_transitions(df, team):
     st.plotly_chart(
         _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"], height=TRANSITION_PITCH_HEIGHT),
         use_container_width=True,
-        config=PLOTLY_EXPORT_CONFIG,
+        config=_plotly_export_config("defensive_transitions", team, _export_scope_label()),
     )
 
     st.caption(
@@ -983,7 +1135,7 @@ def render_attacking_transitions(df, team):
     st.plotly_chart(
         _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"], height=TRANSITION_PITCH_HEIGHT),
         use_container_width=True,
-        config=PLOTLY_EXPORT_CONFIG,
+        config=_plotly_export_config("attacking_transitions", team, _export_scope_label()),
     )
 
     st.caption(
@@ -1021,9 +1173,13 @@ def _set_piece_shot_ids(df, team, window_seconds=12, max_events=8):
 
 
 def compute_style_metrics(df, team):
+    if "match_id" in df.columns and "team" in df.columns:
+        team_match_ids = df.loc[df["team"].astype(str).eq(team), "match_id"].dropna().unique().tolist()
+        if team_match_ids:
+            df = df[df["match_id"].isin(team_match_ids)].copy()
     team_df = df[df["team"].astype(str).eq(team)].copy()
     opp_df = df[df["team"].astype(str).ne(team)].copy()
-    match_count = max(int(df["match_id"].nunique()) if "match_id" in df.columns else 1, 1)
+    match_count = max(int(team_df["match_id"].nunique()) if "match_id" in team_df.columns else 1, 1)
     passes = max(int(team_df["type"].eq("Pass").sum()), 1)
     carries = int(team_df["type"].eq("Carry").sum())
     box_entries = (_bool_series(team_df, "is_box_entry_pass") | _bool_series(team_df, "is_box_entry_carry")).sum()
@@ -1122,6 +1278,7 @@ def _radar_chart(dims, team_name):
         hovertemplate="%{theta}: %{r:.1f}<extra></extra>",
     ))
     fig.update_layout(
+        title=f"Style Profile Radar - {team_name}",
         polar=dict(
             radialaxis=dict(visible=True, range=[0, 100], gridcolor="rgba(142,255,113,0.14)"),
             angularaxis=dict(tickfont=dict(size=11)),
@@ -1231,7 +1388,12 @@ def render_style_profile(df, team):
 
     t1, t2 = st.columns([1, 1])
     with t1:
-        st.plotly_chart(_radar_chart(dims, team), use_container_width=True, config=PLOTLY_EXPORT_CONFIG, key="style_profile_radar")
+        st.plotly_chart(
+            _radar_chart(dims, team),
+            use_container_width=True,
+            config=_plotly_export_config("style_profile_radar", team, _export_scope_label()),
+            key="style_profile_radar",
+        )
         with st.expander("Radar Info", expanded=False):
             st.markdown(_radar_legend_html(raw), unsafe_allow_html=True)
     with t2:
@@ -1256,7 +1418,11 @@ def render_style_profile(df, team):
             sort=False,
         )
         fig.update_layout(showlegend=False)
-        st.plotly_chart(_brand_fig(fig, 420), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _brand_fig(fig, 420),
+            use_container_width=True,
+            config=_plotly_export_config("threat_created_passes_carries", team, _export_scope_label()),
+        )
 
     f1, f2 = st.columns([1, 1])
     with f1:
@@ -1273,7 +1439,11 @@ def render_style_profile(df, team):
             ],
         })
         fig = px.funnel(funnel, x="Per Match", y="Stage", title="Progression Funnel Per Match")
-        st.plotly_chart(_brand_fig(fig, 420), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _brand_fig(fig, 420),
+            use_container_width=True,
+            config=_plotly_export_config("progression_funnel", team, _export_scope_label()),
+        )
     with f2:
         zone = team_df.groupby(["depth_zone", "pitch_zone"]).size().reset_index(name="Events")
         all_zones = pd.MultiIndex.from_product(
@@ -1293,7 +1463,11 @@ def render_style_profile(df, team):
                 "depth_zone": DEPTH_ZONE_ORDER,
             },
         )
-        st.plotly_chart(_brand_fig(fig, 420), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _brand_fig(fig, 420),
+            use_container_width=True,
+            config=_plotly_export_config("territory_heatmap", team, _export_scope_label()),
+        )
 
     if "match_id" in df.columns and df["match_id"].nunique() > 1:
         trend_df = _per_match_trends(df, team, [str(x) for x in df.groupby("match_id")["match_label"].first().tolist()])
@@ -1308,7 +1482,12 @@ def render_style_profile(df, team):
                 title=f"{selected_dim.replace(chr(10), ' ')} Across Matches",
             )
             fig.add_hline(y=50, line_dash="dot", line_color=MUTED)
-            st.plotly_chart(_brand_fig(fig, 340), use_container_width=True, config=PLOTLY_EXPORT_CONFIG, key="style_profile_trend")
+            st.plotly_chart(
+                _brand_fig(fig, 340),
+                use_container_width=True,
+                config=_plotly_export_config("style_profile_trend", selected_dim, team),
+                key="style_profile_trend",
+            )
 
     st.markdown("##### Strength Signals")
     if strengths:
@@ -1395,7 +1574,11 @@ def render_set_pieces(df, team):
     ])
     left, right = st.columns([1.25, 1])
     with left:
-        st.plotly_chart(_arrow_pitch(profile, "Restart Delivery Map", color=ACCENT), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _arrow_pitch(profile, "Restart Delivery Map", color=ACCENT),
+            use_container_width=True,
+            config=_plotly_export_config("restart_delivery_map", team, _export_scope_label()),
+        )
     with right:
         counts = profile.groupby("restart_type").agg(
             Count=("event_id", "count"),
@@ -1404,7 +1587,11 @@ def render_set_pieces(df, team):
         ).reset_index()
         counts["Threat"] = counts["Threat"] * 100
         fig = px.bar(counts, x="restart_type", y="Count", color="Threat", title="Restart Mix And Threat %")
-        st.plotly_chart(_brand_fig(fig, 440), use_container_width=True, config=PLOTLY_EXPORT_CONFIG)
+        st.plotly_chart(
+            _brand_fig(fig, 440),
+            use_container_width=True,
+            config=_plotly_export_config("restart_mix_threat", team, _export_scope_label()),
+        )
     st.markdown("##### Restart Outcomes")
     show = profile.sort_values(["shot", "box_entry", "xT_created"], ascending=False).copy()
     show["time"] = show.apply(_event_clock, axis=1)
@@ -1440,9 +1627,13 @@ if not teams:
     st.error("No team names were found in the match data.")
     st.stop()
 
-match_name = ", ".join(match_labels[:3])
-if len(match_labels) > 3:
-    match_name = f"{match_name} + {len(match_labels) - 3} more"
+match_count = len(match_labels)
+if match_count > 1:
+    match_name = f"{match_count} matches"
+elif match_count == 1:
+    match_name = match_labels[0]
+else:
+    match_name = ""
 if not match_name and "matchName" in df_all.columns and not df_all["matchName"].dropna().empty:
     match_name = str(df_all["matchName"].dropna().iloc[0])
 top_c1, top_c2 = st.columns([2.2, 1])
