@@ -10,17 +10,21 @@ _analyst_component = components.declare_component(
 )
 
 
-def penalty_shootout_map(shots, home_team, away_team, selected_idx=None, key=None):
+def penalty_shootout_map(shots, home_team, away_team, selected_idx=None, key=None,
+                         light_mode=False, context_title="", context_subtitle="", context_note=""):
     return _analyst_component(
         component_type="penalty_shootout",
         shots=shots, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
-        height=820, key=key, default=None, light_mode=False,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
+        height=820, key=key, default=None, light_mode=light_mode,
     )
 
 
 def shot_map(shots, home_team, away_team, selected_idx=None,
-             view="pitch", key=None, light_mode=False):
+             view="pitch", key=None, light_mode=False,
+             context_title="", context_subtitle="", context_note=""):
     height_map = {
         "pitch": 460, "halfpitch": 460,
         "halfpitch_vert": 520, "goalframe": 320,
@@ -30,49 +34,63 @@ def shot_map(shots, home_team, away_team, selected_idx=None,
         component_type="shot_map",
         shots=shots, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, view=view,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
 def pass_map(passes, home_team, away_team, selected_idx=None,
-             mode="player", key=None, light_mode=False):
+             mode="player", key=None, light_mode=False,
+             context_title="", context_subtitle="", context_note=""):
     height = 800 if mode == "network" else 470
     return _analyst_component(
         component_type="pass_map",
         passes=passes, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, mode=mode,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
-def defensive_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False):
+def defensive_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False,
+                  context_title="", context_subtitle="", context_note=""):
     height = 500
     return _analyst_component(
         component_type="defensive_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
-def dribble_carry_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False):
+def dribble_carry_map(actions, home_team, away_team, selected_idx=None, key=None, light_mode=False,
+                      context_title="", context_subtitle="", context_note=""):
     height = 500
     return _analyst_component(
         component_type="dribble_carry_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height, key=key, default=None, light_mode=light_mode,
     )
 
 
 def build_up_map(actions, is_home, selected_idx=None, key=None, light_mode=False,
-                 entry_mode="", height=520):
+                 entry_mode="", height=520,
+                 context_title="", context_subtitle="", context_note=""):
     return _analyst_component(
         component_type="build_up_map",
         actions=actions,
         is_home=bool(is_home),
         selected_idx=selected_idx,
         entry_mode=entry_mode or "",
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height,
         key=key,
         default=None,
@@ -81,12 +99,15 @@ def build_up_map(actions, is_home, selected_idx=None, key=None, light_mode=False
 
 
 def goalkeeper_map(actions, home_team, away_team, selected_idx=None,
-                   shots_faced=False, key=None, light_mode=False):
+                   shots_faced=False, key=None, light_mode=False,
+                   context_title="", context_subtitle="", context_note=""):
     height = 520
     return _analyst_component(
         component_type="goalkeeper_map",
         actions=actions, home_team=home_team or "", away_team=away_team or "",
         selected_idx=selected_idx, shots_faced=shots_faced,
+        context_title=context_title or "", context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
         height=height, key=key, default=None, light_mode=light_mode,
     )
 
@@ -131,261 +152,154 @@ def timeline_window(
     )
 
 
-def pressing_map(press_wins, is_home_team, selected_idx=None, key=None, light_mode=False):
-    """
-    Render a full-pitch scatter of high-press wins using Plotly.
-    press_wins: list of dicts from detect_press_wins, each with x, y, type,
-                playerName, minute, second, period, press_zone, idx.
-    Colour coding: High press (x>66) = bright accent, Mid-block (50<x<=66) = muted.
-    Returns a Plotly figure rendered via st.plotly_chart.
-    """
-    import streamlit as st
-    try:
-        import plotly.graph_objects as go
-    except ImportError:
-        st.warning("Plotly not installed — pressing map unavailable.")
-        return
+def echarts_chart(option, height=520, key=None, light_mode=False,
+                  context_title="", context_subtitle="", context_note="",
+                  filename_hint="echarts_chart"):
+    return _analyst_component(
+        component_type="echarts_option",
+        option=option or {},
+        height=int(height or 520),
+        context_title=context_title or filename_hint or "",
+        context_subtitle=context_subtitle or "",
+        context_note=context_note or "",
+        filename_hint=filename_hint or "echarts_chart",
+        key=key,
+        default=None,
+        light_mode=light_mode,
+    )
 
-    # Pitch dimensions (WhoScored 0-100 scale mapped to visual 105x68)
+
+def pressing_map(press_wins, is_home_team, selected_idx=None, key=None, light_mode=False,
+                 context_title="", context_subtitle="", context_note=""):
+    """Render a full-pitch high-press map using ECharts."""
     PITCH_LENGTH = 105
     PITCH_WIDTH  = 68
-    PLOTLY_EXPORT_CONFIG = {
-        "displayModeBar": True,
-        "displaylogo": False,
-        "toImageButtonOptions": {
-            "format": "png",
-            "filename": "clipmaker_plot",
-            "scale": 2,
-        },
-        "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-    }
-
-    def _to_px(x, y):
-        """Convert WhoScored 0-100 coordinates to pitch coordinates."""
-        px = x / 100 * PITCH_LENGTH
-        py = y / 100 * PITCH_WIDTH
-        return round(px, 2), round(py, 2)
-
-    # Separate wins by zone
-    high_wins = [w for w in press_wins if w["press_zone"] == "High"]
-    mid_wins  = [w for w in press_wins if w["press_zone"] == "Mid"]
-
-    TYPE_ICON = {
-        "BallRecovery": "R",
-        "Interception": "I",
-        "Tackle":       "T",
-    }
-    PERIOD_LABEL = {
-        "FirstHalf": "1H", "SecondHalf": "2H",
-        "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2",
-    }
-
-    def _hover(w):
-        p = PERIOD_LABEL.get(w["period"], "")
-        return (
-            f"<b>{w['playerName']}</b><br>"
-            f"{w['type']}  {w['minute']}'{w['second']:02d}\" {p}<br>"
-            f"Zone: {w['press_zone']} Press"
-        )
-
-    def _marker_size(w):
-        return 18 if w.get("idx") == selected_idx else 13
-
-    fig = go.Figure()
     half_line_x = PITCH_LENGTH * 0.50
     final_third_x = PITCH_LENGTH * 0.66
-
-    # ── Pitch markings ──────────────────────────────────────────────────────
     if light_mode:
         _pitch_fill = "#d4e8c2"
-        _line = dict(color="rgba(30,70,10,0.60)", width=1.5)
-        _zone_mid_bg  = "rgba(80,120,40,0.08)"
-        _zone_mid_ln  = "rgba(80,120,40,0.20)"
-        _zone_high_bg  = "rgba(47,93,22,0.10)"
-        _zone_high_ln  = "rgba(47,93,22,0.30)"
-        _sep_line      = "rgba(80,60,30,0.18)"
-        _sep_final     = "rgba(47,93,22,0.42)"
-        _ann_font_mid  = "#4a7020"
-        _ann_bg        = "rgba(220,200,170,0.50)"
-        _ann_font_high = "#234610"
-        _leg_font      = "#444444"
-        _plot_bg       = "#f0ece4"
         _paper_bg      = "#f0ece4"
-        _brand_col     = "#2f5d16"
-        _brand_bg      = "rgba(40,30,10,0.50)"
-        _marker_border = "#333333"
-        _high_color    = "#2f5d16"
+        _line          = "rgba(25,61,9,0.66)"
+        _zone_mid_bg   = "rgba(80,120,40,0.08)"
+        _zone_high_bg  = "rgba(47,93,22,0.12)"
+        _zone_mid_ln   = "rgba(80,120,40,0.20)"
+        _sep_final     = "rgba(47,93,22,0.50)"
+        _leg_font      = "#1f241b"
+        _marker_border = "#315322"
+        _high_color    = "#2f6f18"
+        _mid_color     = "#7fae16"
     else:
         _pitch_fill = "#1a2a1a"
-        _line = dict(color="#555555", width=1.5)
-        _zone_mid_bg  = "rgba(106,159,0,0.12)"
-        _zone_mid_ln  = "rgba(106,159,0,0.28)"
-        _zone_high_bg  = "rgba(200,255,0,0.10)"
-        _zone_high_ln  = "rgba(200,255,0,0.35)"
-        _sep_line      = "rgba(255,255,255,0.18)"
-        _sep_final     = "rgba(200,255,0,0.55)"
-        _ann_font_mid  = "#94b65b"
-        _ann_bg        = "rgba(0,0,0,0.28)"
-        _ann_font_high = "#d8ff6a"
-        _leg_font      = "#cccccc"
-        _plot_bg       = "#1a2a1a"
         _paper_bg      = "#111111"
-        _brand_col     = "#DFFF00"
-        _brand_bg      = "rgba(0,0,0,0.50)"
-        _marker_border = "white"
+        _line          = "rgba(220,220,220,0.42)"
+        _zone_mid_bg   = "rgba(106,159,0,0.12)"
+        _zone_high_bg  = "rgba(200,255,0,0.11)"
+        _zone_mid_ln   = "rgba(106,159,0,0.30)"
+        _sep_final     = "rgba(200,255,0,0.60)"
+        _leg_font      = "#cccccc"
+        _marker_border = "#ffffff"
         _high_color    = "#c8ff00"
-    # Outer boundary
-    fig.add_shape(type="rect", x0=0, y0=0, x1=PITCH_LENGTH, y1=PITCH_WIDTH,
-                  line=_line, fillcolor=_pitch_fill, layer="below")
-    # Halfway line
-    fig.add_shape(type="line", x0=PITCH_LENGTH/2, y0=0, x1=PITCH_LENGTH/2, y1=PITCH_WIDTH, line=_line, layer="below")
-    # Centre circle (approx radius 9.15m)
-    fig.add_shape(type="circle",
-                  x0=PITCH_LENGTH/2-9.15, y0=PITCH_WIDTH/2-9.15,
-                  x1=PITCH_LENGTH/2+9.15, y1=PITCH_WIDTH/2+9.15,
-                  line=_line, layer="below")
-    # Centre spot
-    fig.add_trace(go.Scatter(x=[PITCH_LENGTH/2], y=[PITCH_WIDTH/2],
-                             mode="markers",
-                             marker=dict(color=_line["color"], size=4),
-                             showlegend=False, hoverinfo="skip"))
-    # Penalty areas (attacking = right side when is_home_team=True)
-    for side in ("left", "right"):
-        x0 = 0 if side == "left" else PITCH_LENGTH - 16.5
-        x1 = 16.5 if side == "left" else PITCH_LENGTH
-        fig.add_shape(type="rect", x0=x0, y0=(PITCH_WIDTH-40.32)/2,
-                      x1=x1, y1=(PITCH_WIDTH+40.32)/2, line=_line, layer="below")
-        # 6-yard box
-        x0b = 0 if side == "left" else PITCH_LENGTH - 5.5
-        x1b = 5.5 if side == "left" else PITCH_LENGTH
-        fig.add_shape(type="rect", x0=x0b, y0=(PITCH_WIDTH-18.32)/2,
-                      x1=x1b, y1=(PITCH_WIDTH+18.32)/2, line=_line, layer="below")
+        _mid_color     = "#6a9f00"
 
-    fig.add_shape(
-        type="rect",
-        x0=half_line_x,
-        y0=0,
-        x1=final_third_x,
-        y1=PITCH_WIDTH,
-        fillcolor=_zone_mid_bg,
-        line=dict(color=_zone_mid_ln, width=1),
-        layer="below",
-    )
-    fig.add_shape(
-        type="rect",
-        x0=final_third_x,
-        y0=0,
-        x1=PITCH_LENGTH,
-        y1=PITCH_WIDTH,
-        fillcolor=_zone_high_bg,
-        line=dict(color=_zone_high_ln, width=1),
-        layer="below",
-    )
-    fig.add_shape(
-        type="line",
-        x0=half_line_x,
-        y0=0,
-        x1=half_line_x,
-        y1=PITCH_WIDTH,
-        line=dict(color=_sep_line, width=1, dash="dot"),
-        layer="below",
-    )
-    fig.add_shape(
-        type="line",
-        x0=final_third_x,
-        y0=0,
-        x1=final_third_x,
-        y1=PITCH_WIDTH,
-        line=dict(color=_sep_final, width=1, dash="dot"),
-        layer="below",
-    )
-    fig.add_annotation(
-        x=(half_line_x + final_third_x) / 2,
-        y=PITCH_WIDTH - 3,
-        text="Mid-Block",
-        showarrow=False,
-        font=dict(color=_ann_font_mid, size=11),
-        bgcolor=_ann_bg,
-    )
-    fig.add_annotation(
-        x=(final_third_x + PITCH_LENGTH) / 2,
-        y=PITCH_WIDTH - 3,
-        text="High Press / Final Third",
-        showarrow=False,
-        font=dict(color=_ann_font_high, size=11),
-        bgcolor=_ann_bg,
-    )
+    def _to_px(x, y):
+        return round(float(x or 0) / 100 * PITCH_LENGTH, 2), round(float(y or 0) / 100 * PITCH_WIDTH, 2)
 
-    # ── Press win scatter traces ────────────────────────────────────────────
-    for zone_wins, colour, label in [
-        (high_wins, _high_color, "High Press"),
-        (mid_wins,  "#6a9f00", "Mid-Block"),
-    ]:
-        if not zone_wins:
-            continue
-        xs, ys, texts, hovers, idxs, sizes, borders = [], [], [], [], [], [], []
-        for w in zone_wins:
-            px, py = _to_px(w["x"], w["y"])
-            xs.append(px)
-            ys.append(py)
-            texts.append(TYPE_ICON.get(w["type"], "?"))
-            hovers.append(_hover(w))
-            idxs.append(w["idx"])
-            is_selected = w.get("idx") == selected_idx
-            sizes.append(20 if is_selected else _marker_size(w))
-            borders.append(3 if is_selected else 1)
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys,
-            mode="markers+text",
-            marker=dict(
-                color=colour, size=sizes,
-                line=dict(color=_marker_border, width=borders),
-                symbol="circle",
-                opacity=0.95,
-            ),
-            text=texts,
-            textfont=dict(color="#000000", size=8, family="monospace"),
-            textposition="middle center",
-            hovertext=hovers,
-            hovertemplate="%{hovertext}<extra></extra>",
-            customdata=idxs,
-            name=label,
-        ))
+    def _rect_points(x0, y0, x1, y1):
+        return [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
 
-    fig.update_layout(
-        plot_bgcolor=_plot_bg,
-        paper_bgcolor=_paper_bg,
-        margin=dict(l=5, r=5, t=5, b=5),
-        xaxis=dict(range=[-2, PITCH_LENGTH+2], showgrid=False, zeroline=False,
-                   showticklabels=False, fixedrange=True),
-        yaxis=dict(range=[-2, PITCH_WIDTH+2], showgrid=False, zeroline=False,
-                   showticklabels=False, scaleanchor="x", scaleratio=1, fixedrange=True),
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0,
-                    font=dict(color=_leg_font, size=11)),
-        height=440,
-        annotations=list(fig.layout.annotations) + [
-            dict(
-                x=PITCH_LENGTH,
-                y=-2,
-                text="Opponent goal -> higher press height",
-                showarrow=False,
-                xanchor="right",
-                font=dict(color=_leg_font, size=10),
-            ),
-            dict(
-                text="ClipMaker v1.2.2<br>@B03GHB4L1",
-                xref="paper",
-                yref="paper",
-                x=0.995,
-                y=0.015,
-                xanchor="right",
-                yanchor="bottom",
-                showarrow=False,
-                align="right",
-                font=dict(size=10, color=_brand_col, family="monospace"),
-            ),
+    def _circle_points(cx, cy, r, steps=48):
+        import math
+        return [[cx + math.cos(i / steps * math.tau) * r, cy + math.sin(i / steps * math.tau) * r] for i in range(steps + 1)]
+
+    pitch_lines = [
+        _rect_points(0, 0, PITCH_LENGTH, PITCH_WIDTH),
+        [[PITCH_LENGTH / 2, 0], [PITCH_LENGTH / 2, PITCH_WIDTH]],
+        _circle_points(PITCH_LENGTH / 2, PITCH_WIDTH / 2, 9.15),
+        _rect_points(0, (PITCH_WIDTH - 40.32) / 2, 16.5, (PITCH_WIDTH + 40.32) / 2),
+        _rect_points(PITCH_LENGTH - 16.5, (PITCH_WIDTH - 40.32) / 2, PITCH_LENGTH, (PITCH_WIDTH + 40.32) / 2),
+        _rect_points(0, (PITCH_WIDTH - 18.32) / 2, 5.5, (PITCH_WIDTH + 18.32) / 2),
+        _rect_points(PITCH_LENGTH - 5.5, (PITCH_WIDTH - 18.32) / 2, PITCH_LENGTH, (PITCH_WIDTH + 18.32) / 2),
+        [[half_line_x, 0], [half_line_x, PITCH_WIDTH]],
+        [[final_third_x, 0], [final_third_x, PITCH_WIDTH]],
+    ]
+    series = []
+    for i, pts in enumerate(pitch_lines):
+        series.append({
+            "type": "line", "data": pts, "showSymbol": False, "silent": True,
+            "lineStyle": {"color": _sep_final if i == 8 else _line, "width": 1.6 if i < 7 else 1.1, "type": "dotted" if i >= 7 else "solid"},
+            "z": 1,
+        })
+    series.append({
+        "type": "scatter", "data": [[PITCH_LENGTH / 2, PITCH_WIDTH / 2]],
+        "symbolSize": 5, "silent": True, "itemStyle": {"color": _line}, "z": 2,
+    })
+
+    type_icon = {"BallRecovery": "R", "Interception": "I", "Tackle": "T"}
+    period_label = {"FirstHalf": "1H", "SecondHalf": "2H", "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2"}
+
+    for zone, color, label in [("High", _high_color, "High Press"), ("Mid", _mid_color, "Mid-Block")]:
+        points = []
+        for w in [row for row in press_wins if row.get("press_zone") == zone]:
+            px, py = _to_px(w.get("x"), w.get("y"))
+            selected = w.get("idx") == selected_idx
+            p = period_label.get(w.get("period"), "")
+            points.append({
+                "name": type_icon.get(w.get("type"), "?"),
+                "value": [px, py],
+                "symbolSize": 22 if selected else 16,
+                "tooltip": f"<b>{w.get('playerName', '')}</b><br>{w.get('type', '')} {w.get('minute', 0)}'{int(w.get('second', 0) or 0):02d}\" {p}<br>Zone: {label}",
+                "itemStyle": {
+                    "color": color,
+                    "borderColor": "#1f4218" if light_mode and zone == "High" else (_marker_border if light_mode else _marker_border),
+                    "borderWidth": 2.4 if selected else (1.2 if light_mode else 1.8),
+                },
+            })
+        if points:
+            series.append({
+                "type": "scatter", "name": label, "data": points,
+                "label": {
+                    "show": True, "formatter": "{b}",
+                    "color": "#ffffff" if light_mode and zone == "High" else "#111111",
+                    "fontSize": 8, "fontWeight": 800,
+                    "textBorderColor": "#1f2d16" if light_mode and zone == "High" else "#f8f6f0",
+                    "textBorderWidth": 1.4 if light_mode else 0,
+                },
+                "itemStyle": {"opacity": 0.95},
+                "emphasis": {"scale": 1.25},
+                "z": 10,
+            })
+
+    option = {
+        "cmPitchAspect": PITCH_LENGTH / PITCH_WIDTH,
+        "backgroundColor": _paper_bg,
+        "animationDuration": 450,
+        "title": {
+            "text": context_title or "Pressing Map",
+            "subtext": context_subtitle or "",
+            "left": 16,
+            "top": 10,
+            "textStyle": {"color": _leg_font, "fontSize": 18, "fontWeight": 800},
+            "subtextStyle": {"color": _leg_font, "fontSize": 11},
+        },
+        "grid": {"left": 20, "right": 20, "top": 72 if context_title else 24, "bottom": 42, "containLabel": False},
+        "xAxis": {"type": "value", "min": -2, "max": PITCH_LENGTH + 2, "show": False},
+        "yAxis": {"type": "value", "min": -2, "max": PITCH_WIDTH + 2, "show": False, "inverse": True},
+        "legend": {"bottom": 8, "left": "center", "textStyle": {"color": _leg_font, "fontSize": 11}},
+        "tooltip": {"trigger": "item", "confine": True},
+        "graphic": [
+            {"type": "rect", "left": "20px", "right": "20px", "top": "72px" if context_title else "24px", "bottom": "42px",
+             "cmPitchBackground": True, "style": {"fill": _pitch_fill}, "silent": True, "z": -10},
+            {"type": "text", "right": 34, "bottom": 14, "style": {"text": "ClipMaker v1.2.3\n@B03GHB4L1", "fill": "#2f5d16" if light_mode else "#DFFF00", "font": "700 10px monospace"}, "silent": True},
         ],
+        "series": series,
+    }
+    return echarts_chart(
+        option,
+        height=500 if context_title or context_note else 460,
+        key=key,
+        light_mode=light_mode,
+        context_title=context_title,
+        context_subtitle=context_subtitle,
+        context_note=context_note,
+        filename_hint="pressing_map",
     )
-
-    st.plotly_chart(fig, use_container_width=True, key=key, config=PLOTLY_EXPORT_CONFIG,
-                    selection_mode="points", on_select="rerun")
