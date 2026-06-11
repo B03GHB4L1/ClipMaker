@@ -9,7 +9,7 @@
 
 Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
 
-Current version: **v1.2.2**
+Current version: **v1.2.3**
 </div>
 
 ---
@@ -20,14 +20,14 @@ ClipMaker turns match event data and match video into a local football analysis 
 
 You can use it to:
 
-- scrape match events from WhoScored
+- scrape match events from WhoScored or Scoresway
 - load your own event CSV and match video files
 - explore the match inside an interactive Analyst Room
 - profile team style, transitions, and set pieces inside the Tactical Lab
 - filter events manually or with AI-assisted prompts
 - generate individual clips or a combined highlight reel automatically
 
-It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst toolkit.
+It started as a clip cutter. In `v1.2.3`, it is much closer to a full analyst toolkit.
 
 ---
 
@@ -36,9 +36,11 @@ It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst to
 ### Data ingestion
 
 - **WhoScored scraper built in** — load a match directly from a WhoScored URL
+- **Scoresway scraper built in** — paste Scoresway match URLs and let ClipMaker normalize the event data into the same workflow
 - **CSV import workflow** for your own event data
-- **Single-file or split-video support** for one full match file or separate half files
+- **Single-file or split-video support** for one full match file, separate half files, extra-time files, and penalty shootout files
 - **Kick-off timestamp mapping** for 1st half, 2nd half, extra time, and penalties where needed
+- **First penalty timestamp mapping** so penalty shootouts can be aligned more reliably
 
 ### Clipping and output
 
@@ -48,6 +50,7 @@ It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst to
 - **Merge-gap logic** to combine nearby actions into cleaner sequences
 - **Live progress feedback** during clip rendering and reel assembly
 - **FFmpeg-based cutting and concatenation** for faster and more reliable output handling
+- **Improved event ordering and match-clock mapping** across normal time, extra time, and shootouts
 
 ### Manual filtering
 
@@ -83,6 +86,7 @@ It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst to
 - **Natural-language filter parsing** into app filter settings
 - **AI-generated clip outputs** with downloadable rendered clips/reels
 - **Football glossary and alias system** to improve prompt understanding
+- **Expanded football query support** for switches, diagonals, box entries, final-third entries, touch-in-box actions, penalties, and successful take-ons in the box
 - **Proxy-backed model fallback flow** for the AI layer
 
 ### Workflow helpers
@@ -90,6 +94,8 @@ It started as a clip cutter. In `v1.2.2`, it is much closer to a full analyst to
 - **Quick filter presets** like set pieces, ball progression, attacking chaos, and defensive display
 - **Filter snapshots** so users can save and reload filter configurations across sessions
 - **Browser-based local UI** built in Streamlit
+- **PNG and animated GIF exports** for interactive analysis maps
+- **Cleaner chart export names, titles, match context, and ClipMaker branding**
 - **Packaged launchers** for Windows, macOS, and Linux
 
 ---
@@ -127,6 +133,8 @@ Recent improvements also include:
 - dedicated penalty shootout layout
 - chronological shootout ordering
 - wrapped shootout rows after 5 penalties
+- export-ready map context with match, team, player, and filter labels
+- cleaner PNG exports for charts and maps
 
 ---
 
@@ -136,6 +144,9 @@ The Tactical Lab is a team-level analysis workspace for style and phase-of-play 
 
 It includes:
 
+- **Multi-match team analysis**
+  - select up to 20 saved matches
+  - compare team style across a wider sample
 - **Style Profile radar**
   - possession control
   - PPDA-based pressing intensity
@@ -146,6 +157,8 @@ It includes:
   - transition threat
 - **Radar Info** explanations for every radar metric
 - **Threat split chart** showing pass xT versus carry xT
+- **Progression Funnel** showing territory gain and final-third/box progression
+- **Territory Heatmap** for team field tilt and area usage
 - **Defensive Transitions**
   - possession-loss locations
   - recovery, progression conceded, box entry conceded, and shot conceded outcomes
@@ -156,6 +169,11 @@ It includes:
   - restart delivery map
   - restart mix and outcome table
   - corner normalization so `Corner` and `CornerAwarded` are treated as one restart type
+- **Video Lab**
+  - cut tactical moments directly from transition, xT, box-entry, and restart playlists
+  - build tactical reels from selected moments
+- **Export polish**
+  - chart titles, notes, filenames, and branding are prepared for presentation use
 
 ---
 
@@ -204,7 +222,7 @@ Each package includes platform-specific setup instructions and launchers.
 
 - Python 3.10 or later recommended
 - Match video file(s)
-- Event CSV data or a WhoScored match URL
+- Event CSV data, a WhoScored match URL, or a Scoresway match URL
 
 Packaged launchers handle first-run dependency setup for supported builds.
 
@@ -212,14 +230,14 @@ Packaged launchers handle first-run dependency setup for supported builds.
 
 ## How it works
 
-1. Load a match by scraping WhoScored or importing your own CSV
-2. Load one or two match video files
+1. Load a match by scraping WhoScored, scraping Scoresway, or importing your own CSV
+2. Load the match video file, separate half files, or separate extra-time/penalty files where needed
 3. Enter kick-off timestamps that match your video timeline
 4. Explore the match in the Analyst Room or go straight to filtering
 5. Build your export using manual filters or AI prompts
 6. Render either individual clips or a combined reel
 
-ClipMaker maps event times to the video timeline, builds clip windows around the selected moments, merges nearby events when appropriate, and exports the final result locally.
+ClipMaker maps event times to the video timeline, builds clip windows around the selected moments, merges nearby events when appropriate, and exports the final result locally. For penalty shootouts, users can enter the timestamp of the first penalty kick and ClipMaker derives the period anchor from the match data.
 
 ---
 
@@ -249,7 +267,28 @@ Useful optional columns:
 
 ---
 
+## Data Source Notes
+
+- WhoScored and Scoresway data do not always contain identical event tags or qualifiers.
+- Scoresway matches are normalized into the ClipMaker workflow, but some analysis outputs may differ slightly from the equivalent WhoScored workflow.
+- All clipping and video rendering still happens locally on your machine.
+
+---
+
 ## Changelog
+
+### v1.2.3
+
+- Added **Scoresway scraping** alongside WhoScored, with automatic source detection from pasted match URLs
+- Added **Scoresway event normalization** for xT, progressive actions, carries, box entries, goalkeeper actions, set pieces, and shot/save classification where available
+- Added **PNG and animated GIF export controls** for interactive analysis maps
+- Improved **extra-time and penalty shootout handling**, including optional separate files for extra-time halves and shootouts
+- Added easier **penalty shootout timestamp alignment** using the first penalty kick timestamp
+- Expanded the **Tactical Lab** with multi-match selection, transition analysis, style profiles, progression funnels, territory heatmaps, restart profiles, and tactical video playlists
+- Improved **Analyst Room exports** with clearer titles, match context, labels, notes, filenames, and ClipMaker branding
+- Improved **AI and manual filtering** for xT, progressive actions, switches, diagonals, box entries, final-third entries, penalties, and touch-in-box queries
+- Improved event ordering, timestamp conversion, and handling of missing or incomplete event clocks
+- Improved macOS file handling with browser-safe upload controls
 
 ### v1.2.2
 
