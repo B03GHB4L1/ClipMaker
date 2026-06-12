@@ -65,7 +65,7 @@ _MATCH_SETUP_KEYS = [
     "video_path", "video2_path", "video3_path", "video4_path", "video5_path",
     "csv_path", "half1_time", "half2_time",
     "half3_time", "half4_time", "half5_time", "had_extra_time",
-    "had_penalties", "split_extra_time_video", "split_penalties_video",
+    "had_penalties", "split_extra_time_video", "extra_time_video_mode", "split_penalties_video",
     "split_video", "before_buffer", "after_buffer", "min_gap",
 ]
 
@@ -400,6 +400,10 @@ had_et        = _ss("had_extra_time", False)
 had_pso       = _ss("had_penalties", False)
 split_et_video = _ss("split_extra_time_video", False)
 split_pso_video = _ss("split_penalties_video", False)
+et_video_mode = _ss("extra_time_video_mode", "single")
+if et_video_mode not in ("single", "separate"):
+    et_video_mode = "single"
+final_video4_for_config = final_video4 if et_video_mode == "separate" else final_video3
 half1         = _ss("half1_time")
 half2         = _ss("half2_time")
 half3         = _ss("half3_time")
@@ -423,8 +427,11 @@ def _missing_video_setup_errors():
         errors.append("2nd half video file is required when split-video mode is enabled.")
     if split_video and split_et_video:
         if not (final_video3 and os.path.exists(final_video3)):
-            errors.append("ET 1st half video file is required when extra time uses separate files.")
-        if not (final_video4 and os.path.exists(final_video4)):
+            if et_video_mode == "separate":
+                errors.append("ET 1st half video file is required when extra time uses separate files.")
+            else:
+                errors.append("Extra-time video file is required when extra time uses its own file.")
+        if et_video_mode == "separate" and not (final_video4 and os.path.exists(final_video4)):
             errors.append("ET 2nd half video file is required when extra time uses separate files.")
     if split_video and split_pso_video and not (final_video5 and os.path.exists(final_video5)):
         errors.append("Penalty shootout video file is required when penalties use a separate file.")
@@ -925,9 +932,10 @@ with tab_manual:
             "video_file":       final_video or "",
             "video2_file":      final_video2 or "",
             "video3_file":      final_video3 if split_et_video else "",
-            "video4_file":      final_video4 if split_et_video else "",
+            "video4_file":      final_video4_for_config if split_et_video else "",
             "video5_file":      final_video5 if split_pso_video else "",
             "split_video":      split_video,
+            "extra_time_video_mode": et_video_mode,
             "data_file":        _team_data_file,
             "half1_time":       half1,
             "half2_time":       half2,
@@ -1698,9 +1706,10 @@ with tab_ai:
                 "video_file":       final_video,
                 "video2_file":      final_video2 or "",
                 "video3_file":      final_video3 if split_et_video else "",
-                "video4_file":      final_video4 if split_et_video else "",
+                "video4_file":      final_video4_for_config if split_et_video else "",
                 "video5_file":      final_video5 if split_pso_video else "",
                 "split_video":      split_video,
+                "extra_time_video_mode": et_video_mode,
                 "data_file":        ai_data_file,
                 "half1_time":       half1 or "0:00",
                 "half2_time":       half2 or "45:00",
