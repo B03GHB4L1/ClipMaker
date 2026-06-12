@@ -1518,6 +1518,7 @@ SHARED_STATE_DEFAULTS = {
     "had_penalties": False,
     "split_video": False,
     "split_extra_time_video": False,
+    "extra_time_video_mode": "single",
     "split_penalties_video": False,
     "whoscored_url": "",
         "before_buffer": 5,

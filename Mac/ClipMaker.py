@@ -120,7 +120,7 @@ for key, default in [
     ("csv_path", ""), ("output_dir", ""),
     ("half1_time", ""), ("half2_time", ""), ("half3_time", ""), ("half4_time", ""),
     ("half5_time", ""), ("had_extra_time", False), ("had_penalties", False),
-    ("split_extra_time_video", False), ("split_penalties_video", False),
+    ("split_extra_time_video", False), ("extra_time_video_mode", "single"), ("split_penalties_video", False),
     ("split_video", False), ("whoscored_url", ""),
     ("before_buffer", 5), ("after_buffer", 8), ("min_gap", 6),
 ]:
@@ -279,7 +279,7 @@ _MATCH_SETUP_KEYS = [
     "video_path", "video2_path", "video3_path", "video4_path", "video5_path",
     "csv_path", "half1_time", "half2_time", "half3_time", "half4_time",
     "half5_time", "had_extra_time", "had_penalties",
-    "split_extra_time_video", "split_penalties_video", "split_video",
+    "split_extra_time_video", "extra_time_video_mode", "split_penalties_video", "split_video",
     "before_buffer", "after_buffer", "min_gap",
 ]
 
@@ -617,6 +617,22 @@ split_video = st.checkbox(
 )
 st.session_state["split_video"] = split_video
 
+period_col1, period_col2 = st.columns(2)
+with period_col1:
+    had_et = st.checkbox(
+        "Match went to Extra Time",
+        value=st.session_state.get("had_extra_time", False),
+        help="Shows extra-time video setup here and ET kick-off timestamps in Section 3."
+    )
+with period_col2:
+    had_pso = st.checkbox(
+        "Match went to Penalty Shootout",
+        value=st.session_state.get("had_penalties", False),
+        help="Shows penalty shootout video setup here and the first penalty timestamp in Section 3."
+    )
+st.session_state.had_extra_time = had_et
+st.session_state.had_penalties = had_pso
+
 def _render_video_input(label, state_key, browse_key, upload_key):
     if IS_MAC:
         uploaded = st.file_uploader(label, type=["mp4","mkv","avi","mov","ts"], key=upload_key)
@@ -655,25 +671,46 @@ else:
 
 if split_video and st.session_state.get("had_extra_time"):
     split_et_video = st.checkbox(
-        "Extra time is in separate video files",
-        value=st.session_state.get("split_extra_time_video", False)
+        "Extra time is in its own video file(s)",
+        value=st.session_state.get("split_extra_time_video", False),
+        help="Turn this on if extra time is not part of the 2nd-half video."
     )
     st.session_state.split_extra_time_video = split_et_video
     if split_et_video:
-        etv1, etv2 = st.columns(2)
-        with etv1:
-            video3_path = _render_video_input("ET 1st Half Video", "video3_path", "browse_video3", "up_video3")
-        with etv2:
-            video4_path = _render_video_input("ET 2nd Half Video", "video4_path", "browse_video4", "up_video4")
+        current_et_mode = st.session_state.get("extra_time_video_mode", "single")
+        if current_et_mode not in ("single", "separate"):
+            current_et_mode = "single"
+            st.session_state.extra_time_video_mode = current_et_mode
+        et_mode = st.radio(
+            "Extra-time file layout",
+            ["single", "separate"],
+            format_func=lambda mode: "Separate ET half files" if mode == "separate" else "One extra-time file",
+            horizontal=True,
+            key="extra_time_video_mode",
+            help="Choose one file if ET 1st half and ET 2nd half are in the same video."
+        )
+        if et_mode == "single":
+            video3_path = _render_video_input("Extra Time Video", "video3_path", "browse_video3", "up_video3")
+            video4_path = video3_path
+            st.session_state.video4_path = video3_path if video3_path else ""
+            st.caption("Use the ET 1st Half and ET 2nd Half kick-off timestamps below to map both halves inside this file.")
+        else:
+            etv1, etv2 = st.columns(2)
+            with etv1:
+                video3_path = _render_video_input("ET 1st Half Video", "video3_path", "browse_video3", "up_video3")
+            with etv2:
+                video4_path = _render_video_input("ET 2nd Half Video", "video4_path", "browse_video4", "up_video4")
     else:
         video3_path = ""
         video4_path = ""
+        st.session_state.extra_time_video_mode = "single"
         st.session_state.video3_path = ""
         st.session_state.video4_path = ""
 else:
     video3_path = ""
     video4_path = ""
     st.session_state.split_extra_time_video = False
+    st.session_state.extra_time_video_mode = "single"
     st.session_state.video3_path = ""
     st.session_state.video4_path = ""
 
@@ -738,6 +775,7 @@ if not split_video:
     st.session_state.video4_path = ""
     st.session_state.video5_path = ""
     st.session_state.split_extra_time_video = False
+    st.session_state.extra_time_video_mode = "single"
     st.session_state.split_penalties_video = False
 elif video2_path and video2_path != st.session_state.video2_path:
     st.session_state.video2_path = video2_path
@@ -759,7 +797,10 @@ if csv_path and csv_path != st.session_state.csv_path:
 st.markdown(theme.step_header(3, "Kick-off Timestamps"), unsafe_allow_html=True)
 
 if split_video:
-    st.caption("Enter timestamps relative to the **start of each video file**")
+    if st.session_state.get("split_extra_time_video") and st.session_state.get("extra_time_video_mode", "single") == "single":
+        st.caption("Enter timestamps relative to the **start of each selected video file**. Both ET kick-offs use the same extra-time file.")
+    else:
+        st.caption("Enter timestamps relative to the **start of each video file**")
 else:
     st.caption("Type exactly what your video player shows — MM:SS or HH:MM:SS")
 
@@ -773,25 +814,25 @@ with kt2:
 if half1: st.session_state.half1_time = half1
 if half2: st.session_state.half2_time = half2
 
-had_et = st.checkbox("Match went to Extra Time", value=st.session_state.had_extra_time)
-st.session_state.had_extra_time = had_et
-if had_et:
+if st.session_state.get("had_extra_time"):
     et1, et2 = st.columns(2)
     with et1:
         half3 = st.text_input("ET 1st Half kick-off", value=st.session_state.half3_time,
                               placeholder="e.g. 0:00" if split_video else "e.g. 1:35:10")
     with et2:
+        et2_placeholder = "e.g. 15:30" if (
+            split_video and st.session_state.get("split_extra_time_video") and
+            st.session_state.get("extra_time_video_mode", "single") == "single"
+        ) else ("e.g. 0:00" if split_video else "e.g. 1:50:45")
         half4 = st.text_input("ET 2nd Half kick-off", value=st.session_state.half4_time,
-                              placeholder="e.g. 0:00" if split_video else "e.g. 1:50:45")
+                              placeholder=et2_placeholder)
     if half3: st.session_state.half3_time = half3
     if half4: st.session_state.half4_time = half4
 else:
     st.session_state.half3_time = ""
     st.session_state.half4_time = ""
 
-had_pso = st.checkbox("Match went to Penalty Shootout", value=st.session_state.had_penalties)
-st.session_state.had_penalties = had_pso
-if had_pso:
+if st.session_state.get("had_penalties"):
     half5 = st.text_input(
         "First penalty kick timestamp",
         value=st.session_state.half5_time,
@@ -844,7 +885,10 @@ ready = bool(
         st.session_state.get("video2_path") and os.path.exists(st.session_state.get("video2_path"))
         and (not st.session_state.get("split_extra_time_video") or (
             st.session_state.get("video3_path") and os.path.exists(st.session_state.get("video3_path")) and
-            st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path"))
+            (
+                st.session_state.get("extra_time_video_mode", "single") != "separate" or
+                (st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path")))
+            )
         ))
         and (not st.session_state.get("split_penalties_video") or (
             st.session_state.get("video5_path") and os.path.exists(st.session_state.get("video5_path"))
@@ -865,8 +909,8 @@ else:
         missing.append("2nd half video file")
     if st.session_state.get("split_video") and st.session_state.get("split_extra_time_video"):
         if not (st.session_state.get("video3_path") and os.path.exists(st.session_state.get("video3_path"))):
-            missing.append("ET 1st half video file")
-        if not (st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path"))):
+            missing.append("ET 1st half video file" if st.session_state.get("extra_time_video_mode", "single") == "separate" else "extra-time video file")
+        if st.session_state.get("extra_time_video_mode", "single") == "separate" and not (st.session_state.get("video4_path") and os.path.exists(st.session_state.get("video4_path"))):
             missing.append("ET 2nd half video file")
     if st.session_state.get("split_video") and st.session_state.get("split_penalties_video") and not (
         st.session_state.get("video5_path") and os.path.exists(st.session_state.get("video5_path"))
