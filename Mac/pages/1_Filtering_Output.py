@@ -22,6 +22,8 @@ from clipmaker_core import (
     query_data, parse_filters, render_stats_panel,
     to_seconds, assign_periods, match_clock_to_video_time,
     merge_overlapping_windows, resolve_period_starts_for_video,
+    normalise_timeline_corrections, apply_timeline_corrections,
+    parse_clock_seconds, format_clock_seconds, describe_timeline_correction,
     save_filter_snapshot, load_filter_snapshot, list_snapshots, delete_snapshot,
     INTENT_FLAG_TO_BOOL_COL,
 )
@@ -48,6 +50,99 @@ theme.render_top_nav("filtering")
 # =============================================================================
 def _ss(key, default=""):
     return st.session_state.get(key, default)
+
+
+EXPORT_FORMATS = {
+    "MP4 (.mp4)": ".mp4",
+    "MOV (.mov)": ".mov",
+    "MKV (.mkv)": ".mkv",
+}
+
+EXPORT_QUALITY_PRESETS = {
+    "Balanced (Recommended)": {"crf": 20, "preset": "veryfast", "audio": "128k"},
+    "Smaller file": {"crf": 24, "preset": "veryfast", "audio": "96k"},
+    "High quality": {"crf": 18, "preset": "slow", "audio": "160k"},
+    "Custom": None,
+}
+
+ENCODER_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"]
+AUDIO_BITRATES = ["96k", "128k", "160k", "192k", "256k"]
+
+
+def _clean_output_stem(value):
+    raw = str(value or "").strip().strip("\"'")
+    raw = raw.replace("\\", "/").split("/")[-1]
+    stem, _ext = os.path.splitext(raw)
+    return re.sub(r'[<>:"/\\|?*]+', "_", stem or raw or "Highlights").strip() or "Highlights"
+
+
+def _format_output_filename(value, extension):
+    return f"{_clean_output_stem(value)}{extension}"
+
+
+def _audio_kbps(value):
+    match = re.search(r"\d+", str(value or "128k"))
+    return int(match.group(0)) if match else 128
+
+
+def _estimated_video_mbps(crf):
+    try:
+        crf = int(crf)
+    except Exception:
+        crf = 20
+    if crf <= 18:
+        return 7.5
+    if crf <= 20:
+        return 5.0
+    if crf <= 23:
+        return 3.2
+    if crf <= 26:
+        return 2.1
+    return 1.4
+
+
+def _format_file_size(size_mb):
+    if size_mb >= 1024:
+        return f"{size_mb / 1024:.2f} GB"
+    return f"{size_mb:.0f} MB"
+
+
+def _format_duration(secs):
+    total = max(0, int(round(float(secs or 0))))
+    m, s = divmod(total, 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _format_mmss(secs):
+    total = max(0, int(round(float(secs or 0))))
+    minutes, seconds = divmod(total, 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def _parse_match_clock_from_label(label):
+    match = re.search(r"@\s*(\d+):(\d{2})\s*\(P(\d+)\)", str(label or ""))
+    if not match:
+        return None
+    return {
+        "minute": int(match.group(1)),
+        "second": int(match.group(2)),
+        "period": int(match.group(3)),
+        "clock": f"{int(match.group(1))}:{int(match.group(2)):02d}",
+        "seconds": int(match.group(1)) * 60 + int(match.group(2)),
+    }
+
+
+def _timeline_correction_summary(corrections):
+    normalised = normalise_timeline_corrections({"timeline_corrections": corrections})
+    if not normalised:
+        return "No timeline corrections active."
+    return "Active: " + "; ".join(describe_timeline_correction(c) for c in normalised)
+
+
+def _estimate_export_size(duration_seconds, crf, audio_bitrate):
+    total_mbps = _estimated_video_mbps(crf) + (_audio_kbps(audio_bitrate) / 1000)
+    return max(0.0, float(duration_seconds or 0) * total_mbps / 8)
 
 
 def _scraped_match_paths():
@@ -192,6 +287,7 @@ def _compute_windows_from_config(cfg):
         ps[5] = to_seconds(cfg["half5_time"])
     po = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
     ps = resolve_period_starts_for_video(anchor_df, ps)
+    timeline_corrections = normalise_timeline_corrections(cfg)
     df = df.copy()
     df["_clip_order"] = range(len(df))
     timestamps = []
@@ -203,9 +299,11 @@ def _compute_windows_from_config(cfg):
             timestamps.append(None)
             continue
         try:
-            timestamps.append(match_clock_to_video_time(
+            ts = match_clock_to_video_time(
                 minute, second, period, ps, po
-            ))
+            )
+            match_seconds = minute * 60 + second
+            timestamps.append(apply_timeline_corrections(ts, match_seconds, period, timeline_corrections))
         except (TypeError, ValueError):
             timestamps.append(None)
     df["video_timestamp"] = timestamps
@@ -901,10 +999,126 @@ with tab_manual:
     final_out_dir = st.session_state.get("output_dir") or "output"
 
     individual = st.checkbox("Save individual clips instead of one combined reel")
+    export_size_placeholder = None
     if not individual:
-        out_filename = st.text_input("Output Filename", value="Highlights.mp4")
+        raw_out_name = st.text_input("Output name", value="Highlights")
+        with st.expander("Advanced export settings", expanded=False):
+            export_format_label = st.selectbox(
+                "Format",
+                options=list(EXPORT_FORMATS.keys()),
+                index=0,
+                help="MP4 is the safest choice for sharing and playback.",
+            )
+            quality_label = st.selectbox(
+                "Quality",
+                options=list(EXPORT_QUALITY_PRESETS.keys()),
+                index=0,
+            )
+            quality_defaults = EXPORT_QUALITY_PRESETS.get(quality_label) or EXPORT_QUALITY_PRESETS["Balanced (Recommended)"]
+            if quality_label == "Custom":
+                video_crf = st.slider(
+                    "Video quality (CRF)",
+                    min_value=16,
+                    max_value=30,
+                    value=20,
+                    help="Lower values look better and create larger files.",
+                )
+                encoder_preset = st.selectbox(
+                    "Encoder speed",
+                    options=ENCODER_PRESETS,
+                    index=ENCODER_PRESETS.index("veryfast"),
+                    help="Slower presets can reduce file size but take longer.",
+                )
+                audio_bitrate = st.selectbox(
+                    "Audio bitrate",
+                    options=AUDIO_BITRATES,
+                    index=AUDIO_BITRATES.index("128k"),
+                )
+            else:
+                video_crf = quality_defaults["crf"]
+                encoder_preset = quality_defaults["preset"]
+                audio_bitrate = quality_defaults["audio"]
+                st.caption(
+                    f"CRF {video_crf} · {encoder_preset} encoder · {audio_bitrate} audio"
+                )
+            export_size_placeholder = st.empty()
+        export_ext = EXPORT_FORMATS[export_format_label]
+        out_filename = _format_output_filename(raw_out_name, export_ext)
+        st.caption(f"Final export: `{out_filename}`")
     else:
         out_filename = "Highlights.mp4"
+        export_format_label = "MP4 (.mp4)"
+        video_crf = 20
+        encoder_preset = "veryfast"
+        audio_bitrate = "128k"
+
+    st.session_state.setdefault("timeline_corrections", [])
+    with st.expander("Advanced timing corrections", expanded=bool(st.session_state.get("timeline_corrections"))):
+        st.caption(
+            "Use this when the recording skipped, shortened, or added time. Corrections affect every later clip in the same half/period, and multiple corrections stack within that period."
+        )
+        corrections = st.session_state.get("timeline_corrections", []) or []
+        valid_corrections = normalise_timeline_corrections({"timeline_corrections": corrections})
+        if valid_corrections:
+            for idx, original_correction in enumerate(corrections):
+                normalised_one = normalise_timeline_corrections({"timeline_corrections": [original_correction]})
+                if not normalised_one:
+                    continue
+                correction = normalised_one[0]
+                row_c1, row_c2 = st.columns([5, 1], gap="small")
+                with row_c1:
+                    note = f" - {correction['note']}" if correction.get("note") else ""
+                    st.markdown(f"`{describe_timeline_correction(correction)}{note}`")
+                with row_c2:
+                    if st.button("Remove", key=f"remove_timeline_correction_{idx}", use_container_width=True):
+                        original = list(st.session_state.get("timeline_corrections", []) or [])
+                        if idx < len(original):
+                            original.pop(idx)
+                        st.session_state["timeline_corrections"] = original
+                        st.session_state.pop("_preview_windows", None)
+                        st.session_state.pop("_preview_video_sources", None)
+                        st.rerun()
+            if st.button("Clear all timing corrections", key="clear_all_timeline_corrections", use_container_width=True):
+                st.session_state["timeline_corrections"] = []
+                st.session_state.pop("_preview_windows", None)
+                st.session_state.pop("_preview_video_sources", None)
+                st.rerun()
+        else:
+            st.info("No timing corrections are active.")
+
+        st.markdown("**Add correction manually**")
+        tc1, tc2, tc3, tc4 = st.columns([1, 1.5, 2, 1.5], gap="small")
+        with tc1:
+            manual_period = st.selectbox("Period", [1, 2, 3, 4, 5], format_func=lambda p: f"P{p}", key="manual_timeline_period")
+        with tc2:
+            manual_clock = st.text_input("From match clock", value="25:52", key="manual_timeline_clock", help="Use the match clock shown in the data or preview, for example 25:52 or 67:39.")
+        with tc3:
+            manual_direction = st.selectbox(
+                "Problem",
+                ["Recording is shorter; move later clips earlier", "Recording has extra time; move later clips later"],
+                key="manual_timeline_direction",
+            )
+        with tc4:
+            manual_amount = st.text_input("Shift by", value="00:00", key="manual_timeline_amount", help="Use MM:SS, for example 02:51.")
+        manual_note = st.text_input("Note", value="", key="manual_timeline_note", placeholder="Optional, e.g. water break shortened")
+        if st.button("Add timing correction", key="add_manual_timeline_correction", use_container_width=True):
+            at_seconds = parse_clock_seconds(manual_clock)
+            amount_seconds = parse_clock_seconds(manual_amount)
+            if at_seconds is None:
+                st.error("Use a valid match clock, for example 25:52.")
+            elif not amount_seconds:
+                st.error("Shift amount must be greater than 00:00.")
+            else:
+                signed = -float(amount_seconds) if manual_direction.startswith("Recording is shorter") else float(amount_seconds)
+                st.session_state["timeline_corrections"] = list(st.session_state.get("timeline_corrections", []) or []) + [{
+                    "period": int(manual_period),
+                    "clock": format_clock_seconds(at_seconds),
+                    "seconds": signed,
+                    "note": manual_note.strip() or "manual correction",
+                }]
+                st.session_state.pop("_preview_windows", None)
+                st.session_state.pop("_preview_video_sources", None)
+                st.rerun()
 
     st.divider()
 
@@ -949,6 +1163,11 @@ with tab_manual:
             "min_gap":          min_gap,
             "output_dir":       final_out_dir,
             "output_filename":  out_filename,
+            "output_format":    EXPORT_FORMATS.get(export_format_label, ".mp4"),
+            "video_crf":        int(video_crf),
+            "encoder_preset":   encoder_preset,
+            "audio_bitrate":    audio_bitrate,
+            "timeline_corrections": st.session_state.get("timeline_corrections", []),
             "individual_clips": individual,
             "dry_run":          dry_run,
             "half_filter":      half_filter,
@@ -1009,6 +1228,18 @@ with tab_manual:
         windows = _compute_windows_from_config(cfg)
         return windows, _video_sources_for_windows(cfg, windows)
 
+    if export_size_placeholder is not None:
+        try:
+            estimate_windows = _compute_windows_from_config(_build_config(dry_run=True))
+            estimate_duration = sum(max(0.0, float(end) - float(start)) for start, end, _label, _period in estimate_windows)
+            estimate_size = _estimate_export_size(estimate_duration, video_crf, audio_bitrate)
+            export_size_placeholder.caption(
+                f"Estimated export: {_format_file_size(estimate_size)} for {_format_duration(estimate_duration)} "
+                f"({len(estimate_windows)} clips)"
+            )
+        except Exception:
+            export_size_placeholder.caption("Estimated export size appears after match setup is complete.")
+
     # ── Helper: cut a single clip with ffmpeg ─────────────────────────────────
     def _get_ffmpeg():
         cmd = shutil.which("ffmpeg")
@@ -1052,8 +1283,8 @@ with tab_manual:
         ff = _get_ffmpeg()
         r = subprocess.run(
             [ff, "-y", "-ss", str(start), "-to", str(end), "-i", src,
-             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
-             "-c:a", "aac", "-avoid_negative_ts", "make_zero", out_path],
+             "-c:v", "libx264", "-preset", encoder_preset, "-crf", str(video_crf), "-threads", "0",
+             "-c:a", "aac", "-b:a", audio_bitrate, "-avoid_negative_ts", "make_zero", out_path],
             capture_output=True, text=True)
         if r.returncode != 0:
             raise ValueError(f"FFmpeg error: {r.stderr[-300:]}")
@@ -1236,6 +1467,8 @@ with tab_manual:
         _hdr1, _hdr2 = st.columns([5, 1])
         with _hdr1:
             st.success(f"**{len(_pw)} clip{'s' if len(_pw) != 1 else ''}** match the current filters.")
+            if st.session_state.get("timeline_corrections"):
+                st.caption(_timeline_correction_summary(st.session_state.get("timeline_corrections")))
         with _hdr2:
             if st.button("Clear", key="_clear_preview_btn", use_container_width=True, icon=theme.icon_shortcode("[X]")):
                 _clear_preview()
@@ -1298,6 +1531,46 @@ with tab_manual:
                 with editor_c1:
                     st.markdown(f"**Start:** {_fmt(s)}  \n**End:** {_fmt(e)}  \n**Duration:** {dur:.0f}s")
                     st.caption(lbl)
+                    label_clock = _parse_match_clock_from_label(lbl)
+                    st.markdown("**Fix Timeline Drift**")
+                    if label_clock:
+                        st.caption(
+                            "Use this if this clip is lined up but every later clip in this half is early or late."
+                        )
+                        drift_c1, drift_c2 = st.columns([2, 1], gap="small")
+                        with drift_c1:
+                            drift_direction = st.selectbox(
+                                "Later clips are",
+                                ["Too late; recording is shorter", "Too early; recording has extra time"],
+                                key=f"timeline_direction_{i}",
+                            )
+                        with drift_c2:
+                            drift_amount = st.text_input(
+                                "Shift by",
+                                value="00:00",
+                                key=f"timeline_amount_{i}",
+                                help="Use MM:SS. Negative shifts are handled by the selected direction.",
+                            )
+                        if st.button(
+                            f"Apply from {label_clock['clock']} (P{label_clock['period']})",
+                            key=f"apply_timeline_correction_{i}",
+                            use_container_width=True,
+                        ):
+                            amount_seconds = _parse_duration_input(drift_amount, 0)
+                            if amount_seconds <= 0:
+                                st.error("Enter a shift greater than 00:00.")
+                            else:
+                                signed = -float(amount_seconds) if drift_direction.startswith("Too late") else float(amount_seconds)
+                                st.session_state["timeline_corrections"] = list(st.session_state.get("timeline_corrections", []) or []) + [{
+                                    "period": label_clock["period"],
+                                    "clock": label_clock["clock"],
+                                    "seconds": signed,
+                                    "note": f"preview clip {i+1}",
+                                }]
+                                _clear_preview()
+                                st.rerun()
+                    else:
+                        st.caption("This merged clip has no readable match-clock label, so add the correction in Advanced timing corrections.")
                     st.markdown("**Manual Extension**")
                     use_manual_extension = st.checkbox(
                         "Use MM:SS inputs",
