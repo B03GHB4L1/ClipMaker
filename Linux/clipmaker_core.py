@@ -192,6 +192,79 @@ def match_clock_to_video_time(minute, second, period, period_start, period_offse
         raise ValueError(f"Negative elapsed at {minute}:{second:02d} P{period}.")
     return period_start[period] + elapsed
 
+def parse_clock_seconds(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        return int(round(float(value)))
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parts = [int(float(p.strip())) for p in text.split(":")]
+        if len(parts) == 1:
+            return parts[0]
+        if len(parts) == 2 and parts[0] >= 0 and 0 <= parts[1] <= 59:
+            return parts[0] * 60 + parts[1]
+        if len(parts) == 3 and parts[0] >= 0 and 0 <= parts[1] <= 59 and 0 <= parts[2] <= 59:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    except Exception:
+        return None
+    return None
+
+def format_clock_seconds(seconds):
+    total = max(0, int(round(float(seconds or 0))))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes}:{secs:02d}"
+
+def normalise_timeline_corrections(config):
+    corrections = []
+    for item in config.get("timeline_corrections", []) or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            period = int(float(item.get("period", 0)))
+        except Exception:
+            continue
+        if period not in PERIOD_MAP.values():
+            continue
+        at_seconds = parse_clock_seconds(item.get("clock", item.get("at_seconds")))
+        if at_seconds is None:
+            continue
+        try:
+            amount = float(item.get("seconds", item.get("amount_seconds", 0)) or 0)
+        except Exception:
+            continue
+        if abs(amount) < 0.01:
+            continue
+        corrections.append({
+            "period": period,
+            "at_seconds": int(at_seconds),
+            "amount_seconds": amount,
+            "note": str(item.get("note", "") or "").strip(),
+        })
+    return sorted(corrections, key=lambda c: (c["period"], c["at_seconds"]))
+
+def apply_timeline_corrections(video_timestamp, match_clock_seconds, period, corrections):
+    corrected = float(video_timestamp)
+    try:
+        period = int(period)
+        match_clock_seconds = int(match_clock_seconds)
+    except Exception:
+        return corrected
+    for correction in corrections or []:
+        if correction["period"] == period and match_clock_seconds >= correction["at_seconds"]:
+            corrected += float(correction["amount_seconds"])
+    return corrected
+
+def describe_timeline_correction(correction):
+    amount = float(correction.get("amount_seconds", 0) or 0)
+    direction = "add" if amount > 0 else "subtract"
+    return (
+        f"P{correction.get('period')} from {format_clock_seconds(correction.get('at_seconds'))}: "
+        f"{direction} {format_clock_seconds(abs(amount))}"
+    )
+
 def _row_match_seconds(row, period=None):
     minute = safe_clock_int(row.get("minute"))
     second = safe_clock_int(row.get("second"))
@@ -755,6 +828,13 @@ def run_clip_maker(config, log_queue, progress_queue):
         if filtered_count > 0:
             log(f"Filters removed {filtered_count} events.")
 
+        timeline_corrections = normalise_timeline_corrections(config)
+        if timeline_corrections:
+            log("Timeline corrections active:")
+            for correction in timeline_corrections:
+                note = f" ({correction['note']})" if correction.get("note") else ""
+                log(f"  - {describe_timeline_correction(correction)}{note}")
+
         df = df.copy()
         df["_clip_order"] = range(len(df))
         timestamps = []
@@ -774,6 +854,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                 ts = match_clock_to_video_time(
                     minute, second, period, period_start, period_offset
                 )
+                match_seconds = _clock_seconds_for_period(minute, second, period)
+                ts = apply_timeline_corrections(ts, match_seconds, period, timeline_corrections)
                 timestamps.append(ts)
             except (TypeError, ValueError) as e:
                 log(f"  WARNING: {e}")
@@ -831,11 +913,15 @@ def run_clip_maker(config, log_queue, progress_queue):
         def get_video_duration(path, ffmpeg_bin):
             import subprocess, re
             r = subprocess.run([ffmpeg_bin, "-i", path], capture_output=True, text=True)
-            output = r.stdout + r.stderr
+            output = (r.stdout or "") + (r.stderr or "")
             m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", output)
             if not m:
                 raise ValueError(f"Could not determine duration of {path}")
             return int(m.group(1))*3600 + int(m.group(2))*60 + float(m.group(3))
+
+        video_crf = str(config.get("video_crf", 20))
+        encoder_preset = str(config.get("encoder_preset", "veryfast") or "veryfast")
+        audio_bitrate = str(config.get("audio_bitrate", "128k") or "128k")
 
         def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
             import subprocess
@@ -846,8 +932,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                 "-i", src_path,
                 "-t", str(duration),
                 "-map", "0:v:0", "-map", "0:a:0",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-threads", "0",
-                "-c:a", "aac", "-b:a", "128k",
+                "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
+                "-c:a", "aac", "-b:a", audio_bitrate,
                 "-avoid_negative_ts", "make_zero",
                 out_path
             ]
@@ -1003,7 +1089,11 @@ def run_clip_maker(config, log_queue, progress_queue):
 
             total_dur = sum(e - s for _, s, e in clip_specs)
             log(f"Assembling {len(clip_specs)} clips ({total_dur:.1f}s)...")
-            out_path = os.path.join(out_dir, config["output_filename"])
+            output_filename = str(config.get("output_filename") or "Highlights.mp4").strip().strip("\"'")
+            output_filename = output_filename.replace("\\", "/").split("/")[-1] or "Highlights.mp4"
+            if not os.path.splitext(output_filename)[1]:
+                output_filename = f"{output_filename}.mp4"
+            out_path = os.path.join(out_dir, output_filename)
 
             assembly_start = time.time()
             stop_event = threading.Event()
