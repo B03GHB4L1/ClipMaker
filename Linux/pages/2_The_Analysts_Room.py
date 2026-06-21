@@ -13,6 +13,7 @@ from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
     detect_progressive_chains, detect_possession_carries, detect_press_wins, get_chain_actions,
     read_csv_safe, resolve_period_starts_for_video, match_clock_to_video_time,
+    normalise_timeline_corrections, apply_timeline_corrections,
 )
 
 try:
@@ -608,6 +609,23 @@ def _analysts_room_buffers():
     )
 
 
+def _analysts_room_timeline_corrections():
+    return normalise_timeline_corrections({
+        "timeline_corrections": st.session_state.get("timeline_corrections", [])
+    })
+
+
+def _corrected_video_timestamp(minute, second, period_int, period_start, period_offset):
+    base_ts = match_clock_to_video_time(int(minute), int(second), period_int, period_start, period_offset)
+    match_seconds = int(minute) * 60 + int(second)
+    return apply_timeline_corrections(
+        base_ts,
+        match_seconds,
+        period_int,
+        _analysts_room_timeline_corrections(),
+    )
+
+
 def cut_clip(minute, second, period_str, before=None, after=None):
     if not video_path:
         raise ValueError("No video file loaded. Go to Home and set a video path.")
@@ -628,7 +646,7 @@ def cut_clip(minute, second, period_str, before=None, after=None):
     period_start = resolve_period_starts_for_video(globals().get("df_all"), period_start)
     if period_int not in period_start:
         raise ValueError(f"No kick-off time set for period {period_int}.")
-    video_ts = match_clock_to_video_time(int(minute), int(second), period_int, period_start, period_offset)
+    video_ts = _corrected_video_timestamp(int(minute), int(second), period_int, period_start, period_offset)
     start_ts = max(0.0, video_ts - before)
     duration = (video_ts + after) - start_ts
     if split_video and period_int >= 2:
@@ -676,8 +694,8 @@ def cut_build_up_clip(chain, df_source):
     if period_int not in period_start:
         raise ValueError(f"No kick-off time set for period {period_int}.")
 
-    start_video_ts = match_clock_to_video_time(start_minute, start_second, period_int, period_start, period_offset)
-    end_video_ts   = match_clock_to_video_time(end_minute, end_second, period_int, period_start, period_offset)
+    start_video_ts = _corrected_video_timestamp(start_minute, start_second, period_int, period_start, period_offset)
+    end_video_ts   = _corrected_video_timestamp(end_minute, end_second, period_int, period_start, period_offset)
     clip_start_ts  = max(0.0, start_video_ts - _before_buf)
     clip_end_ts    = max(clip_start_ts, end_video_ts + _after_buf)
     duration       = max(1.0, clip_end_ts - clip_start_ts)

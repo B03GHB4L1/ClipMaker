@@ -8,7 +8,15 @@ import streamlit as st
 
 from whoscored_scraper import scrape_whoscored, save_scraped_match_csv
 from scoresway_scraper import scrape_scoresway
-from clipmaker_core import normalize_event_labels, ping_proxy, read_csv_safe
+from clipmaker_core import (
+    describe_timeline_correction,
+    format_clock_seconds,
+    normalise_timeline_corrections,
+    normalize_event_labels,
+    parse_clock_seconds,
+    ping_proxy,
+    read_csv_safe,
+)
 import theme
 
 # =============================================================================
@@ -85,6 +93,7 @@ for key, default in [
     ("split_extra_time_video", False), ("extra_time_video_mode", "single"), ("split_penalties_video", False),
     ("split_video", False), ("whoscored_url", ""),
     ("before_buffer", 5), ("after_buffer", 8), ("min_gap", 6),
+    ("timeline_corrections", []),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -242,7 +251,7 @@ _MATCH_SETUP_KEYS = [
     "csv_path", "half1_time", "half2_time", "half3_time", "half4_time",
     "half5_time", "had_extra_time", "had_penalties",
     "split_extra_time_video", "extra_time_video_mode", "split_penalties_video", "split_video",
-    "before_buffer", "after_buffer", "min_gap",
+    "before_buffer", "after_buffer", "min_gap", "timeline_corrections",
 ]
 
 
@@ -438,7 +447,8 @@ if scrape_btn:
 
         # Map log message keywords → step index so the UI advances as work progresses
         _STEP_SIGNALS = [
-            ("connect", 0), ("detected", 0), ("source", 0),
+            ("connect", 0), ("loading", 1), ("loaded", 1),
+            ("detected", 0), ("source", 0),
             ("performfeeds", 1), ("loading", 1), ("loaded", 1),
             ("primary event", 2), ("extracting", 2), ("event data", 2), ("matchevent", 2),
             ("xt values", 3), ("progressive", 3), ("xT", 3),
@@ -758,52 +768,153 @@ if csv_path and csv_path != st.session_state.csv_path:
 # =============================================================================
 st.markdown(theme.step_header(3, "Kick-off Timestamps"), unsafe_allow_html=True)
 
-if split_video:
-    if st.session_state.get("split_extra_time_video") and st.session_state.get("extra_time_video_mode", "single") == "single":
-        st.caption("Enter timestamps relative to the **start of each selected video file**. Both ET kick-offs use the same extra-time file.")
+kickoff_tab, correction_tab = st.tabs(["Kick-offs", "Timeline corrections"])
+
+with kickoff_tab:
+    if split_video:
+        if st.session_state.get("split_extra_time_video") and st.session_state.get("extra_time_video_mode", "single") == "single":
+            st.caption("Enter timestamps relative to the **start of each selected video file**. Both ET kick-offs use the same extra-time file.")
+        else:
+            st.caption("Enter timestamps relative to the **start of each video file**")
     else:
-        st.caption("Enter timestamps relative to the **start of each video file**")
-else:
-    st.caption("Type exactly what your video player shows — MM:SS or HH:MM:SS")
+        st.caption("Type exactly what your video player shows — MM:SS or HH:MM:SS")
 
-kt1, kt2 = st.columns(2)
-with kt1:
-    half1 = st.text_input("1st Half kick-off", value=st.session_state.half1_time, placeholder="e.g. 4:16")
-with kt2:
-    half2 = st.text_input("2nd Half kick-off", value=st.session_state.half2_time,
-                           placeholder="e.g. 0:45" if split_video else "e.g. 1:00:32")
+    kt1, kt2 = st.columns(2)
+    with kt1:
+        half1 = st.text_input("1st Half kick-off", value=st.session_state.half1_time, placeholder="e.g. 4:16")
+    with kt2:
+        half2 = st.text_input("2nd Half kick-off", value=st.session_state.half2_time,
+                               placeholder="e.g. 0:45" if split_video else "e.g. 1:00:32")
 
-if half1: st.session_state.half1_time = half1
-if half2: st.session_state.half2_time = half2
+    if half1: st.session_state.half1_time = half1
+    if half2: st.session_state.half2_time = half2
 
-if st.session_state.get("had_extra_time"):
-    et1, et2 = st.columns(2)
-    with et1:
-        half3 = st.text_input("ET 1st Half kick-off", value=st.session_state.half3_time,
-                              placeholder="e.g. 0:00" if split_video else "e.g. 1:35:10")
-    with et2:
-        et2_placeholder = "e.g. 15:30" if (
-            split_video and st.session_state.get("split_extra_time_video") and
-            st.session_state.get("extra_time_video_mode", "single") == "single"
-        ) else ("e.g. 0:00" if split_video else "e.g. 1:50:45")
-        half4 = st.text_input("ET 2nd Half kick-off", value=st.session_state.half4_time,
-                              placeholder=et2_placeholder)
-    if half3: st.session_state.half3_time = half3
-    if half4: st.session_state.half4_time = half4
-else:
-    st.session_state.half3_time = ""
-    st.session_state.half4_time = ""
+    if st.session_state.get("had_extra_time"):
+        et1, et2 = st.columns(2)
+        with et1:
+            half3 = st.text_input("ET 1st Half kick-off", value=st.session_state.half3_time,
+                                  placeholder="e.g. 0:00" if split_video else "e.g. 1:35:10")
+        with et2:
+            et2_placeholder = "e.g. 15:30" if (
+                split_video and st.session_state.get("split_extra_time_video") and
+                st.session_state.get("extra_time_video_mode", "single") == "single"
+            ) else ("e.g. 0:00" if split_video else "e.g. 1:50:45")
+            half4 = st.text_input("ET 2nd Half kick-off", value=st.session_state.half4_time,
+                                  placeholder=et2_placeholder)
+        if half3: st.session_state.half3_time = half3
+        if half4: st.session_state.half4_time = half4
+    else:
+        st.session_state.half3_time = ""
+        st.session_state.half4_time = ""
 
-if st.session_state.get("had_penalties"):
-    half5 = st.text_input(
-        "First penalty kick timestamp",
-        value=st.session_state.half5_time,
-        placeholder="e.g. 0:20" if split_video else "e.g. 2:05:30",
-        help="Use the video timestamp where the first penalty taker strikes the ball. ClipMaker derives the 120:00 period anchor from the event data."
+    if st.session_state.get("had_penalties"):
+        half5 = st.text_input(
+            "First penalty kick timestamp",
+            value=st.session_state.half5_time,
+            placeholder="e.g. 0:20" if split_video else "e.g. 2:05:30",
+            help="Use the video timestamp where the first penalty taker strikes the ball. ClipMaker derives the 120:00 period anchor from the event data."
+        )
+        if half5: st.session_state.half5_time = half5
+    else:
+        st.session_state.half5_time = ""
+
+with correction_tab:
+    st.caption(
+        "Use this when the recording skipped, shortened, or added time. "
+        "Corrections apply globally to previews, exports, Analyst's Room, and Tactical Lab."
     )
-    if half5: st.session_state.half5_time = half5
-else:
-    st.session_state.half5_time = ""
+
+    active_corrections = list(st.session_state.get("timeline_corrections", []) or [])
+    normalised_corrections = normalise_timeline_corrections({"timeline_corrections": active_corrections})
+
+    if normalised_corrections:
+        st.markdown("Active timing corrections")
+        for idx, original in enumerate(active_corrections):
+            one_correction = normalise_timeline_corrections({"timeline_corrections": [original]})
+            if not one_correction:
+                continue
+            correction = one_correction[0]
+            label_col, remove_col = st.columns([5, 1])
+            note = correction.get("note", "")
+            with label_col:
+                st.write(describe_timeline_correction(correction) + (f" - {note}" if note else ""))
+            with remove_col:
+                if st.button("Remove", key=f"home_remove_timeline_correction_{idx}"):
+                    updated = list(st.session_state.get("timeline_corrections", []) or [])
+                    if idx < len(updated):
+                        updated.pop(idx)
+                    st.session_state["timeline_corrections"] = updated
+                    _capture_match_setup(st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path"))
+                    st.rerun()
+        if st.button("Clear all timing corrections", key="home_clear_timeline_corrections"):
+            st.session_state["timeline_corrections"] = []
+            _capture_match_setup(st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path"))
+            st.rerun()
+    else:
+        st.info("No global timing corrections are active.")
+
+    st.markdown("Add timing correction")
+    add_period_col, add_clock_col, add_shift_col = st.columns(3)
+    with add_period_col:
+        correction_period = st.selectbox(
+            "Half / period",
+            options=[1, 2, 3, 4, 5],
+            format_func=lambda value: {
+                1: "1st half",
+                2: "2nd half",
+                3: "ET 1st half",
+                4: "ET 2nd half",
+                5: "Penalty shootout",
+            }.get(value, f"P{value}"),
+            key="home_timeline_period",
+        )
+    with add_clock_col:
+        correction_clock = st.text_input(
+            "From match clock",
+            value=st.session_state.get("home_timeline_clock", ""),
+            placeholder="e.g. 25:52",
+            key="home_timeline_clock",
+        )
+    with add_shift_col:
+        correction_shift = st.text_input(
+            "Shift by",
+            value=st.session_state.get("home_timeline_shift", ""),
+            placeholder="e.g. 2:15",
+            key="home_timeline_shift",
+        )
+
+    direction = st.selectbox(
+        "Recording issue",
+        [
+            "Recording is shorter; move later clips earlier",
+            "Recording has extra time; move later clips later",
+        ],
+        key="home_timeline_direction",
+    )
+    correction_note = st.text_input(
+        "Note",
+        value=st.session_state.get("home_timeline_note", ""),
+        placeholder="e.g. hydration break shortened",
+        key="home_timeline_note",
+    )
+
+    if st.button("Add timing correction", key="home_add_timeline_correction"):
+        at_seconds = parse_clock_seconds(correction_clock)
+        amount_seconds = parse_clock_seconds(correction_shift)
+        if at_seconds is None:
+            st.error("Enter the match clock as MM:SS or HH:MM:SS.")
+        elif amount_seconds is None or amount_seconds <= 0:
+            st.error("Enter a positive shift amount as MM:SS or HH:MM:SS.")
+        else:
+            signed_amount = -amount_seconds if direction.startswith("Recording is shorter") else amount_seconds
+            st.session_state["timeline_corrections"] = active_corrections + [{
+                "period": int(correction_period),
+                "clock": format_clock_seconds(at_seconds),
+                "seconds": signed_amount,
+                "note": correction_note.strip() or "home correction",
+            }]
+            _capture_match_setup(st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path"))
+            st.rerun()
 
 
 # =============================================================================
@@ -881,6 +992,7 @@ else:
     if not st.session_state.half1_time: missing.append("1st half kick-off")
     if not st.session_state.half2_time: missing.append("2nd half kick-off")
     if missing:
-        st.info(f"Still needed: {', '.join(missing)}")
+        st.info(f"Still needed for a both-halves/full-match setup: {', '.join(missing)}")
+        st.caption("Standalone half exports are OK: choose 1st half only or 2nd half only on Filtering/Output and provide only that half's video and kick-off timestamp.")
 
 theme.render_support_footer("Home")

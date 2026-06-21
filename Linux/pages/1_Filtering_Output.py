@@ -263,7 +263,14 @@ def _valid_player_selection(key, options):
 
 
 def _compute_windows_from_config(cfg):
-    if not cfg.get("data_file") or not cfg.get("half1_time") or not cfg.get("half2_time"):
+    hf = cfg.get("half_filter", "Both halves")
+    if hf == "1st half only":
+        required_time_keys = ["half1_time"]
+    elif hf == "2nd half only":
+        required_time_keys = ["half2_time"]
+    else:
+        required_time_keys = ["half1_time", "half2_time"]
+    if not cfg.get("data_file") or any(not cfg.get(key) for key in required_time_keys):
         return []
     df = read_csv_safe(cfg["data_file"])
     for col in ["minute", "second", "type"]:
@@ -272,13 +279,16 @@ def _compute_windows_from_config(cfg):
     period_col_val = cfg.get("period_column") or None
     df = assign_periods(df, period_col_val, cfg.get("fallback_row"))
     anchor_df = df.copy()
-    hf = cfg.get("half_filter", "Both halves")
     if hf == "1st half only":
         df = df[df["resolved_period"] == 1]
     elif hf == "2nd half only":
         df = df[df["resolved_period"] == 2]
     df, _ = apply_filters(df, cfg)
-    ps = {1: to_seconds(cfg["half1_time"]), 2: to_seconds(cfg["half2_time"])}
+    ps = {}
+    if cfg.get("half1_time"):
+        ps[1] = to_seconds(cfg["half1_time"])
+    if cfg.get("half2_time"):
+        ps[2] = to_seconds(cfg["half2_time"])
     if cfg.get("half3_time", "").strip():
         ps[3] = to_seconds(cfg["half3_time"])
     if cfg.get("half4_time", "").strip():
@@ -519,9 +529,12 @@ fallback_row = 0
 
 def _missing_video_setup_errors():
     errors = []
-    if not (final_video and os.path.exists(final_video)):
+    half_filter_value = globals().get("half_filter", "Both halves")
+    needs_primary_video = (half_filter_value != "2nd half only") or not split_video
+    needs_second_half_video = split_video and half_filter_value != "1st half only"
+    if needs_primary_video and not (final_video and os.path.exists(final_video)):
         errors.append("Video file is required (set it on the Home page).")
-    if split_video and not (final_video2 and os.path.exists(final_video2)):
+    if needs_second_half_video and not (final_video2 and os.path.exists(final_video2)):
         errors.append("2nd half video file is required when split-video mode is enabled.")
     if split_video and split_et_video:
         if not (final_video3 and os.path.exists(final_video3)):
@@ -726,6 +739,10 @@ with tab_manual:
         options=["Both halves", "1st half only", "2nd half only"],
         help="Restrict clips to a specific half."
     )
+    if half_filter == "Both halves" and not half1:
+        st.caption("Both-halves output needs the 1st-half kick-off. If you only have the 2nd-half file, choose 2nd half only here.")
+    elif half_filter == "Both halves" and not half2:
+        st.caption("Both-halves output needs the 2nd-half kick-off. If you only have the 1st-half file, choose 1st half only here.")
 
     # ── Action Type ──────────────────────────────────────────────────────────
     filter_types = st.multiselect(
@@ -999,58 +1016,57 @@ with tab_manual:
     final_out_dir = st.session_state.get("output_dir") or "output"
 
     individual = st.checkbox("Save individual clips instead of one combined reel")
-    export_size_placeholder = None
     if not individual:
         raw_out_name = st.text_input("Output name", value="Highlights")
-        with st.expander("Advanced export settings", expanded=False):
-            export_format_label = st.selectbox(
-                "Format",
-                options=list(EXPORT_FORMATS.keys()),
-                index=0,
-                help="MP4 is the safest choice for sharing and playback.",
-            )
-            quality_label = st.selectbox(
-                "Quality",
-                options=list(EXPORT_QUALITY_PRESETS.keys()),
-                index=0,
-            )
-            quality_defaults = EXPORT_QUALITY_PRESETS.get(quality_label) or EXPORT_QUALITY_PRESETS["Balanced (Recommended)"]
-            if quality_label == "Custom":
-                video_crf = st.slider(
-                    "Video quality (CRF)",
-                    min_value=16,
-                    max_value=30,
-                    value=20,
-                    help="Lower values look better and create larger files.",
-                )
-                encoder_preset = st.selectbox(
-                    "Encoder speed",
-                    options=ENCODER_PRESETS,
-                    index=ENCODER_PRESETS.index("veryfast"),
-                    help="Slower presets can reduce file size but take longer.",
-                )
-                audio_bitrate = st.selectbox(
-                    "Audio bitrate",
-                    options=AUDIO_BITRATES,
-                    index=AUDIO_BITRATES.index("128k"),
-                )
-            else:
-                video_crf = quality_defaults["crf"]
-                encoder_preset = quality_defaults["preset"]
-                audio_bitrate = quality_defaults["audio"]
-                st.caption(
-                    f"CRF {video_crf} · {encoder_preset} encoder · {audio_bitrate} audio"
-                )
-            export_size_placeholder = st.empty()
-        export_ext = EXPORT_FORMATS[export_format_label]
-        out_filename = _format_output_filename(raw_out_name, export_ext)
-        st.caption(f"Final export: `{out_filename}`")
     else:
-        out_filename = "Highlights.mp4"
-        export_format_label = "MP4 (.mp4)"
-        video_crf = 20
-        encoder_preset = "veryfast"
-        audio_bitrate = "128k"
+        raw_out_name = "Highlights"
+    export_size_placeholder = None
+    with st.expander("Advanced export settings", expanded=False):
+        export_format_label = st.selectbox(
+            "Format",
+            options=list(EXPORT_FORMATS.keys()),
+            index=0,
+            help="MP4 is the safest choice for sharing and playback.",
+        )
+        quality_label = st.selectbox(
+            "Quality",
+            options=list(EXPORT_QUALITY_PRESETS.keys()),
+            index=0,
+        )
+        quality_defaults = EXPORT_QUALITY_PRESETS.get(quality_label) or EXPORT_QUALITY_PRESETS["Balanced (Recommended)"]
+        if quality_label == "Custom":
+            video_crf = st.slider(
+                "Video quality (CRF)",
+                min_value=16,
+                max_value=30,
+                value=20,
+                help="Lower values look better and create larger files.",
+            )
+            encoder_preset = st.selectbox(
+                "Encoder speed",
+                options=ENCODER_PRESETS,
+                index=ENCODER_PRESETS.index("veryfast"),
+                help="Slower presets can reduce file size but take longer.",
+            )
+            audio_bitrate = st.selectbox(
+                "Audio bitrate",
+                options=AUDIO_BITRATES,
+                index=AUDIO_BITRATES.index("128k"),
+            )
+        else:
+            video_crf = quality_defaults["crf"]
+            encoder_preset = quality_defaults["preset"]
+            audio_bitrate = quality_defaults["audio"]
+            st.caption(
+                f"CRF {video_crf} · {encoder_preset} encoder · {audio_bitrate} audio"
+            )
+        export_size_placeholder = st.empty()
+    export_ext = EXPORT_FORMATS[export_format_label]
+    out_filename = _format_output_filename(raw_out_name, export_ext)
+    if individual:
+        st.caption(f"Individual clips will use `{export_ext}` with the selected quality.")
+    else:
+        st.caption(f"Final export: `{out_filename}`")
 
     st.session_state.setdefault("timeline_corrections", [])
     with st.expander("Advanced timing corrections", expanded=bool(st.session_state.get("timeline_corrections"))):
@@ -1222,7 +1238,11 @@ with tab_manual:
     # ── Helper: compute clip windows from current filters ─────────────────────
     def _compute_windows():
         """Return (windows, video_sources) using the same pipeline as run_clip_maker."""
-        if not final_csv or not half1 or not half2:
+        if not final_csv:
+            return [], []
+        if half_filter != "2nd half only" and not half1:
+            return [], []
+        if half_filter != "1st half only" and not half2:
             return [], []
         cfg = _build_config(dry_run=True)
         windows = _compute_windows_from_config(cfg)
@@ -1434,10 +1454,10 @@ with tab_manual:
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
         errors.extend(_missing_video_setup_errors())
-        if not half1:
-            errors.append("1st half kick-off time is required (set it on the Home page).")
-        if not half2:
-            errors.append("2nd half kick-off time is required (set it on the Home page).")
+        if half_filter != "2nd half only" and not half1:
+            errors.append("1st half kick-off time is required for this Half setting. Choose 2nd half only if you only have the 2nd-half file.")
+        if half_filter != "1st half only" and not half2:
+            errors.append("2nd half kick-off time is required for this Half setting. Choose 1st half only if you only have the 1st-half file.")
         if errors:
             for e in errors: st.error(e)
         else:
@@ -1721,10 +1741,10 @@ with tab_manual:
         errors = _missing_video_setup_errors()
         if not final_csv:
             errors.append("CSV file is required (set it on the Home page).")
-        if not half1:
-            errors.append("1st half kick-off time is required (set it on the Home page).")
-        if not half2:
-            errors.append("2nd half kick-off time is required (set it on the Home page).")
+        if half_filter != "2nd half only" and not half1:
+            errors.append("1st half kick-off time is required for this Half setting. Choose 2nd half only if you only have the 2nd-half file.")
+        if half_filter != "1st half only" and not half2:
+            errors.append("2nd half kick-off time is required for this Half setting. Choose 1st half only if you only have the 1st-half file.")
 
         if errors:
             for e in errors:
@@ -1997,6 +2017,7 @@ with tab_ai:
                 "output_dir":       ai_out_dir,
                 "output_filename":  ai_output_name,
                 "individual_clips": filters.get("individual_clips", False),
+                "timeline_corrections": st.session_state.get("timeline_corrections", []),
                 "dry_run":          False,
                 "half_filter":      filters.get("half_filter", "Both halves"),
                 "filter_types":     filters.get("filter_types", []),
