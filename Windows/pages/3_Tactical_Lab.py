@@ -10,7 +10,10 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
-from clipmaker_core import read_csv_safe, to_seconds, resolve_period_starts_for_video, match_clock_to_video_time
+from clipmaker_core import (
+    read_csv_safe, to_seconds, resolve_period_starts_for_video, match_clock_to_video_time,
+    normalise_timeline_corrections, apply_timeline_corrections,
+)
 
 try:
     import plotly.graph_objects as go
@@ -663,18 +666,30 @@ def _match_seconds(row):
     return int(row.get("minute", 0) or 0) * 60 + int(row.get("second", 0) or 0)
 
 
+def _timeline_corrections():
+    return normalise_timeline_corrections({
+        "timeline_corrections": st.session_state.get("timeline_corrections", [])
+    })
+
+
 def _video_timestamp(row):
     period = _period_int(row.get("period", "FirstHalf"))
     starts = _period_starts()
     if period not in starts:
         raise ValueError(f"No kick-off video time set for period {period}.")
     offsets = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
-    return match_clock_to_video_time(
+    base_ts = match_clock_to_video_time(
         int(row.get("minute", 0) or 0),
         int(row.get("second", 0) or 0),
         period,
         starts,
         offsets,
+    )
+    return apply_timeline_corrections(
+        base_ts,
+        _match_seconds(row),
+        period,
+        _timeline_corrections(),
     )
 
 

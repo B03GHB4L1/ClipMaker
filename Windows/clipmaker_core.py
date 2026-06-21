@@ -617,11 +617,106 @@ def apply_filters(df, config, log=None):
             log(f"  [WARN] Qualifier '{label or col}' matched 0/{before} events — column has no True values in filtered data")
         return result
 
-    if config.get("key_passes_only") and not config.get("shots_and_key_passes_only") and "is_key_pass" in df.columns:
-        df = _apply_qualifier(df, "is_key_pass", label="Key passes")
+    shot_types = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
+    scoped_qualifiers = [
+        ("key_passes_only",              "is_key_pass",                "Key passes",              {"Pass"}),
+        ("crosses_only",                 "is_cross",                   "Crosses",                 {"Pass"}),
+        ("long_balls_only",              "is_long_ball",               "Long balls",              {"Pass"}),
+        ("switches_only",                "is_switch_of_play",          "Switches of play",        {"Pass"}),
+        ("diagonals_only",               "is_diagonal_long_ball",      "Diagonals",               {"Pass"}),
+        ("through_balls_only",           "is_through_ball",            "Through balls",           {"Pass"}),
+        ("corners_only",                 "is_corner",                  "Corners",                 {"Pass"}),
+        ("freekicks_only",               "is_freekick",                "Freekicks",               {"Pass"}),
+        ("headers_only",                 "is_header",                  "Headers",                 {"Pass"}),
+        ("big_chances_created_only",     "is_big_chance",              "Big chances created",     {"Pass"}),
+        ("assist_throughball_only",      "is_assist_throughball",      "Assist (through ball)",   {"Pass"}),
+        ("assist_cross_only",            "is_assist_cross",            "Assist (cross)",          {"Pass"}),
+        ("assist_corner_only",           "is_assist_corner",           "Assist (corner)",         {"Pass"}),
+        ("assist_freekick_only",         "is_assist_freekick",         "Assist (free kick)",      {"Pass"}),
+        ("intentional_assists_only",     "is_intentional_assist",      "Intentional assists",     {"Pass"}),
+        ("box_entry_pass_only",          "is_box_entry_pass",          "Box entry (pass)",        {"Pass"}),
+        ("deep_completion_only",         "is_deep_completion",         "Deep completion",         {"Pass"}),
+        ("final_third_entry_pass_only",  "is_final_third_entry_pass",  "Final third entry (pass)", {"Pass"}),
+        ("throw_ins_only",               "is_throw_in",                "Throw ins",               {"Pass"}),
+        ("goal_kicks_only",              "is_goal_kick",               "Goal kicks",              {"Pass"}),
+        ("keeper_throws_only",           "is_keeper_throw",            "Keeper throws",           {"Pass"}),
+        ("gk_hoofs_only",                "is_gk_hoof",                 "GK hoofs",                {"Pass"}),
+        ("pull_backs_only",              "is_pull_back",               "Pull backs",              {"Pass"}),
+        ("lay_offs_only",                "is_lay_off",                 "Lay offs",                {"Pass"}),
+        ("flick_ons_only",               "is_flick_on",                "Flick ons",               {"Pass"}),
+        ("launches_only",                "is_launch",                  "Launches",                {"Pass"}),
+        ("assists_only",                 "is_assist",                  "Assists",                 {"Pass"}),
+        ("attacking_passes_only",        "is_attacking_pass",          "Attacking passes",        {"Pass"}),
+        ("big_chances_only",             "is_big_chance_shot",         "Big chances",             shot_types),
+        ("own_goals_only",               "is_own_goal",                "Own goal",                {"Goal"}),
+        ("penalties_only",               "is_penalty",                 "Penalties",               shot_types),
+        ("volleys_only",                 "is_volley",                  "Volleys",                 shot_types),
+        ("chipped_only",                 "is_chipped",                 "Chipped shots",           shot_types),
+        ("direct_from_corner_only",      "is_direct_from_corner",      "Direct from corner",      shot_types),
+        ("left_foot_only",               "is_left_foot",               "Left foot",               shot_types),
+        ("right_foot_only",              "is_right_foot",              "Right foot",              shot_types),
+        ("gk_saves_only",                "is_gk_save",                 "GK save",                 {"Save"}),
+        ("yellow_cards_only",            "is_yellow_card",             "Yellow card",             {"Card"}),
+        ("red_cards_only",               "is_red_card",                "Red card",                {"Card"}),
+        ("second_yellow_only",           "is_second_yellow",           "Second yellow",           {"Card"}),
+        ("nutmegs_only",                 "is_nutmeg",                  "Nutmeg",                  {"TakeOn"}),
+        ("success_in_box_only",          "is_success_in_box",          "Success in box",          {"TakeOn"}),
+        ("box_entry_carry_only",         "is_box_entry_carry",         "Box entry (carry)",       {"Carry"}),
+        ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final third entry (carry)", {"Carry"}),
+    ]
+    scoped_flag_names = {flag for flag, _col, _label, _scope in scoped_qualifiers}
+    active_scoped = [
+        (flag, col, label, set(scope_types))
+        for flag, col, label, scope_types in scoped_qualifiers
+        if config.get(flag) and not (flag == "key_passes_only" and config.get("shots_and_key_passes_only")) and col in df.columns
+    ]
+    for flag, col, label, _scope_types in scoped_qualifiers:
+        if config.get(flag) and col not in df.columns and log:
+            log(f"  [WARN] Qualifier '{label}' is active but column '{col}' not found in data — filter skipped")
+
+    if active_scoped and "type" in df.columns:
+        before_scoped = len(df)
+        type_series = df["type"].astype(str)
+        selected_types = set(config.get("filter_types") or [])
+        grouped = {}
+        for _flag, col, label, scope_types in active_scoped:
+            grouped.setdefault(frozenset(scope_types), []).append((col, label))
+
+        scoped_mask = pd.Series(False, index=df.index)
+        active_scope_types = set()
+        for scope_key, rules in grouped.items():
+            scope_types = set(scope_key)
+            active_scope_types.update(scope_types)
+            scope_mask = type_series.isin(scope_types)
+            if not scope_mask.any():
+                continue
+            qualifier_mask = scope_mask.copy()
+            rule_cols = {col for col, _label in rules}
+            if "is_corner" in rule_cols and "is_freekick" in rule_cols:
+                restart_mask = (
+                    df["is_corner"].fillna(False).astype(bool)
+                    | df["is_freekick"].fillna(False).astype(bool)
+                )
+                qualifier_mask &= restart_mask
+            for col, _label in rules:
+                if col in {"is_corner", "is_freekick"} and {"is_corner", "is_freekick"}.issubset(rule_cols):
+                    continue
+                qualifier_mask &= df[col].fillna(False).astype(bool)
+            scoped_mask |= qualifier_mask
+
+        if selected_types:
+            # In mixed selections, scoped qualifiers only narrow their own
+            # action family. Example: [Pass] Key passes should not remove
+            # TakeOns selected alongside Passes.
+            scoped_mask |= ~type_series.isin(active_scope_types)
+
+        if log and scoped_mask.sum() == 0 and before_scoped > 0:
+            labels = [label for _flag, _col, label, _scope in active_scoped]
+            log(f"  [WARN] Scoped qualifiers matched 0/{before_scoped} events: {', '.join(labels)}")
+        df = df[scoped_mask]
 
     # Special case: if both corners_only and freekicks_only are set, use OR logic
-    if config.get("corners_only") and config.get("freekicks_only"):
+    if config.get("corners_only") and config.get("freekicks_only") and not active_scoped:
         if "is_corner" in df.columns and "is_freekick" in df.columns:
             mask_corner = df["is_corner"].astype(str).str.lower().isin(["true", "1", "yes"])
             mask_freekick = df["is_freekick"].astype(str).str.lower().isin(["true", "1", "yes"])
@@ -692,6 +787,8 @@ def apply_filters(df, config, log=None):
             ("errors_to_goal_only",          "is_error_led_to_goal",      "Error → goal"),
         ]:
             if config.get(flag):
+                if flag in scoped_flag_names:
+                    continue
                 if col in df.columns:
                     before = len(df)
                     df = _apply_qualifier(df, col, label=label)
@@ -775,11 +872,13 @@ def run_clip_maker(config, log_queue, progress_queue):
                 raise ValueError(f"CSV missing column: '{col}'")
 
         split_video = config.get("split_video", False)
+        half_filter = config.get("half_filter", "Both halves")
 
-        period_start = {
-            1: to_seconds(config["half1_time"]),
-            2: to_seconds(config["half2_time"]),
-        }
+        period_start = {}
+        if str(config.get("half1_time", "")).strip():
+            period_start[1] = to_seconds(config["half1_time"])
+        if str(config.get("half2_time", "")).strip():
+            period_start[2] = to_seconds(config["half2_time"])
         if config["half3_time"].strip():
             period_start[3] = to_seconds(config["half3_time"])
         if config["half4_time"].strip():
@@ -794,7 +893,6 @@ def run_clip_maker(config, log_queue, progress_queue):
         df = assign_periods(df, period_col, fallback)
         period_start = resolve_period_starts_for_video(df, period_start, log=log)
 
-        half_filter = config.get("half_filter", "Both halves")
         if half_filter == "1st half only":
             df = df[df["resolved_period"] == 1]
             log("Filtering to 1st half only.")
@@ -922,21 +1020,59 @@ def run_clip_maker(config, log_queue, progress_queue):
         video_crf = str(config.get("video_crf", 20))
         encoder_preset = str(config.get("encoder_preset", "veryfast") or "veryfast")
         audio_bitrate = str(config.get("audio_bitrate", "128k") or "128k")
+        audio_stream_cache = {}
+        output_ext = str(config.get("output_format", ".mp4") or ".mp4").strip().lower()
+        if output_ext not in {".mp4", ".mov", ".mkv"}:
+            output_ext = ".mp4"
+        if not output_ext.startswith("."):
+            output_ext = f".{output_ext}"
+
+        def source_has_audio(ffmpeg_bin, src_path):
+            import re, subprocess
+            cache_key = os.path.abspath(str(src_path))
+            if cache_key in audio_stream_cache:
+                return audio_stream_cache[cache_key]
+            result = subprocess.run(
+                [ffmpeg_bin, "-hide_banner", "-i", src_path],
+                capture_output=True,
+                text=True,
+            )
+            output = (result.stdout or "") + (result.stderr or "")
+            has_audio = bool(re.search(r"Stream #\d+:\d+.*Audio:", output))
+            audio_stream_cache[cache_key] = has_audio
+            return has_audio
 
         def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
             import subprocess
-            duration = end - start
-            cmd = [
-                ffmpeg_bin, "-y",
-                "-ss", str(start),
-                "-i", src_path,
-                "-t", str(duration),
-                "-map", "0:v:0", "-map", "0:a:0",
-                "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
-                "-c:a", "aac", "-b:a", audio_bitrate,
-                "-avoid_negative_ts", "make_zero",
-                out_path
-            ]
+            duration = max(0.0, end - start)
+            if source_has_audio(ffmpeg_bin, src_path):
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-ss", str(start),
+                    "-i", src_path,
+                    "-t", str(duration),
+                    "-map", "0:v:0", "-map", "0:a:0?",
+                    "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
+                    "-c:a", "aac", "-b:a", audio_bitrate,
+                    "-avoid_negative_ts", "make_zero",
+                    out_path
+                ]
+            else:
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-ss", str(start),
+                    "-t", str(duration),
+                    "-i", src_path,
+                    "-f", "lavfi",
+                    "-t", str(duration),
+                    "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
+                    "-c:a", "aac", "-b:a", audio_bitrate,
+                    "-shortest",
+                    "-avoid_negative_ts", "make_zero",
+                    out_path
+                ]
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 raise ValueError(f"FFmpeg error cutting clip: {result.stderr[-500:]}")
@@ -985,18 +1121,28 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         log("Loading video...")
         ffmpeg_bin = get_ffmpeg_binary()
-        video1_path = config["video_file"].strip().strip("\"'")
-        video1_duration = get_video_duration(video1_path, ffmpeg_bin)
-        log(f"  Video 1 duration: {video1_duration:.2f}s")
+        needed_periods = {int(period) for _start, _end, _label, period in windows}
+        period_video_sources = {}
+        video1_path = str(config.get("video_file", "")).strip().strip("\"'")
+        video1_duration = None
+        video2_path_str = str(config.get("video2_file", "")).strip().strip("\"'")
+        video2_duration = None
 
-        period_video_sources = {1: (video1_path, video1_duration)}
+        if (not split_video) or (1 in needed_periods):
+            if not video1_path:
+                raise ValueError("Video file is required for the selected clips.")
+            video1_duration = get_video_duration(video1_path, ffmpeg_bin)
+            log(f"  Video 1 duration: {video1_duration:.2f}s")
+            period_video_sources[1] = (video1_path, video1_duration)
+
         if split_video:
-            video2_path_str = str(config.get("video2_file", "")).strip().strip("\"'")
-            if not video2_path_str:
+            needs_video2 = bool(needed_periods & {2, 3, 4, 5})
+            if needs_video2 and not video2_path_str:
                 raise ValueError("Split-video mode is enabled, but no 2nd half video file was provided.")
-            video2_duration = get_video_duration(video2_path_str, ffmpeg_bin)
-            log(f"  Video 2 duration: {video2_duration:.2f}s")
-            period_video_sources[2] = (video2_path_str, video2_duration)
+            if needs_video2:
+                video2_duration = get_video_duration(video2_path_str, ffmpeg_bin)
+                log(f"  Video 2 duration: {video2_duration:.2f}s")
+                period_video_sources[2] = (video2_path_str, video2_duration)
 
             extra_period_labels = {
                 3: "ET 1st half",
@@ -1004,6 +1150,8 @@ def run_clip_maker(config, log_queue, progress_queue):
                 5: "Penalty shootout",
             }
             for period, label in extra_period_labels.items():
+                if period not in needed_periods:
+                    continue
                 extra_path = str(config.get(f"video{period}_file", "")).strip().strip("\"'")
                 if extra_path:
                     extra_duration = get_video_duration(extra_path, ffmpeg_bin)
@@ -1018,8 +1166,10 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         def get_src_and_duration(period):
             if split_video:
-                return period_video_sources.get(int(period), (video1_path, video1_duration))
-            return video1_path, video1_duration
+                if int(period) in period_video_sources:
+                    return period_video_sources[int(period)]
+                raise ValueError(f"No video source is available for period {period}.")
+            return period_video_sources[1]
 
         out_dir = config["output_dir"]
         os.makedirs(out_dir, exist_ok=True)
@@ -1040,7 +1190,7 @@ def run_clip_maker(config, log_queue, progress_queue):
                     continue
                 actions = [pt.split(" @")[0].strip() for pt in label.split(" + ")]
                 dominant = max(set(actions), key=actions.count).replace(" ", "_")
-                filename = f"{i:02d}_{dominant}.mp4"
+                filename = f"{i:02d}_{dominant}{output_ext}"
                 filepath = os.path.join(out_dir, filename)
                 clip_specs_indiv.append((i, src, s, e, label, filepath))
 
@@ -1092,7 +1242,7 @@ def run_clip_maker(config, log_queue, progress_queue):
             output_filename = str(config.get("output_filename") or "Highlights.mp4").strip().strip("\"'")
             output_filename = output_filename.replace("\\", "/").split("/")[-1] or "Highlights.mp4"
             if not os.path.splitext(output_filename)[1]:
-                output_filename = f"{output_filename}.mp4"
+                output_filename = f"{output_filename}{output_ext}"
             out_path = os.path.join(out_dir, output_filename)
 
             assembly_start = time.time()
