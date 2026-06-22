@@ -649,6 +649,7 @@ with tab_manual:
         st.session_state["_cm_pitch_zone"] = ""
         st.session_state["_cm_progressive"] = False
         st.session_state["_cm_selected_pass_types"] = []
+        st.session_state["_cm_qualifier_logic"] = "Match any selected qualifier"
         st.session_state["_cm_shots_and_kp"] = False
         # Apply preset values
         if "filter_types" in _pending_preset:
@@ -686,6 +687,7 @@ with tab_manual:
             st.session_state["_cm_pitch_zone"]               = _snap_cfg.get("pitch_zone_filter", "")
             st.session_state["_cm_progressive"]              = _snap_cfg.get("progressive_only", False)
             st.session_state["_cm_snap_pass_types_pending"]  = _snap_cfg.get("selected_pass_types", [])
+            st.session_state["_cm_qualifier_logic"]          = _snap_cfg.get("qualifier_logic_label", "Match any selected qualifier")
 
     _pending_matrix_apply = st.session_state.pop("_cm_pending_matrix_apply", None)
     if _pending_matrix_apply is not None:
@@ -884,6 +886,7 @@ with tab_manual:
     selected_pass_types = []
     key_passes_only = False
     progressive_only = False
+    qualifier_logic_label = st.session_state.get("_cm_qualifier_logic", "Match any selected qualifier")
 
     if available_pass_types:
         selected_pass_types = st.multiselect(
@@ -892,6 +895,22 @@ with tab_manual:
             placeholder="All qualifiers",
             key="_cm_selected_pass_types",
         )
+        family_qualifier_count = sum(
+            1 for label in selected_pass_types
+            if label.startswith(("[Pass]", "[Shot]", "[GK]", "[Card]", "[Dribble]", "[Carry]"))
+        )
+        if family_qualifier_count >= 2:
+            qualifier_logic_label = st.radio(
+                "Qualifier logic",
+                ["Match any selected qualifier", "Match all selected qualifiers"],
+                index=0 if st.session_state.get("_cm_qualifier_logic", "Match any selected qualifier") == "Match any selected qualifier" else 1,
+                horizontal=True,
+                key="_cm_qualifier_logic",
+                help=(
+                    "Any gives separate categories together, such as key passes plus long balls. "
+                    "All keeps only events that satisfy every selected qualifier. Outcome filters like Successful still narrow the result."
+                ),
+            )
         key_passes_only = "[Pass] Key passes" in selected_pass_types
 
 
@@ -941,6 +960,7 @@ with tab_manual:
                         "depth_zone_filter": st.session_state.get("_cm_depth_zone", ""),
                         "progressive_only":  st.session_state.get("_cm_progressive", False),
                         "selected_pass_types": st.session_state.get("_cm_selected_pass_types", []),
+                        "qualifier_logic_label": st.session_state.get("_cm_qualifier_logic", "Match any selected qualifier"),
                     }
                     save_filter_snapshot(_snap_name, _snap_data)
                     st.success(f"Saved: {_snap_name}")
@@ -1188,6 +1208,7 @@ with tab_manual:
             "dry_run":          dry_run,
             "half_filter":      half_filter,
             "filter_types":              filter_types,
+            "qualifier_logic":           "all" if qualifier_logic_label == "Match all selected qualifiers" else "any",
             "progressive_only":          progressive_only,
             "key_passes_only":           key_passes_only,
             "shots_and_key_passes_only": st.session_state.get("_cm_shots_and_kp", False),
@@ -1428,11 +1449,13 @@ with tab_manual:
         _render_preview_clip_window(index, src, start, end, render_start, render_end)
 
     # ── Buttons row ───────────────────────────────────────────────────────────
+    _active_run_job = st.session_state.get("_clipmaker_run_job")
+    _run_is_active = bool(_active_run_job and _active_run_job.get("thread") and _active_run_job["thread"].is_alive())
     btn1, btn2 = st.columns(2)
     with btn1:
         preview_btn = st.button("Preview Clip List", use_container_width=True, icon=theme.icon_shortcode("[SEARCH]"))
     with btn2:
-        run_btn = st.button("Run ClipMaker", type="primary", use_container_width=True, icon=theme.icon_shortcode("[RUN]"))
+        run_btn = st.button("Run ClipMaker", type="primary", use_container_width=True, icon=theme.icon_shortcode("[RUN]"), disabled=_run_is_active)
 
     progress_placeholder = st.empty()
     status_placeholder   = st.empty()
@@ -1754,72 +1777,106 @@ with tab_manual:
 
             log_q  = queue.Queue()
             prog_q = queue.Queue()
-            log_lines = []
-            last_progress = {"current": 0, "total": 1, "elapsed": 0}
+            cancel_event = threading.Event()
 
             _run_start_t = time.time()
             thread = threading.Thread(
-                target=run_clip_maker, args=(config, log_q, prog_q), daemon=True
+                target=run_clip_maker, args=(config, log_q, prog_q, cancel_event), daemon=True
             )
             thread.start()
+            st.session_state["_clipmaker_run_job"] = {
+                "thread": thread,
+                "log_q": log_q,
+                "prog_q": prog_q,
+                "cancel_event": cancel_event,
+                "log_lines": [],
+                "last_progress": {"current": 0, "total": 1, "elapsed": 0},
+                "status": "running",
+                "start_time": _run_start_t,
+                "individual": individual,
+                "out_dir": final_out_dir,
+                "out_filename": out_filename,
+            }
+            st.rerun()
 
-            while thread.is_alive() or not log_q.empty():
-                while not prog_q.empty():
-                    last_progress = prog_q.get_nowait()
+    run_job = st.session_state.get("_clipmaker_run_job")
+    if run_job:
+        thread = run_job.get("thread")
+        log_q = run_job.get("log_q")
+        prog_q = run_job.get("prog_q")
+        log_lines = run_job.setdefault("log_lines", [])
+        last_progress = run_job.setdefault("last_progress", {"current": 0, "total": 1, "elapsed": 0})
+        while prog_q is not None and not prog_q.empty():
+            last_progress = prog_q.get_nowait()
+            run_job["last_progress"] = last_progress
 
-                updated = False
-                while not log_q.empty():
-                    msg = log_q.get_nowait()
-                    if msg["type"] == "log":
-                        log_lines.append(msg["msg"])
-                        updated = True
+        while log_q is not None and not log_q.empty():
+            msg = log_q.get_nowait()
+            if msg.get("type") == "log":
+                log_lines.append(msg.get("msg", ""))
+            elif msg.get("type") in {"done", "error", "cancelled"}:
+                run_job["status"] = msg.get("type")
 
-                cur = last_progress["current"]
-                tot = last_progress["total"]
-                elapsed = last_progress["elapsed"]
-                frac = cur / tot if tot > 0 else 0
-                phase = last_progress.get("phase", "clips")
+        cur = last_progress.get("current", 0)
+        tot = last_progress.get("total", 1) or 1
+        elapsed = last_progress.get("elapsed", 0)
+        frac = max(0.0, min(1.0, cur / tot if tot > 0 else 0.0))
+        phase = last_progress.get("phase", "clips")
 
-                if cur > 0 and elapsed > 0:
-                    rate = cur / elapsed
-                    remaining = (tot - cur) / rate
-                    mins = int(remaining // 60)
-                    secs = int(remaining % 60)
-                    eta_str = f"{mins}m {secs:02d}s remaining"
-                else:
-                    eta_str = "Calculating..."
+        if cur > 0 and elapsed > 0:
+            rate = cur / elapsed
+            remaining = max(0, (tot - cur) / rate) if rate > 0 else 0
+            mins = int(remaining // 60)
+            secs = int(remaining % 60)
+            eta_str = f"{mins}m {secs:02d}s remaining"
+        else:
+            eta_str = "Calculating..."
 
-                if phase == "assembly":
-                    label_str = "Finalising — merging audio and video..." if frac >= 0.99 else f"Assembling — frame {cur:,} of {tot:,} — {eta_str}"
-                else:
-                    label_str = f"Clip {cur} of {tot} — {eta_str}"
+        if run_job.get("cancel_event") and run_job["cancel_event"].is_set() and thread and thread.is_alive():
+            label_str = "Stopping run after the current FFmpeg step..."
+        elif phase == "assembly":
+            label_str = "Finalising — merging audio and video..." if frac >= 0.99 else f"Assembling — frame {cur:,} of {tot:,} — {eta_str}"
+        else:
+            label_str = f"Clip {cur} of {tot} — {eta_str}"
 
-                with progress_placeholder.container():
-                    st.markdown(f'<div class="cm-progress-label">{label_str}</div>', unsafe_allow_html=True)
-                    st.progress(frac)
+        with progress_placeholder.container():
+            st.markdown(f'<div class="cm-progress-label">{label_str}</div>', unsafe_allow_html=True)
+            st.progress(frac)
+            if thread and thread.is_alive():
+                stop_disabled = bool(run_job.get("cancel_event") and run_job["cancel_event"].is_set())
+                if st.button("Stop current run", key="stop_current_clipmaker_run", use_container_width=True, disabled=stop_disabled, icon=theme.icon_shortcode("[X]")):
+                    run_job["cancel_event"].set()
+                    st.rerun()
 
-                if updated:
-                    log_placeholder.markdown(
-                        f'<div class="cm-log-box">{_iconize_log_lines(log_lines)}</div>',
-                        unsafe_allow_html=True
-                    )
-                time.sleep(0.3)
-
-            thread.join()
-
-            while not log_q.empty():
-                msg = log_q.get_nowait()
-                if msg["type"] == "log":
-                    log_lines.append(msg["msg"])
-
+        if log_lines:
             log_placeholder.markdown(
                 f'<div class="cm-log-box">{_iconize_log_lines(log_lines)}</div>',
                 unsafe_allow_html=True
             )
-            progress_placeholder.empty()
 
-            if any("[OK]" in l for l in log_lines):
-                st.success("Done!", icon=theme.icon_shortcode("[OK]"))
+        if thread and thread.is_alive():
+            time.sleep(0.5)
+            st.rerun()
+
+        if thread:
+            thread.join(timeout=0)
+        progress_placeholder.empty()
+
+        status = run_job.get("status")
+        if status == "cancelled" or any("[CANCELLED]" in l for l in log_lines):
+            st.warning("Run stopped. Any clips already completed may remain in the output folder.")
+            st.session_state.pop("_clipmaker_run_job", None)
+        elif status == "error" or any("[ERR]" in l for l in log_lines):
+            st.error("Run failed. Check the log above for details.")
+            st.session_state.pop("_clipmaker_run_job", None)
+        elif status == "done" or any("[OK]" in l for l in log_lines):
+            st.success("Done!", icon=theme.icon_shortcode("[OK]"))
+            _run_start_t = run_job.get("start_time", 0)
+            individual = bool(run_job.get("individual"))
+            final_out_dir = run_job.get("out_dir", final_out_dir)
+            out_filename = run_job.get("out_filename", out_filename)
+            st.session_state.pop("_clipmaker_run_job", None)
+            if True:
                 import glob as _iglob
                 if individual:
                     _new_clips = sorted([
@@ -2021,6 +2078,7 @@ with tab_ai:
                 "dry_run":          False,
                 "half_filter":      filters.get("half_filter", "Both halves"),
                 "filter_types":     filters.get("filter_types", []),
+                "qualifier_logic":  "any",
                 "progressive_only":   filters.get("progressive_only", False),
                 "xt_min":             filters.get("xt_min", 0.0),
                 "top_n":              int(filters.get("top_n", 0)) or None,
