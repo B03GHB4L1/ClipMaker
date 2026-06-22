@@ -678,6 +678,9 @@ def apply_filters(df, config, log=None):
         before_scoped = len(df)
         type_series = df["type"].astype(str)
         selected_types = set(config.get("filter_types") or [])
+        qualifier_logic = str(config.get("qualifier_logic", "any") or "any").strip().lower()
+        if qualifier_logic not in {"any", "all"}:
+            qualifier_logic = "any"
         grouped = {}
         for _flag, col, label, scope_types in active_scoped:
             grouped.setdefault(frozenset(scope_types), []).append((col, label))
@@ -690,18 +693,14 @@ def apply_filters(df, config, log=None):
             scope_mask = type_series.isin(scope_types)
             if not scope_mask.any():
                 continue
-            qualifier_mask = scope_mask.copy()
-            rule_cols = {col for col, _label in rules}
-            if "is_corner" in rule_cols and "is_freekick" in rule_cols:
-                restart_mask = (
-                    df["is_corner"].fillna(False).astype(bool)
-                    | df["is_freekick"].fillna(False).astype(bool)
-                )
-                qualifier_mask &= restart_mask
+            combined_rules = pd.Series(qualifier_logic == "all", index=df.index)
             for col, _label in rules:
-                if col in {"is_corner", "is_freekick"} and {"is_corner", "is_freekick"}.issubset(rule_cols):
-                    continue
-                qualifier_mask &= df[col].fillna(False).astype(bool)
+                col_mask = df[col].fillna(False).astype(bool)
+                if qualifier_logic == "any":
+                    combined_rules |= col_mask
+                else:
+                    combined_rules &= col_mask
+            qualifier_mask = scope_mask & combined_rules
             scoped_mask |= qualifier_mask
 
         if selected_types:
@@ -859,13 +858,21 @@ def apply_filters(df, config, log=None):
 # MAIN CLIP-MAKER ENGINE
 # =============================================================================
 
-def run_clip_maker(config, log_queue, progress_queue):
+def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
     def log(msg):
         log_queue.put({"type": "log", "msg": msg})
     def prog(current, total, elapsed):
         progress_queue.put({"current": current, "total": total, "elapsed": elapsed})
+    def cancelled():
+        return bool(cancel_event is not None and cancel_event.is_set())
+    class ClipMakerCancelled(Exception):
+        pass
+    def raise_if_cancelled():
+        if cancelled():
+            raise ClipMakerCancelled("Run stopped by user.")
 
     try:
+        raise_if_cancelled()
         df = read_csv_safe(config["data_file"])
         for col in ["minute", "second", "type"]:
             if col not in df.columns:
@@ -1044,6 +1051,7 @@ def run_clip_maker(config, log_queue, progress_queue):
 
         def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
             import subprocess
+            raise_if_cancelled()
             duration = max(0.0, end - start)
             if source_has_audio(ffmpeg_bin, src_path):
                 cmd = [
@@ -1073,7 +1081,21 @@ def run_clip_maker(config, log_queue, progress_queue):
                     "-avoid_negative_ts", "make_zero",
                     out_path
                 ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            while proc.poll() is None:
+                if cancelled():
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    raise ClipMakerCancelled("Run stopped by user.")
+                time.sleep(0.2)
+            stdout, stderr = proc.communicate()
+            result = type("FFmpegResult", (), {"returncode": proc.returncode, "stdout": stdout, "stderr": stderr})()
             if result.returncode != 0:
                 raise ValueError(f"FFmpeg error cutting clip: {result.stderr[-500:]}")
 
@@ -1083,43 +1105,59 @@ def run_clip_maker(config, log_queue, progress_queue):
             tmp_files = []
             total = len(clip_specs)
 
-            for i, (src, start, end) in enumerate(clip_specs, 1):
-                tmp_path = os.path.join(tmp_dir, f"part_{i:04d}.mp4")
-                if start is None and end is None:
-                    import shutil as _shutil
-                    _shutil.copy2(src, tmp_path)
-                else:
-                    cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_path)
-                tmp_files.append(tmp_path)
-                elapsed = time.time() - start_time
-                progress_queue.put({"current": i, "total": total, "elapsed": elapsed, "phase": "clips"})
+            try:
+                for i, (src, start, end) in enumerate(clip_specs, 1):
+                    raise_if_cancelled()
+                    tmp_path = os.path.join(tmp_dir, f"part_{i:04d}.mp4")
+                    if start is None and end is None:
+                        import shutil as _shutil
+                        _shutil.copy2(src, tmp_path)
+                    else:
+                        cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_path)
+                    tmp_files.append(tmp_path)
+                    elapsed = time.time() - start_time
+                    progress_queue.put({"current": i, "total": total, "elapsed": elapsed, "phase": "clips"})
 
-            list_path = os.path.join(tmp_dir, "concat.txt")
-            with open(list_path, "w", encoding="utf-8") as f:
+                list_path = os.path.join(tmp_dir, "concat.txt")
+                with open(list_path, "w", encoding="utf-8") as f:
+                    for p in tmp_files:
+                        p_safe = p.replace(os.sep, "/")
+                        f.write(f"file '{p_safe}'\n")
+
+                cmd = [
+                    ffmpeg_bin, "-y",
+                    "-f", "concat", "-safe", "0",
+                    "-i", list_path,
+                    "-c", "copy",
+                    out_path
+                ]
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                while proc.poll() is None:
+                    if cancelled():
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=2)
+                        except Exception:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+                        raise ClipMakerCancelled("Run stopped by user.")
+                    time.sleep(0.2)
+                stdout, stderr = proc.communicate()
+                if proc.returncode != 0:
+                    raise ValueError(f"FFmpeg concat error: {stderr[-500:]}")
+            finally:
                 for p in tmp_files:
-                    p_safe = p.replace(os.sep, "/")
-                    f.write(f"file '{p_safe}'\n")
-
-            cmd = [
-                ffmpeg_bin, "-y",
-                "-f", "concat", "-safe", "0",
-                "-i", list_path,
-                "-c", "copy",
-                out_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                raise ValueError(f"FFmpeg concat error: {result.stderr[-500:]}")
-
-            for p in tmp_files:
-                try: os.remove(p)
+                    try: os.remove(p)
+                    except: pass
+                try: os.remove(list_path)
+                except Exception: pass
+                try: os.rmdir(tmp_dir)
                 except: pass
-            try: os.remove(list_path)
-            except: pass
-            try: os.rmdir(tmp_dir)
-            except: pass
 
         log("Loading video...")
+        raise_if_cancelled()
         ffmpeg_bin = get_ffmpeg_binary()
         needed_periods = {int(period) for _start, _end, _label, period in windows}
         period_video_sources = {}
@@ -1198,6 +1236,7 @@ def run_clip_maker(config, log_queue, progress_queue):
             completed_count = [0]
 
             def _cut_one(spec):
+                raise_if_cancelled()
                 i, src, s, e, label, filepath = spec
                 cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath)
                 return spec
@@ -1206,6 +1245,9 @@ def run_clip_maker(config, log_queue, progress_queue):
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {executor.submit(_cut_one, spec): spec for spec in clip_specs_indiv}
                 for fut in as_completed(futures):
+                    if cancelled():
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise ClipMakerCancelled("Run stopped by user.")
                     spec = futures[fut]
                     i, src, s, e, label, filepath = spec
                     try:
@@ -1255,13 +1297,18 @@ def run_clip_maker(config, log_queue, progress_queue):
                 daemon=True
             )
             monitor_thread.start()
-            cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
-            stop_event.set()
-            monitor_thread.join()
+            try:
+                cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
+            finally:
+                stop_event.set()
+                monitor_thread.join()
             log(f"\n\u2713 Saved to: {out_path}")
 
         log_queue.put({"type": "done"})
 
+    except ClipMakerCancelled as e:
+        log(f"\n[CANCELLED] {e}")
+        log_queue.put({"type": "cancelled"})
     except Exception as e:
         log(f"\n[ERR] ERROR: {e}")
         log_queue.put({"type": "error"})
