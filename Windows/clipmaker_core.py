@@ -1049,13 +1049,38 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             audio_stream_cache[cache_key] = has_audio
             return has_audio
 
+        def run_ffmpeg_cancellable(cmd, error_label):
+            import subprocess, tempfile
+            with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as stderr_file:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_file,
+                    text=True,
+                )
+                while proc.poll() is None:
+                    if cancelled():
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=2)
+                        except Exception:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+                        raise ClipMakerCancelled("Run stopped by user.")
+                    time.sleep(0.2)
+                stderr_file.seek(0)
+                stderr = stderr_file.read()
+            if proc.returncode != 0:
+                raise ValueError(f"{error_label}: {stderr[-500:]}")
+
         def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
-            import subprocess
             raise_if_cancelled()
             duration = max(0.0, end - start)
             if source_has_audio(ffmpeg_bin, src_path):
                 cmd = [
-                    ffmpeg_bin, "-y",
+                    ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
                     "-ss", str(start),
                     "-i", src_path,
                     "-t", str(duration),
@@ -1067,7 +1092,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 ]
             else:
                 cmd = [
-                    ffmpeg_bin, "-y",
+                    ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
                     "-ss", str(start),
                     "-t", str(duration),
                     "-i", src_path,
@@ -1081,29 +1106,15 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     "-avoid_negative_ts", "make_zero",
                     out_path
                 ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            while proc.poll() is None:
-                if cancelled():
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=2)
-                    except Exception:
-                        try:
-                            proc.kill()
-                        except Exception:
-                            pass
-                    raise ClipMakerCancelled("Run stopped by user.")
-                time.sleep(0.2)
-            stdout, stderr = proc.communicate()
-            result = type("FFmpegResult", (), {"returncode": proc.returncode, "stdout": stdout, "stderr": stderr})()
-            if result.returncode != 0:
-                raise ValueError(f"FFmpeg error cutting clip: {result.stderr[-500:]}")
+            run_ffmpeg_cancellable(cmd, "FFmpeg error cutting clip")
 
         def cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, start_time):
             import subprocess, tempfile
             tmp_dir = tempfile.mkdtemp()
             tmp_files = []
             total = len(clip_specs)
+            total_steps = total + 1
+            list_path = None
 
             try:
                 for i, (src, start, end) in enumerate(clip_specs, 1):
@@ -1116,7 +1127,13 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                         cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_path)
                     tmp_files.append(tmp_path)
                     elapsed = time.time() - start_time
-                    progress_queue.put({"current": i, "total": total, "elapsed": elapsed, "phase": "clips"})
+                    progress_queue.put({
+                        "current": i,
+                        "total": total_steps,
+                        "clip_total": total,
+                        "elapsed": elapsed,
+                        "phase": "clips",
+                    })
 
                 list_path = os.path.join(tmp_dir, "concat.txt")
                 with open(list_path, "w", encoding="utf-8") as f:
@@ -1125,34 +1142,34 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                         f.write(f"file '{p_safe}'\n")
 
                 cmd = [
-                    ffmpeg_bin, "-y",
+                    ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
                     "-f", "concat", "-safe", "0",
                     "-i", list_path,
                     "-c", "copy",
                     out_path
                 ]
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                while proc.poll() is None:
-                    if cancelled():
-                        try:
-                            proc.terminate()
-                            proc.wait(timeout=2)
-                        except Exception:
-                            try:
-                                proc.kill()
-                            except Exception:
-                                pass
-                        raise ClipMakerCancelled("Run stopped by user.")
-                    time.sleep(0.2)
-                stdout, stderr = proc.communicate()
-                if proc.returncode != 0:
-                    raise ValueError(f"FFmpeg concat error: {stderr[-500:]}")
+                progress_queue.put({
+                    "current": total,
+                    "total": total_steps,
+                    "clip_total": total,
+                    "elapsed": time.time() - start_time,
+                    "phase": "concat",
+                })
+                run_ffmpeg_cancellable(cmd, "FFmpeg concat error")
+                progress_queue.put({
+                    "current": total_steps,
+                    "total": total_steps,
+                    "clip_total": total,
+                    "elapsed": time.time() - start_time,
+                    "phase": "done",
+                })
             finally:
                 for p in tmp_files:
                     try: os.remove(p)
                     except: pass
-                try: os.remove(list_path)
-                except Exception: pass
+                if list_path:
+                    try: os.remove(list_path)
+                    except Exception: pass
                 try: os.rmdir(tmp_dir)
                 except: pass
 
@@ -1241,6 +1258,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath)
                 return spec
 
+            total_individual = max(1, len(clip_specs_indiv))
             log(f"  Cutting {len(clip_specs_indiv)} clips in parallel (up to 4 workers)...")
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {executor.submit(_cut_one, spec): spec for spec in clip_specs_indiv}
@@ -1260,7 +1278,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     log(f"  Rendered {i:02d}/{total_clips}: {os.path.basename(filepath)}")
 
                     saved.append(filepath)
-                    prog(completed_count[0], total_clips, time.time() - start_time)
+                    prog(completed_count[0], total_individual, time.time() - start_time)
 
             log(f"\n\u2713 {len(saved)} clips saved to: {os.path.abspath(out_dir)}/")
         else:
@@ -1288,20 +1306,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             out_path = os.path.join(out_dir, output_filename)
 
             assembly_start = time.time()
-            stop_event = threading.Event()
-            fps_est = 25
-            total_frames = int(total_dur * fps_est)
-            monitor_thread = threading.Thread(
-                target=monitor_file_progress,
-                args=(out_path, total_frames, fps_est, progress_queue, stop_event),
-                daemon=True
-            )
-            monitor_thread.start()
-            try:
-                cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
-            finally:
-                stop_event.set()
-                monitor_thread.join()
+            cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
             log(f"\n\u2713 Saved to: {out_path}")
 
         log_queue.put({"type": "done"})
