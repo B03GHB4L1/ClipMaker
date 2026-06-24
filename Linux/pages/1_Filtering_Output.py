@@ -1822,6 +1822,7 @@ with tab_manual:
         elapsed = last_progress.get("elapsed", 0)
         frac = max(0.0, min(1.0, cur / tot if tot > 0 else 0.0))
         phase = last_progress.get("phase", "clips")
+        clip_total = last_progress.get("clip_total", tot)
 
         if cur > 0 and elapsed > 0:
             rate = cur / elapsed
@@ -1834,10 +1835,10 @@ with tab_manual:
 
         if run_job.get("cancel_event") and run_job["cancel_event"].is_set() and thread and thread.is_alive():
             label_str = "Stopping run after the current FFmpeg step..."
-        elif phase == "assembly":
-            label_str = "Finalising — merging audio and video..." if frac >= 0.99 else f"Assembling — frame {cur:,} of {tot:,} — {eta_str}"
+        elif phase in {"concat", "done"}:
+            label_str = "Finalising export — merging clips..." if phase == "concat" else "Export complete."
         else:
-            label_str = f"Clip {cur} of {tot} — {eta_str}"
+            label_str = f"Clip {min(cur, clip_total)} of {clip_total} — {eta_str}"
 
         with progress_placeholder.container():
             st.markdown(f'<div class="cm-progress-label">{label_str}</div>', unsafe_allow_html=True)
@@ -1855,7 +1856,7 @@ with tab_manual:
             )
 
         if thread and thread.is_alive():
-            time.sleep(0.5)
+            time.sleep(1.0)
             st.rerun()
 
         if thread:
