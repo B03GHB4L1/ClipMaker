@@ -1,0 +1,11 @@
+{
+  "name": "clipmaker-desktop",
+  "private": true,
+  "version": "1.3.0",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0"
+  }
+}
