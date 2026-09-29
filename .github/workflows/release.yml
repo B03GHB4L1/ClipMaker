@@ -3,6 +3,7 @@ name: Desktop release
 on:
   workflow_dispatch:
   push:
+    branches: ["codex/release-packaging"]
     tags: ["v*"]
 
 permissions:
