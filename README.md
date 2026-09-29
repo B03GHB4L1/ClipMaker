@@ -9,7 +9,7 @@
 
 Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
 
-Current version: **v1.2.3**
+Current version: **v1.3.0**
 </div>
 
 ---

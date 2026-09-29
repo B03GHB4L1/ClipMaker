@@ -1,5 +1,5 @@
 """
-ClipMaker v1.2.3 — Kinetic Analyst Theme
+ClipMaker v1.3.0 — Kinetic Analyst Theme
 Deep black + neon chartreuse (#DFFF00), Inter, brutalist uppercase tracking.
 Reference: Kinetic Analyst dashboard mockup.
 """
@@ -1406,7 +1406,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarContent"]::before {{
     pointer-events: none;
 }}
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"]::after {{
-    content: "CLIPMAKER\\A v1.2.3 · B4L1";
+    content: "CLIPMAKER\\A v1.3.0 · B4L1";
     white-space: pre;
     position: absolute;
     top: 74px;
