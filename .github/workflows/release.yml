@@ -64,10 +64,23 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
+      - name: Generate Homebrew formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          curl --fail --location --retry 3 \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" \
+            --output release-artifacts/clipmaker-source.tar.gz
+          sha256="$(sha256sum release-artifacts/clipmaker-source.tar.gz | cut -d ' ' -f 1)"
+          python packaging/render_homebrew_formula.py \
+            --version "$version" \
+            --sha256 "$sha256" \
+            --output release-artifacts/clipmaker.rb
+          rm release-artifacts/clipmaker-source.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*

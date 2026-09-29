@@ -32,7 +32,7 @@ from clipmaker_core import (
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="Filtering/Output — ClipMaker v1.2.3",
+    page_title="Filtering/Output — ClipMaker v1.3.0",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",

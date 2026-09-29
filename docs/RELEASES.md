@@ -20,8 +20,8 @@ the launcher creates a private Python environment under the user's Library,
 installs the pinned dependencies and Playwright headless browser, then opens the
 local ClipMaker interface in the default browser.
 
-After publishing a tag, calculate the SHA-256 hash of GitHub's tag archive and
-render the formula:
+The tagged release automatically includes a rendered `clipmaker.rb` formula
+with the correct source SHA-256. To render it locally when troubleshooting, run:
 
 ```text
 python packaging/render_homebrew_formula.py --version 1.3.0 --sha256 HASH --output Formula/clipmaker.rb

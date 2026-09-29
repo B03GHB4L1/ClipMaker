@@ -289,7 +289,7 @@ def pressing_map(press_wins, is_home_team, selected_idx=None, key=None, light_mo
         "graphic": [
             {"type": "rect", "left": "20px", "right": "20px", "top": "72px" if context_title else "24px", "bottom": "42px",
              "cmPitchBackground": True, "style": {"fill": _pitch_fill}, "silent": True, "z": -10},
-            {"type": "text", "right": 34, "bottom": 14, "style": {"text": "ClipMaker v1.2.3\n@B03GHB4L1", "fill": "#2f5d16" if light_mode else "#DFFF00", "font": "700 10px monospace"}, "silent": True},
+            {"type": "text", "right": 34, "bottom": 14, "style": {"text": "ClipMaker v1.3.0\n@B03GHB4L1", "fill": "#2f5d16" if light_mode else "#DFFF00", "font": "700 10px monospace"}, "silent": True},
         ],
         "series": series,
     }
