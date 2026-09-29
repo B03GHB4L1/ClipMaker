@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: B4L1.ClipMaker
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: B4L1
+PublisherUrl: https://github.com/B03GHB4L1
+PublisherSupportUrl: https://github.com/B03GHB4L1/ClipMaker/issues
+PackageName: ClipMaker
+PackageUrl: https://github.com/B03GHB4L1/ClipMaker
+License: MIT
+LicenseUrl: https://github.com/B03GHB4L1/ClipMaker/blob/main/LICENSE
+ShortDescription: Football video clipping and analysis workstation
+Tags:
+  - football
+  - soccer
+  - video
+  - analysis
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

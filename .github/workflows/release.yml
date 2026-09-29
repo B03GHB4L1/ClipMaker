@@ -80,6 +80,19 @@ jobs:
             --sha256 "$sha256" \
             --output release-artifacts/clipmaker.rb
           rm release-artifacts/clipmaker-source.tar.gz
+      - name: Generate WinGet manifests
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          installer="$(find release-artifacts -type f -name '*-setup.exe' -print -quit)"
+          test -n "$installer"
+          installer_sha256="$(sha256sum "$installer" | cut -d ' ' -f 1)"
+          installer_name="$(basename "$installer")"
+          installer_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer_name}"
+          python packaging/render_winget_manifests.py \
+            --version "$version" \
+            --installer-url "$installer_url" \
+            --installer-sha256 "$installer_sha256" \
+            --output release-artifacts/winget
       - uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -87,4 +100,5 @@ jobs:
             release-artifacts/**/*.deb
             release-artifacts/**/*.rpm
             release-artifacts/clipmaker.rb
+            release-artifacts/winget/*.yaml
           generate_release_notes: true
