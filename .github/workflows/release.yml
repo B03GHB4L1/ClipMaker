@@ -3,7 +3,6 @@ name: Desktop release
 on:
   workflow_dispatch:
   push:
-    branches: ["codex/release-packaging"]
     tags: ["v*"]
 
 permissions:
@@ -83,5 +82,9 @@ jobs:
           rm release-artifacts/clipmaker-source.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/*
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/clipmaker.rb
           generate_release_notes: true
