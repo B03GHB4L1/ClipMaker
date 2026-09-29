@@ -30,6 +30,8 @@ pub fn run() {
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;
+            let data_dir = app.path().app_local_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
             let executable = if cfg!(windows) {
                 "backend/clipmaker-server.exe"
             } else {
@@ -38,6 +40,7 @@ pub fn run() {
             let server = app.path().resolve(executable, BaseDirectory::Resource)?;
             let child = Command::new(server)
                 .args(["--port", &port.to_string()])
+                .current_dir(data_dir)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
