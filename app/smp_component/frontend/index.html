@@ -1,0 +1,3292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    @import url('https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
+    body { background: #0e0e0e; overflow: hidden; font-family: 'Iosevka Charon Mono', monospace; color: #f0f0f0; }
+  body.cm-light { background: #f5f0e8; color: #1a1a1a; }
+  body.cm-light .modebar-btn svg,
+  body.cm-light svg [fill="#DFFF00"],
+  body.cm-light svg [stroke="#DFFF00"] { color: #2f5d16 !important; fill: #2f5d16 !important; stroke: #2f5d16 !important; }
+    #plot { width: 100%; }
+    .cm-chart-wrap { position: relative; width: 100%; }
+    .cm-export-controls {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      z-index: 20;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .cm-export-controls button {
+      border: 1px solid rgba(142,255,113,0.28);
+      background: rgba(7,16,8,0.78);
+      color: #dfff00;
+      height: 28px;
+      padding: 0 9px;
+      border-radius: 5px;
+      font: 700 10px 'Iosevka Charon Mono', monospace;
+      cursor: pointer;
+    }
+    .cm-export-controls button:hover { border-color: rgba(142,255,113,0.72); }
+    .cm-export-controls select {
+      border: 1px solid rgba(142,255,113,0.22);
+      background: rgba(7,16,8,0.72);
+      color: #f4f7f2;
+      height: 28px;
+      padding: 0 7px;
+      border-radius: 5px;
+      font: 700 10px 'Iosevka Charon Mono', monospace;
+      cursor: pointer;
+      outline: none;
+    }
+    body.cm-light .cm-export-controls button {
+      background: rgba(248,246,240,0.88);
+      color: #2f5d16;
+      border-color: rgba(47,93,22,0.28);
+    }
+    body.cm-light .cm-export-controls select {
+      background: rgba(248,246,240,0.88);
+      color: #1f3214;
+      border-color: rgba(47,93,22,0.24);
+    }
+    .cm-network-controls {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      z-index: 19;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      max-width: calc(100% - 220px);
+      padding: 5px;
+      border-radius: 6px;
+      background: rgba(7,16,8,0.54);
+      box-shadow: 0 0 0 1px rgba(142,255,113,0.08);
+    }
+    .cm-network-controls select {
+      border: 1px solid rgba(142,255,113,0.22);
+      background: rgba(7,16,8,0.72);
+      color: #f4f7f2;
+      height: 28px;
+      padding: 0 7px;
+      border-radius: 5px;
+      font: 700 10px 'Iosevka Charon Mono', monospace;
+      cursor: pointer;
+      outline: none;
+    }
+    body.cm-light .cm-network-controls select {
+      background: rgba(248,246,240,0.88);
+      color: #1f3214;
+      border-color: rgba(47,93,22,0.24);
+    }
+    body.cm-light .cm-network-controls {
+      background: rgba(248,246,240,0.62);
+      box-shadow: 0 0 0 1px rgba(47,93,22,0.10);
+    }
+    #no-data {
+      display: none;
+      text-align: center;
+      padding: 40px 20px;
+      color: #888;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="plot"></div>
+  <div id="no-data">No data available.</div>
+
+  <script src="echarts.min.js"></script>
+  <script src="gif.js"></script>
+  <script>
+  if (typeof echarts === "undefined") {
+    var _s = document.createElement("script");
+    _s.src = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js";
+    document.head.appendChild(_s);
+  }
+  if (typeof GIF === "undefined") {
+    var _g = document.createElement("script");
+    _g.src = "https://cdn.jsdelivr.net/npm/gif.js.optimized/dist/gif.js";
+    document.head.appendChild(_g);
+  }
+  </script>
+  <script>
+  // ════════════════════════════════════════════════════════════════════════════
+  // Streamlit component protocol (unchanged from working version)
+  // ════════════════════════════════════════════════════════════════════════════
+  const Streamlit = {
+    ready() {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*"
+      );
+    },
+    setHeight(h) {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: Math.ceil(h) }, "*"
+      );
+    },
+    setValue(v) {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type: "streamlit:setComponentValue", value: v, dataType: "json" }, "*"
+      );
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Constants (dark mode defaults; lights override per render)
+  // ════════════════════════════════════════════════════════════════════════════
+  const HOME_RGB   = [0, 175, 254];
+  const AWAY_RGB   = [255, 112, 118];
+  const HOME_HEX   = "#00affe";
+  const AWAY_HEX   = "#ff7076";
+  const SUCC_HEX   = "#00affe";
+  const FAIL_HEX   = "#ff7076";
+  const HUD_GREEN  = "#8eff71";
+  const PITCH_BG   = "#071008";
+  const PITCH_LINE = "rgba(142,255,113,0.32)";
+  const PITCH_THICK= "rgba(142,255,113,0.62)";
+  const LIGHT_PITCH_BG   = "#d7edca";
+  const LIGHT_PITCH_LINE = "rgba(25,61,9,0.62)";
+  const LIGHT_PITCH_THICK= "rgba(25,61,9,0.88)";
+  const LIGHT_HUD_GREEN  = "#2d5a0e";
+  const LIGHT_GOAL_FILL     = "rgba(0,0,0,0.04)";
+  const LIGHT_GOALFRAME_FILL= "rgba(0,0,0,0.08)";
+  const LIGHT_GOAL_LINE     = "#555555";
+  const LIGHT_LEGEND_FONT   = "#1a1a1a";
+  const LIGHT_MARKER_BORDER = "rgba(16,32,10,0.72)";
+  const LIGHT_ANNO_COLOR    = "#2c351f";
+  const LIGHT_PASS_LABEL    = "#1a1a1a";
+  const LIGHT_CARRY_LINE    = "rgba(132,94,0,0.72)";
+  const LIGHT_DRIBBLE_LINE  = "rgba(21,100,54,0.62)";
+  const LIGHT_PENALTY       = "rgba(0,0,0,0.35)";
+  const LIGHT_SHADOW        = "rgba(0,0,0,0.30)";
+  const MISSED     = new Set(["MissedShot","Attempt","MissedShots"]);
+  // Real football pitch aspect: 105m length x 68m width.
+  const HORIZONTAL_PITCH_SCALERATIO = 68 / 105;
+  const VERTICAL_PITCH_SCALERATIO = 105 / 68;
+  const DARK_MARKER_BORDER = "rgba(255,255,255,0.78)";
+
+  // Standard football goal dimensions: 7.32m wide x 2.44m high.
+  // The feed uses a much taller z-scale than the goal-mouth y-span,
+  // so we preserve the real-world goal ratio through axis scaling.
+  const GOAL_Y_LEFT  = 45.2;  // Matches existing width
+  const GOAL_Y_RIGHT = 54.8;
+  const GOAL_Z_TOP   = 29.5;
+  const GOAL_Z_BOT   = 0;
+  const GOAL_ASPECT_RATIO = 7.32 / 2.44;
+  const GOAL_SCALERATIO = (GOAL_Y_RIGHT - GOAL_Y_LEFT) / (GOAL_ASPECT_RATIO * (GOAL_Z_TOP - GOAL_Z_BOT));
+  const NORMAL_GOALFRAME_X_RANGE = [20, 80];
+  const NORMAL_GOALFRAME_Y_RANGE = [-8, GOAL_Z_TOP + 14];
+  const NORMAL_GOALFRAME_EXPAND_MARGIN_X = 4;
+  const NORMAL_GOALFRAME_EXPAND_MARGIN_Y = 8;
+  const SHOOTOUT_GOALFRAME_X_PADDING = 7.5;
+  const SHOOTOUT_GOALFRAME_X_RANGE = [GOAL_Y_LEFT - SHOOTOUT_GOALFRAME_X_PADDING, GOAL_Y_RIGHT + SHOOTOUT_GOALFRAME_X_PADDING];
+  const SHOOTOUT_GOALFRAME_Y_RANGE = [-8, GOAL_Z_TOP + 14];
+  const SHOOTOUT_GOALFRAME_EXPAND_MARGIN_X = 4;
+  const SHOOTOUT_GOALFRAME_EXPAND_MARGIN_Y = 8;
+
+  const DEF_STYLE = {
+    "Tackle":       { color:"#2980b9", symbol:"circle" },
+    "Interception": { color:"#27ae60", symbol:"square" },
+    "Clearance":    { color:"#95a5a6", symbol:"diamond" },
+    "Aerial":       { color:"#8e44ad", symbol:"triangle-up" },
+    "Block":        { color:"#d35400", symbol:"pentagon" },
+    "Challenge":    { color:"#1abc9c", symbol:"hexagon" },
+    "Dispossessed": { color:"#c0392b", symbol:"x" },
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Colour helpers
+  // ════════════════════════════════════════════════════════════════════════════
+  function shotColor(isHome) {
+    const [r, g, b] = isHome ? HOME_RGB : AWAY_RGB;
+    return `rgba(${r},${g},${b},0.92)`;
+  }
+  function borderColor(isHome) {
+    const [r, g, b] = isHome ? HOME_RGB : AWAY_RGB;
+    return `rgba(${r},${g},${b},0.90)`;
+  }
+  function hexToRgba(hex, alpha) {
+    const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  function lightModeAccent(hex) {
+    const map = {
+      "#00affe": "#0078ad",
+      "#ff7076": "#b9353d",
+      "#e0c860": "#a87800",
+      "#27ae60": "#16733e",
+      "#e74c3c": "#b82f24",
+      "#7ab4ff": "#1f69b3",
+      "#2980b9": "#17608f",
+      "#95a5a6": "#566667",
+      "#8e44ad": "#6b2d86",
+      "#d35400": "#974000",
+      "#1abc9c": "#087864",
+      "#c0392b": "#92251c",
+    };
+    return map[String(hex || "").toLowerCase()] || hex;
+  }
+  function rgbaFromHex(hex, alpha, isLight) {
+    return hexToRgba(isLight ? lightModeAccent(hex) : hex, alpha);
+  }
+  function attackDirectionAnnotation(hudColor) {
+    const _hud = hudColor || HUD_GREEN;
+    const _isLight = _hud === LIGHT_HUD_GREEN;
+    return {
+      text: "ATTACK ->",
+      x: 0.94, y: 0.94, xref: "paper", yref: "paper",
+      xanchor: "right", yanchor: "bottom", showarrow: false,
+      font: { size: 11, color: _hud, family: "Iosevka Charon Mono, monospace" },
+      bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(11,14,20,0.72)",
+      bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(142,255,113,0.28)",
+      borderwidth: 1, borderpad: 4,
+    };
+  }
+
+  function horizontalPitchShapes(pl, pt, pb, gf, gridColor, zoneFill, zoneLine) {
+    const shapes = pitchShapes(pl, pt, pb, gf);
+    const _grid = gridColor || "rgba(142,255,113,0.045)";
+    const _zoneFill = zoneFill || "rgba(142,255,113,0.035)";
+    const _zoneLine = zoneLine || "rgba(142,255,113,0.10)";
+    for (let x = 10; x < 100; x += 10) {
+      shapes.push({ type:"line", x0:x, y0:0, x1:x, y1:100, line:{color:_grid, width:1}, layer:"below" });
+    }
+    for (let y = 10; y < 100; y += 10) {
+      shapes.push({ type:"line", x0:0, y0:y, x1:100, y1:y, line:{color:_grid, width:1}, layer:"below" });
+    }
+    shapes.push({ type:"rect", x0:66, y0:0, x1:100, y1:100, fillcolor:_zoneFill, line:{color:_zoneLine, width:1}, layer:"below" });
+    return shapes;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Pitch shapes (from working Shot Map Parlour — proven correct)
+  // ════════════════════════════════════════════════════════════════════════════
+  function pitchShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:-3,    y0:0,    x1:103,   y1:100,  fillcolor:_pb, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,     y0:0,    x1:100,   y1:100,  fillcolor:t,        line:lw2 },
+      { type:"line",   x0:50,    y0:0,    x1:50,    y1:100,  line:lw },
+      { type:"circle", x0:40.85, y0:35.9, x1:59.15, y1:64.1, fillcolor:t,        line:lw },
+      { type:"circle", x0:49.5,  y0:49.3, x1:50.5,  y1:50.7, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:0,     y0:21.1, x1:17.0,  y1:78.9, fillcolor:t,        line:lw },
+      { type:"rect",   x0:83.0,  y0:21.1, x1:100,   y1:78.9, fillcolor:t,        line:lw },
+      { type:"rect",   x0:0,     y0:36.6, x1:5.5,   y1:63.4, fillcolor:t,        line:lw },
+      { type:"rect",   x0:94.5,  y0:36.6, x1:100,   y1:63.4, fillcolor:t,        line:lw },
+      { type:"circle", x0:10.5,  y0:49.3, x1:11.5,  y1:50.7, fillcolor:_pl, line:lw },
+      { type:"circle", x0:88.5,  y0:49.3, x1:89.5,  y1:50.7, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:-3,    y0:44.5, x1:0,     y1:55.5, fillcolor:wh, line:{color:_pt, width:2} },
+      { type:"rect",   x0:100,   y0:44.5, x1:103,   y1:55.5, fillcolor:wh, line:{color:_pt, width:2} },
+    ];
+  }
+
+  function halfPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:0,    y0:-3,   x1:100,  y1:53,   fillcolor:_pb, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:0,    x1:100,  y1:50,   fillcolor:t,        line:lw2 },
+      { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
+      { type:"rect",   x0:21.1, y0:0,    x1:78.9, y1:17.0, fillcolor:t,        line:lw },
+      { type:"rect",   x0:36.6, y0:0,    x1:63.4, y1:5.5,  fillcolor:t,        line:lw },
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:44.5, y0:-3,   x1:55.5, y1:0,    fillcolor:wh, line:{color:_pt, width:2} },
+    ];
+  }
+
+
+  // Defensive half pitch: own goal at bottom (y=100), centre line at top (y=50)
+  // Used for goalkeeper maps — mirrors halfPitchVertShapes but shows own half
+  function defHalfPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
+    return [
+      { type:"rect",   x0:0,    y0:47,   x1:100,  y1:103,  fillcolor:_pb, line:lw2, layer:"below" },
+      { type:"rect",   x0:0,    y0:50,   x1:100,  y1:100,  fillcolor:t,        line:lw2 },
+      { type:"line",   x0:0,    y0:50,   x1:100,  y1:50,   line:lw },
+      { type:"rect",   x0:21.1, y0:83.0, x1:78.9, y1:100,  fillcolor:t,        line:lw },
+      { type:"rect",   x0:36.6, y0:94.5, x1:63.4, y1:100,  fillcolor:t,        line:lw },
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:_pl, line:lw },
+      { type:"rect",   x0:44.5, y0:100,  x1:55.5, y1:103,  fillcolor:wh, line:{color:_pt, width:2} },
+      { type:"path",   path:"M 35.9 83.0 A 14.1 9.15 0 0 1 64.1 83.0", fillcolor:t, line:lw },
+    ];
+  }
+
+  // Full pitch drawn vertically: x=0-100 (width), y=0-100 (length)
+  // Goal at y=0 (top), own goal at y=100 (bottom), direction of play: bottom→top
+  function fullPitchVertShapes(pl, pt, pb, gf) {
+    const _pl = pl || PITCH_LINE;
+    const _pt = pt || PITCH_THICK;
+    const _pb = pb || PITCH_BG;
+    const lw  = { color: _pl,  width: 1.5 };
+    const lw2 = { color: _pt, width: 1.5 };
+    const t   = "rgba(0,0,0,0)";
+    const wh  = gf || "rgba(255,255,255,0.04)";
+    return [
+      // Background
+      { type:"rect", x0:-3, y0:-3, x1:103, y1:103, fillcolor:_pb, line:lw2, layer:"below" },
+      // Pitch outline
+      { type:"rect", x0:0, y0:0, x1:100, y1:100, fillcolor:t, line:lw2 },
+      // Centre line
+      { type:"line", x0:0, y0:50, x1:100, y1:50, line:lw },
+      // Centre circle
+      { type:"circle", x0:35.9, y0:40.85, x1:64.1, y1:59.15, fillcolor:t, line:lw },
+      // Centre spot
+      { type:"circle", x0:49.3, y0:49.5, x1:50.7, y1:50.5, fillcolor:_pl, line:lw },
+      // Top penalty area (attacking end)
+      { type:"rect", x0:21.1, y0:0, x1:78.9, y1:17.0, fillcolor:t, line:lw },
+      // Top 6-yard box
+      { type:"rect", x0:36.6, y0:0, x1:63.4, y1:5.5, fillcolor:t, line:lw },
+      // Top penalty spot
+      { type:"circle", x0:49.3, y0:10.5, x1:50.7, y1:11.5, fillcolor:_pl, line:lw },
+      // Top goal
+      { type:"rect", x0:44.5, y0:-3, x1:55.5, y1:0, fillcolor:wh, line:{color:_pt, width:2} },
+      // Bottom penalty area (own goal end)
+      { type:"rect", x0:21.1, y0:83.0, x1:78.9, y1:100, fillcolor:t, line:lw },
+      // Bottom 6-yard box
+      { type:"rect", x0:36.6, y0:94.5, x1:63.4, y1:100, fillcolor:t, line:lw },
+      // Bottom penalty spot
+      { type:"circle", x0:49.3, y0:88.5, x1:50.7, y1:89.5, fillcolor:_pl, line:lw },
+      // Bottom goal
+      { type:"rect", x0:44.5, y0:100, x1:55.5, y1:103, fillcolor:wh, line:{color:_pt, width:2} },
+      // Penalty arcs (top)
+      { type:"path", path:"M 35.9 17.0 A 14.1 9.15 0 0 0 64.1 17.0", fillcolor:t, line:lw },
+      // Penalty arcs (bottom)
+      { type:"path", path:"M 35.9 83.0 A 14.1 9.15 0 0 1 64.1 83.0", fillcolor:t, line:lw },
+    ];
+  }
+
+  function goalframeShapes(xRange, yRange, glColor, gfFill, bgColor, gridColor) {
+    const goalLine = { color: glColor || "#ffffff", width: 3 };
+    const t = "rgba(0,0,0,0)";
+    const _bg = bgColor || PITCH_BG;
+    const _grid = gridColor || PITCH_LINE;
+    // Goal dimensions: width (GOAL_Y_RIGHT - GOAL_Y_LEFT) = 9.6 units
+    // Height (GOAL_Z_TOP = 33.3 z-units ≈ crossbar; goal is 3:1 w:h aspect ratio)
+    // To ensure correct aspect ratio, the plot limits and scaling need to reflect this.
+    return [
+      // Background rectangle for the goalframe area. Adjusted y1 to match new GOAL_Z_TOP.
+      { type:"rect", x0:xRange[0], y0:yRange[0], x1:xRange[1], y1:yRange[1], fillcolor:_bg, line:{color:t}, layer:"below" },
+      // Goal frame outline.
+      { type:"rect", x0:GOAL_Y_LEFT, y0:GOAL_Z_BOT, x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP,
+        fillcolor:gfFill || "rgba(255,255,255,0.08)", line:goalLine },
+      // Ground line at the goal.
+      { type:"line", x0:xRange[0], y0:0, x1:xRange[1], y1:0, line:{color:_grid, width:1} },
+      // Vertical grid lines inside the goal, adjusted to new GOAL_Z_TOP.
+      { type:"line", x0:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
+        x1:GOAL_Y_LEFT + (GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
+        line:{color:_grid, width:0.8, dash:"dot"} },
+      { type:"line", x0:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y0:GOAL_Z_BOT,
+        x1:GOAL_Y_LEFT + 2*(GOAL_Y_RIGHT-GOAL_Y_LEFT)/3, y1:GOAL_Z_TOP,
+        line:{color:_grid, width:0.8, dash:"dot"} },
+      // Horizontal grid line inside the goal, adjusted to new GOAL_Z_TOP.
+      { type:"line", x0:GOAL_Y_LEFT, y0:GOAL_Z_TOP/2,
+        x1:GOAL_Y_RIGHT, y1:GOAL_Z_TOP/2,
+        line:{color:_grid, width:0.8, dash:"dot"} },
+      // Goalposts extending slightly below the ground line.
+      { type:"line", x0:GOAL_Y_LEFT,  y0:0, x1:GOAL_Y_LEFT,  y1:-4, line:goalLine },
+      { type:"line", x0:GOAL_Y_RIGHT, y0:0, x1:GOAL_Y_RIGHT, y1:-4, line:goalLine },
+    ];
+  }
+
+  function expandedGoalframeRangeForShot(shot, defaultXRange, defaultYRange, marginX, marginY) {
+    if (!shot || shot._px == null || shot._py == null) {
+      return { xRange: defaultXRange, yRange: defaultYRange };
+    }
+
+    const xRange = [...defaultXRange];
+    const yRange = [...defaultYRange];
+
+    if (shot._px < xRange[0]) xRange[0] = shot._px - marginX;
+    if (shot._px > xRange[1]) xRange[1] = shot._px + marginX;
+    if (shot._py < yRange[0]) yRange[0] = shot._py - marginY;
+    if (shot._py > yRange[1]) yRange[1] = shot._py + marginY;
+
+    return { xRange, yRange };
+  }
+
+  function periodSortValue(period) {
+    const order = {
+      "FirstHalf": 1,
+      "SecondHalf": 2,
+      "FirstPeriodOfExtraTime": 3,
+      "SecondPeriodOfExtraTime": 4,
+      "PenaltyShootout": 5,
+    };
+    return order[period] || 99;
+  }
+
+  function sortShotsChronologically(shots) {
+    return [...shots].sort((a, b) => {
+      const periodDiff = periodSortValue(a.period) - periodSortValue(b.period);
+      if (periodDiff !== 0) return periodDiff;
+
+      const minuteDiff = (Number(a.minute) || 0) - (Number(b.minute) || 0);
+      if (minuteDiff !== 0) return minuteDiff;
+
+      const secondDiff = (Number(a.second) || 0) - (Number(b.second) || 0);
+      if (secondDiff !== 0) return secondDiff;
+
+      return (Number(a.df_idx) || 0) - (Number(b.df_idx) || 0);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Shared ECharts renderer/export adapter
+  // ════════════════════════════════════════════════════════════════════════════
+  const EXPORT_BRAND_TEXT = "ClipMaker v1.2.3<br>@B03GHB4L1";
+  let _exportBrandColor = "#DFFF00";
+  const ECHARTS_RENDERER = "canvas";
+  let _cmChart = null;
+  let _cmPlotlyClickHandler = null;
+  let _cmLastRender = null;
+  let _cmResizeHandler = null;
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function decodeHtmlEntities(value) {
+    return String(value == null ? "" : value)
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">");
+  }
+
+  function contextFromArgs(args) {
+    return {
+      title: decodeHtmlEntities((args && args.context_title) || "").trim(),
+      subtitle: decodeHtmlEntities((args && args.context_subtitle) || "").trim(),
+      note: decodeHtmlEntities((args && args.context_note) || "").trim(),
+      isLight: args && args.light_mode === true,
+    };
+  }
+
+  function halfPitchShapes(pl, pt, pb, gf) {
+    return pitchShapes(pl, pt, pb, gf);
+  }
+
+  function wrapExportText(value, width) {
+    const words = String(value == null ? "" : value).trim().split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = "";
+    words.forEach((word) => {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > width && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    });
+    if (line) lines.push(line);
+    return lines.map(escapeHtml).join("<br>");
+  }
+
+  function exportSlug(value) {
+    return String(value == null ? "" : value)
+      .trim()
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^[_\-.]+|[_\-.]+$/g, "")
+      .toLowerCase();
+  }
+
+  function exportFilenameFromArgs(args) {
+    const ctx = contextFromArgs(args || {});
+    const base = exportSlug([
+      args && args.component_type,
+      args && args.mode,
+      args && args.view,
+      ctx.title,
+      ctx.subtitle,
+    ].filter(Boolean).join("_"));
+    return (base || "clipmaker_map").slice(0, 110);
+  }
+
+  function withExportBrand(layout, args) {
+    const branded = Object.assign({}, layout || {});
+    const ctx = contextFromArgs(args || {});
+    const paperColor = ctx.isLight ? "#f8f6f0" : "#071008";
+    const margin = Object.assign({}, branded.margin || {});
+    const annotations = Array.isArray(branded.annotations) ? branded.annotations.slice() : [];
+    const shapes = Array.isArray(branded.shapes) ? branded.shapes.slice() : [];
+    branded.paper_bgcolor = paperColor;
+    branded.font = Object.assign({}, branded.font || {}, {
+      color: ctx.isLight ? "#111111" : "#f4f7f2",
+    });
+
+    function reserveMargin(side, needed) {
+      const current = Number(margin[side] || 0);
+      if (current >= needed) return;
+      margin[side] = needed;
+    }
+
+    if (ctx.title || ctx.subtitle) {
+      const titleColor = ctx.isLight ? "#111111" : "#f4f7f2";
+      const subtitleColor = ctx.isLight ? "#302a22" : "#d8dee2";
+      const titleLine = ctx.title ? `<b>${wrapExportText(ctx.title, 62)}</b>` : "";
+      const subtitleLine = ctx.subtitle
+        ? `<span style="font-size:11px;color:${subtitleColor}">${wrapExportText(ctx.subtitle, 104)}</span>`
+        : "";
+      branded.title = {
+        text: [titleLine, subtitleLine].filter(Boolean).join("<br>"),
+        x: 0.012,
+        xanchor: "left",
+        font: { size: 16, color: titleColor, family: "Iosevka Charon Mono, monospace" },
+        pad: { t: 8, b: 4 },
+        automargin: true,
+      };
+      reserveMargin("t", ctx.subtitle ? 42 : 30);
+    }
+    if (ctx.note) {
+      reserveMargin("b", 36);
+    }
+    reserveMargin("r", 72);
+    branded.margin = margin;
+    branded.shapes = shapes;
+
+    if (ctx.note) {
+      annotations.push({
+        text: wrapExportText(ctx.note, 118),
+        xref: "paper",
+        yref: "paper",
+        x: 0.01,
+        y: -0.026,
+        xanchor: "left",
+        yanchor: "top",
+        showarrow: false,
+        align: "left",
+        font: { size: 9, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Iosevka Charon Mono, monospace" },
+        bgcolor: ctx.isLight ? "rgba(245,240,232,0.94)" : "rgba(7,16,8,0.94)",
+        bordercolor: ctx.isLight ? "rgba(80,60,30,0.24)" : "rgba(142,255,113,0.20)",
+        borderwidth: 1,
+        borderpad: 4,
+      });
+    }
+    annotations.push({
+      text: EXPORT_BRAND_TEXT,
+      xref: "paper",
+      yref: "paper",
+      x: 0.975,
+      y: 0.015,
+      xanchor: "right",
+      yanchor: "bottom",
+      showarrow: false,
+      font: { size: 9, color: _exportBrandColor, family: "Iosevka Charon Mono, monospace" },
+    });
+    branded.annotations = annotations;
+    return branded;
+  }
+
+  function ensureEChartsReady() {
+    if (typeof echarts !== "undefined") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      let tries = 0;
+      const timer = setInterval(() => {
+        tries += 1;
+        if (typeof echarts !== "undefined") {
+          clearInterval(timer);
+          resolve();
+        } else if (tries > 80) {
+          clearInterval(timer);
+          reject(new Error("ECharts failed to load."));
+        }
+      }, 50);
+    });
+  }
+
+  function installResizeHandler(handler) {
+    if (_cmResizeHandler) window.removeEventListener("resize", _cmResizeHandler);
+    _cmResizeHandler = handler;
+    window.addEventListener("resize", _cmResizeHandler);
+  }
+
+  function stripHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]*>/g, "");
+  }
+
+  function arrValue(value, index, fallback) {
+    if (Array.isArray(value)) return value[index] != null ? value[index] : fallback;
+    return value != null ? value : fallback;
+  }
+
+  function axisIndexFromRef(ref) {
+    if (!ref || ref === "x" || ref === "y") return 0;
+    const m = String(ref).match(/[xy](\d+)/);
+    return m ? Math.max(0, Number(m[1]) - 1) : 0;
+  }
+
+  function axisName(prefix, index) {
+    return index === 0 ? prefix : `${prefix}${index + 1}`;
+  }
+
+  function axisRange(axis, fallback) {
+    const range = axis && Array.isArray(axis.range) ? axis.range : fallback;
+    const a = Number(range[0]);
+    const b = Number(range[1]);
+    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : fallback;
+  }
+
+  function axisOption(axis, isY, fallback) {
+    const range = axisRange(axis, fallback);
+    return {
+      type: "value",
+      min: Math.min(range[0], range[1]),
+      max: Math.max(range[0], range[1]),
+      inverse: isY ? range[0] > range[1] : range[0] > range[1],
+      show: false,
+      splitLine: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      animation: false,
+    };
+  }
+
+  function axisSpan(axis, fallback) {
+    const range = axisRange(axis, fallback);
+    return Math.max(1e-6, Math.abs(range[1] - range[0]));
+  }
+
+  function fitRectToAspect(rect, targetRatio) {
+    if (!Number.isFinite(targetRatio) || targetRatio <= 0 || rect.width <= 0 || rect.height <= 0) return rect;
+    const availableRatio = rect.width / rect.height;
+    let left = rect.left;
+    let top = rect.top;
+    let width = rect.width;
+    let height = rect.height;
+    if (availableRatio > targetRatio) {
+      width = height * targetRatio;
+      left += (rect.width - width) / 2;
+    } else {
+      height = width / targetRatio;
+      top += (rect.height - height) / 2;
+    }
+    return { left, top, width, height };
+  }
+
+  function pixelGridFromDomains(xd, yd, margin, chartWidth, chartHeight) {
+    const usableW = Math.max(1, chartWidth - margin.l - margin.r);
+    const usableH = Math.max(1, chartHeight - margin.t - margin.b);
+    return {
+      left: margin.l + usableW * xd[0],
+      top: margin.t + usableH * (1 - yd[1]),
+      width: usableW * Math.max(0.001, xd[1] - xd[0]),
+      height: usableH * Math.max(0.001, yd[1] - yd[0]),
+    };
+  }
+
+  function gridFromAxes(layout, index, chartSize) {
+    const xAxis = layout[axisName("xaxis", index).replace("xaxis1", "xaxis")] || layout.xaxis || {};
+    const yAxis = layout[axisName("yaxis", index).replace("yaxis1", "yaxis")] || layout.yaxis || {};
+    const xd = Array.isArray(xAxis.domain) ? xAxis.domain : [0, 1];
+    const yd = Array.isArray(yAxis.domain) ? yAxis.domain : [0, 1];
+    const margin = Object.assign({ l: 8, r: 8, t: 8, b: 8 }, layout.margin || {});
+    const chartWidth = Number(chartSize && chartSize.width) || 0;
+    const chartHeight = Number(chartSize && chartSize.height) || Number(layout.height) || 0;
+    if (chartWidth > 0 && chartHeight > 0) {
+      let rect = pixelGridFromDomains(xd, yd, margin, chartWidth, chartHeight);
+      if (yAxis.scaleanchor) {
+        const scaleratio = Number(yAxis.scaleratio || 1) || 1;
+        const targetRatio = axisSpan(xAxis, [-5, 105]) / (axisSpan(yAxis, [105, -5]) * scaleratio);
+        rect = fitRectToAspect(rect, targetRatio);
+      } else if (xAxis.scaleanchor) {
+        const scaleratio = Number(xAxis.scaleratio || 1) || 1;
+        const targetRatio = axisSpan(xAxis, [-5, 105]) * scaleratio / axisSpan(yAxis, [105, -5]);
+        rect = fitRectToAspect(rect, targetRatio);
+      }
+      return {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.max(1, Math.round(rect.width)),
+        height: Math.max(1, Math.round(rect.height)),
+        containLabel: false,
+      };
+    }
+    if (index === 0 && !xAxis.domain && !yAxis.domain) {
+      return {
+        left: margin.l,
+        right: margin.r,
+        top: margin.t,
+        bottom: margin.b,
+        containLabel: false,
+      };
+    }
+    return {
+      left: `${Math.max(0, xd[0] * 100)}%`,
+      width: `${Math.max(1, (xd[1] - xd[0]) * 100)}%`,
+      top: `${Math.max(0, (1 - yd[1]) * 100)}%`,
+      height: `${Math.max(1, (yd[1] - yd[0]) * 100)}%`,
+      containLabel: false,
+    };
+  }
+
+  function autoHeightForHorizontalPitch(layout, args, plotEl) {
+    const branded = withExportBrand(layout, args);
+    const xAxis = branded.xaxis || {};
+    const yAxis = branded.yaxis || {};
+    const scaleratio = Number(yAxis.scaleratio || 1) || 1;
+    if (!yAxis.scaleanchor || xAxis.domain || yAxis.domain) return null;
+    const isPitchScale = Math.abs(scaleratio - HORIZONTAL_PITCH_SCALERATIO) <= 0.04
+      || Math.abs(scaleratio - VERTICAL_PITCH_SCALERATIO) <= 0.04;
+    if (!isPitchScale) return null;
+    const xSpan = axisSpan(xAxis, [-5, 105]);
+    const ySpan = axisSpan(yAxis, [105, -5]);
+    if (xSpan < 50 || ySpan < 50) return null;
+    const targetRatio = xSpan / (ySpan * scaleratio);
+    const margin = Object.assign({ l: 8, r: 8, t: 8, b: 8 }, branded.margin || {});
+    const availableWidth = Math.max(
+      1,
+      (plotEl && plotEl.clientWidth) || (plotEl && plotEl.parentElement && plotEl.parentElement.clientWidth) || window.innerWidth || 1
+    ) - margin.l - margin.r;
+    const requested = Number(layout && layout.height || args && args.height || 520) || 520;
+    const desired = margin.t + margin.b + (availableWidth / targetRatio);
+    return Math.round(Math.max(requested, Math.min(desired, 900)));
+  }
+
+  function collectAxisCount(layout, traces) {
+    let count = 1;
+    Object.keys(layout || {}).forEach((key) => {
+      const m = key.match(/^[xy]axis(\d+)$/);
+      if (m) count = Math.max(count, Number(m[1]));
+    });
+    (traces || []).forEach((trace) => {
+      count = Math.max(count, axisIndexFromRef(trace.xaxis) + 1, axisIndexFromRef(trace.yaxis) + 1);
+    });
+    (layout.shapes || []).forEach((shape) => {
+      count = Math.max(count, axisIndexFromRef(shape.xref) + 1, axisIndexFromRef(shape.yref) + 1);
+    });
+    return count;
+  }
+
+  function plotlySymbolToECharts(symbol) {
+    const s = String(symbol || "circle");
+    if (s.includes("square")) return "rect";
+    if (s.includes("diamond")) return "diamond";
+    if (s.includes("triangle")) return "triangle";
+    if (s.includes("pentagon")) return "path://M0,-6L5.7,-1.9L3.5,5.2L-3.5,5.2L-5.7,-1.9Z";
+    if (s.includes("hexagon")) return "path://M-5,-3L0,-6L5,-3L5,3L0,6L-5,3Z";
+    if (s === "x") return "path://M-5,-5L5,5M5,-5L-5,5";
+    return "circle";
+  }
+
+  function traceLegendIcon(trace) {
+    const symbol = trace && trace.marker && trace.marker.symbol;
+    if (Array.isArray(symbol)) return "circle";
+    return plotlySymbolToECharts(symbol || "circle");
+  }
+
+  function firstArrayValue(value) {
+    if (!Array.isArray(value)) return value;
+    return value.find((item) => item != null && String(item).trim() !== "") || value[0];
+  }
+
+  function solidLegendColor(value) {
+    const raw = String(firstArrayValue(value) || "").trim();
+    if (!raw) return "";
+    const rgba = raw.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+    if (rgba) return `rgb(${Math.round(Number(rgba[1]))},${Math.round(Number(rgba[2]))},${Math.round(Number(rgba[3]))})`;
+    return raw;
+  }
+
+  function isTransparentColor(value) {
+    const raw = String(firstArrayValue(value) || "").trim();
+    const rgba = raw.match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/i);
+    return rgba ? Number(rgba[1]) <= 0.01 : raw === "transparent";
+  }
+
+  function traceLegendStyle(trace) {
+    const marker = trace && trace.marker || {};
+    const line = trace && trace.line || {};
+    const markerFill = solidLegendColor(marker.color);
+    const markerBorder = solidLegendColor(marker.line && marker.line.color);
+    const lineColor = solidLegendColor(line.color);
+    const fill = markerFill && !isTransparentColor(marker.color)
+      ? markerFill
+      : markerBorder || lineColor || HOME_HEX;
+    const borderColor = markerBorder || fill;
+    return {
+      color: fill,
+      borderColor,
+      borderWidth: Number(firstArrayValue(marker.line && marker.line.width)) || 0,
+    };
+  }
+
+  function legendDataFromTraces(traces) {
+    const seen = new Set();
+    const data = [];
+    (traces || []).forEach((trace) => {
+      const name = String(trace && trace.name || "").trim();
+      if (!name || trace.showlegend === false || name.startsWith("__") || seen.has(name)) return;
+      seen.add(name);
+      data.push({ name, icon: traceLegendIcon(trace), itemStyle: traceLegendStyle(trace) });
+    });
+    return data;
+  }
+
+  function isLineOnlyTrace(trace) {
+    const mode = String(trace && trace.mode || "");
+    return mode.includes("lines") && !mode.includes("markers");
+  }
+
+  function filterTracesForExport(traces, opts) {
+    const source = traces || [];
+    if (opts && opts.visibleTraceCount != null) {
+      return source.slice(0, Math.max(0, Number(opts.visibleTraceCount) || 0));
+    }
+    if (opts && opts.networkLineFraction != null) {
+      const lineTraces = source.filter(isLineOnlyTrace);
+      const maxLines = Math.ceil(lineTraces.length * Math.max(0, Math.min(1, opts.networkLineFraction)));
+      let seenLines = 0;
+      return source.filter((trace) => {
+        if (!isLineOnlyTrace(trace)) return true;
+        seenLines += 1;
+        return seenLines <= maxLines;
+      });
+    }
+    return source;
+  }
+
+  function isOpenSymbol(symbol) {
+    return String(symbol || "").includes("open");
+  }
+
+  function splitLinePoints(trace, revealFraction, revealMode) {
+    const x = trace.x || [];
+    const y = trace.y || [];
+    if (revealMode === "arrow" && revealFraction != null) {
+      const raw = [];
+      for (let i = 0; i < Math.min(x.length, y.length); i++) {
+        if (x[i] == null || y[i] == null) break;
+        raw.push([Number(x[i]), Number(y[i])]);
+      }
+      if (raw.length < 2) return [];
+      const segLengths = [];
+      let total = 0;
+      for (let i = 1; i < raw.length; i++) {
+        const dx = raw[i][0] - raw[i - 1][0];
+        const dy = raw[i][1] - raw[i - 1][1];
+        const len = Math.sqrt(dx * dx + dy * dy);
+        segLengths.push(len);
+        total += len;
+      }
+      let remaining = Math.max(0, Math.min(1, revealFraction)) * total;
+      const points = [raw[0]];
+      for (let i = 1; i < raw.length; i++) {
+        const len = segLengths[i - 1] || 0;
+        if (remaining >= len) {
+          points.push(raw[i]);
+          remaining -= len;
+        } else {
+          const t = len <= 0 ? 0 : remaining / len;
+          points.push([
+            raw[i - 1][0] + (raw[i][0] - raw[i - 1][0]) * t,
+            raw[i - 1][1] + (raw[i][1] - raw[i - 1][1]) * t,
+          ]);
+          break;
+        }
+      }
+      return points.length > 1 ? [points] : [];
+    }
+    const maxLen = revealFraction == null ? x.length : Math.max(0, Math.ceil(x.length * revealFraction));
+    const segments = [];
+    let current = [];
+    for (let i = 0; i < Math.min(x.length, y.length, maxLen); i++) {
+      if (x[i] == null || y[i] == null) {
+        if (current.length > 1) segments.push(current);
+        current = [];
+      } else {
+        current.push([x[i], y[i]]);
+      }
+    }
+    if (current.length > 1) segments.push(current);
+    return segments;
+  }
+
+  function markerData(trace, revealFraction, revealMode) {
+    const x = trace.x || [];
+    const y = trace.y || [];
+    const maxLen = revealFraction == null ? x.length : Math.max(0, (revealMode === "arrow" ? Math.floor(x.length * revealFraction) : Math.ceil(x.length * revealFraction)));
+    const data = [];
+    for (let i = 0; i < Math.min(x.length, y.length, maxLen); i++) {
+      if (x[i] == null || y[i] == null) continue;
+      data.push({
+        value: [x[i], y[i]],
+        labelText: arrValue(trace.text, i, ""),
+        tooltipText: arrValue(trace.hovertext || trace.text, i, trace.name || ""),
+        customdata: arrValue(trace.customdata, i, null),
+        itemStyle: {
+          color: arrValue(trace.marker && trace.marker.color, i, HOME_HEX),
+          borderColor: arrValue(trace.marker && trace.marker.line && trace.marker.line.color, i, "rgba(255,255,255,0.78)"),
+          borderWidth: Number(arrValue(trace.marker && trace.marker.line && trace.marker.line.width, i, 1.5)) || 0,
+          borderType: parseDash(arrValue(trace.marker && trace.marker.line && trace.marker.line.dash, i, "solid")),
+        },
+        symbol: plotlySymbolToECharts(arrValue(trace.marker && trace.marker.symbol, i, "circle")),
+        symbolSize: Number(arrValue(trace.marker && trace.marker.size, i, 12)) || 12,
+        isOpen: isOpenSymbol(arrValue(trace.marker && trace.marker.symbol, i, "")),
+      });
+    }
+    return data;
+  }
+
+  function convertTrace(trace, layout, revealFraction, opts) {
+    const revealMode = opts && opts.revealMode;
+    const isLight = opts && opts.isLight;
+    const mode = String(trace.mode || "markers");
+    const xAxisIndex = axisIndexFromRef(trace.xaxis);
+    const yAxisIndex = axisIndexFromRef(trace.yaxis);
+    const legendStyle = traceLegendStyle(trace);
+    const common = {
+      name: trace.name || "",
+      xAxisIndex,
+      yAxisIndex,
+      color: legendStyle.color,
+      animationDuration: 450,
+      animationEasing: "cubicOut",
+      silent: trace.hoverinfo === "skip" || trace.hoverinfo === "none",
+    };
+    if (mode.includes("lines") && !mode.includes("markers")) {
+      return splitLinePoints(trace, revealFraction, revealMode).map((points, idx) => ({
+        type: "line",
+        ...common,
+        data: points,
+        showSymbol: false,
+        symbol: revealMode === "arrow" ? ["none", "arrow"] : undefined,
+        symbolSize: revealMode === "arrow" ? 8 : undefined,
+        lineStyle: {
+          color: trace.line && trace.line.color || "#dfff00",
+          width: Number(trace.line && trace.line.width) || 2,
+          type: trace.line && trace.line.dash === "dot" ? "dotted" : "solid",
+          opacity: 1,
+        },
+        emphasis: { lineStyle: { width: Math.max(3, Number(trace.line && trace.line.width || 2) + 1.5) } },
+        z: 5 + idx,
+      }));
+    }
+    if (mode.includes("markers") || mode.includes("text")) {
+      const data = markerData(trace, revealFraction, revealMode);
+      const markerSymbol = trace.marker && trace.marker.symbol;
+      const fixedSymbol = Array.isArray(markerSymbol) ? null : plotlySymbolToECharts(markerSymbol || "circle");
+      return [{
+        type: "scatter",
+        ...common,
+        data,
+        symbol: fixedSymbol || ((value, params) => params.data.symbol),
+        symbolSize: (value, params) => params.data.symbolSize,
+        itemStyle: {
+          color: (params) => params.data.isOpen ? "rgba(0,0,0,0)" : params.data.itemStyle.color,
+          borderColor: (params) => params.data.itemStyle.borderColor,
+          borderWidth: (params) => params.data.itemStyle.borderWidth,
+          borderType: (params) => params.data.itemStyle.borderType,
+        },
+        label: mode.includes("text") ? {
+          show: true,
+          formatter: (params) => stripHtml(params.data.labelText || ""),
+          position: trace.textposition || "inside",
+          color: trace.textfont && trace.textfont.color || layout.font && layout.font.color || (isLight ? "#101510" : "#f4f7f2"),
+          fontSize: trace.textfont && trace.textfont.size || 9,
+          backgroundColor: trace.textfont && trace.textfont.bgcolor || (isLight ? "rgba(248,246,240,0.88)" : "rgba(7,16,8,0.58)"),
+          borderRadius: 3,
+          padding: [2, 4],
+          textBorderColor: isLight ? "rgba(248,246,240,0.86)" : "rgba(0,0,0,0.55)",
+          textBorderWidth: 1.5,
+        } : { show: false },
+        emphasis: { scale: 1.25 },
+        z: 20,
+      }];
+    }
+    return [];
+  }
+
+  function parseDash(dash) {
+    return dash === "dot" ? "dotted" : dash === "dash" ? "dashed" : "solid";
+  }
+
+  function shapeSeries(shapes, axisCount) {
+    const byAxis = Array.from({ length: axisCount }, () => []);
+    (shapes || []).forEach((shape) => {
+      const idx = axisIndexFromRef(shape.xref || shape.yref);
+      if (shape.xref === "paper" || shape.yref === "paper") return;
+      byAxis[idx].push(shape);
+    });
+    return byAxis.map((items, axisIndex) => ({
+      type: "custom",
+      xAxisIndex: axisIndex,
+      yAxisIndex: axisIndex,
+      data: items.map((shape, i) => [i]),
+      silent: true,
+      legendHoverLink: false,
+      z: 0,
+      renderItem(params, api) {
+        const shape = items[api.value(0)];
+        const coord = (x, y) => api.coord([Number(x), Number(y)]);
+        const style = {
+          fill: shape.fillcolor || "rgba(0,0,0,0)",
+          stroke: shape.line && shape.line.color || "rgba(255,255,255,0.4)",
+          lineWidth: Number(shape.line && shape.line.width) || 1,
+          lineDash: shape.line && shape.line.dash === "dot" ? [2, 3] : null,
+        };
+        if (shape.type === "line") {
+          const p0 = coord(shape.x0, shape.y0);
+          const p1 = coord(shape.x1, shape.y1);
+          return { type: "line", shape: { x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1] }, style };
+        }
+        if (shape.type === "circle") {
+          const p0 = coord(shape.x0, shape.y0);
+          const p1 = coord(shape.x1, shape.y1);
+          return {
+            type: "ellipse",
+            shape: { cx: (p0[0] + p1[0]) / 2, cy: (p0[1] + p1[1]) / 2, rx: Math.abs(p1[0] - p0[0]) / 2, ry: Math.abs(p1[1] - p0[1]) / 2 },
+            style,
+          };
+        }
+        if (shape.type === "path") {
+          const m = String(shape.path || "").match(/M\s*([-\d.]+)\s+([-\d.]+)\s+A\s*([-\d.]+)\s+([-\d.]+)\s+0\s+0\s+([01])\s+([-\d.]+)\s+([-\d.]+)/i);
+          if (m) {
+            const x0 = Number(m[1]), y0 = Number(m[2]), rx = Math.abs(Number(m[3])), ry = Math.abs(Number(m[4]));
+            const sweep = Number(m[5]), x1 = Number(m[6]), y1 = Number(m[7]);
+            const cx = (x0 + x1) / 2;
+            const cy = y0;
+            const points = [];
+            for (let step = 0; step <= 28; step++) {
+              const t = step / 28;
+              const angle = sweep ? Math.PI * (1 - t) : Math.PI * t;
+              const x = cx + Math.cos(angle) * rx;
+              const y = cy + (sweep ? -1 : 1) * Math.sin(angle) * ry;
+              points.push(coord(x, y));
+            }
+            return { type: "polyline", shape: { points }, style };
+          }
+        }
+        const p0 = coord(shape.x0, shape.y0);
+        const p1 = coord(shape.x1, shape.y1);
+        return {
+          type: "rect",
+          shape: { x: Math.min(p0[0], p1[0]), y: Math.min(p0[1], p1[1]), width: Math.abs(p1[0] - p0[0]), height: Math.abs(p1[1] - p0[1]) },
+          style,
+        };
+      },
+    })).filter(series => series.data.length);
+  }
+
+  function annotationSeries(annotations, axisCount, layout) {
+    const series = [];
+    const graphic = [];
+    (annotations || []).forEach((ann, i) => {
+      if (ann.showarrow && ann.xref && ann.yref && ann.xref !== "paper" && ann.yref !== "paper") {
+        const idx = axisIndexFromRef(ann.xref);
+        series.push({
+          type: "lines",
+          xAxisIndex: idx,
+          yAxisIndex: idx,
+          coordinateSystem: "cartesian2d",
+          data: [{ coords: [[ann.ax, ann.ay], [ann.x, ann.y]] }],
+          lineStyle: { color: ann.arrowcolor || "#dfff00", width: Number(ann.arrowwidth) || 2, opacity: 0.92 },
+          symbol: ["none", "arrow"],
+          symbolSize: Number(ann.arrowsize || 1) * 9,
+          silent: true,
+          z: 12,
+        });
+      } else if (ann.xref === "paper" || ann.yref === "paper") {
+        const x = Number(ann.x || 0);
+        const y = Number(ann.y || 0);
+        const xanchor = ann.xanchor || ann.align || "left";
+        const yanchor = ann.yanchor || "top";
+        const item = {
+          type: "text",
+          style: {
+            text: stripHtml(ann.text || ""),
+            fill: ann.font && ann.font.color || layout.font && layout.font.color || "#f4f7f2",
+            font: `${ann.font && ann.font.size || 10}px Iosevka Charon Mono, monospace`,
+            align: xanchor === "right" ? "right" : xanchor === "center" ? "center" : "left",
+            verticalAlign: yanchor === "bottom" ? "bottom" : yanchor === "middle" ? "middle" : "top",
+          },
+          silent: true,
+          z: 30,
+        };
+        if (xanchor === "right") item.right = `${Math.max(0, (1 - x) * 100)}%`;
+        else item.left = `${Math.max(0, x * 100)}%`;
+        if (yanchor === "bottom") item.bottom = `${Math.max(0, y * 100)}%`;
+        else item.top = `${Math.max(0, (1 - y) * 100)}%`;
+        graphic.push(item);
+      } else if (ann.x != null && ann.y != null) {
+        const idx = axisIndexFromRef(ann.xref);
+        series.push({
+          type: "scatter",
+          xAxisIndex: idx,
+          yAxisIndex: idx,
+          data: [[ann.x, ann.y]],
+          symbolSize: 1,
+          itemStyle: { opacity: 0 },
+          label: {
+            show: true,
+            formatter: stripHtml(ann.text || ""),
+            color: ann.font && ann.font.color || layout.font && layout.font.color || "#f4f7f2",
+            fontSize: ann.font && ann.font.size || 10,
+            position: "inside",
+          },
+          silent: true,
+          z: 25,
+        });
+      }
+    });
+    return { series, graphic };
+  }
+
+  function echartsOptionFromPlotly(traces, layout, args, opts) {
+    const revealFraction = opts && opts.revealFraction;
+    const chartSize = opts && opts.chartSize;
+    const exporting = opts && opts.exporting;
+    const branded = withExportBrand(layout, args);
+    const axisCount = collectAxisCount(branded, traces);
+    const grids = [];
+    const xAxes = [];
+    const yAxes = [];
+    for (let i = 0; i < axisCount; i++) {
+      const xKey = i === 0 ? "xaxis" : `xaxis${i + 1}`;
+      const yKey = i === 0 ? "yaxis" : `yaxis${i + 1}`;
+      grids.push(gridFromAxes(branded, i, chartSize));
+      xAxes.push(Object.assign(axisOption(branded[xKey], false, [-5, 105]), { gridIndex: i }));
+      yAxes.push(Object.assign(axisOption(branded[yKey], true, [105, -5]), { gridIndex: i }));
+    }
+    const ctx = contextFromArgs(args || {});
+    const optionOpts = Object.assign({}, opts || {}, { isLight: ctx.isLight });
+    const sourceTraces = filterTracesForExport(traces, optionOpts);
+    const converted = [];
+    sourceTraces.forEach((trace) => converted.push(...convertTrace(trace, branded, revealFraction, optionOpts)));
+    converted.unshift(...shapeSeries(branded.shapes || [], axisCount));
+    const ann = annotationSeries(branded.annotations || [], axisCount, branded);
+    converted.push(...ann.series);
+    const title = branded.title && branded.title.text ? stripHtml(branded.title.text) : "";
+    const legendData = legendDataFromTraces(sourceTraces);
+    return {
+      backgroundColor: branded.paper_bgcolor || branded.plot_bgcolor || (ctx.isLight ? "#f8f6f0" : "#071008"),
+      animation: !exporting,
+      animationDuration: exporting ? 0 : 450,
+      animationEasing: "cubicOut",
+      title: title ? {
+        text: title.split("\n")[0] || "",
+        subtext: title.split("\n").slice(1).join("  "),
+        left: 14,
+        top: 8,
+        textStyle: { color: branded.font && branded.font.color || "#f4f7f2", fontSize: 16, fontFamily: "Iosevka Charon Mono, monospace", fontWeight: 800 },
+        subtextStyle: { color: ctx.isLight ? "#302a22" : "#d8dee2", fontSize: 11, fontFamily: "Iosevka Charon Mono, monospace" },
+      } : undefined,
+      grid: grids,
+      xAxis: xAxes,
+      yAxis: yAxes,
+      legend: branded.showlegend === false || !legendData.length ? { show: false } : {
+        show: true,
+        data: legendData,
+        bottom: 8,
+        left: "center",
+        textStyle: { color: ctx.isLight ? LIGHT_LEGEND_FONT : "#cfd4d8", fontSize: 11 },
+      },
+      tooltip: {
+        trigger: "item",
+        confine: true,
+        backgroundColor: ctx.isLight ? "rgba(255,255,255,0.96)" : "rgba(8,12,10,0.96)",
+        borderColor: ctx.isLight ? "rgba(0,0,0,0.16)" : "rgba(142,255,113,0.22)",
+        textStyle: { color: ctx.isLight ? "#111111" : "#f4f7f2" },
+        formatter(params) {
+          const data = params.data || {};
+          return data.tooltipText || params.seriesName || "";
+        },
+      },
+      graphic: ann.graphic,
+      series: exporting ? converted.map((series) => Object.assign({}, series, {
+        animation: false,
+        animationDuration: 0,
+        animationDurationUpdate: 0,
+      })) : converted,
+    };
+  }
+
+  function downloadDataUrl(url, filename) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+  }
+
+  function exportAnimationKey(args) {
+    const parts = [
+      args && args.component_type,
+      args && args.mode,
+      args && args.view,
+      args && args.entry_mode,
+    ].filter(Boolean).map((part) => String(part).trim());
+    return `clipmaker:gif-animation:${parts.join(":") || "chart"}`;
+  }
+
+  function animationOptionsForArgs(args) {
+    const component = args && args.component_type;
+    const simple = [
+      ["build", "Build"],
+      ["pulse", "Pulse"],
+      ["still", "Still"],
+    ];
+    const flow = [
+      ["build", "Build"],
+      ["arrow", "Arrow Flow"],
+      ["pulse", "Pulse"],
+      ["still", "Still"],
+    ];
+    const sequence = [
+      ["build", "Build"],
+      ["sequence", "Sequence"],
+      ["arrow", "Arrow Flow"],
+      ["pulse", "Pulse"],
+      ["still", "Still"],
+    ];
+    if (component === "pass_map" && args && args.mode === "network") {
+      return [
+        ["network", "Network Grow"],
+        ["pulse", "Pulse"],
+        ["still", "Still"],
+      ];
+    }
+    if (component === "pass_map") return flow;
+    if (component === "build_up_map") return sequence;
+    if (component === "defensive_map") return simple;
+    if (component === "dribble_carry_map") return simple;
+    if (component === "goalkeeper_map") return simple;
+    if (component === "shot_map") return simple;
+    if (component === "penalty_shootout") return simple;
+    if (component === "echarts_option") return simple;
+    return simple;
+  }
+
+  function exportControlsHtml(defaultMode, args) {
+    const options = animationOptionsForArgs(args || {});
+    const fallbackMode = options.length ? options[0][0] : "build";
+    const selectedMode = options.some(([value]) => value === defaultMode) ? defaultMode : fallbackMode;
+    return [
+      '<button type="button" data-export="png">PNG</button>',
+      '<select data-export-animation title="GIF animation">',
+      ...options.map(([value, label]) => `<option value="${value}"${selectedMode === value ? " selected" : ""}>${label}</option>`),
+      '</select>',
+      '<button type="button" data-export="gif">GIF</button>',
+    ].join("");
+  }
+
+  function prepareExportControls(wrap, args) {
+    let controls = wrap.querySelector(".cm-export-controls");
+    if (!controls) {
+      controls = document.createElement("div");
+      controls.className = "cm-export-controls";
+      wrap.appendChild(controls);
+    }
+    const key = exportAnimationKey(args || {});
+    const options = animationOptionsForArgs(args || {});
+    const saved = localStorage.getItem(key) || "build";
+    const fallbackMode = options.length ? options[0][0] : "build";
+    const mode = options.some(([value]) => value === saved) ? saved : fallbackMode;
+    if (mode !== saved) localStorage.setItem(key, mode);
+    controls.innerHTML = exportControlsHtml(mode, args || {});
+    const selector = controls.querySelector("[data-export-animation]");
+    selector.onchange = () => localStorage.setItem(key, selector.value);
+    return controls;
+  }
+
+  function exportHighlightSeriesIndexes(chart) {
+    const series = chart.getOption().series || [];
+    const indexes = [];
+    series.forEach((item, index) => {
+      if (item && item.type !== "custom" && item.name !== "__pitch_shapes") indexes.push(index);
+    });
+    return indexes.length ? indexes : [0];
+  }
+
+  function installExportControls(plotEl, chart, traces, layout, args) {
+    let wrap = plotEl.parentElement;
+    if (!wrap || !wrap.classList.contains("cm-chart-wrap")) {
+      wrap = document.createElement("div");
+      wrap.className = "cm-chart-wrap";
+      plotEl.parentNode.insertBefore(wrap, plotEl);
+      wrap.appendChild(plotEl);
+    }
+    let controls = prepareExportControls(wrap, args);
+    controls.querySelector('[data-export="png"]').onclick = () => {
+      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+      const url = chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg, excludeComponents: [] });
+      downloadDataUrl(url, `${exportFilenameFromArgs(args || {})}.png`);
+    };
+    controls.querySelector('[data-export="gif"]').onclick = () => makeChartGif(
+      chart, traces, layout, args,
+      controls.querySelector('[data-export="gif"]'),
+      controls.querySelector('[data-export-animation]').value
+    );
+  }
+
+  function makeChartGif(chart, traces, layout, args, button, animationMode) {
+    if (typeof GIF === "undefined") {
+      button.textContent = "NO GIF";
+      setTimeout(() => { button.textContent = "GIF"; }, 1200);
+      return;
+    }
+    const old = button.textContent;
+    button.textContent = "MAKING";
+    button.disabled = true;
+    const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: chart.getWidth(),
+      height: chart.getHeight(),
+      workerScript: "gif.worker.js",
+      background: bg,
+    });
+    const mode = animationMode || "build";
+    const lineCount = Math.max(1, (traces || []).filter(isLineOnlyTrace).length);
+    const traceCount = Math.max(1, (traces || []).length);
+
+    function framePolicy(modeName) {
+      if (modeName === "still") return { frames: 2, delay: 1400, finalHold: 0 };
+      if (modeName === "pulse") return { frames: Math.min(20, Math.max(8, exportHighlightSeriesIndexes(chart).length * 2)), delay: 160, finalHold: 900 };
+      if (modeName === "arrow") return { frames: Math.min(54, Math.max(16, lineCount * 3)), delay: lineCount > 24 ? 95 : 125, finalHold: 1000 };
+      if (modeName === "sequence") return { frames: Math.min(48, Math.max(10, traceCount)), delay: traceCount > 30 ? 110 : 170, finalHold: 1100 };
+      if (modeName === "network") return { frames: Math.min(42, Math.max(14, lineCount)), delay: lineCount > 28 ? 100 : 150, finalHold: 1000 };
+      return { frames: Math.min(36, Math.max(18, lineCount)), delay: 115, finalHold: 1000 };
+    }
+
+    function setMapOption(extra) {
+      chart.setOption(echartsOptionFromPlotly(traces, layout, args, Object.assign({
+        chartSize: { width: chart.getWidth(), height: chart.getHeight() },
+        exporting: true,
+      }, extra || {})), true);
+    }
+
+    function addCanvasFrame(delay) {
+      gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay });
+    }
+
+    function finishGif(finalDelay) {
+      setMapOption();
+      setTimeout(() => {
+        if (finalDelay !== 0) addCanvasFrame(finalDelay || framePolicy(mode).finalHold || 900);
+        gif.render();
+      }, 80);
+    }
+
+    if (mode === "still") {
+      setMapOption();
+      setTimeout(() => {
+        const policy = framePolicy("still");
+        addCanvasFrame(policy.delay);
+        addCanvasFrame(policy.delay);
+        gif.render();
+      }, 80);
+    } else if (mode === "pulse") {
+      setMapOption();
+      const policy = framePolicy("pulse");
+      const seriesIndexes = exportHighlightSeriesIndexes(chart);
+      let frame = 0;
+      function pulseTick() {
+        chart.dispatchAction({ type: "downplay" });
+        chart.dispatchAction({ type: "highlight", seriesIndex: seriesIndexes[frame % seriesIndexes.length] });
+        setTimeout(() => {
+          addCanvasFrame(frame === policy.frames - 1 ? policy.finalHold : policy.delay);
+          frame += 1;
+          if (frame < policy.frames) pulseTick();
+          else {
+            chart.dispatchAction({ type: "downplay" });
+            finishGif(0);
+          }
+        }, 80);
+      }
+      pulseTick();
+    } else if (mode === "arrow") {
+      const policy = framePolicy("arrow");
+      let frame = 1;
+      function arrowTick() {
+        const fraction = frame / policy.frames;
+        setMapOption({ revealFraction: fraction, revealMode: "arrow" });
+        setTimeout(() => {
+          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
+          frame += 1;
+          if (frame <= policy.frames) arrowTick();
+          else finishGif(0);
+        }, 50);
+      }
+      arrowTick();
+    } else if (mode === "sequence") {
+      const policy = framePolicy("sequence");
+      let frame = 1;
+      function sequenceTick() {
+        const visibleTraceCount = Math.ceil(traceCount * (frame / policy.frames));
+        setMapOption({ visibleTraceCount, revealFraction: 1 });
+        setTimeout(() => {
+          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
+          frame += 1;
+          if (frame <= policy.frames) sequenceTick();
+          else finishGif(0);
+        }, 50);
+      }
+      sequenceTick();
+    } else if (mode === "network") {
+      const policy = framePolicy("network");
+      let frame = 1;
+      setMapOption({ networkLineFraction: 0, revealFraction: 1 });
+      setTimeout(() => addCanvasFrame(policy.delay), 80);
+      function networkTick() {
+        setMapOption({ networkLineFraction: frame / policy.frames, revealFraction: 1 });
+        setTimeout(() => {
+          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
+          frame += 1;
+          if (frame <= policy.frames) networkTick();
+          else finishGif(0);
+        }, 50);
+      }
+      setTimeout(networkTick, 180);
+    } else {
+      const policy = framePolicy("build");
+      const frames = policy.frames;
+      let i = 1;
+      function renderFraction(fraction) {
+        setMapOption({ revealFraction: fraction });
+      }
+      function addNextFrame() {
+        const fraction = i / frames;
+        renderFraction(fraction);
+        setTimeout(() => {
+          addCanvasFrame(i === frames ? policy.finalHold : policy.delay);
+          i += 1;
+          if (i <= frames) addNextFrame();
+          else finishGif(0);
+        }, 40);
+      }
+      addNextFrame();
+    }
+    gif.on("finished", (blob) => {
+      chart.setOption(echartsOptionFromPlotly(traces, layout, args, {
+        chartSize: { width: chart.getWidth(), height: chart.getHeight() },
+      }), true);
+      downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
+      button.textContent = old;
+      button.disabled = false;
+    });
+  }
+
+  function installOptionExportControls(plotEl, chart, args) {
+    let wrap = plotEl.parentElement;
+    if (!wrap || !wrap.classList.contains("cm-chart-wrap")) {
+      wrap = document.createElement("div");
+      wrap.className = "cm-chart-wrap";
+      plotEl.parentNode.insertBefore(wrap, plotEl);
+      wrap.appendChild(plotEl);
+    }
+    let controls = prepareExportControls(wrap, args);
+    controls.querySelector('[data-export="png"]').onclick = () => {
+      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+      downloadDataUrl(chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg }), `${exportFilenameFromArgs(args || {})}.png`);
+    };
+    controls.querySelector('[data-export="gif"]').onclick = () => {
+      if (typeof GIF === "undefined") {
+        const btn = controls.querySelector('[data-export="gif"]');
+        btn.textContent = "NO GIF";
+        setTimeout(() => { btn.textContent = "GIF"; }, 1200);
+        return;
+      }
+      const btn = controls.querySelector('[data-export="gif"]');
+      const old = btn.textContent;
+      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+      const mode = controls.querySelector('[data-export-animation]').value || "build";
+      const gif = new GIF({
+        workers: 2,
+        quality: 10,
+        width: chart.getWidth(),
+        height: chart.getHeight(),
+        workerScript: "gif.worker.js",
+        background: bg,
+      });
+      btn.textContent = "MAKING";
+      btn.disabled = true;
+      if (mode === "still") {
+        setTimeout(() => {
+          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: 1400 });
+          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: 1400 });
+          gif.render();
+        }, 80);
+      } else {
+      let frame = 0;
+      const maxFrames = mode === "pulse" ? 20 : mode === "still" ? 2 : mode === "network" ? 18 : mode === "sequence" ? 18 : 24;
+      const frameDelay = mode === "arrow" ? 120 : mode === "sequence" ? 155 : mode === "network" ? 145 : 140;
+      const finalHold = mode === "arrow" || mode === "network" || mode === "sequence" ? 1000 : 900;
+      const seriesIndexes = exportHighlightSeriesIndexes(chart);
+      function tick() {
+        chart.dispatchAction({ type: "highlight", seriesIndex: seriesIndexes[frame % seriesIndexes.length] });
+        setTimeout(() => {
+          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: frame === maxFrames - 1 ? finalHold : frameDelay });
+          chart.dispatchAction({ type: "downplay" });
+          frame += 1;
+          if (frame < maxFrames) tick();
+          else {
+            gif.render();
+          }
+        }, 90);
+      }
+      tick();
+      }
+      gif.on("finished", (blob) => {
+        downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
+        btn.textContent = old;
+        btn.disabled = false;
+      });
+    };
+  }
+
+  function numericBoxValue(value, fallback) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value.replace("px", ""));
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return fallback;
+  }
+
+  function fitNativePitchOption(option, plotEl, requestedHeight) {
+    const aspect = Number(option && option.cmPitchAspect);
+    if (!Number.isFinite(aspect) || aspect <= 0) return;
+    const grid = Object.assign({ left: 20, right: 20, top: 72, bottom: 42 }, Array.isArray(option.grid) ? option.grid[0] : option.grid || {});
+    const margins = {
+      left: numericBoxValue(grid.left, 20),
+      right: numericBoxValue(grid.right, 20),
+      top: numericBoxValue(grid.top, 72),
+      bottom: numericBoxValue(grid.bottom, 42),
+    };
+    const chartWidth = Math.max(1, (plotEl && plotEl.clientWidth) || (plotEl && plotEl.parentElement && plotEl.parentElement.clientWidth) || window.innerWidth || 1);
+    const desiredHeight = Math.round(Math.max(requestedHeight, Math.min(900, margins.top + margins.bottom + ((chartWidth - margins.left - margins.right) / aspect))));
+    if (plotEl && Math.abs(plotEl.clientHeight - desiredHeight) > 2) plotEl.style.height = `${desiredHeight}px`;
+    const chartHeight = desiredHeight;
+    const rect = fitRectToAspect({
+      left: margins.left,
+      top: margins.top,
+      width: Math.max(1, chartWidth - margins.left - margins.right),
+      height: Math.max(1, chartHeight - margins.top - margins.bottom),
+    }, aspect);
+    const fittedGrid = Object.assign({}, grid, {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      right: undefined,
+      bottom: undefined,
+      containLabel: false,
+    });
+    option.grid = Array.isArray(option.grid) ? [fittedGrid].concat(option.grid.slice(1)) : fittedGrid;
+    if (Array.isArray(option.graphic)) {
+      option.graphic = option.graphic.map((item) => {
+        if (!item || item.type !== "rect" || item.cmPitchBackground !== true) return item;
+        return Object.assign({}, item, {
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          shape: { width: Math.round(rect.width), height: Math.round(rect.height) },
+          right: undefined,
+          bottom: undefined,
+        });
+      });
+    }
+  }
+
+  function renderEchartsOption(args) {
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    plotEl.style.display = "block";
+    plotEl.style.height = `${Number(args.height || 520)}px`;
+    ensureEChartsReady().then(() => {
+      if (!_cmChart || _cmChart.getDom() !== plotEl) {
+        if (_cmChart) _cmChart.dispose();
+        _cmChart = echarts.init(plotEl, null, { renderer: ECHARTS_RENDERER });
+      }
+      const option = Object.assign({}, args.option || {});
+      fitNativePitchOption(option, plotEl, Number(args.height || 520) || 520);
+      option.tooltip = Object.assign({
+        trigger: "item",
+        confine: true,
+        formatter(params) {
+          const data = params && params.data || {};
+          return data.tooltip || data.tooltipText || params.name || "";
+        },
+      }, option.tooltip || {});
+      _cmChart.setOption(option, true);
+      installResizeHandler(() => {
+        if (_cmChart && _cmChart.getDom() === plotEl) {
+          fitNativePitchOption(option, plotEl, Number(args.height || 520) || 520);
+          _cmChart.resize();
+          _cmChart.setOption(option, true);
+          Streamlit.setHeight(plotEl.offsetHeight + 4);
+        }
+      });
+      installOptionExportControls(plotEl, _cmChart, args);
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+    });
+  }
+
+  function cmNewPlot(plotEl, traces, layout, args) {
+    _cmLastRender = { traces, layout, args };
+    const requestedHeight = Number(layout && layout.height || args && args.height || 520) || 520;
+    plotEl.style.height = `${requestedHeight}px`;
+    const pitchHeight = autoHeightForHorizontalPitch(layout || {}, args || {}, plotEl);
+    if (pitchHeight) plotEl.style.height = `${pitchHeight}px`;
+    plotEl.removeAllListeners = function() { _cmPlotlyClickHandler = null; };
+    plotEl.on = function(eventName, handler) {
+      if (eventName === "plotly_click") _cmPlotlyClickHandler = handler;
+    };
+    return ensureEChartsReady().then(() => {
+      if (!_cmChart || _cmChart.getDom() !== plotEl) {
+        if (_cmChart) _cmChart.dispose();
+        _cmChart = echarts.init(plotEl, null, { renderer: ECHARTS_RENDERER });
+      }
+      const renderOption = () => echartsOptionFromPlotly(traces, layout, args, {
+        chartSize: { width: plotEl.clientWidth || _cmChart.getWidth(), height: plotEl.clientHeight || _cmChart.getHeight() },
+      });
+      const option = renderOption();
+      _cmChart.off("click");
+      _cmChart.on("click", (params) => {
+        if (!_cmPlotlyClickHandler || !params || !params.data) return;
+        _cmPlotlyClickHandler({ points: [{ customdata: params.data.customdata, data: params.data.value }] });
+      });
+      _cmChart.setOption(option, true);
+      installResizeHandler(() => {
+        if (_cmChart && _cmChart.getDom() === plotEl) {
+          const resizedHeight = autoHeightForHorizontalPitch(layout || {}, args || {}, plotEl);
+          if (resizedHeight) plotEl.style.height = `${resizedHeight}px`;
+          _cmChart.resize();
+          _cmChart.setOption(renderOption(), true);
+          Streamlit.setHeight(plotEl.offsetHeight + 4);
+        }
+      });
+      installExportControls(plotEl, _cmChart, traces, layout, args);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHOT MAP — based on working Shot Map Parlour
+  // ════════════════════════════════════════════════════════════════════════════
+  function buildShotTrace(shotList, isHome, teamName, selectedIdx, isGF) {
+    if (!shotList.length) {
+      return { x:[], y:[], mode:"markers", name:teamName, type:"scatter",
+        marker:{size:12, color:isHome?HOME_HEX:AWAY_HEX}, showlegend:true };
+    }
+    const xs=[], ys=[], colors=[], symbols=[], sizes=[], texts=[], cd=[], lineColors=[], lineWidths=[], lineDashes=[];
+    for (const s of shotList) {
+      xs.push(s._px); ys.push(s._py);
+      const baseFill = shotColor(isHome);
+      const baseLine = borderColor(isHome);
+      if (s.type === "Goal") {
+        colors.push(baseFill);
+        symbols.push("circle");
+        lineColors.push(baseLine);
+        lineWidths.push(2.4);
+        lineDashes.push("solid");
+      } else if (s.type === "BlockedShot") {
+        colors.push("rgba(0,0,0,0)");
+        symbols.push("circle-open");
+        lineColors.push(baseLine);
+        lineWidths.push(2.4);
+        lineDashes.push("solid");
+      } else if (s.type === "SavedShot" || s.type === "AttemptSaved") {
+        colors.push("rgba(0,0,0,0)");
+        symbols.push("circle-open");
+        lineColors.push(baseLine);
+        lineWidths.push(2.4);
+        lineDashes.push("dot");
+      } else if (MISSED.has(s.type)) {
+        colors.push(baseFill);
+        symbols.push("x");
+        lineColors.push(baseLine);
+        lineWidths.push(2);
+        lineDashes.push("solid");
+      } else {
+        colors.push(baseFill);
+        symbols.push("circle");
+        lineColors.push(baseLine);
+        lineWidths.push(2);
+        lineDashes.push("solid");
+      }
+      sizes.push(s.df_idx === selectedIdx ? 22 : 13);
+      const sec = String(s.second).padStart(2,"0");
+      const et = (s.period||"").includes("ExtraTime") ? " ET" : "";
+      texts.push(`<b>${s.playerName||""}</b><br>${s.minute}'${sec}"${et}<br>${s.type}`);
+      cd.push(s.df_idx);
+    }
+    return { x:xs, y:ys, mode:"markers", name:teamName, type:"scatter",
+      text:texts, hovertemplate:"%{text}<extra></extra>", customdata:cd,
+      marker:{ size:sizes, color:colors, symbol:symbols, line:{color:lineColors,width:lineWidths,dash:lineDashes} },
+      showlegend:true };
+  }
+
+  function renderShotMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _gfLine    = isLight ? LIGHT_GOAL_LINE : "#ffffff";
+    const _gfFrame   = isLight ? LIGHT_GOALFRAME_FILL : "rgba(255,255,255,0.08)";
+    const _legendFont= isLight ? LIGHT_LEGEND_FONT : "#ffffff";
+    const _annoColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
+    const shots      = args.shots      || [];
+    const homeTeam   = args.home_team  || "Home";
+    const awayTeam   = args.away_team  || "Away";
+    const selectedIdx= args.selected_idx;
+    const view       = args.view       || "pitch";
+    const height     = args.height     || 460;
+    const isGF = view === "goalframe";
+    const isHPV = view === "halfpitch_vert";
+    const isHP = view === "halfpitch";
+
+    let toPlot = shots;
+    if (isGF) toPlot = shots.filter(s => s.goal_mouth_y != null && s.goal_mouth_z != null);
+
+    for (const s of toPlot) {
+      if (isGF) {
+        s._px = 100 - s.goal_mouth_y;
+        s._py = s.goal_mouth_z;
+      } else if (isHPV) {
+        s._px = 100 - s.y;
+        s._py = 100 - s.x;
+      } else {
+        s._px = s.x;
+        s._py = 100 - s.y;
+      }
+    }
+
+    const homeShots = toPlot.filter(s => s.is_home);
+    const awayShots = toPlot.filter(s => !s.is_home);
+    const noData = toPlot.length === 0;
+    document.getElementById("no-data").style.display = noData ? "block" : "none";
+    document.getElementById("plot").style.display = noData ? "none" : "block";
+
+    const traces = [
+      buildShotTrace(homeShots, true, homeTeam, selectedIdx, isGF),
+      buildShotTrace(awayShots, false, awayTeam, selectedIdx, isGF),
+    ];
+
+    const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
+    const annotations = isGF ? [
+      {x:GOAL_Y_LEFT,y:-6,text:"Post",showarrow:false,font:{color:_annoColor,size:10}},
+      {x:GOAL_Y_RIGHT,y:-6,text:"Post",showarrow:false,font:{color:_annoColor,size:10}},
+      {x:gMid,y:GOAL_Z_TOP+4,text:"Crossbar",showarrow:false,font:{color:_annoColor,size:10}},
+    ] : [];
+
+    const selectedShot = selectedIdx != null ? toPlot.find(s => s.df_idx === selectedIdx) : null;
+
+    let xRange, yRange, scaleRatio, shapes;
+    if (isGF) {
+      const expanded = expandedGoalframeRangeForShot(
+        selectedShot,
+        NORMAL_GOALFRAME_X_RANGE,
+        NORMAL_GOALFRAME_Y_RANGE,
+        NORMAL_GOALFRAME_EXPAND_MARGIN_X,
+        NORMAL_GOALFRAME_EXPAND_MARGIN_Y
+      );
+      xRange=expanded.xRange; yRange=expanded.yRange; scaleRatio=GOAL_SCALERATIO; shapes=goalframeShapes(xRange, yRange, _gfLine, _gfFrame, _pitchBG, _pitchLine);
+    } else if (isHPV) {
+      xRange=[-5,105]; yRange=[55,-5]; scaleRatio=VERTICAL_PITCH_SCALERATIO; shapes=halfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    } else if (isHP) {
+      xRange=[50,105]; yRange=[105,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=halfPitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    } else {
+      xRange=[-5,105]; yRange=[105,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    }
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
+      margin:{l:0,r:0,t:isGF?20:0,b:0}, height:height,
+      showlegend:!isGF,
+      legend:{orientation:"h",yanchor:"bottom",y:1.02,xanchor:"left",x:0,font:{color:_legendFont,size:12},bgcolor:"rgba(0,0,0,0)"},
+      xaxis:{range:xRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:yRange,showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:scaleRatio},
+      shapes:shapes, annotations:annotations, dragmode:false,
+    };
+
+    const plotEl = document.getElementById("plot");
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const dfIdx = data.points[0].customdata;
+        if (dfIdx != null) Streamlit.setValue([dfIdx, Date.now()]);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PASS MAP — player passes and pass network
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderPassMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const passes     = args.passes      || [];
+    const homeTeam   = args.home_team   || "";
+    const awayTeam   = args.away_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const mode       = args.mode        || "player";
+    const height     = args.height      || 520;
+
+    document.getElementById("no-data").style.display = passes.length ? "none" : "block";
+    document.getElementById("plot").style.display = passes.length ? "block" : "none";
+    if (!passes.length) { Streamlit.setHeight(100); return; }
+
+    if (mode === "network") renderPassNetwork(passes, homeTeam, awayTeam, height, _pitchBG, _pitchLine, _pitchThick, isLight, args);
+    else renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height, _pitchBG, _pitchLine, _pitchThick, _hudGreen, isLight, args);
+  }
+
+
+  function renderPlayerPassMap(passes, homeTeam, awayTeam, selectedIdx, height, _pitchBG, _pitchLine, _pitchThick, _hudGreen, isLight, args) {
+    const plotEl = document.getElementById("plot");
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG,
+      isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)",
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    // Horizontal player map: attack direction is left-to-right.
+    passes.forEach(p => {
+      if (p.x == null || p.endX == null) return;
+      const isSelected = selectedIdx === p.df_idx;
+      const col = isLight ? lightModeAccent(p.successful ? SUCC_HEX : FAIL_HEX) : (p.successful ? SUCC_HEX : FAIL_HEX);
+      const lineAlpha = dimmed ? (isSelected ? 0.86 : 0.10) : 0.42;
+      const dotAlpha = dimmed ? (isSelected ? 1.0 : 0.18) : 0.92;
+      const sx=p.x, sy=100-p.y, ex=p.endX, ey=100-p.endY;
+
+      traces.push({
+        x:[sx,ex], y:[sy,ey], mode:"lines",
+        line:{color:hexToRgba(col,lineAlpha),width:isSelected?4:2.2},
+        hoverinfo:"none", showlegend:false,
+      });
+      traces.push({
+        x:[ex], y:[ey], mode:"markers",
+        marker:{color:hexToRgba(col,dotAlpha),size:isSelected?18:11,symbol:"circle",
+          line:{color:isSelected?col:(isLight ? LIGHT_MARKER_BORDER : DARK_MARKER_BORDER),width:isSelected?3:1.8}},
+        text:[`${p.playerName}<br>${p.minute}'${String(p.second).padStart(2,'0')}"<br>${p.successful?"✅ Successful":"❌ Unsuccessful"}`],
+        hovertemplate:"%{text}<extra></extra>",
+        customdata:[[p.df_idx, Date.now()]], showlegend:false,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG || PITCH_BG,
+      margin:{l:5,r:5,t:5,b:5}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:HORIZONTAL_PITCH_SCALERATIO},
+      shapes:shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode:false, showlegend:false,
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  function installPassNetworkControls(plotEl, storageKey, controls, onChange) {
+    let wrap = plotEl.parentElement;
+    if (!wrap || !wrap.classList.contains("cm-chart-wrap")) return;
+    let panel = wrap.querySelector(".cm-network-controls");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.className = "cm-network-controls";
+      wrap.appendChild(panel);
+    }
+    const selected = (name, value) => controls[name] === value ? " selected" : "";
+    panel.innerHTML = [
+      '<select data-net-control="segment" title="Time segment">',
+      `<option value="before"${selected("segment","before")}>Before subs</option>`,
+      `<option value="after"${selected("segment","after")}>After subs</option>`,
+      '</select>',
+      '<select data-net-control="min" title="Minimum passes per link">',
+      `<option value="1"${selected("min","1")}>1+ links</option>`,
+      `<option value="2"${selected("min","2")}>2+ links</option>`,
+      `<option value="3"${selected("min","3")}>3+ links</option>`,
+      `<option value="5"${selected("min","5")}>5+ links</option>`,
+      '</select>',
+    ].join("");
+    panel.querySelectorAll("select").forEach((select) => {
+      select.onchange = () => {
+        const next = Object.assign({}, controls);
+        panel.querySelectorAll("select").forEach((el) => { next[el.dataset.netControl] = el.value; });
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        onChange();
+      };
+    });
+  }
+
+  function renderPassNetwork(passes, homeTeam, awayTeam, height, _pitchBG, _pitchLine, _pitchThick, isLight, args) {
+    const plotEl = document.getElementById("plot");
+    const _pl = _pitchLine || PITCH_LINE;
+    const _pt = _pitchThick || PITCH_THICK;
+    const _pb = _pitchBG || PITCH_BG;
+    const _gf = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _starterColor = isLight ? LIGHT_PASS_LABEL : "#ffffff";
+    const _subColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
+    const controlKey = `clipmaker:pass-network:${homeTeam || "home"}:${awayTeam || "away"}`;
+    const defaultControls = { segment: "before", min: "2" };
+    const controls = Object.assign({}, defaultControls, JSON.parse(localStorage.getItem(controlKey) || "{}"));
+    const passSecond = (p) => {
+      const minute = Number(p && p.minute || 0);
+      const second = Number(p && p.second || 0);
+      return (Number.isFinite(minute) ? minute : 0) * 60 + (Number.isFinite(second) ? second : 0);
+    };
+    const sortedPasses = (passes || []).slice().sort((a, b) => {
+      const pa = String(a.period || "");
+      const pb = String(b.period || "");
+      if (pa !== pb) return pa.localeCompare(pb);
+      return passSecond(a) - passSecond(b);
+    });
+    const subFirstTimes = {};
+    sortedPasses.forEach((p) => {
+      if (p && p.playerName && p.is_starter === false) {
+        const t = passSecond(p);
+        if (subFirstTimes[p.playerName] == null || t < subFirstTimes[p.playerName]) subFirstTimes[p.playerName] = t;
+      }
+    });
+    const subTimes = Object.values(subFirstTimes);
+    const firstSubSecond = subTimes.length ? Math.min(...subTimes) : null;
+    const allSubsSecond = subTimes.length ? Math.max(...subTimes) : null;
+    let networkPasses = sortedPasses.filter((p) => {
+      if (controls.segment === "before") return firstSubSecond == null ? true : passSecond(p) < firstSubSecond;
+      if (controls.segment === "after") return allSubsSecond == null ? true : passSecond(p) >= allSubsSecond;
+      return true;
+    });
+
+    // Build player data with starter info
+    const players = {};
+    networkPasses.forEach(p => {
+      if (!p.playerName || p.x == null) return;
+      if (!players[p.playerName]) {
+        players[p.playerName] = {xs:[],ys:[],count:0,isHome:p.is_home,team:p.team,isStarter:p.is_starter!==false};
+      }
+      players[p.playerName].xs.push(p.x);
+      players[p.playerName].ys.push(p.y);
+      players[p.playerName].count++;
+    });
+
+    const nodes = {};
+    Object.entries(players).forEach(([name,d]) => {
+      nodes[name] = {
+        ax:d.xs.reduce((a,b)=>a+b,0)/d.xs.length,
+        ay:d.ys.reduce((a,b)=>a+b,0)/d.ys.length,
+        count:d.count, isHome:d.isHome, team:d.team, isStarter:d.isStarter,
+      };
+    });
+
+    const conns = {};
+    for (let i=0; i<networkPasses.length-1; i++) {
+      const a=networkPasses[i], b=networkPasses[i+1];
+      if (!a.playerName||!b.playerName) continue;
+      if (a.team!==b.team||a.playerName===b.playerName) continue;
+      const key=[a.playerName,b.playerName].sort().join("|||");
+      conns[key]=(conns[key]||0)+1;
+    }
+
+    const homeNodes=Object.entries(nodes).filter(([,n])=>n.isHome);
+    const awayNodes=Object.entries(nodes).filter(([,n])=>!n.isHome);
+    const minFreq = Math.max(1, Number(controls.min || 2) || 2);
+    function filteredConns(isHome) {
+      return Object.entries(conns)
+        .filter(([k, freq]) => {
+          const [a, b]=k.split("|||");
+          return nodes[a] && nodes[b] && nodes[a].isHome === isHome && freq >= minFreq;
+        })
+        .sort((a, b) => b[1] - a[1]);
+    }
+    const homeConns=filteredConns(true);
+    const awayConns=filteredConns(false);
+
+    const homeMaxConn=Math.max(...homeConns.map(([,f])=>f),1);
+    const awayMaxConn=Math.max(...awayConns.map(([,f])=>f),1);
+    const homeMaxCount=Math.max(...homeNodes.map(([,n])=>n.count),1);
+    const awayMaxCount=Math.max(...awayNodes.map(([,n])=>n.count),1);
+
+    function buildTeamTraces(teamNodes,teamConns,maxConn,maxCount,baseHex,xaxis,yaxis) {
+      const traces=[];
+      const displayHex = isLight ? lightModeAccent(baseHex) : baseHex;
+      const [br,bg,bb]=[parseInt(displayHex.slice(1,3),16),parseInt(displayHex.slice(3,5),16),parseInt(displayHex.slice(5,7),16)];
+
+      // Connection lines: transform WhoScored→portrait (display x=100-y, display y=100-x)
+      teamConns.forEach(([key,freq]) => {
+        const [a,b]=key.split("|||");
+        if (!nodes[a]||!nodes[b]) return;
+        const weight = freq/maxConn;
+        const alpha=(isLight ? 0.22 : 0.10)+(isLight ? 0.64 : 0.58)*weight;
+        traces.push({
+          x:[100-nodes[a].ay, 100-nodes[b].ay], y:[100-nodes[a].ax, 100-nodes[b].ax],
+          xaxis:xaxis, yaxis:yaxis, mode:"lines",
+          line:{color:`rgba(${br},${bg},${bb},${alpha})`,width:0.8+4.2*weight},
+          hoverinfo:"none", showlegend:false,
+        });
+      });
+
+      // Starters (circles)
+      const starters=teamNodes.filter(([,n])=>n.isStarter);
+      if (starters.length) {
+        traces.push({
+          x:starters.map(([,n])=>100-n.ay), y:starters.map(([,n])=>100-n.ax),
+          xaxis:xaxis, yaxis:yaxis, mode:"markers+text",
+          marker:{
+            color:starters.map(([,n])=>`rgba(${br},${bg},${bb},${0.25+0.7*(n.count/maxCount)})`),
+            size:starters.map(([,n])=>14+14*(n.count/maxCount)), symbol:"circle",
+            line:{color:displayHex,width:isLight ? 2.4 : 2},
+          },
+          text:starters.map(([name])=>name.split(" ").pop()),
+          textposition:"top center", textfont:{size:9,color:_starterColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(7,16,8,0.60)"},
+          hovertext:starters.map(([name,n])=>`${name}<br>${n.count} passes`),
+          hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
+        });
+      }
+
+      // Subs (smaller squares)
+      const subs=teamNodes.filter(([,n])=>!n.isStarter);
+      if (subs.length) {
+        traces.push({
+          x:subs.map(([,n])=>100-n.ay), y:subs.map(([,n])=>100-n.ax),
+          xaxis:xaxis, yaxis:yaxis, mode:"markers+text",
+          marker:{
+            color:subs.map(([,n])=>`rgba(${br},${bg},${bb},${0.25+0.7*(n.count/maxCount)})`),
+            size:subs.map(([,n])=>8+8*(n.count/maxCount)), symbol:"square",
+            line:{color:displayHex,width:isLight ? 2 : 1.5},
+          },
+          text:subs.map(([name])=>name.split(" ").pop()),
+          textposition:"top center", textfont:{size:8,color:_subColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(7,16,8,0.60)"},
+          hovertext:subs.map(([name,n])=>`${name} (sub)<br>${n.count} passes`),
+          hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
+        });
+      }
+
+      return traces;
+    }
+
+    const traces=[
+      ...buildTeamTraces(homeNodes,homeConns,homeMaxConn,homeMaxCount,HOME_HEX,"x","y"),
+      ...buildTeamTraces(awayNodes,awayConns,awayMaxConn,awayMaxCount,AWAY_HEX,"x2","y2"),
+    ];
+
+    // Pitch shapes for both subplots
+    const shapes1=fullPitchVertShapes(_pl, _pt, _pb, _gf);
+    const shapes2=fullPitchVertShapes(_pl, _pt, _pb, _gf).map(s => {
+      const ns=Object.assign({},s);
+      ns.xref="x2"; ns.yref="y2";
+      if (ns.line) ns.line=Object.assign({},ns.line);
+      return ns;
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+      margin:{l:0,r:0,t:25,b:10}, height:height, dragmode:false, showlegend:false,
+      xaxis: {range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,domain:[0,0.48]},
+      yaxis: {range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1.5},
+      xaxis2:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,domain:[0.52,1],anchor:"y2"},
+      yaxis2:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x2",scaleratio:1.5,anchor:"x2"},
+      shapes:[...shapes1,...shapes2],
+      annotations:[
+        {x:50,y:107,xref:"x",yref:"y",text:`<b>${homeTeam}</b>`,showarrow:false,font:{size:13,color:HOME_HEX}},
+        {x:50,y:107,xref:"x2",yref:"y2",text:`<b>${awayTeam}</b>`,showarrow:false,font:{size:13,color:AWAY_HEX}},
+      ],
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      installPassNetworkControls(plotEl, controlKey, controls, () => renderPassNetwork(passes, homeTeam, awayTeam, height, _pitchBG, _pitchLine, _pitchThick, isLight, args));
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // DEFENSIVE MAP — horizontal full pitch (left→right attack)
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderDefensiveMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : DARK_MARKER_BORDER;
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
+    const actions    = args.actions     || [];
+    const homeTeam   = args.home_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height      || 620;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG, _goalFill,
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+    const stackConnectorTraces = [];
+
+    const displayPoint = (a) => ({ x:a.x, y:100-a.y });
+    const clampPitch = (v) => Math.max(2, Math.min(98, v));
+    const actionSecond = (a) => {
+      const minute = Number(a.minute || 0);
+      const second = Number(a.second || 0);
+      return (Number.isFinite(minute) ? minute : 0) * 60 + (Number.isFinite(second) ? second : 0);
+    };
+    const parent = actions.map((_, i) => i);
+    const find = (i) => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
+      return i;
+    };
+    const unite = (a, b) => {
+      const ra = find(a), rb = find(b);
+      if (ra !== rb) parent[rb] = ra;
+    };
+
+    actions.forEach((a, i) => {
+      const p = displayPoint(a);
+      a._plotX = p.x;
+      a._plotY = p.y;
+      a._stackSize = 1;
+    });
+
+    for (let i = 0; i < actions.length; i++) {
+      for (let j = i + 1; j < actions.length; j++) {
+        const samePeriod = String(actions[i].period || "") === String(actions[j].period || "");
+        if (samePeriod && Math.abs(actionSecond(actions[i]) - actionSecond(actions[j])) <= 6) {
+          unite(i, j);
+        }
+      }
+    }
+
+    const stacks = {};
+    actions.forEach((a, i) => {
+      const root = find(i);
+      if (!stacks[root]) stacks[root] = [];
+      stacks[root].push(a);
+    });
+
+    Object.values(stacks).forEach(stack => {
+      if (stack.length < 2) return;
+      const radius = Math.min(5, 2.4 + stack.length * 0.45);
+      stack.forEach((a, i) => {
+        const p = displayPoint(a);
+        const angle = -Math.PI / 2 + (2 * Math.PI * i / stack.length);
+        a._plotX = clampPitch(p.x + Math.cos(angle) * radius);
+        a._plotY = clampPitch(p.y + Math.sin(angle) * radius);
+        a._stackSize = stack.length;
+      });
+      const ordered = [...stack].sort((a, b) => (actionSecond(a) - actionSecond(b)) || (a._plotY - b._plotY) || (a._plotX - b._plotX));
+      stackConnectorTraces.push({
+        x: ordered.map(a => a._plotX),
+        y: ordered.map(a => a._plotY),
+        mode: "lines",
+        name: "Stack link",
+        line: { color: isLight ? "rgba(126,82,0,0.90)" : "rgba(255,225,0,0.95)", width: isLight ? 3.4 : 3 },
+        hoverinfo: "skip",
+        showlegend: false,
+      });
+    });
+
+    traces.push(...stackConnectorTraces);
+
+    const byType = {};
+    actions.forEach(a => { if (!byType[a.type]) byType[a.type]=[]; byType[a.type].push(a); });
+
+    Object.entries(byType).forEach(([atype,acts]) => {
+      const style = DEF_STYLE[atype] || {color:"#aaa",symbol:"circle"};
+      const displayColor = isLight ? lightModeAccent(style.color) : style.color;
+      traces.push({
+        x:acts.map(a=>a._plotX), y:acts.map(a=>a._plotY), mode:"markers", name:atype,
+        marker:{
+          color:acts.map(a=>{
+            const isSel=selectedIdx===a.df_idx;
+              const alpha=dimmed?(isSel?1.0:0.18):0.92;
+            const [r,g,b]=[parseInt(displayColor.slice(1,3),16),parseInt(displayColor.slice(3,5),16),parseInt(displayColor.slice(5,7),16)];
+            return `rgba(${r},${g},${b},${alpha})`;
+          }),
+          size:acts.map(a=>selectedIdx===a.df_idx?28:19), symbol:style.symbol,
+           line:{color:acts.map(a=>(selectedIdx===a.df_idx)?displayColor:_markerBorder),
+                width:acts.map(a=>selectedIdx===a.df_idx?3.5:2.2)},
+        },
+        text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}${a._stackSize > 1 ? `<br>Stacked with ${a._stackSize - 1} other action${a._stackSize > 2 ? "s" : ""}` : ""}`),
+        hovertemplate:"%{text}<extra></extra>",
+        customdata:acts.map(a=>[a.df_idx, Date.now()]),
+        showlegend:true,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
+      margin:{l:5,r:5,t:5,b:5}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,-5],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:HORIZONTAL_PITCH_SCALERATIO},
+      shapes:shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode:false,
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:_legendFont}},
+      showlegend:true,
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ROI SELECTOR — click-and-drag rectangle on a video frame
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderRoiSelector(args) {
+    const frame_b64   = args.frame_b64   || "";
+    const frame_w     = args.frame_w     || 960;
+    const frame_h     = args.frame_h     || 540;
+    const existing    = args.existing_roi || {};
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    plotEl.style.display = "block";
+
+    plotEl.innerHTML = `
+      <div style="position:relative;width:100%;user-select:none;">
+        <canvas id="roi-canvas" style="cursor:crosshair;width:100%;display:block;border:1px solid #333;border-radius:4px;"></canvas>
+        <div id="roi-hint" style="color:#adaaaa;font-size:11px;margin-top:5px;min-height:16px;"></div>
+      </div>`;
+
+    const canvas = document.getElementById("roi-canvas");
+    const ctx    = canvas.getContext("2d");
+    const img    = new Image();
+
+    let isDragging = false;
+    let startX = 0, startY = 0;
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    // Map a canvas-CSS coordinate to an image-pixel coordinate
+    function toImg(cx, cy) {
+      const scaleX = frame_w / canvas.width;
+      const scaleY = frame_h / canvas.height;
+      return [cx * scaleX, cy * scaleY];
+    }
+
+    // Map a canvas-CSS position (relative to canvas element) from a mouse event
+    function canvasPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width  / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const src = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
+      return [
+        (src.clientX - rect.left)  * scaleX,
+        (src.clientY - rect.top)   * scaleY,
+      ];
+    }
+
+    function drawScene(rect) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (rect && rect.w >= 2 && rect.h >= 2) {
+        ctx.strokeStyle = "#00ff50";
+        ctx.lineWidth   = 2;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.fillStyle   = "rgba(0,255,80,0.10)";
+        ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      }
+    }
+
+    function sendRoi(x1, y1, x2, y2) {
+      let ix1 = clamp(Math.round(Math.min(x1, x2)), 0, frame_w - 1);
+      let iy1 = clamp(Math.round(Math.min(y1, y2)), 0, frame_h - 1);
+      let iw  = clamp(Math.round(Math.abs(x2 - x1)), 4, frame_w  - ix1);
+      let ih  = clamp(Math.round(Math.abs(y2 - y1)), 2, frame_h  - iy1);
+      if (iw < 4 || ih < 2) return;
+      Streamlit.setValue({ x: ix1, y: iy1, w: iw, h: ih });
+      const hint = document.getElementById("roi-hint");
+      if (hint) hint.textContent = `ROI: (${ix1}, ${iy1})  ${iw}×${ih}px — draw again to adjust.`;
+    }
+
+    img.onload = function () {
+      canvas.width  = frame_w;
+      canvas.height = frame_h;
+
+      // Show existing ROI (if any) on first render
+      let initRect = null;
+      if (existing.w > 0 && existing.h > 0) {
+        initRect = { x: existing.x, y: existing.y, w: existing.w, h: existing.h };
+        const hint = document.getElementById("roi-hint");
+        if (hint) hint.textContent = `Current ROI: (${existing.x}, ${existing.y})  ${existing.w}×${existing.h}px`;
+      } else {
+        const hint = document.getElementById("roi-hint");
+        if (hint) hint.textContent = "Click and drag to draw the scoreboard region.";
+      }
+      drawScene(initRect);
+
+      requestAnimationFrame(() => {
+        const h = canvas.getBoundingClientRect().height;
+        Streamlit.setHeight(h + 30);
+      });
+    };
+
+    img.src = "data:image/jpeg;base64," + frame_b64;
+
+    // ── Mouse events ─────────────────────────────────────────────────────────
+    canvas.addEventListener("mousedown", function (e) {
+      [startX, startY] = canvasPos(e);
+      isDragging = true;
+      e.preventDefault();
+    });
+
+    canvas.addEventListener("mousemove", function (e) {
+      if (!isDragging) return;
+      const [cx, cy] = canvasPos(e);
+      drawScene({ x: Math.min(startX, cx), y: Math.min(startY, cy),
+                  w: Math.abs(cx - startX), h: Math.abs(cy - startY) });
+    });
+
+    canvas.addEventListener("mouseup", function (e) {
+      if (!isDragging) return;
+      isDragging = false;
+      const [cx, cy] = canvasPos(e);
+      const [ix1, iy1] = toImg(startX, startY);
+      const [ix2, iy2] = toImg(cx, cy);
+      sendRoi(ix1, iy1, ix2, iy2);
+    });
+
+    canvas.addEventListener("mouseleave", function () { isDragging = false; });
+
+    // ── Touch events ──────────────────────────────────────────────────────────
+    canvas.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      [startX, startY] = canvasPos(e);
+      isDragging = true;
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", function (e) {
+      e.preventDefault();
+      if (!isDragging) return;
+      const [cx, cy] = canvasPos(e);
+      drawScene({ x: Math.min(startX, cx), y: Math.min(startY, cy),
+                  w: Math.abs(cx - startX), h: Math.abs(cy - startY) });
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", function (e) {
+      e.preventDefault();
+      if (!isDragging) return;
+      isDragging = false;
+      const [cx, cy] = canvasPos(e);
+      const [ix1, iy1] = toImg(startX, startY);
+      const [ix2, iy2] = toImg(cx, cy);
+      sendRoi(ix1, iy1, ix2, iy2);
+    }, { passive: false });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Goalkeeper Actions Map
+  // ════════════════════════════════════════════════════════════════════════════
+  const GK_STYLE = {
+    "Punch":         { color: "#3498db", symbol: "circle" },
+    "Claim":         { color: "#27ae60", symbol: "square" },
+    "KeeperSweeper": { color: "#f39c12", symbol: "diamond" },
+    "KeeperPickup":  { color: "#8e44ad", symbol: "triangle-up" },
+    "PenaltyFaced":  { color: "#e74c3c", symbol: "pentagon" },
+  };
+
+  function renderGoalkeeperMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : DARK_MARKER_BORDER;
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
+    const actions    = args.actions     || [];
+    const homeTeam   = args.home_team   || "";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height      || 520;
+    const shotsFaced = args.shots_faced === true;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = defHalfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    if (shotsFaced) {
+      // ── Shots Faced mode ────────────────────────────────────────────────────
+      // Opposing shots: display_x = y, display_y = x (no inversion — x≈90 lands near own goal)
+      // y is mirrored (a.y not 100-a.y) so left/right matches the GK's perspective
+      // Group by outcome: Saved (blue) vs Goal (red)
+      const groups = [
+        { label: "Saved",    color: isLight ? lightModeAccent("#7ab4ff") : "#7ab4ff", acts: actions.filter(a => a.type === "SavedShot") },
+        { label: "Goal",     color: isLight ? lightModeAccent("#e74c3c") : "#e74c3c", acts: actions.filter(a => a.type === "Goal")      },
+      ];
+      groups.forEach(({label, color, acts}) => {
+        if (!acts.length) return;
+        const [r,g,b] = [parseInt(color.slice(1,3),16),parseInt(color.slice(3,5),16),parseInt(color.slice(5,7),16)];
+        traces.push({
+          x: acts.map(a => a.y),
+          y: acts.map(a => a.x),
+          mode: "markers", name: label,
+          marker: {
+            symbol: label === "Goal" ? "circle" : "circle-open",
+            color: acts.map(a => {
+              const isSel = selectedIdx === a.df_idx;
+              const alpha = dimmed ? (isSel ? 1.0 : 0.18) : 0.94;
+              return label === "Goal" ? `rgba(${r},${g},${b},${alpha})` : "rgba(0,0,0,0)";
+            }),
+            size: acts.map(a => selectedIdx === a.df_idx ? 28 : 19),
+            line: {
+              color: acts.map(a => {
+                const isSel = selectedIdx === a.df_idx;
+                const alpha = dimmed ? (isSel ? 1.0 : 0.22) : 0.96;
+                return `rgba(${r},${g},${b},${alpha})`;
+              }),
+              width: acts.map(a => selectedIdx === a.df_idx ? 3.5 : 2.2),
+              dash: label === "Goal" ? "solid" : "dot",
+            },
+          },
+          text: acts.map(a => `${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${label}`),
+          hovertemplate: "%{text}<extra></extra>",
+          customdata: acts.map(a => [a.df_idx, Date.now()]),
+          showlegend: true,
+        });
+      });
+    } else {
+      // ── GK Actions mode ─────────────────────────────────────────────────────
+      const byType = {};
+      actions.forEach(a => { if (!byType[a.type]) byType[a.type]=[]; byType[a.type].push(a); });
+
+      Object.entries(byType).forEach(([atype,acts]) => {
+        const style = GK_STYLE[atype] || {color:"#aaa",symbol:"circle"};
+        const displayColor = isLight ? lightModeAccent(style.color) : style.color;
+        // PenaltyFaced has no meaningful coords in WhoScored — always pin to penalty spot
+        const isPenalty = atype === "PenaltyFaced";
+        traces.push({
+          x:acts.map(a=> isPenalty ? 50   : 100-a.y),
+          y:acts.map(a=> isPenalty ? 88.5 : 100-a.x),
+          mode:"markers", name:atype,
+          marker:{
+            color:acts.map(a=>{
+              const isSel=selectedIdx===a.df_idx;
+              const alpha=dimmed?(isSel?1.0:0.18):0.92;
+              const [r,g,b]=[parseInt(displayColor.slice(1,3),16),parseInt(displayColor.slice(3,5),16),parseInt(displayColor.slice(5,7),16)];
+              return `rgba(${r},${g},${b},${alpha})`;
+            }),
+          size:acts.map(a=>selectedIdx===a.df_idx?28:19), symbol:style.symbol,
+           line:{color:acts.map(a=>(selectedIdx===a.df_idx)?displayColor:_markerBorder),
+                width:acts.map(a=>selectedIdx===a.df_idx?3.5:2.2)},
+          },
+          text:acts.map(a=>`${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,'0')}"<br>${a.type}<br>${a.outcomeType||""}`),
+          hovertemplate:"%{text}<extra></extra>",
+          customdata:acts.map(a=>[a.df_idx, Date.now()]),
+          showlegend:true,
+        });
+      });
+    }
+
+    const layout = {
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:_pitchBG,
+      margin:{l:8,r:8,t:0,b:44}, height:height,
+      xaxis:{range:[-5,105],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true},
+      yaxis:{range:[105,45],showgrid:false,zeroline:false,showticklabels:false,fixedrange:true,scaleanchor:"x",scaleratio:1},
+      shapes:shapes, dragmode:false,
+      legend:{orientation:"h",y:-0.04,x:0.5,xanchor:"center",bgcolor:"rgba(0,0,0,0)",font:{size:11,color:_legendFont}},
+      showlegend:true,
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // DRIBBLE & CARRY MAP — horizontal pitch
+  // ════════════════════════════════════════════════════════════════════════════
+  // Dribble & Carry Map
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderDribbleCarryMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _markerBorder = isLight ? LIGHT_MARKER_BORDER : DARK_MARKER_BORDER;
+    const _carryLineColor = isLight ? LIGHT_CARRY_LINE : "rgba(255,255,255,0.3)";
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
+    const actions    = args.actions     || [];
+    const selectedIdx = args.selected_idx != null ? args.selected_idx : null;
+    const height      = args.height       || 700;
+
+    document.getElementById("no-data").style.display = actions.length ? "none" : "block";
+    document.getElementById("plot").style.display    = actions.length ? "block" : "none";
+    if (!actions.length) { Streamlit.setHeight(100); return; }
+
+    const plotEl = document.getElementById("plot");
+    const shapes = horizontalPitchShapes(
+      _pitchLine, _pitchThick, _pitchBG, _goalFill,
+      isLight ? "rgba(30,70,10,0.08)" : undefined,
+      isLight ? "rgba(47,93,22,0.055)" : undefined,
+      isLight ? "rgba(47,93,22,0.16)" : undefined
+    );
+    const dimmed = selectedIdx !== null;
+    const traces = [];
+
+    const SUCC_COLOR  = isLight ? lightModeAccent("#27ae60") : "#27ae60";
+    const FAIL_COLOR  = isLight ? lightModeAccent("#e74c3c") : "#e74c3c";
+    const CARRY_COLOR = isLight ? lightModeAccent("#e0c860") : "#e0c860";
+
+    const dribbles = actions.filter(a => a.type === "TakeOn");
+    const carries  = actions.filter(a => a.type === "Carry" && a.endX != null && a.endY != null);
+
+    // ── Carry lines (null-separated, not clickable) ──────────────────────────
+    if (carries.length) {
+      const lineAlpha = dimmed ? (isLight ? 0.32 : 0.18) : (isLight ? 0.82 : 0.68);
+      const cxs = [], cys = [];
+      carries.forEach(c => {
+        cxs.push(c.x, c.endX, null);
+        cys.push(100 - c.y, 100 - c.endY, null);
+      });
+      traces.push({
+        x: cxs, y: cys, mode: "lines",
+        line: { dash: "dot", width: isLight ? 2.4 : 2, color: rgbaFromHex("#e0c860", lineAlpha, isLight) },
+        hoverinfo: "skip", showlegend: false, name: "Carry line",
+      });
+
+      // highlighted line for selected carry
+      if (dimmed) {
+        const sel = carries.find(c => c.df_idx === selectedIdx);
+        if (sel) {
+          traces.push({
+            x: [sel.x, sel.endX],
+            y: [100 - sel.y, 100 - sel.endY],
+            mode: "lines",
+            line: { dash: "dot", width: isLight ? 3.6 : 3, color: rgbaFromHex("#e0c860", 1.0, isLight) },
+            hoverinfo: "skip", showlegend: false, name: "",
+          });
+        }
+      }
+
+      // ── Carry endpoints (clickable dots) ────────────────────────────────────
+      const ex = [], ey = [], ec = [], es = [], elc = [], elw = [], et = [], ecd = [];
+      carries.forEach(c => {
+        const isSel  = selectedIdx === c.df_idx;
+        const alpha  = dimmed ? (isSel ? 1.0 : 0.18) : 0.92;
+        ex.push(c.endX);
+        ey.push(100 - c.endY);
+        ec.push(rgbaFromHex("#e0c860", alpha, isLight));
+        es.push(isSel ? 20 : 13);
+        elc.push(isSel ? CARRY_COLOR : _carryLineColor);
+        elw.push(isSel ? 2.5 : 1.5);
+        et.push(`${c.playerName}<br>${c.minute}'${String(c.second).padStart(2,"0")}"<br>Carry`);
+        ecd.push([c.df_idx, Date.now()]);
+      });
+      traces.push({
+        x: ex, y: ey, mode: "markers", name: "Carry",
+        marker: { symbol: "circle", color: ec, size: es,
+                  line: { color: elc, width: elw } },
+        text: et, hovertemplate: "%{text}<extra></extra>",
+        customdata: ecd, showlegend: true,
+      });
+    }
+
+    // ── Dribbles ─────────────────────────────────────────────────────────────
+    [
+      [dribbles.filter(d => d.outcomeType === "Successful"),   SUCC_COLOR, "Succ. dribbles"],
+      [dribbles.filter(d => d.outcomeType !== "Successful"),   FAIL_COLOR, "Unsucc. dribbles"],
+    ].forEach(([grp, color, name]) => {
+      if (!grp.length) return;
+      const [r,g,b] = [parseInt(color.slice(1,3),16), parseInt(color.slice(3,5),16), parseInt(color.slice(5,7),16)];
+      traces.push({
+        x: grp.map(d => d.x),
+        y: grp.map(d => 100 - d.y),
+        mode: "markers", name: name,
+        marker: {
+          symbol: "circle",
+          color: grp.map(d => {
+            const isSel = selectedIdx === d.df_idx;
+            const alpha = dimmed ? (isSel ? 1.0 : 0.18) : 0.94;
+            return `rgba(${r},${g},${b},${alpha})`;
+          }),
+          size: grp.map(d => selectedIdx === d.df_idx ? 24 : 16),
+          line: {
+            color: grp.map(d => selectedIdx === d.df_idx ? color : _markerBorder),
+            width: grp.map(d => selectedIdx === d.df_idx ? 3.5 : 2.2),
+          },
+        },
+        text: grp.map(d => `${d.playerName}<br>${d.minute}'${String(d.second).padStart(2,"0")}"<br>${d.outcomeType === "Successful" ? "Successful dribble" : "Unsuccessful dribble"}`),
+        hovertemplate: "%{text}<extra></extra>",
+        customdata: grp.map(d => [d.df_idx, Date.now()]),
+        showlegend: true,
+      });
+    });
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
+      margin: {l:5, r:5, t:5, b:5}, height: height,
+      xaxis: {range:[-5,105], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true},
+      yaxis: {range:[105,-5], showgrid:false, zeroline:false, showticklabels:false, fixedrange:true, scaleanchor:"x", scaleratio:HORIZONTAL_PITCH_SCALERATIO},
+      shapes: shapes, annotations:[attackDirectionAnnotation(_hudGreen)], dragmode: false,
+      legend: {orientation:"h", y:-0.04, x:0.5, xanchor:"center", bgcolor:"rgba(0,0,0,0)", font:{size:11, color:_legendFont}},
+      showlegend: true,
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata) Streamlit.setValue(pt.customdata);
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BUILD-UP MAP — horizontal pitch, plots a single sequence's ball path
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderBuildUpMap(args) {
+    const isLight    = args.light_mode === true;
+    const _pitchBG   = isLight ? LIGHT_PITCH_BG : PITCH_BG;
+    const _pitchLine = isLight ? LIGHT_PITCH_LINE : PITCH_LINE;
+    const _pitchThick= isLight ? LIGHT_PITCH_THICK : PITCH_THICK;
+    const _hudGreen  = isLight ? LIGHT_HUD_GREEN : HUD_GREEN;
+    const _goalFill  = isLight ? LIGHT_GOAL_FILL : "rgba(255,255,255,0.04)";
+    const actions     = args.actions      || [];
+    const isHome    = args.is_home   || false;
+    const height    = args.height    || 260;
+    const selectedIdx = args.selected_idx != null ? Number(args.selected_idx) : null;
+    const entryMode = args.entry_mode || "";
+    const isEntryMap = entryMode === "final_third" || entryMode === "box";
+    const teamColor = isLight ? lightModeAccent(isHome ? HOME_HEX : AWAY_HEX) : (isHome ? HOME_HEX : AWAY_HEX);
+    const [tr, tg, tb] = isHome ? HOME_RGB : AWAY_RGB;
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    document.getElementById("plot").style.display    = "block";
+
+    const shapes      = isEntryMap
+      ? fullPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill)
+      : pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    const annotations = [];
+    const traces      = [];
+
+    const carryX = [], carryY = [];
+    const stepX  = [], stepY  = [], stepText = [], stepHover = [];
+    const endX = [], endY = [], endHover = [], endCustom = [], endSize = [], endLine = [], endColor = [];
+    const plotPoint = (x, y) => {
+      if (isEntryMap) return { x: 100 - y, y: 100 - x };
+      return { x: x, y: 100 - y };
+    };
+
+    if (entryMode === "final_third") {
+      shapes.push({
+        type: "rect", x0: 0, y0: 0, x1: 100, y1: 33,
+        fillcolor: isLight ? "rgba(47,93,22,0.10)" : "rgba(223,255,0,0.09)",
+        line: { color: isLight ? "rgba(47,93,22,0.35)" : "rgba(223,255,0,0.38)", width: 1, dash: "dot" },
+        layer: "below",
+      });
+      annotations.push({
+        x: 50, y: 6, xref: "x", yref: "y",
+        text: "Final 3rd", showarrow: false,
+        font: { color: _hudGreen, size: 11 },
+        bgcolor: isLight ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.28)",
+      });
+    } else if (entryMode === "box") {
+      shapes.push({
+        type: "rect", x0: 21, y0: 0, x1: 79, y1: 17,
+        fillcolor: isLight ? "rgba(47,93,22,0.12)" : "rgba(223,255,0,0.11)",
+        line: { color: isLight ? "rgba(47,93,22,0.42)" : "rgba(223,255,0,0.48)", width: 1.5, dash: "dot" },
+        layer: "below",
+      });
+      annotations.push({
+        x: 50, y: 8, xref: "x", yref: "y",
+        text: "Box", showarrow: false,
+        font: { color: _hudGreen, size: 11 },
+        bgcolor: isLight ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.28)",
+      });
+    }
+
+    actions.forEach(a => {
+      if (a.endX == null || a.endY == null) return;
+      const startPt = plotPoint(a.x, a.y);
+      const endPt = plotPoint(a.endX, a.endY);
+      const sx = startPt.x, sy = startPt.y;
+      const ex = endPt.x, ey = endPt.y;
+      const dfIdx = a.df_idx != null ? Number(a.df_idx) : null;
+      const isSelected = selectedIdx != null && dfIdx === selectedIdx;
+      const entryKind = a.entry_kind || a.type || "Action";
+
+      stepX.push(sx);
+      stepY.push(sy);
+      stepText.push(isEntryMap ? "" : String(a.step));
+      stepHover.push(
+        `${a.step}. ${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,"0")}" (${a.type})`
+      );
+      if (dfIdx != null) {
+        endX.push(ex);
+        endY.push(ey);
+        endCustom.push(dfIdx);
+        endSize.push(isSelected ? 18 : 12);
+        endLine.push(isSelected ? 3 : 1.5);
+        endColor.push(entryKind === "Carry" ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.90 : 0.78, isLight) : teamColor);
+        endHover.push(
+          `<b>${a.entry_label || "Entry"}</b><br>${a.playerName}<br>` +
+          `${a.minute}'${String(a.second).padStart(2,"0")}" (${entryKind})`
+        );
+      }
+
+      if (a.type === "Pass" || a.type === "SuccessfulFinalThirdPass") {
+        annotations.push({
+          x: ex, y: ey, ax: sx, ay: sy,
+          xref: "x", yref: "y", axref: "x", ayref: "y",
+          showarrow: true,
+          arrowhead: 2, arrowsize: 1.2, arrowwidth: 2,
+          arrowcolor: teamColor,
+          text: "",
+        });
+      } else {
+        // Carry — dashed line
+        carryX.push(sx, ex, null);
+        carryY.push(sy, ey, null);
+      }
+    });
+
+    // Carry lines
+    if (carryX.length) {
+      traces.push({
+        x: carryX, y: carryY, mode: "lines",
+        line: { dash: "dot", width: isLight ? 3 : 2.5, color: rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.88 : 0.70, isLight) },
+        hoverinfo: "skip", showlegend: false,
+      });
+    }
+
+    // Terminal end-point dot (last action's end position)
+    if (!isEntryMap && actions.length > 0) {
+      const last = actions[actions.length - 1];
+      if (last.endX != null && last.endY != null) {
+        const lastPt = plotPoint(last.endX, last.endY);
+        traces.push({
+          x: [lastPt.x], y: [lastPt.y], mode: "markers",
+          marker: { symbol: "circle", size: 10,
+                    color: rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight),
+                    line: { color: teamColor, width: 1.5 } },
+          hoverinfo: "skip", showlegend: false,
+        });
+      }
+    }
+
+    if (endX.length) {
+      traces.push({
+        x: endX, y: endY, mode: "markers",
+        marker: {
+          symbol: "circle",
+          size: endSize,
+          color: endColor,
+          line: { color: isLight ? "#222222" : "#ffffff", width: endLine },
+          opacity: 0.96,
+        },
+        hovertext: endHover,
+        hovertemplate: "%{hovertext}<extra></extra>",
+        customdata: endCustom,
+        showlegend: false,
+      });
+    }
+
+    // Numbered start markers (drawn last so they sit on top)
+    if (stepX.length) {
+      traces.push({
+        x: stepX, y: stepY, mode: isEntryMap ? "markers" : "markers+text",
+        text: stepText,
+        textposition: "middle center",
+        textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Iosevka Charon Mono, monospace" },
+        marker: {
+          symbol: "circle", size: isEntryMap ? 7 : 20,
+          color: isEntryMap ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.42 : 0.28, isLight) : rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight),
+          line: { color: teamColor, width: isEntryMap ? 0.7 : 1.5 },
+        },
+        hovertext: stepHover,
+        hovertemplate: "%{hovertext}<extra></extra>",
+        showlegend: false,
+      });
+    }
+
+    // Empty state
+    if (!actions.length) {
+      annotations.push({
+        x: 50, y: 50, xref: "x", yref: "y",
+        text: "Select a sequence",
+        showarrow: false,
+        font: { color: "#555555", size: 13 },
+      });
+    }
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
+      xaxis: { range: [-5, 105], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true },
+      yaxis: {
+        range: [105, -5],
+        showgrid: false,
+        zeroline: false,
+        showticklabels: false,
+        fixedrange: true,
+        scaleanchor: "x",
+        scaleratio: isEntryMap ? 1.54 : HORIZONTAL_PITCH_SCALERATIO,
+      },
+      shapes: shapes, annotations: annotations,
+      dragmode: false, showlegend: false,
+      height: height,
+      margin: { l: 8, r: 8, t: 8, b: 8 },
+    };
+
+    cmNewPlot(plotEl, traces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        if (pt.customdata != null) {
+          Streamlit.setValue([pt.customdata, Date.now()]);
+        }
+      });
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PENALTY SHOOTOUT MAP
+  // Layout: goalframe top-centre, home player circles left, away player circles right
+  // Clicking a player circle sends back [df_idx, timestamp]
+  // ════════════════════════════════════════════════════════════════════════════
+  function renderPenaltyShootout(args) {
+    const isLight    = args.light_mode === true;
+    const shots      = args.shots      || [];
+    const homeTeam   = args.home_team  || "Home";
+    const awayTeam   = args.away_team  || "Away";
+    const selectedIdx= args.selected_idx != null ? args.selected_idx : null;
+    const height     = args.height     || 560;
+    const _annoColor = isLight ? LIGHT_ANNO_COLOR : "#adaaaa";
+    const _penaltySpot = isLight ? LIGHT_PENALTY : "rgba(255,255,255,0.5)";
+
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = shots.length ? "none" : "block";
+    plotEl.style.display = shots.length ? "block" : "none";
+    if (!shots.length) { Streamlit.setHeight(100); return; }
+
+    const homeShots = sortShotsChronologically(shots.filter(s => s.is_home));
+    const awayShots = sortShotsChronologically(shots.filter(s => !s.is_home));
+    const ROW_SIZE = 5;
+    const homeRows = Math.max(1, Math.ceil(homeShots.length / ROW_SIZE));
+    const awayRows = Math.max(1, Math.ceil(awayShots.length / ROW_SIZE));
+    const playerRows = Math.max(homeRows, awayRows);
+    const playerRangeForRows = rows => [-(rows - 1) - 0.8, 0.8];
+    const layoutHeight = Math.max(height, 760 + Math.max(0, playerRows - 1) * 72);
+
+    // Compute goalframe data for selected shot
+    const selShot = selectedIdx != null ? shots.find(s => s.df_idx === selectedIdx) : null;
+    const hasGF   = selShot && selShot.goal_mouth_y != null && selShot.goal_mouth_z != null;
+
+    // ── Helper: build player circle trace for one team ──────────────────────
+    // ── Helper: build player traces for one team (split by outcome for correct rendering)
+    function buildPlayerTraces(teamShots, isHome, xaxis, yaxis) {
+      const baseColor = isHome ? HOME_HEX : AWAY_HEX;
+      const [r,g,b]   = isHome ? HOME_RGB  : AWAY_RGB;
+      const goals = [], saved = [], missed = [];
+
+      teamShots.forEach((s, i) => {
+        const col  = i % ROW_SIZE;
+        const row  = Math.floor(i / ROW_SIZE);
+        const isSel = s.df_idx === selectedIdx;
+        const sec   = String(s.second).padStart(2, "0");
+        const entry = {
+          x: col, y: -row, dfIdx: s.df_idx, size: isSel ? 30 : 22,
+          text: "<b>" + (s.playerName || "") + "</b><br>" + s.minute + "'" + sec + '"<br>' + s.type,
+        };
+        if      (s.type === "Goal")   goals.push(entry);
+        else if (MISSED.has(s.type))  missed.push(entry);
+        else                          saved.push(entry);
+      });
+
+      function mkTrace(bucket, symbol, fillColor, borderColor, lineWidth) {
+        if (!bucket.length) return null;
+        return {
+          x: bucket.map(e => e.x), y: bucket.map(e => e.y),
+          mode: "markers", type: "scatter", xaxis, yaxis,
+          text: bucket.map(e => e.text),
+          hovertemplate: "%{text}<extra></extra>",
+          customdata: bucket.map(e => e.dfIdx),
+          marker: {
+            size:   bucket.map(e => e.size),
+            symbol, color: fillColor,
+            line:   { color: borderColor, width: lineWidth },
+          },
+          showlegend: false,
+        };
+      }
+
+      return [
+        mkTrace(goals,  "circle",      "rgba(" + r + "," + g + "," + b + ",0.85)", baseColor, 2),
+        mkTrace(saved,  "circle-open", baseColor,                                    baseColor, 3),
+        mkTrace(missed, "circle-open", baseColor,                                    baseColor, 3),
+      ].filter(Boolean);
+    }
+
+    // ── Goal frame traces ────────────────────────────────────────────────────
+    const shootoutExpandedRange = expandedGoalframeRangeForShot(
+      hasGF ? { _px: 100 - selShot.goal_mouth_y, _py: selShot.goal_mouth_z } : null,
+      SHOOTOUT_GOALFRAME_X_RANGE,
+      SHOOTOUT_GOALFRAME_Y_RANGE,
+      SHOOTOUT_GOALFRAME_EXPAND_MARGIN_X,
+      SHOOTOUT_GOALFRAME_EXPAND_MARGIN_Y
+    );
+
+    const gfShapes = goalframeShapes(shootoutExpandedRange.xRange, shootoutExpandedRange.yRange).map(s => {
+      const ns = Object.assign({}, s);
+      ns.xref = "x2"; ns.yref = "y2";
+      if (ns.line) ns.line = Object.assign({}, ns.line);
+      return ns;
+    });
+
+    // Shot dot on goalframe
+    const gfTraces = [];
+    if (hasGF) {
+      const gx = 100 - selShot.goal_mouth_y;
+      const gy = selShot.goal_mouth_z;
+      const isHome = selShot.is_home;
+      const [r,g,b] = isHome ? HOME_RGB : AWAY_RGB;
+      const isGoal  = selShot.type === "Goal";
+      const isMiss  = MISSED.has(selShot.type);
+      gfTraces.push({
+        x: [gx], y: [gy], mode: "markers", type: "scatter",
+        xaxis: "x2", yaxis: "y2",
+        marker: {
+          size: 18,
+          color: isGoal ? `rgba(${r},${g},${b},0.85)` : (isHome ? HOME_HEX : AWAY_HEX),
+          symbol: isGoal ? "circle" : "circle-open",
+          line: { color: isHome ? HOME_HEX : AWAY_HEX, width: 3 },
+        },
+        hoverinfo: "none", showlegend: false,
+      });
+    }
+
+    // ── Penalty spot marker (goalframe) ──────────────────────────────────────
+    gfTraces.push({
+      x: [50], y: [-5.2], mode: "markers", type: "scatter",
+      xaxis: "x2", yaxis: "y2",
+      marker: { size: 10, color: "rgba(0,0,0,0)", symbol: "circle-open",
+                line: { color: _penaltySpot, width: 2 } },
+      hoverinfo: "none", showlegend: false,
+    });
+
+    const homeTraces = buildPlayerTraces(homeShots, true,  "x",  "y");
+    const awayTraces = buildPlayerTraces(awayShots, false, "x3", "y3");
+
+    // ── Annotations ─────────────────────────────────────────────────────────
+    const annotations = [
+      { text: "GOALFRAME",           x: 0.50, y: 1.03, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: _annoColor } },
+      { text: `<b>${homeTeam}</b>`,  x: 0.25, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: HOME_HEX } },
+      { text: `<b>${awayTeam}</b>`,  x: 0.75, y: 0.28, xref: "paper", yref: "paper", showarrow: false, font: { size: 12, color: AWAY_HEX } },
+      { text: "Penalty spot",        x: 50,   y: -7.1, xref: "x2",    yref: "y2",    showarrow: false, font: { size: 9, color: _annoColor } },
+    ];
+
+    // Goalframe post / crossbar annotations
+    const gMid = (GOAL_Y_LEFT + GOAL_Y_RIGHT) / 2;
+    [{x: GOAL_Y_LEFT, t: "Post"}, {x: GOAL_Y_RIGHT, t: "Post"}].forEach(p => {
+      annotations.push({ x: p.x, y: -7.1, xref: "x2", yref: "y2", text: p.t, showarrow: false, font: { size: 9, color: _annoColor } });
+    });
+    annotations.push({ x: gMid, y: GOAL_Z_TOP + 1, xref: "x2", yref: "y2", text: "Bar", showarrow: false, font: { size: 9, color: _annoColor } });
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+      margin: { l: 10, r: 10, t: 30, b: 20 }, height: layoutHeight,
+      dragmode: false, showlegend: false,
+      annotations: annotations,
+
+      // x/y — home player circles (bottom left)
+      xaxis:  { domain: [0.05, 0.47], range: [-0.7, 4.7], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y" },
+      yaxis:  { domain: [0.02, 0.23], range: playerRangeForRows(homeRows), showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, scaleanchor: "x", scaleratio: 1, anchor: "x" },
+
+      // x2/y2 — goalframe (top, full column width)
+      xaxis2: { domain: [0.03, 0.97], range: shootoutExpandedRange.xRange, showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y2" },
+      yaxis2: { domain: [0.34, 0.98], range: shootoutExpandedRange.yRange, showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "x2", scaleanchor: "x2", scaleratio: GOAL_SCALERATIO },
+
+      // x3/y3 — away player circles (bottom right)
+      xaxis3: { domain: [0.53, 0.95], range: [-0.7, 4.7], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, anchor: "y3" },
+      yaxis3: { domain: [0.02, 0.23], range: playerRangeForRows(awayRows), showgrid: false, zeroline: false, showticklabels: false, fixedrange: true, scaleanchor: "x3", scaleratio: 1, anchor: "x3" },
+
+      shapes: [
+        { type: "rect", x0: shootoutExpandedRange.xRange[0], y0: shootoutExpandedRange.yRange[0], x1: shootoutExpandedRange.xRange[1], y1: shootoutExpandedRange.yRange[1], fillcolor: PITCH_BG, line: { color: "rgba(0,0,0,0)" }, layer: "below", xref: "x2", yref: "y2" },
+        ...gfShapes,
+      ],
+    };
+
+    const allTraces = [...homeTraces, ...awayTraces, ...gfTraces];
+
+    cmNewPlot(plotEl, allTraces, layout, args).then(() => {
+      Streamlit.setHeight(plotEl.offsetHeight + 4);
+      plotEl.removeAllListeners("plotly_click");
+      plotEl.on("plotly_click", function(data) {
+        if (!data || !data.points || !data.points.length) return;
+        const pt = data.points[0];
+        // Only player circle traces carry customdata as a plain df_idx integer
+        if (pt.customdata != null && typeof pt.customdata !== "object") {
+          Streamlit.setValue([pt.customdata, Date.now()]);
+        }
+      });
+    });
+  }
+
+  function renderTimelineWindow(args) {
+    const isLight = args.light_mode === true;
+    const _shadowColor = isLight ? LIGHT_SHADOW : "rgba(255,255,255,0.45)";
+    const _labelColor = isLight ? "#555555" : "#d9d9d9";
+    const _captionColor = isLight ? "#555555" : "#8e8e8e";
+    const currentWindow = Math.max(1, Number(args.current_window_seconds || 0));
+    const beforeLimit = Math.max(0, Number(args.before_limit_seconds || 180));
+    const afterLimit = Math.max(0, Number(args.after_limit_seconds || 180));
+    const total = Math.max(1, beforeLimit + currentWindow + afterLimit);
+    const plotEl = document.getElementById("plot");
+    document.getElementById("no-data").style.display = "none";
+    plotEl.style.display = "block";
+
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const toMMSS = (secs) => {
+      const totalSecs = Math.max(0, Math.round(secs));
+      const minutes = Math.floor(totalSecs / 60);
+      const seconds = totalSecs % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+    const toPct = (secs) => (secs / total) * 100;
+    const currentStartPct = toPct(beforeLimit);
+    const currentEndPct = toPct(beforeLimit + currentWindow);
+    const currentWidthPct = currentEndPct - currentStartPct;
+
+    const initialBefore = clamp(Number(args.selected_before_seconds || 0), 0, beforeLimit);
+    const initialAfter = clamp(Number(args.selected_after_seconds || 0), 0, afterLimit);
+
+    plotEl.innerHTML = `
+      <div style="padding:8px 0 4px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:${_captionColor};font-size:11px;letter-spacing:0.12em;text-transform:uppercase;">
+          <span>${toMMSS(beforeLimit)} before</span>
+          <span>&nbsp;</span>
+          <span>${toMMSS(afterLimit)} after</span>
+        </div>
+        <div id="cm-timeline-wrap" style="position:relative;height:54px;padding:14px 0 10px 0;">
+          <div style="position:absolute;left:0;right:0;top:24px;height:6px;border-radius:999px;background:linear-gradient(90deg, rgba(120,120,120,0.25), rgba(170,170,170,0.18));"></div>
+          <div id="cm-before-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:${args.light_mode === true ? 'linear-gradient(90deg, rgba(47,93,22,0.25), rgba(47,93,22,0.75))' : 'linear-gradient(90deg, rgba(223,255,0,0.25), rgba(223,255,0,0.75))'};"></div>
+          <div id="cm-after-fill" style="position:absolute;top:24px;height:6px;border-radius:999px;background:${args.light_mode === true ? 'linear-gradient(90deg, rgba(47,93,22,0.75), rgba(47,93,22,0.25))' : 'linear-gradient(90deg, rgba(223,255,0,0.75), rgba(223,255,0,0.25))'};"></div>
+          <div id="cm-current-window" style="position:absolute;top:14px;height:26px;border-radius:999px;background:#f4f1e8;color:#111;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;box-shadow:0 0 0 1px ${_shadowColor}, 0 10px 26px rgba(0,0,0,0.28);padding:0 10px;white-space:nowrap;pointer-events:none;"></div>
+          <button id="cm-left-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid ${args.light_mode === true ? '#2f5d16' : '#dfff00'};background:${args.light_mode === true ? '#fcf8f2' : '#161616'};box-shadow:0 0 0 3px ${args.light_mode === true ? 'rgba(47,93,22,0.15)' : 'rgba(223,255,0,0.15)'};cursor:ew-resize;"></button>
+          <button id="cm-right-handle" type="button" style="position:absolute;top:12px;width:28px;height:28px;border-radius:999px;border:2px solid ${args.light_mode === true ? '#2f5d16' : '#dfff00'};background:${args.light_mode === true ? '#fcf8f2' : '#161616'};box-shadow:0 0 0 3px ${args.light_mode === true ? 'rgba(47,93,22,0.15)' : 'rgba(223,255,0,0.15)'};cursor:ew-resize;"></button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:${_labelColor};font-size:12px;">
+          <span id="cm-before-label">Before ${toMMSS(initialBefore)}</span>
+          <span id="cm-after-label">After ${toMMSS(initialAfter)}</span>
+        </div>
+      </div>`;
+
+    const wrap = document.getElementById("cm-timeline-wrap");
+    const currentEl = document.getElementById("cm-current-window");
+    const beforeFill = document.getElementById("cm-before-fill");
+    const afterFill = document.getElementById("cm-after-fill");
+    const leftHandle = document.getElementById("cm-left-handle");
+    const rightHandle = document.getElementById("cm-right-handle");
+    const beforeLabel = document.getElementById("cm-before-label");
+    const afterLabel = document.getElementById("cm-after-label");
+
+    if (window.__cmTimelineCleanup) {
+      window.__cmTimelineCleanup();
+      window.__cmTimelineCleanup = null;
+    }
+
+    const state = { before: initialBefore, after: initialAfter };
+    let dragging = null;
+    let dragStartClientX = 0;
+    let dragOriginBefore = initialBefore;
+    let dragOriginAfter = initialAfter;
+
+    function emitValue() {
+      Streamlit.setValue({
+        before_seconds: Math.round(state.before),
+        after_seconds: Math.round(state.after),
+        nonce: Date.now(),
+      });
+    }
+
+    function draw() {
+      const leftPct = toPct(beforeLimit - state.before);
+      const rightPct = toPct(beforeLimit + currentWindow + state.after);
+      const currentLeft = currentStartPct;
+      const currentRight = currentLeft + currentWidthPct;
+
+      currentEl.style.left = `${currentLeft}%`;
+      currentEl.style.width = `${Math.min(100 - currentLeft, currentWidthPct)}%`;
+
+      leftHandle.style.left = `calc(${leftPct}% - 14px)`;
+      rightHandle.style.left = `calc(${rightPct}% - 14px)`;
+
+      beforeFill.style.left = `${leftPct}%`;
+      beforeFill.style.width = `${Math.max(0, currentStartPct - leftPct)}%`;
+      afterFill.style.left = `${currentEndPct}%`;
+      afterFill.style.width = `${Math.max(0, rightPct - currentEndPct)}%`;
+
+      beforeLabel.textContent = `Before ${toMMSS(state.before)}`;
+      afterLabel.textContent = `After ${toMMSS(state.after)}`;
+    }
+
+    function onMove(clientX) {
+      const rect = wrap.getBoundingClientRect();
+      const deltaPct = ((clientX - dragStartClientX) / Math.max(rect.width, 1)) * 100;
+      const deltaSeconds = (deltaPct / 100) * total;
+      if (dragging === "left") {
+        state.before = clamp(dragOriginBefore - deltaSeconds, 0, beforeLimit);
+      } else if (dragging === "right") {
+        state.after = clamp(dragOriginAfter + deltaSeconds, 0, afterLimit);
+      }
+      draw();
+    }
+
+    function startDrag(which, event) {
+      dragging = which;
+      const src = event.touches ? event.touches[0] : event;
+      dragStartClientX = src.clientX;
+      dragOriginBefore = state.before;
+      dragOriginAfter = state.after;
+      event.preventDefault();
+    }
+
+    function stopDrag() {
+      if (!dragging) return;
+      dragging = null;
+      emitValue();
+    }
+
+    const onMouseMove = (e) => { if (dragging) onMove(e.clientX); };
+    const onMouseUp = () => stopDrag();
+    const onLeftMouseDown = (e) => startDrag("left", e);
+    const onRightMouseDown = (e) => startDrag("right", e);
+    const onLeftTouchStart = (e) => startDrag("left", e);
+    const onRightTouchStart = (e) => startDrag("right", e);
+    const onTouchMove = (e) => {
+      if (!dragging || !e.touches || !e.touches.length) return;
+      onMove(e.touches[0].clientX);
+      e.preventDefault();
+    };
+    const onTouchEnd = () => stopDrag();
+
+    leftHandle.addEventListener("mousedown", onLeftMouseDown);
+    rightHandle.addEventListener("mousedown", onRightMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+
+    leftHandle.addEventListener("touchstart", onLeftTouchStart, { passive: false });
+    rightHandle.addEventListener("touchstart", onRightTouchStart, { passive: false });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onTouchEnd);
+
+    window.__cmTimelineCleanup = function() {
+      leftHandle.removeEventListener("mousedown", onLeftMouseDown);
+      rightHandle.removeEventListener("mousedown", onRightMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      leftHandle.removeEventListener("touchstart", onLeftTouchStart);
+      rightHandle.removeEventListener("touchstart", onRightTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+    };
+
+    draw();
+    Streamlit.setHeight(150);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Router
+  // ════════════════════════════════════════════════════════════════════════════
+  function render(args) {
+    document.body.classList.toggle("cm-light", args.light_mode === true);
+    _exportBrandColor = args.light_mode === true ? "#2f5d16" : "#DFFF00";
+    const t = args.component_type || "";
+    if (t === "penalty_shootout")       renderPenaltyShootout(args);
+    else if (t === "echarts_option")    renderEchartsOption(args);
+    else if (t === "shot_map")         renderShotMap(args);
+    else if (t === "pass_map")         renderPassMap(args);
+    else if (t === "defensive_map")    renderDefensiveMap(args);
+    else if (t === "dribble_carry_map") renderDribbleCarryMap(args);
+    else if (t === "goalkeeper_map")   renderGoalkeeperMap(args);
+    else if (t === "build_up_map")     renderBuildUpMap(args);
+    else if (t === "roi_selector")     renderRoiSelector(args);
+    else if (t === "timeline_window")  renderTimelineWindow(args);
+    else {
+      if (args.shots !== undefined)   renderShotMap(args);
+      else if (args.passes !== undefined) renderPassMap(args);
+      else if (args.actions !== undefined) renderDefensiveMap(args);
+      else Streamlit.setHeight(100);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Boot — listen for Streamlit render messages
+  // ════════════════════════════════════════════════════════════════════════════
+  window.addEventListener("message", function(event) {
+    var msg = event.data;
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "streamlit:render") {
+      render(msg.args);
+    }
+  });
+  Streamlit.ready();
+  </script>
+</body>
+</html>

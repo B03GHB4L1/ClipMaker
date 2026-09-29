@@ -1,0 +1,26 @@
+class Clipmaker < Formula
+  desc "Football video clipping and analysis workstation"
+  homepage "https://github.com/B03GHB4L1/ClipMaker"
+  url "https://github.com/B03GHB4L1/ClipMaker/archive/refs/tags/v@VERSION@.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on "ffmpeg"
+  depends_on "python@3.12"
+
+  def install
+    libexec.install "app", "requirements.txt"
+    libexec.install "packaging/clipmaker_bootstrap.py"
+    libexec.install "packaging/clipmaker_server.py"
+
+    (bin/"clipmaker").write <<~SH
+      #!/bin/bash
+      exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
+    SH
+    (bin/"clipmaker").chmod 0755
+  end
+
+  test do
+    assert_predicate bin/"clipmaker", :executable?
+  end
+end

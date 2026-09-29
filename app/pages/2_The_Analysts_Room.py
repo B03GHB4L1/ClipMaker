@@ -1,0 +1,3601 @@
+import sys
+import os
+import re
+import subprocess
+import tempfile
+import streamlit as st
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import theme
+from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map, pressing_map
+from clipmaker_core import (
+    to_seconds, _effective_pitch_zone_series,
+    detect_progressive_chains, detect_possession_carries, detect_press_wins, get_chain_actions,
+    read_csv_safe, resolve_period_starts_for_video, match_clock_to_video_time,
+    normalise_timeline_corrections, apply_timeline_corrections,
+)
+
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    _PLOTLY_AVAILABLE = True
+except ImportError:
+    _PLOTLY_AVAILABLE = False
+
+def _h(s):
+    import re as _re
+    return _re.sub(r'\s{2,}', ' ', s.replace('\n', ' ')).strip()
+
+st.set_page_config(
+    page_title="The Analyst's Room — ClipMaker v1.2.3",
+    page_icon="../ClipMaker_logo.png",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# =============================================================================
+# STYLING
+# =============================================================================
+theme.inject(
+    logo_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
+)
+theme.init_shared_state()
+theme.render_top_nav("analyst")
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost",
+              "BlockedShot", "AttemptSaved", "Attempt"}
+
+PERIOD_MAP = {
+    "FirstHalf": 1, "SecondHalf": 2,
+    "FirstPeriodOfExtraTime": 3, "SecondPeriodOfExtraTime": 4,
+    "PenaltyShootout": 5,
+    1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
+}
+
+DEF_ACTIONS = {"Tackle", "Interception", "Clearance", "Aerial", "Block",
+               "Challenge", "Dispossessed", "Error"}
+
+GK_ACTIONS = {"Punch", "Claim", "KeeperSweeper", "KeeperPickup", "PenaltyFaced"}
+
+# Tier base scores for "Top 5 Moments" — xT adds up to ~20 pts on top
+_MOMENT_TIERS = {
+    "attacker": [
+        ({"Goal"},                                      100),
+        ({"SavedShot", "AttemptSaved"},                  80),
+        ({"GoodSkill"},                                  80),
+        (None, "is_key_pass", 60),                   # key pass qualifier
+        ({"TakeOn"}, "successful", 40),              # successful takeon
+        ({"ShotOnPost", "MissedShot", "MissedShots", "BlockedShot"}, 25),
+    ],
+    "midfielder": [
+        ({"Goal"},                                      100),
+        (None, "is_key_pass", 80),                   # key pass qualifier
+        ({"GoodSkill"},                                  80),
+        ({"Tackle", "Interception"}, "successful", 65),
+        (None, "is_long_ball_successful", 55),        # progressive long ball
+        ({"TakeOn"}, "successful", 40),
+        ({"Clearance", "Block"},                         25),
+    ],
+    "defender": [
+        ({"Tackle"}, "successful", 100),
+        ({"Block"},                                      90),
+        ({"Interception"},                               75),
+        ({"GoodSkill"},                                  75),
+        ({"Clearance"},                                  60),
+        ({"Aerial"}, "successful", 45),
+    ],
+}
+
+OUTCOME_ICON  = {"Goal": "●", "SavedShot": "◉", "ShotOnPost": "◎",
+                 "BlockedShot": "■", "MissedShot": "✕"}
+OUTCOME_LABEL = {"Goal": "[GOAL] GOAL", "SavedShot": "[SAVE] SAVED", "ShotOnPost": "[POST] POST",
+                 "BlockedShot": "[DEF] BLOCKED", "MissedShot": "[ERR] MISSED"}
+OUTCOME_CLASS = {"Goal": "badge badge-goal", "SavedShot": "badge badge-saved",
+                 "ShotOnPost": "badge badge-post", "BlockedShot": "badge badge-blocked",
+                 "MissedShot": "badge badge-missed"}
+
+DEF_LABEL = {
+    "Tackle": "[TKL] TACKLE", "Interception": "[INT] INTERCEPTION",
+    "Clearance": "[CLR] CLEARANCE", "Aerial": "[AER] AERIAL",
+    "Block": "[BLK] BLOCK", "Challenge": "[CHL] CHALLENGE",
+    "Dispossessed": "[DIS] DISPOSSESSED", "Error": "[ERR] ERROR",
+}
+DEF_CLASS = {
+    "Tackle": "badge badge-tackle", "Interception": "badge badge-interc",
+    "Clearance": "badge badge-clear", "Aerial": "badge badge-aerial",
+    "Block": "badge badge-block", "Challenge": "badge badge-challenge",
+    "Dispossessed": "badge badge-disp", "Error": "badge badge-missed",
+}
+
+HOME_COLOR = "#7ab4ff"
+AWAY_COLOR = "#ff7351"
+PLOTLY_EXPORT_BRAND = "ClipMaker v1.2.3 · @B03GHB4L1"
+PLOTLY_EXPORT_CONFIG = {
+    "displayModeBar": True,
+    "displaylogo": False,
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "analyst_room_export",
+        "scale": 2,
+    },
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+}
+
+
+def _plotly_export_filename(*parts, fallback="analyst_room_export"):
+    text = "_".join(str(part or "").strip() for part in parts if str(part or "").strip())
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("._-").lower()
+    return (text or fallback)[:110]
+
+
+def plotly_export_config(*parts, fallback="analyst_room_export"):
+    config = dict(PLOTLY_EXPORT_CONFIG)
+    image_options = dict(config.get("toImageButtonOptions", {}))
+    image_options["filename"] = _plotly_export_filename(*parts, fallback=fallback)
+    config["toImageButtonOptions"] = image_options
+    return config
+
+
+def plotly_clean_static_config(*parts, fallback="analyst_room_export"):
+    config = plotly_export_config(*parts, fallback=fallback)
+    config["displayModeBar"] = False
+    return config
+
+
+def brand_plotly_export(fig, light: bool = False):
+    if light:
+        bg        = "#f5f0e8"
+        plot_bg   = "#ede8df"
+        font_col  = "#1a1a1a"
+        grid_col  = "rgba(80,60,30,0.12)"
+        zero_col  = "rgba(80,60,30,0.20)"
+        line_col  = "rgba(80,60,30,0.25)"
+        tick_col  = "#555048"
+        hover_bg  = "#f5f0e8"
+        hover_br  = "rgba(120,100,60,0.35)"
+        hover_fc  = "#1a1a1a"
+        ann_fc    = "#ffffff"
+        ann_bc    = "rgba(60,48,30,0.36)"
+        ann_col   = "rgba(54,47,36,0.74)"
+    else:
+        bg        = "#0b0e14"
+        plot_bg   = "#071008"
+        font_col  = "#ecedf6"
+        grid_col  = "rgba(142,255,113,0.08)"
+        zero_col  = "rgba(142,255,113,0.12)"
+        line_col  = "rgba(142,255,113,0.18)"
+        tick_col  = "#a9abb3"
+        hover_bg  = "#10131a"
+        hover_br  = "rgba(142,255,113,0.35)"
+        hover_fc  = "#ecedf6"
+        ann_fc    = "#ffffff"
+        ann_bc    = "rgba(142,255,113,0.28)"
+        ann_col   = "rgba(11,14,20,0.72)"
+    fig.update_layout(
+        paper_bgcolor=bg,
+        plot_bgcolor=plot_bg,
+        font=dict(color=font_col, family="Space Grotesk, Inter, sans-serif"),
+        hoverlabel=dict(
+            bgcolor=hover_bg,
+            bordercolor=hover_br,
+            font=dict(color=hover_fc),
+        ),
+    )
+    fig.update_xaxes(
+        gridcolor=grid_col,
+        zerolinecolor=zero_col,
+        linecolor=line_col,
+        tickfont=dict(color=tick_col),
+        automargin=True,
+    )
+    fig.update_yaxes(
+        gridcolor=grid_col,
+        zerolinecolor=zero_col,
+        linecolor=line_col,
+        tickfont=dict(color=tick_col),
+        automargin=True,
+    )
+    fig.add_annotation(
+        text=PLOTLY_EXPORT_BRAND,
+        xref="paper",
+        yref="paper",
+        x=0.995,
+        y=0.015,
+        xanchor="right",
+        yanchor="bottom",
+        showarrow=False,
+        font=dict(size=10, color=ann_fc, family="monospace"),
+        bgcolor=ann_col,
+        bordercolor=ann_bc,
+        borderwidth=1,
+        borderpad=3,
+    )
+    return fig
+
+
+def defensive_actions_df(source_df):
+    defensive = source_df[source_df["type"].isin(DEF_ACTIONS)].copy()
+    if defensive.empty:
+        return defensive.reset_index(drop=True)
+
+    type_series = defensive["type"].astype(str)
+    if "depth_zone" in defensive.columns:
+        depth_series = defensive["depth_zone"].astype(str)
+    else:
+        depth_series = pd.Series("", index=defensive.index)
+
+    # Final-third aerials are usually attacking headed shots/passes, not defensive actions.
+    attacking_header_actions = type_series.eq("Aerial") & depth_series.eq("Attacking Third")
+    return defensive[~attacking_header_actions].copy().reset_index(drop=True)
+
+# =============================================================================
+# SESSION STATE
+# =============================================================================
+def _ss(key, default=""):
+    return st.session_state.get(key, default)
+
+
+def _scraped_match_paths():
+    paths = []
+    for path in st.session_state.get("multi_scraped_csv_paths", []) or []:
+        if path and os.path.exists(path) and path not in paths:
+            paths.append(path)
+    current = _ss("csv_path") or _ss("scraped_csv_path")
+    if current and os.path.exists(current) and current not in paths:
+        paths.insert(0, current)
+    return paths
+
+
+_MATCH_SETUP_KEYS = [
+    "video_path", "video2_path", "csv_path", "half1_time", "half2_time",
+    "half3_time", "half4_time", "half5_time", "had_extra_time",
+    "had_penalties", "split_video", "before_buffer", "after_buffer", "min_gap",
+]
+
+_MATCH_SETUP_DEFAULTS = {
+    "video_path": "",
+    "video2_path": "",
+    "half1_time": "",
+    "half2_time": "",
+    "half3_time": "",
+    "half4_time": "",
+    "half5_time": "",
+    "had_extra_time": False,
+    "had_penalties": False,
+    "split_video": False,
+    "before_buffer": 5,
+    "after_buffer": 8,
+    "min_gap": 6,
+}
+
+
+def _capture_match_setup(path):
+    if not path:
+        return
+    st.session_state.setdefault("match_setup_by_csv", {})[path] = {
+        key: st.session_state.get(key)
+        for key in _MATCH_SETUP_KEYS
+        if key != "csv_path"
+    }
+
+
+def _restore_match_setup(path):
+    setup = st.session_state.get("match_setup_by_csv", {}).get(path, {})
+    st.session_state["csv_path"] = path
+    st.session_state["scraped_csv_path"] = path
+    st.session_state["active_setup_csv_path"] = path
+    for key, default in _MATCH_SETUP_DEFAULTS.items():
+        st.session_state[key] = setup.get(key, default)
+
+
+def _clear_analyst_filters_for_match_switch():
+    prefixes = (
+        "smp_", "pm_", "dm_", "dcm_", "gk_", "bu_", "press_", "comp_",
+        "_smp_", "_pm_", "_dm_", "_dcm_", "_gk_", "_bu_", "_press_",
+    )
+    keep = {"analysts_room_active_match_csv"}
+    for key in list(st.session_state.keys()):
+        if key not in keep and key.startswith(prefixes):
+            del st.session_state[key]
+
+
+def _choose_active_match_csv(page_key, current_path):
+    paths = _scraped_match_paths()
+    if len(paths) <= 1:
+        return current_path
+    default_idx = paths.index(current_path) if current_path in paths else 0
+    with st.expander("Match Source", expanded=False):
+        selected = st.selectbox(
+            "Active match for this page",
+            paths,
+            index=default_idx,
+            format_func=os.path.basename,
+            key=f"{page_key}_active_match_csv",
+        )
+        st.caption("Analyst maps are match-specific. Pick which scraped match to inspect.")
+    if selected != current_path:
+        _capture_match_setup(current_path)
+        _clear_analyst_filters_for_match_switch()
+        _restore_match_setup(selected)
+        st.rerun()
+    return selected
+
+
+def _resolve_event_team_names(df):
+    if "team" not in df.columns:
+        return "", ""
+    event_teams = [str(team) for team in df["team"].dropna().astype(str).unique().tolist() if str(team)]
+    if len(event_teams) < 2:
+        return (event_teams + ["", ""])[:2]
+
+    home_label = ""
+    away_label = ""
+    if "homeTeam" in df.columns and not df["homeTeam"].dropna().empty:
+        home_label = str(df["homeTeam"].dropna().iloc[0])
+    if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty:
+        away_label = str(df["awayTeam"].dropna().iloc[0])
+
+    def match_label(label, used):
+        label_norm = label.casefold().strip()
+        if not label_norm:
+            return ""
+        for team in event_teams:
+            if team not in used and team.casefold() == label_norm:
+                return team
+        for team in event_teams:
+            team_norm = team.casefold()
+            if team not in used and (label_norm in team_norm or team_norm in label_norm):
+                return team
+        return ""
+
+    used = set()
+    home = match_label(home_label, used)
+    if home:
+        used.add(home)
+    away = match_label(away_label, used)
+    if away:
+        used.add(away)
+
+    remaining = [team for team in event_teams if team not in used]
+    if not home and remaining:
+        home = remaining.pop(0)
+    if not away and remaining:
+        away = remaining.pop(0)
+    return home, away
+
+
+def _first_nonempty(df, columns):
+    for col in columns:
+        if col in df.columns:
+            values = df[col].dropna().astype(str)
+            values = values[values.str.strip() != ""]
+            if not values.empty:
+                return values.iloc[0].strip()
+    return ""
+
+
+def _match_export_context(df):
+    if df is None or df.empty:
+        return ""
+    match_name = _first_nonempty(df, ["matchName"])
+    if match_name.lower().endswith(".csv") or "_all_events" in match_name:
+        match_name = os.path.basename(match_name)
+        match_name = match_name.replace("whoscored_", "").replace("scoresway_", "")
+        match_name = match_name.replace("_all_events.csv", "").replace(".csv", "")
+        match_name = match_name.replace("_", " ")
+    if not match_name:
+        home = _first_nonempty(df, ["homeTeam"])
+        away = _first_nonempty(df, ["awayTeam"])
+        match_name = f"{home} vs {away}".strip(" vs ")
+
+    match_date = _first_nonempty(df, ["matchDate", "match_date", "date", "startTime", "kickOffTime", "dtStamp"])
+    if match_date:
+        match_date = match_date[:10]
+
+    parts = [part for part in [match_name, match_date] if part]
+    return " · ".join(parts)
+
+
+def _plotly_header(fig, title, subtitle="", note="", light=False, height=None):
+    def _wrap_export_text(text, width=104):
+        import textwrap
+        return "<br>".join(textwrap.wrap(str(text or ""), width=width, break_long_words=False))
+
+    font_col = "#1a1a1a" if light else "#ecedf6"
+    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(11,14,20,0.78)"
+    note_border = "rgba(120,100,60,0.30)" if light else "rgba(142,255,113,0.24)"
+    title_text = f"<b>{title}</b>"
+    if subtitle:
+        title_text += f"<br><sup>{_wrap_export_text(subtitle, 96)}</sup>"
+    bottom_margin = 118 if note else 88
+    layout_update = dict(
+        title=dict(
+            text=title_text,
+            x=0.01,
+            xanchor="left",
+            y=0.92,
+            yanchor="top",
+            font=dict(size=21, color=font_col, family="Space Grotesk, Inter, sans-serif"),
+        ),
+        margin=dict(t=118, b=bottom_margin, l=60, r=60),
+    )
+    if height:
+        layout_update["height"] = height
+    fig.update_layout(**layout_update)
+    if note:
+        fig.add_annotation(
+            text=_wrap_export_text(note, 108),
+            xref="paper",
+            yref="paper",
+            x=0.01,
+            y=-0.08,
+            xanchor="left",
+            yanchor="top",
+            showarrow=False,
+            align="left",
+            font=dict(size=10, color=font_col, family="Inter, sans-serif"),
+            bgcolor=note_bg,
+            bordercolor=note_border,
+            borderwidth=1,
+            borderpad=4,
+        )
+    return fig
+
+
+def _scope_line(*parts):
+    cleaned = []
+    for part in parts:
+        text = str(part or "").strip()
+        if text:
+            cleaned.append(text)
+    return " | ".join(cleaned)
+
+
+def _count_scope(count, singular="event", plural=None):
+    irregular = {
+        "pass": "passes",
+        "entry": "entries",
+        "penalty": "penalties",
+    }
+    plural = plural or irregular.get(singular, f"{singular}s")
+    try:
+        value = int(count)
+    except (TypeError, ValueError):
+        return ""
+    return f"{value} {singular if value == 1 else plural}"
+
+
+def _zone_scope(pitch_zone="", depth_zone=""):
+    return _scope_line(
+        pitch_zone or "Any pitch zone",
+        depth_zone or "Any depth zone",
+    )
+
+
+def _map_context(title, team="", player="", subset="", pitch_zone="", depth_zone="",
+                 count=None, unit="event", note=""):
+    match = _match_export_context(globals().get("df_all"))
+    subtitle = _scope_line(match, team, player, subset, _zone_scope(pitch_zone, depth_zone), _count_scope(count, unit))
+    return {
+        "context_title": title,
+        "context_subtitle": subtitle,
+        "context_note": note,
+    }
+
+csv_path    = _ss("csv_path") or _ss("scraped_csv_path")
+csv_path    = _choose_active_match_csv("analysts_room", csv_path)
+video_path  = _ss("video_path")
+video2_path = _ss("video2_path")
+split_video = _ss("split_video", False)
+half1_time  = _ss("half1_time")
+half2_time  = _ss("half2_time")
+half3_time  = _ss("half3_time")
+half4_time  = _ss("half4_time")
+half5_time  = _ss("half5_time")
+home_team   = ""
+away_team   = ""
+
+data_loaded = bool(csv_path and os.path.exists(csv_path))
+
+for _k, _v in [
+    ("smp_selected_idx", None), ("smp_last_click_ts", None),
+    ("smp_clip_path", None), ("smp_clip_key", None), ("smp_clip_error", None),
+    ("smp_pso_mode", False), ("smp_pso_selected_idx", None),
+    ("pm_selected_idx", None), ("pm_last_click_ts", None),
+    ("pm_clip_path", None), ("pm_clip_key", None), ("pm_clip_error", None),
+    ("dm_selected_idx", None), ("dm_last_click_ts", None),
+    ("dm_clip_path", None), ("dm_clip_key", None), ("dm_clip_error", None),
+    ("dcm_selected_idx", None), ("dcm_last_click_ts", None),
+    ("dcm_clip_path", None), ("dcm_clip_key", None), ("dcm_clip_error", None),
+    ("gk_selected_idx", None), ("gk_last_click_ts", None),
+    ("gk_clip_path", None), ("gk_clip_key", None), ("gk_clip_error", None),
+    ("bu_selected_chain_idx", None), ("bu_clip_path", None), ("bu_clip_key", None), ("bu_clip_error", None),
+    ("bu_entry_selected_idx", None), ("bu_entry_last_click_ts", None),
+    ("bu_entry_clip_path", None), ("bu_entry_clip_key", None), ("bu_entry_clip_error", None),
+    ("press_selected_idx", None), ("press_clip_path", None), ("press_clip_key", None), ("press_clip_error", None),
+    ("comp_p1_reel_path", None), ("comp_p1_reel_key", None), ("comp_p1_reel_error", None),
+    ("comp_p2_reel_path", None), ("comp_p2_reel_key", None), ("comp_p2_reel_error", None),
+]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# =============================================================================
+# DATA LOADING
+# =============================================================================
+df_all           = None
+shots_df         = None
+pso_shots_df     = None
+passes_df        = None
+def_df           = None
+dribble_carry_df = None
+gk_df            = None
+
+if data_loaded:
+    try:
+        df_all           = read_csv_safe(csv_path)
+        # The selected CSV is the source of truth; use event team names for filters/maps.
+        home_team, away_team = _resolve_event_team_names(df_all)
+        pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy() if "period" in df_all.columns else pd.DataFrame()
+        pso_shots_df     = pso_shots_df[pso_shots_df["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
+        if "period" in df_all.columns:
+            df_all = df_all[df_all["period"] != "PenaltyShootout"].copy()
+        shots_df         = df_all[df_all["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
+        passes_df        = df_all[df_all["type"] == "Pass"].copy().reset_index(drop=True)
+        def_df           = defensive_actions_df(df_all)
+        dribble_carry_df = df_all[df_all["type"].isin({"TakeOn", "Carry"})].copy().reset_index(drop=True)
+        gk_df            = df_all[df_all["type"].isin(GK_ACTIONS)].copy().reset_index(drop=True)
+        # Re-attribute own goals to the benefiting team so all filtering/display is correct
+        if "is_own_goal" in shots_df.columns and home_team and away_team:
+            og = shots_df["is_own_goal"].astype(bool)
+            home_og = og & (shots_df["team"] == home_team)
+            away_og = og & (shots_df["team"] == away_team)
+            shots_df.loc[home_og, "team"] = away_team
+            shots_df.loc[away_og, "team"] = home_team
+        if "is_own_goal" in pso_shots_df.columns and home_team and away_team:
+            og = pso_shots_df["is_own_goal"].astype(bool)
+            home_og = og & (pso_shots_df["team"] == home_team)
+            away_og = og & (pso_shots_df["team"] == away_team)
+            pso_shots_df.loc[home_og, "team"] = away_team
+            pso_shots_df.loc[away_og, "team"] = home_team
+    except Exception as e:
+        st.error(f"Could not load match data: {e}")
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+def safe_float(v):
+    try:
+        out = float(v)
+        if pd.isna(out) or out == float("inf") or out == float("-inf"):
+            return None
+        return out
+    except:
+        return None
+
+def safe_bool(v):
+    if isinstance(v, bool): return v
+    if isinstance(v, str):  return v.strip().lower() in ("true","1","yes")
+    try: return bool(int(v))
+    except: return False
+
+def reclassify_shot(row):
+    t = row.get("type", "")
+    if t == "AttemptSaved": return "SavedShot"
+    if t in ("MissedShots", "Attempt"): return "MissedShot"
+    return t
+
+def fmt_time(minute, second, period):
+    p = PERIOD_MAP.get(period, 1)
+    label = {1:"1H",2:"2H",3:"ET1",4:"ET2",5:"PSO"}.get(p,"UNK")
+    return f"{minute}'{int(second):02d}\" {label}"
+
+def get_ffmpeg():
+    import shutil
+    cmd = shutil.which("ffmpeg")
+    if cmd: return cmd
+    try:
+        from moviepy.config import FFMPEG_BINARY
+        if os.path.exists(FFMPEG_BINARY): return FFMPEG_BINARY
+    except Exception: pass
+    raise ValueError("FFmpeg not found — please install FFmpeg.")
+
+def _analysts_room_buffers():
+    return (
+        int(st.session_state.get("before_buffer", 5)),
+        int(st.session_state.get("after_buffer", 8)),
+    )
+
+
+def _analysts_room_timeline_corrections():
+    return normalise_timeline_corrections({
+        "timeline_corrections": st.session_state.get("timeline_corrections", [])
+    })
+
+
+def _corrected_video_timestamp(minute, second, period_int, period_start, period_offset):
+    base_ts = match_clock_to_video_time(int(minute), int(second), period_int, period_start, period_offset)
+    match_seconds = int(minute) * 60 + int(second)
+    return apply_timeline_corrections(
+        base_ts,
+        match_seconds,
+        period_int,
+        _analysts_room_timeline_corrections(),
+    )
+
+
+def cut_clip(minute, second, period_str, before=None, after=None):
+    if not video_path:
+        raise ValueError("No video file loaded. Go to Home and set a video path.")
+    if before is None or after is None:
+        default_before, default_after = _analysts_room_buffers()
+        if before is None:
+            before = default_before
+        if after is None:
+            after = default_after
+    period_int = PERIOD_MAP.get(period_str, 1)
+    period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
+    period_start = {}
+    if half1_time: period_start[1] = to_seconds(half1_time)
+    if half2_time: period_start[2] = to_seconds(half2_time)
+    if half3_time: period_start[3] = to_seconds(half3_time)
+    if half4_time: period_start[4] = to_seconds(half4_time)
+    if half5_time: period_start[5] = to_seconds(half5_time)
+    period_start = resolve_period_starts_for_video(globals().get("df_all"), period_start)
+    if period_int not in period_start:
+        raise ValueError(f"No kick-off time set for period {period_int}.")
+    video_ts = _corrected_video_timestamp(int(minute), int(second), period_int, period_start, period_offset)
+    start_ts = max(0.0, video_ts - before)
+    duration = (video_ts + after) - start_ts
+    if split_video and period_int >= 2:
+        if not video2_path:
+            raise ValueError("2nd half video file is required for this second-half clip.")
+        src = video2_path
+    else:
+        src = video_path
+    ffmpeg = get_ffmpeg()
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out = tmp.name; tmp.close()
+    r = subprocess.run([
+        ffmpeg, "-y", "-ss", str(start_ts), "-i", src,
+        "-t", str(duration), "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+        "-c:a", "aac", "-avoid_negative_ts", "make_zero", out
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise ValueError(f"FFmpeg error: {r.stderr[-400:]}")
+    return out
+
+def cut_build_up_clip(chain, df_source):
+    if not video_path:
+        raise ValueError("No video file loaded. Go to Home and set a video path.")
+
+    _before_buf, _after_buf = _analysts_room_buffers()
+    start_row = df_source.loc[chain["start_idx"]]
+    end_row   = df_source.loc[chain["end_idx"]]
+
+    start_minute = int(start_row.get("minute", 0) or 0)
+    start_second = int(start_row.get("second", 0) or 0)
+    end_minute   = int(end_row.get("minute", 0) or 0)
+    end_second   = int(end_row.get("second", 0) or 0)
+    period_str   = start_row.get("period", "FirstHalf")
+    period_int   = PERIOD_MAP.get(period_str, 1)
+
+    period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
+    period_start = {}
+    if half1_time: period_start[1] = to_seconds(half1_time)
+    if half2_time: period_start[2] = to_seconds(half2_time)
+    if half3_time: period_start[3] = to_seconds(half3_time)
+    if half4_time: period_start[4] = to_seconds(half4_time)
+    if half5_time: period_start[5] = to_seconds(half5_time)
+    period_start = resolve_period_starts_for_video(df_source, period_start)
+    if period_int not in period_start:
+        raise ValueError(f"No kick-off time set for period {period_int}.")
+
+    start_video_ts = _corrected_video_timestamp(start_minute, start_second, period_int, period_start, period_offset)
+    end_video_ts   = _corrected_video_timestamp(end_minute, end_second, period_int, period_start, period_offset)
+    clip_start_ts  = max(0.0, start_video_ts - _before_buf)
+    clip_end_ts    = max(clip_start_ts, end_video_ts + _after_buf)
+    duration       = max(1.0, clip_end_ts - clip_start_ts)
+
+    if split_video and period_int >= 2:
+        if not video2_path:
+            raise ValueError("2nd half video file is required for this second-half clip.")
+        src = video2_path
+    else:
+        src = video_path
+    ffmpeg = get_ffmpeg()
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    out = tmp.name
+    tmp.close()
+    r = subprocess.run([
+        ffmpeg, "-y", "-ss", str(clip_start_ts), "-i", src,
+        "-t", str(duration), "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+        "-c:a", "aac", "-avoid_negative_ts", "make_zero", out
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise ValueError(f"FFmpeg error: {r.stderr[-400:]}")
+    return out
+
+# =============================================================================
+# STATS BARS
+# =============================================================================
+def render_shot_stats():
+    if shots_df is None: return
+    hs  = shots_df[shots_df["team"] == home_team] if home_team else pd.DataFrame()
+    as_ = shots_df[shots_df["team"] == away_team] if away_team else pd.DataFrame()
+    sot = {"SavedShot", "Goal", "ShotOnPost"}
+    th, ta = len(hs), len(as_); tot = th + ta
+    sh = len(hs[hs["type"].isin(sot)]); sa = len(as_[as_["type"].isin(sot)])
+    gh = len(hs[hs["type"] == "Goal"]); ga = len(as_[as_["type"] == "Goal"])
+    share = ""
+    if tot > 0:
+        hp = round(th/tot*100); ap = 100 - hp
+        share = f"""<div class="cm-stats-cell" style="min-width:180px"><div class="cm-stats-label">Shot share</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <span class="cm-stats-home" style="font-size:13px;min-width:28px">{hp}%</span>
+            <div style="flex:1;height:8px;background:#2c2c2c;border-radius:4px;overflow:hidden">
+            <div style="width:{hp}%;height:100%;background:{HOME_COLOR};border-radius:4px"></div></div>
+            <span class="cm-stats-away" style="font-size:13px;min-width:28px">{ap}%</span></div></div>"""
+    html = f"""<div class="cm-stats-bar">{share}
+        <div class="cm-stats-cell"><div class="cm-stats-label">Shots</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{th}</span><span style="color:#2c2c2c;font-size:18px">—</span><span class="cm-stats-away">{ta}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">On Target</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{sh}</span><span style="color:#2c2c2c;font-size:18px">—</span><span class="cm-stats-away">{sa}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Goals</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{gh}</span><span style="color:#2c2c2c;font-size:18px">—</span><span class="cm-stats-away">{ga}</span></div></div>
+    </div>"""
+    st.markdown(_h(html), unsafe_allow_html=True)
+
+def render_pass_stats(df):
+    if df is None or df.empty: return
+    tot   = len(df)
+    succ  = len(df[df["outcomeType"] == "Successful"]) if "outcomeType" in df.columns else 0
+    acc   = round(succ / tot * 100) if tot > 0 else 0
+    kp    = int(df["is_key_pass"].sum()) if "is_key_pass" in df.columns else 0
+    cross = int(df["is_cross"].sum())    if "is_cross"    in df.columns else 0
+    html  = f"""<div class="cm-stats-bar">
+        <div class="cm-stats-cell"><div class="cm-stats-label">Passes</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{tot}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Accuracy</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{acc}%</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Key Passes</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{kp}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Crosses</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{cross}</span></div></div>
+    </div>"""
+    st.markdown(_h(html), unsafe_allow_html=True)
+
+def render_def_stats(df):
+    if df is None or df.empty: return
+    counts = df["type"].value_counts()
+    cells  = "".join(
+        f'<div class="cm-stats-cell"><div class="cm-stats-label">{t}</div>'
+        f'<div class="cm-stats-split"><span class="cm-stats-home">{counts.get(t, 0)}</span></div></div>'
+        for t in ["Tackle", "Interception", "Clearance", "Aerial", "Block", "Challenge", "Dispossessed", "Error"]
+        if counts.get(t, 0) > 0
+    )
+    st.markdown(_h(f'<div class="cm-stats-bar">{cells}</div>'), unsafe_allow_html=True)
+
+
+def _filter_by_pitch_zone(df, selected_zone):
+    if df is None or df.empty or not selected_zone:
+        return df
+    zone_series = _effective_pitch_zone_series(df)
+    combined_pitch_zones = {
+        "Entire Left Side": ["Left Wing", "Left Half Space"],
+        "Entire Right Side": ["Right Wing", "Right Half Space"],
+    }
+    if selected_zone in combined_pitch_zones:
+        return df[zone_series.isin(combined_pitch_zones[selected_zone])]
+    return df[zone_series == selected_zone]
+
+
+# =============================================================================
+# CLIP HELPERS
+# =============================================================================
+def _delete_file(path):
+    """Silently delete a file if it exists (temp clip cleanup)."""
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _clear_clip(prefix):
+    """Delete the temp clip file and wipe all clip state for a given panel prefix."""
+    _delete_file(st.session_state.get(f"{prefix}_clip_path"))
+    st.session_state[f"{prefix}_clip_path"]  = None
+    st.session_state[f"{prefix}_clip_key"]   = None
+    st.session_state[f"{prefix}_clip_error"] = None
+
+
+# =============================================================================
+# WATCH PANEL
+# =============================================================================
+def render_watch_panel(row, prefix, label_fn):
+    minute_val = row.get("minute", 0)
+    second_val = row.get("second", 0)
+    period_val = row.get("period", "FirstHalf")
+    player_val = row.get("playerName", "")
+    clip_label = theme.ui_html(f"[CLIP]  {player_val} · {fmt_time(minute_val, second_val, period_val)}")
+
+    # Initialise per-panel buffer sliders from global defaults (only on first render)
+    _glob_before, _glob_after = _analysts_room_buffers()
+    _bk, _ak = f"{prefix}_clip_before", f"{prefix}_clip_after"
+    if _bk not in st.session_state:
+        st.session_state[_bk] = _glob_before
+    if _ak not in st.session_state:
+        st.session_state[_ak] = _glob_after
+
+    st.markdown(f"<div><strong>{clip_label}</strong></div>", unsafe_allow_html=True)
+
+    _sc1, _sc2 = st.columns(2)
+    with _sc1:
+        _before = st.slider("Before (s)", 0, 60, key=_bk, label_visibility="visible")
+    with _sc2:
+        _after  = st.slider("After (s)",  0, 60, key=_ak, label_visibility="visible")
+
+    # Cache key encodes both the event identity and the current buffer values
+    event_key = f"{minute_val}_{second_val}_{period_val}_{player_val}"
+    full_key  = f"{event_key}__{_before}_{_after}"
+
+    existing_clip = st.session_state.get(f"{prefix}_clip_path")
+    existing_key  = st.session_state.get(f"{prefix}_clip_key")
+    clip_error    = st.session_state.get(f"{prefix}_clip_error")
+
+    # same_event: a clip exists for this event but with different buffer values
+    same_event = (
+        isinstance(existing_key, str)
+        and existing_key.startswith(event_key + "__")
+        and existing_key != full_key
+    )
+
+    if existing_key == full_key and existing_clip and os.path.exists(existing_clip):
+        st.video(existing_clip)
+        safe_name = re.sub(r"[^\w\-.]", "_", f"{player_val}_{minute_val}.mp4")
+        with open(existing_clip, "rb") as _dl:
+            st.download_button("Download clip", data=_dl.read(),
+                               file_name=safe_name, mime="video/mp4",
+                               use_container_width=True,
+                               icon=theme.icon_shortcode("[DL]"))
+        if st.button("Clear preview", use_container_width=True, key=f"{prefix}_clear",
+                     icon=theme.icon_shortcode("[X]")):
+            _clear_clip(prefix)
+            st.rerun()
+    elif clip_error and existing_key == full_key:
+        st.error(f"Could not cut clip: {clip_error}")
+        if st.button("Retry", use_container_width=True, key=f"{prefix}_retry", icon=theme.icon_shortcode("[RETRY]")):
+            st.session_state[f"{prefix}_clip_error"] = None
+            st.session_state[f"{prefix}_clip_key"]   = None
+            st.rerun()
+    elif same_event:
+        # Buffer changed while a clip was showing — auto re-cut immediately
+        with st.spinner("Re-cutting clip…"):
+            try:
+                new_path = cut_clip(minute_val, second_val, period_val,
+                                    before=_before, after=_after)
+                _delete_file(existing_clip)
+                st.session_state[f"{prefix}_clip_path"]  = new_path
+                st.session_state[f"{prefix}_clip_key"]   = full_key
+                st.session_state[f"{prefix}_clip_error"] = None
+                st.rerun()
+            except Exception as e:
+                st.session_state[f"{prefix}_clip_error"] = str(e)
+                st.session_state[f"{prefix}_clip_key"]   = full_key
+                st.rerun()
+    else:
+        if st.button("Watch", type="primary", use_container_width=True, key=f"{prefix}_watch", icon=theme.icon_shortcode("[RUN]")):
+            with st.spinner("Cutting clip…"):
+                try:
+                    new_path = cut_clip(minute_val, second_val, period_val,
+                                        before=_before, after=_after)
+                    _delete_file(existing_clip)
+                    st.session_state[f"{prefix}_clip_path"]  = new_path
+                    st.session_state[f"{prefix}_clip_key"]   = full_key
+                    st.session_state[f"{prefix}_clip_error"] = None
+                    st.rerun()
+                except Exception as e:
+                    st.session_state[f"{prefix}_clip_error"] = str(e)
+                    st.session_state[f"{prefix}_clip_key"]   = full_key
+                    st.rerun()
+
+# handle_click: only updates state, no rerun — fragment handles re-execution
+def handle_click(raw_click, prefix):
+    clicked_idx = None
+    click_ts    = None
+    if isinstance(raw_click, (list, tuple)) and len(raw_click) >= 2:
+        clicked_idx, click_ts = raw_click[0], raw_click[1]
+    elif isinstance(raw_click, (int, float)) and raw_click is not None:
+        clicked_idx, click_ts = int(raw_click), 0
+    last_ts = st.session_state.get(f"{prefix}_last_click_ts")
+    if clicked_idx is not None and click_ts != last_ts:
+        st.session_state[f"{prefix}_last_click_ts"]  = click_ts
+        st.session_state[f"{prefix}_selected_idx"]   = clicked_idx
+        st.session_state[f"{prefix}_clip_path"]      = None
+        st.session_state[f"{prefix}_clip_key"]       = None
+        st.session_state[f"{prefix}_clip_error"]     = None
+        st.rerun()
+
+# =============================================================================
+# HEADER
+# =============================================================================
+_logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
+_b64 = theme.load_logo_b64(_logo_path)
+st.markdown(theme.logo_header("The Analyst's Room", "Visualise match events as interactive charts and maps", _b64 or None), unsafe_allow_html=True)
+
+st.divider()
+
+if not data_loaded:
+    nd_gray = theme.light_color("#ccc", "#555")
+    st.markdown(f"""<div class="cm-no-data-msg">
+        <div style="font-size:40px;margin-bottom:16px">{theme.icon_span("[SEARCH]", color=nd_gray, size=40)}</div>
+        <b style="color:{nd_gray};font-size:17px">No match data loaded</b><br><br>
+        Go to <b>Home</b> and scrape a match first.
+    </div>""", unsafe_allow_html=True)
+    st.stop()
+
+# =============================================================================
+# TABS
+# =============================================================================
+tab_shot, tab_pass, tab_def, tab_dc, tab_gk, tab_bu, tab_press, tab_comp = st.tabs([
+    "◉ Shot Map",
+    "◎ Pass Map",
+    "■ Defensive Actions",
+    "◈ Dribbles & Carries",
+    "⊞ Goalkeeper",
+    "↗ Build-Up",
+    "◆ Pressing",
+    "⇄ Comparison",
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — SHOT MAP
+# ─────────────────────────────────────────────────────────────────────────────
+@st.fragment
+def render_shot_tab():
+    if shots_df is None or shots_df.empty:
+        st.info("No shot data found in the loaded CSV.")
+        return
+
+    has_pso = pso_shots_df is not None and not pso_shots_df.empty
+
+    if has_pso:
+        mode = st.radio("Mode", ["Normal", "Penalty Shootout"], horizontal=True,
+                       key="smp_mode_radio", label_visibility="collapsed")
+    else:
+        mode = st.radio("Mode", ["Normal"], horizontal=True, disabled=True,
+                       key="smp_mode_radio", label_visibility="collapsed")
+        st.caption("⊘ No penalty shootout data in this match")
+
+    if mode == "Penalty Shootout":
+        pso_shots = pso_shots_df.copy()
+
+        if pso_shots.empty:
+            st.info("No penalty shootout shots found.")
+            return
+
+        def shot_to_dict(idx, row):
+            return {
+                "df_idx": int(idx), "is_home": bool(row.get("team", "") == home_team),
+                "team": str(row.get("team", "")), "playerName": str(row.get("playerName", "")),
+                "minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
+                "period": str(row.get("period", "")), "type": reclassify_shot(row),
+                "x": safe_float(row.get("x")), "y": safe_float(row.get("y")),
+                "goal_mouth_y": safe_float(row.get("goal_mouth_y")),
+                "goal_mouth_z": safe_float(row.get("goal_mouth_z")),
+            }
+
+        shots_for_pso = [shot_to_dict(idx, row) for idx, row in pso_shots.iterrows()]
+        pso_sel_idx   = st.session_state.get("smp_pso_selected_idx")
+
+        if pso_sel_idx is not None:
+            if st.button("Clear selection", key="smp_pso_clear_sel"):
+                st.session_state["smp_pso_selected_idx"] = None
+                st.session_state["smp_clip_path"]        = None
+                st.session_state["smp_clip_key"]         = None
+                st.session_state["smp_clip_error"]       = None
+                st.rerun()
+
+        # ── New unified PSO component ──────────────────────────────────────────
+        raw_click = penalty_shootout_map(
+            shots_for_pso,
+            home_team=home_team or "",
+            away_team=away_team or "",
+            selected_idx=pso_sel_idx,
+            key="smp_pso_main",
+            light_mode=st.session_state.get("light_mode", False),
+            **_map_context(
+                "Penalty Shootout Map",
+                team=_scope_line(home_team, away_team),
+                subset="Penalty shootout attempts",
+                count=len(pso_shots),
+                unit="penalty",
+                note="Subset: penalty shootout attempts only. Goalframe shows selected placement; player circles are ordered chronologically by team.",
+            ),
+        )
+        handle_click(raw_click, "smp_pso")
+
+        st.markdown(
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+            "● Scored &nbsp;◯ Saved / Post &nbsp;"
+            f"<span style='color:{theme.light_color(AWAY_COLOR, '#c44232')};font-size:12px'>&#10005;</span> Missed &nbsp;·&nbsp;"
+            "Click a player circle to inspect their penalty</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<div style=\'height:6px\'></div>", unsafe_allow_html=True)
+        def shot_label(row):
+            icon   = OUTCOME_ICON.get(reclassify_shot(row), "✕")
+            period = row.get("period", "")
+            et     = " ET" if "ExtraTime" in str(period) else ""
+            return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"{et}  {row.get('playerName','Unknown')}  ({row.get('team','')})"
+
+        pso_indices = list(pso_shots.index)
+        labels = ["— Select a penalty to inspect —"] + [shot_label(r) for _, r in pso_shots.iterrows()]
+        cur_idx = st.session_state.get("smp_pso_selected_idx")
+        sel_pos = pso_indices.index(cur_idx) + 1 if cur_idx in pso_indices else 0
+        chosen  = st.selectbox("Select a penalty", labels, index=sel_pos, key="smp_pso_shot_sel")
+        if chosen != "— Select a penalty to inspect —":
+            new_idx = pso_indices[labels.index(chosen) - 1]
+            if new_idx != st.session_state.get("smp_pso_selected_idx"):
+                st.session_state["smp_pso_selected_idx"] = new_idx
+                st.session_state["smp_clip_path"]        = None
+                st.session_state["smp_clip_key"]         = None
+                st.session_state["smp_clip_error"]       = None
+                st.rerun()
+
+        pso_sel = st.session_state.get("smp_pso_selected_idx")
+        if pso_sel is not None and pso_sel in pso_shots_df.index:
+            row        = pso_shots_df.loc[pso_sel].to_dict()
+            s_type     = reclassify_shot(row)
+            team       = row.get("team", "")
+            accent     = HOME_COLOR if team == home_team else AWAY_COLOR
+            is_penalty  = safe_bool(row.get("is_penalty", ""))
+            is_lfoot    = safe_bool(row.get("is_left_foot", ""))
+            is_rfoot    = safe_bool(row.get("is_right_foot", ""))
+            extras      = " · ".join(x for x in [
+                "Penalty"   if is_penalty else "",
+                "Left Foot" if is_lfoot   else "",
+                "Right Foot" if is_rfoot  else "",
+            ] if x) or "—"
+            badge_cls  = OUTCOME_CLASS.get(s_type, "badge badge-missed")
+            badge_lbl  = theme.ui_html(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"))
+            minute_v   = row.get("minute", 0); second_v = row.get("second", 0); period_v = row.get("period", "")
+
+            st.divider()
+            dc, vc = st.columns([1, 1], gap="large")
+            with dc:
+                st.markdown(_h(f"""<div class="cm-shot-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(minute_v, second_v, period_v)}</div>
+                    <span class="{badge_cls}">{badge_lbl}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Qualifier</div>
+                        <div class="cm-detail-value">{extras}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+            with vc:
+                render_watch_panel(row, "smp", shot_label)
+        return
+
+    radio_opts = []
+    if home_team: radio_opts.append(home_team)
+    if away_team: radio_opts.append(away_team)
+    if not radio_opts:
+        radio_opts = sorted(shots_df["team"].dropna().unique().tolist())[:2]
+
+    team_sel = st.radio("Team", radio_opts, horizontal=True, key="smp_team_radio",
+                        label_visibility="collapsed")
+
+    all_shot_players  = sorted(shots_df["playerName"].dropna().unique()) if "playerName" in shots_df.columns else []
+    team_shot_players = [p for p in all_shot_players
+                         if p in shots_df[shots_df["team"] == team_sel]["playerName"].values]
+    player_filter_shot = st.selectbox("Player", ["All players"] + team_shot_players,
+                                      label_visibility="collapsed", key="smp_player_sel")
+
+    smp_pitch_zone = st.selectbox(
+        "Pitch Zone",
+        options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+        format_func=lambda x: "Any pitch zone" if x == "" else x,
+        key="smp_pitch_zone_sel",
+        label_visibility="collapsed",
+    )
+
+    _smp_fkey = f"{team_sel}|{player_filter_shot}|{smp_pitch_zone}"
+    if st.session_state.get("_smp_last_filter") != _smp_fkey:
+        st.session_state["_smp_last_filter"] = _smp_fkey
+        st.session_state["smp_selected_idx"] = None
+        st.session_state["smp_clip_path"]    = None
+        st.session_state["smp_clip_key"]     = None
+        st.session_state["smp_clip_error"]   = None
+
+    render_shot_stats()
+
+    disp_shots = shots_df[shots_df["team"] == team_sel].copy()
+    if player_filter_shot != "All players":
+        disp_shots = disp_shots[disp_shots["playerName"] == player_filter_shot]
+    disp_shots = _filter_by_pitch_zone(disp_shots, smp_pitch_zone)
+
+    if disp_shots.empty:
+        st.info("No shots match the current filter.")
+        return
+
+    def shot_to_dict(idx, row):
+        return {
+            "df_idx": int(idx), "is_home": bool(row.get("team", "") == home_team),
+            "team": str(row.get("team", "")), "playerName": str(row.get("playerName", "")),
+            "minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
+            "period": str(row.get("period", "")), "type": reclassify_shot(row),
+            "x": safe_float(row.get("x")), "y": safe_float(row.get("y")),
+            "goal_mouth_y": safe_float(row.get("goal_mouth_y")),
+            "goal_mouth_z": safe_float(row.get("goal_mouth_z")),
+        }
+
+    shots_for_comp = [shot_to_dict(idx, row) for idx, row in disp_shots.iterrows()]
+    sel_idx = st.session_state.get("smp_selected_idx")
+
+    if sel_idx is not None:
+        if st.button("Clear selection", key="smp_clear_sel"):
+            st.session_state["smp_selected_idx"] = None
+            st.session_state["smp_clip_path"]    = None
+            st.session_state["smp_clip_key"]     = None
+            st.session_state["smp_clip_error"]   = None
+            st.rerun()
+
+    if sel_idx is not None and sel_idx in disp_shots.index:
+        sel_row  = disp_shots.loc[sel_idx]
+        shot_map([shot_to_dict(sel_idx, sel_row)], home_team=home_team or "",
+                 away_team=away_team or "", selected_idx=sel_idx,
+                 view="goalframe", key="smp_gf",
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     f"Shot Placement - {sel_row.get('playerName', 'Unknown')}",
+                     team=sel_row.get("team", ""),
+                     subset=reclassify_shot(sel_row),
+                     count=1,
+                     unit="shot",
+                     note="Goal-mouth placement for the selected shot. Posts and crossbar are shown for export context.",
+                 ))
+
+    raw_click = shot_map(shots_for_comp, home_team=home_team or "",
+                         away_team=away_team or "", selected_idx=sel_idx,
+                         view="halfpitch_vert", key="smp_pitch",
+                         light_mode=st.session_state.get("light_mode", False),
+                         **_map_context(
+                             f"Shot Map - {team_sel if player_filter_shot == 'All players' else player_filter_shot}",
+                             team=team_sel,
+                             player="" if player_filter_shot == "All players" else player_filter_shot,
+                             subset="Shots",
+                             pitch_zone=smp_pitch_zone,
+                             count=len(disp_shots),
+                             unit="shot",
+                             note="Subset: shots after the selected team/player/pitch-zone filters. The half-pitch view points toward the attacking goal.",
+                         ))
+    handle_click(raw_click, "smp")
+
+    st.markdown(
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+        "● Goal &nbsp;◯ Saved / Post &nbsp;"
+        f"<span style='color:{theme.light_color(AWAY_COLOR, '#c44232')};font-size:12px'>&#10005;</span> Missed &nbsp;·&nbsp;"
+        "Click a shot to inspect it</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style=\'height:6px\'></div>", unsafe_allow_html=True)
+    def shot_label(row):
+        icon   = OUTCOME_ICON.get(reclassify_shot(row), "✕")
+        period = row.get("period", "")
+        et     = " ET" if "ExtraTime" in str(period) else ""
+        return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"{et}  {row.get('playerName','Unknown')}  ({row.get('team','')})"
+
+    disp_indices = list(disp_shots.index)
+    labels = ["— Select a shot to inspect —"] + [shot_label(r) for _, r in disp_shots.iterrows()]
+    cur_idx = st.session_state.get("smp_selected_idx")
+    sel_pos = disp_indices.index(cur_idx) + 1 if cur_idx in disp_indices else 0
+    chosen  = st.selectbox("Select a shot", labels, index=sel_pos, key="smp_shot_sel")
+    if chosen != "— Select a shot to inspect —":
+        new_idx = disp_indices[labels.index(chosen) - 1]
+        if new_idx != st.session_state.get("smp_selected_idx"):
+            st.session_state["smp_selected_idx"] = new_idx
+            st.session_state["smp_clip_path"]    = None
+            st.session_state["smp_clip_key"]     = None
+            st.session_state["smp_clip_error"]   = None
+            st.rerun()
+
+    sel_idx = st.session_state.get("smp_selected_idx")
+    if sel_idx is not None and sel_idx in shots_df.index:
+        row        = shots_df.loc[sel_idx].to_dict()
+        s_type     = reclassify_shot(row)
+        team       = row.get("team", "")
+        accent     = HOME_COLOR if team == home_team else AWAY_COLOR
+        is_head     = safe_bool(row.get("is_header", ""))
+        is_bc       = safe_bool(row.get("is_big_chance_shot", ""))
+        is_penalty  = safe_bool(row.get("is_penalty", ""))
+        is_volley   = safe_bool(row.get("is_volley", ""))
+        is_chipped  = safe_bool(row.get("is_chipped", ""))
+        is_dcfc     = safe_bool(row.get("is_direct_from_corner", ""))
+        is_lfoot    = safe_bool(row.get("is_left_foot", ""))
+        is_rfoot    = safe_bool(row.get("is_right_foot", ""))
+        is_fb       = safe_bool(row.get("is_fast_break", ""))
+        is_scramble   = safe_bool(row.get("is_scramble", ""))
+        is_corner_sit = safe_bool(row.get("is_corner_situation", ""))
+        is_indiv      = safe_bool(row.get("is_individual_play", ""))
+        is_foll_drib  = safe_bool(row.get("is_follows_dribble", ""))
+        is_strong     = safe_bool(row.get("is_shot_strong", ""))
+        is_weak       = safe_bool(row.get("is_shot_weak", ""))
+        is_woodwork   = safe_bool(row.get("is_hit_woodwork", ""))
+        extras      = " · ".join(x for x in [
+            "Header"            if is_head       else "",
+            "Big Chance"        if is_bc         else "",
+            "Penalty"           if is_penalty    else "",
+            "Volley"            if is_volley     else "",
+            "Chipped"           if is_chipped    else "",
+            "Direct from Corner" if is_dcfc      else "",
+            "Left Foot"         if is_lfoot      else "",
+            "Right Foot"        if is_rfoot      else "",
+            "Fast Break"        if is_fb         else "",
+            "Scramble"          if is_scramble   else "",
+            "2nd Phase"         if is_corner_sit else "",
+            "Solo"              if is_indiv      else "",
+            "After Dribble"     if is_foll_drib  else "",
+            "Strong"            if is_strong     else "",
+            "Weak"              if is_weak       else "",
+            "Woodwork"          if is_woodwork   else "",
+        ] if x) or "—"
+        badge_cls  = OUTCOME_CLASS.get(s_type, "badge badge-missed")
+        badge_lbl  = theme.ui_html(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"))
+        minute_v   = row.get("minute", 0); second_v = row.get("second", 0); period_v = row.get("period", "")
+
+        st.divider()
+        dc, vc = st.columns([1, 1], gap="large")
+        with dc:
+            st.markdown(_h(f"""<div class="cm-shot-panel">
+                <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                <div class="cm-panel-sub">{team} · {fmt_time(minute_v, second_v, period_v)}</div>
+                <span class="{badge_cls}">{badge_lbl}</span>
+                <div style="margin-top:12px">
+                    <div class="cm-detail-label">Qualifier</div>
+                    <div class="cm-detail-value">{extras}</div>
+                </div>
+            </div>"""), unsafe_allow_html=True)
+        with vc:
+            render_watch_panel(row, "smp", shot_label)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — PASS MAP
+# ─────────────────────────────────────────────────────────────────────────────
+@st.fragment
+def render_pass_tab():
+    if passes_df is None or passes_df.empty:
+        st.info("No pass data found in the loaded CSV.")
+        return
+
+    PASS_NETWORK = "Pass Network"
+    radio_pass_opts = [PASS_NETWORK]
+    if home_team: radio_pass_opts.append(home_team)
+    if away_team: radio_pass_opts.append(away_team)
+
+    view_sel = st.radio("View", radio_pass_opts, horizontal=True,
+                        key="pm_view_radio", label_visibility="collapsed")
+
+    if view_sel == PASS_NETWORK:
+        subs_on = set()
+        if df_all is not None and "type" in df_all.columns:
+            sub_on_types = {"SubstitutionOn", "PlayerOn"}
+            subs_on = set(df_all[df_all["type"].isin(sub_on_types)]["playerName"].dropna().unique())
+
+        all_net_passes = []
+        for idx, row in passes_df.iterrows():
+            if pd.isna(safe_float(row.get("x"))) or pd.isna(safe_float(row.get("endX"))):
+                continue
+            pname = str(row.get("playerName", ""))
+            all_net_passes.append({
+                "df_idx": int(idx),
+                "playerName": pname,
+                "team": str(row.get("team", "")),
+                "is_home": bool(row.get("team", "") == home_team),
+                "is_starter": pname not in subs_on,
+                "minute": int(row.get("minute", 0)),
+                "second": int(row.get("second", 0)),
+                "period": str(row.get("period", "")),
+                "x": safe_float(row.get("x")),
+                "y": safe_float(row.get("y")),
+                "endX": safe_float(row.get("endX")),
+                "endY": safe_float(row.get("endY")),
+                "successful": str(row.get("outcomeType", "")).lower() == "successful",
+                "is_key_pass": safe_bool(row.get("is_key_pass", False)),
+                "mode": "network",
+            })
+
+        ht = passes_df[passes_df["team"] == home_team] if home_team else pd.DataFrame()
+        at = passes_df[passes_df["team"] == away_team] if away_team else pd.DataFrame()
+
+        def pass_acc(df):
+            if df.empty: return "—"
+            s = len(df[df["outcomeType"] == "Successful"]) if "outcomeType" in df.columns else 0
+            return f"{round(s/len(df)*100)}%"
+
+        html = f"""<div class="cm-stats-bar">
+            <div class="cm-stats-cell"><div class="cm-stats-label">Passes</div>
+                <div class="cm-stats-split">
+                    <span class="cm-stats-home">{len(ht)}</span>
+                    <span style="color:#2c2c2c;font-size:18px">—</span>
+                    <span class="cm-stats-away">{len(at)}</span>
+                </div></div>
+            <div class="cm-stats-cell"><div class="cm-stats-label">Accuracy</div>
+                <div class="cm-stats-split">
+                    <span class="cm-stats-home">{pass_acc(ht)}</span>
+                    <span style="color:#2c2c2c;font-size:18px">—</span>
+                    <span class="cm-stats-away">{pass_acc(at)}</span>
+                </div></div>
+            <div class="cm-stats-cell"><div class="cm-stats-label">Key Passes</div>
+                <div class="cm-stats-split">
+                    <span class="cm-stats-home">{int(ht['is_key_pass'].sum()) if 'is_key_pass' in ht.columns else 0}</span>
+                    <span style="color:#2c2c2c;font-size:18px">—</span>
+                    <span class="cm-stats-away">{int(at['is_key_pass'].sum()) if 'is_key_pass' in at.columns else 0}</span>
+                </div></div>
+        </div>"""
+        st.markdown(_h(html), unsafe_allow_html=True)
+
+        pass_map(passes=all_net_passes, home_team=home_team or "",
+                 away_team=away_team or "", selected_idx=None,
+                 mode="network", key="pm_network",
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     "Pass Network",
+                     team=_scope_line(home_team, away_team),
+                     subset="All team passes",
+                     count=len(all_net_passes),
+                     unit="pass",
+                     note="Subset: all passes in the selected match source. Node size shows pass volume; line width shows connection frequency.",
+                 ))
+
+        st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:4px'>"
+                    "Node colour intensity = pass volume · "
+                    "Line colour intensity = connection frequency</div>",
+                    unsafe_allow_html=True)
+
+    else:
+        team_passes       = passes_df[passes_df["team"] == view_sel].copy()
+        team_pass_players = sorted(team_passes["playerName"].dropna().unique().tolist()) if "playerName" in team_passes.columns else []
+
+        player_sel = st.selectbox("Player", ["— Select a player —"] + team_pass_players,
+                                  label_visibility="collapsed", key="pm_player_sel")
+
+        pass_type_opts = ["All passes"]
+        bool_cols_present = {
+            "Key passes":          "is_key_pass",
+            "Crosses":             "is_cross",
+            "Long balls":          "is_long_ball",
+            "Switches of play":    "is_switch_of_play",
+            "Diagonals":           "is_diagonal_long_ball",
+            "Through balls":       "is_through_ball",
+            "Deep completions":    "is_deep_completion",
+            "Box entry passes":    "is_box_entry_pass",
+            "Final 3rd entries":   "is_final_third_entry_pass",
+            "Big chances created": "is_big_chance",
+            "Assist (thru ball)":  "is_assist_throughball",
+            "Assist (cross)":      "is_assist_cross",
+            "Assist (corner)":     "is_assist_corner",
+            "Assist (free kick)":  "is_assist_freekick",
+            "Touch in box":        "is_touch_in_box",
+            "Goal kicks":          "is_goal_kick",
+            "Keeper throws":       "is_keeper_throw",
+            "Pull backs":          "is_pull_back",
+            "Lay-offs":            "is_lay_off",
+            "Flick-ons":           "is_flick_on",
+            "Assists":             "is_assist",
+            "Throw ins":           "is_throw_in",
+        }
+        available_pass_types = {k: v for k, v in bool_cols_present.items() if v in passes_df.columns}
+        pass_type_sel = st.radio("Pass type", ["All passes"] + list(available_pass_types.keys()),
+                                 horizontal=True, key="pm_type_radio", label_visibility="collapsed")
+
+        _pm_z1, _pm_z2 = st.columns(2)
+        with _pm_z1:
+            pm_pitch_zone = st.selectbox(
+                "Pitch Zone",
+                options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+                format_func=lambda x: "Any pitch zone" if x == "" else x,
+                key="pm_pitch_zone_sel",
+                label_visibility="collapsed",
+            )
+        with _pm_z2:
+            pm_depth_zone = st.selectbox(
+                "Depth Zone",
+                options=["", "Defensive Third", "Middle Third", "Attacking Third"],
+                format_func=lambda x: "Any depth zone" if x == "" else x,
+                key="pm_depth_zone_sel",
+                label_visibility="collapsed",
+            )
+
+        _pm_fkey = f"{view_sel}|{player_sel}|{pass_type_sel}|{pm_pitch_zone}|{pm_depth_zone}"
+        if st.session_state.get("_pm_last_filter") != _pm_fkey:
+            st.session_state["_pm_last_filter"] = _pm_fkey
+            st.session_state["pm_selected_idx"] = None
+            st.session_state["pm_clip_path"]    = None
+            st.session_state["pm_clip_key"]     = None
+            st.session_state["pm_clip_error"]   = None
+
+        if player_sel == "— Select a player —":
+            nd_gray = theme.light_color("#ccc", "#555")
+            st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+                <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[PASS]", color=nd_gray, size=32)}</div>
+                Select a player above to view their pass map
+            </div>""", unsafe_allow_html=True)
+        else:
+            player_passes = team_passes[team_passes["playerName"] == player_sel].copy()
+            if pass_type_sel != "All passes" and pass_type_sel in available_pass_types:
+                col = available_pass_types[pass_type_sel]
+                player_passes = player_passes[player_passes[col] == True]
+            player_passes = _filter_by_pitch_zone(player_passes, pm_pitch_zone)
+            if pm_depth_zone and "depth_zone" in player_passes.columns:
+                player_passes = player_passes[player_passes["depth_zone"] == pm_depth_zone]
+            player_passes = player_passes.dropna(subset=["x", "endX"])
+
+            render_pass_stats(player_passes)
+
+            if player_passes.empty:
+                st.info("No passes match the current filter.")
+                return
+
+            passes_for_comp = []
+            for idx, row in player_passes.iterrows():
+                passes_for_comp.append({
+                    "df_idx": int(idx),
+                    "playerName": str(row.get("playerName", "")),
+                    "team": str(row.get("team", "")),
+                    "is_home": bool(row.get("team", "") == home_team),
+                    "minute": int(row.get("minute", 0)),
+                    "second": int(row.get("second", 0)),
+                    "period": str(row.get("period", "")),
+                    "x": safe_float(row.get("x")),
+                    "y": safe_float(row.get("y")),
+                    "endX": safe_float(row.get("endX")),
+                    "endY": safe_float(row.get("endY")),
+                    "successful": str(row.get("outcomeType", "")).lower() == "successful",
+                    "is_key_pass":           safe_bool(row.get("is_key_pass", False)),
+                    "is_cross":              safe_bool(row.get("is_cross", False)),
+                    "is_long_ball":          safe_bool(row.get("is_long_ball", False)),
+                    "is_switch_of_play":     safe_bool(row.get("is_switch_of_play", False)),
+                    "is_diagonal_long_ball": safe_bool(row.get("is_diagonal_long_ball", False)),
+                    "is_through_ball":       safe_bool(row.get("is_through_ball", False)),
+                    "is_big_chance":         safe_bool(row.get("is_big_chance", False)),
+                    "is_assist_throughball": safe_bool(row.get("is_assist_throughball", False)),
+                    "is_assist_cross":       safe_bool(row.get("is_assist_cross", False)),
+                    "is_assist_corner":      safe_bool(row.get("is_assist_corner", False)),
+                    "is_assist_freekick":    safe_bool(row.get("is_assist_freekick", False)),
+                    "is_intentional_assist": safe_bool(row.get("is_intentional_assist", False)),
+                    "is_fast_break":         safe_bool(row.get("is_fast_break", False)),
+                    "is_touch_in_box":       safe_bool(row.get("is_touch_in_box", False)),
+                    "mode": "player",
+                })
+
+            pm_sel_idx = st.session_state.get("pm_selected_idx")
+            if pm_sel_idx is not None:
+                if st.button("Clear selection", key="pm_clear_sel"):
+                    st.session_state["pm_selected_idx"] = None
+                    st.session_state["pm_clip_path"]    = None
+                    st.session_state["pm_clip_key"]     = None
+                    st.session_state["pm_clip_error"]   = None
+                    st.rerun()
+
+            raw_pm = pass_map(passes=passes_for_comp, home_team=home_team or "",
+                              away_team=away_team or "", selected_idx=pm_sel_idx,
+                              mode="player", key="pm_player",
+                              light_mode=st.session_state.get("light_mode", False),
+                              **_map_context(
+                                  f"Pass Map - {player_sel}",
+                                  team=view_sel,
+                                  player=player_sel,
+                                  subset=pass_type_sel,
+                                  pitch_zone=pm_pitch_zone,
+                                  depth_zone=pm_depth_zone,
+                                  count=len(player_passes),
+                                  unit="pass",
+                                  note="Subset: selected player's passes after pass-type, pitch-zone and depth-zone filters. Lines show start-to-end direction.",
+                              ))
+            handle_click(raw_pm, "pm")
+
+            st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+                        f"<span style='color:{theme.light_color('#7ab4ff', '#4a7fc4')}'>●</span> Successful &nbsp;"
+                        f"<span style='color:{theme.light_color('#ff7351', '#c44232')}'>●</span> Unsuccessful &nbsp;·&nbsp;"
+                        "Click a pass endpoint to inspect it</div>",
+                        unsafe_allow_html=True)
+
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            def pass_label(row):
+                outcome = "✓" if str(row.get("outcomeType", "")).lower() == "successful" else "✕"
+                kp = " ◆" if safe_bool(row.get("is_key_pass", False)) else ""
+                return f"{outcome}{kp}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {row.get('playerName','Unknown')}"
+
+            pm_indices = list(player_passes.index)
+            pm_labels  = ["— Select a pass to inspect —"] + [pass_label(r) for _, r in player_passes.iterrows()]
+            cur_pm     = st.session_state.get("pm_selected_idx")
+            pm_pos     = pm_indices.index(cur_pm) + 1 if cur_pm in pm_indices else 0
+            pm_chosen  = st.selectbox("Select a pass", pm_labels, index=pm_pos, key="pm_pass_sel")
+
+            if pm_chosen != "— Select a pass to inspect —":
+                new_pm_idx = pm_indices[pm_labels.index(pm_chosen) - 1]
+                if new_pm_idx != st.session_state.get("pm_selected_idx"):
+                    st.session_state["pm_selected_idx"] = new_pm_idx
+                    st.session_state["pm_clip_path"]    = None
+                    st.session_state["pm_clip_key"]     = None
+                    st.session_state["pm_clip_error"]   = None
+                    st.rerun()
+
+            pm_sel = st.session_state.get("pm_selected_idx")
+            if pm_sel is not None and pm_sel in passes_df.index:
+                row      = passes_df.loc[pm_sel].to_dict()
+                team     = row.get("team", "")
+                accent   = HOME_COLOR if team == home_team else AWAY_COLOR
+                outcome  = row.get("outcomeType", "")
+                badge_c  = "badge badge-success" if outcome == "Successful" else "badge badge-fail"
+                badge_l  = theme.ui_html("[OK] SUCCESSFUL" if outcome == "Successful" else "[ERR] UNSUCCESSFUL")
+                tags     = " · ".join(x for x in [
+                    "Key Pass"            if safe_bool(row.get("is_key_pass"))            else "",
+                    "Cross"               if safe_bool(row.get("is_cross"))               else "",
+                    "Long Ball"           if safe_bool(row.get("is_long_ball"))           else "",
+                    "Switch of Play"      if safe_bool(row.get("is_switch_of_play"))      else "",
+                    "Diagonal"            if safe_bool(row.get("is_diagonal_long_ball"))  else "",
+                    "Through Ball"        if safe_bool(row.get("is_through_ball"))        else "",
+                    "Big Chance Created"  if safe_bool(row.get("is_big_chance"))          else "",
+                    "Assist (Through Ball)" if safe_bool(row.get("is_assist_throughball")) else "",
+                    "Assist (Cross)"      if safe_bool(row.get("is_assist_cross"))        else "",
+                    "Assist (Corner)"     if safe_bool(row.get("is_assist_corner"))       else "",
+                    "Assist (Free Kick)"  if safe_bool(row.get("is_assist_freekick"))     else "",
+                    "Intentional Assist"  if safe_bool(row.get("is_intentional_assist"))  else "",
+                    "Fast Break"          if safe_bool(row.get("is_fast_break"))          else "",
+                    "Touch in Box"        if safe_bool(row.get("is_touch_in_box"))        else "",
+                ] if x) or "—"
+
+                st.divider()
+                dc, vc = st.columns([1, 1], gap="large")
+                with dc:
+                    st.markdown(_h(f"""<div class="cm-event-panel">
+                        <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                        <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                        <span class="{badge_c}">{badge_l}</span>
+                        <div style="margin-top:12px">
+                            <div class="cm-detail-label">Qualifiers</div>
+                            <div class="cm-detail-value">{tags}</div>
+                        </div>
+                    </div>"""), unsafe_allow_html=True)
+                with vc:
+                    render_watch_panel(row, "pm", pass_label)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — DEFENSIVE ACTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+@st.fragment
+def render_def_tab():
+    if def_df is None or def_df.empty:
+        st.info("No defensive action data found in the loaded CSV.")
+        return
+
+    radio_def_opts = []
+    if home_team: radio_def_opts.append(home_team)
+    if away_team: radio_def_opts.append(away_team)
+    if not radio_def_opts:
+        radio_def_opts = sorted(def_df["team"].dropna().unique().tolist())[:2]
+
+    def_team_sel = st.radio("Team", radio_def_opts, horizontal=True,
+                            key="dm_team_radio", label_visibility="collapsed")
+
+    team_def       = def_df[def_df["team"] == def_team_sel].copy()
+    def_players    = sorted(team_def["playerName"].dropna().unique().tolist()) if "playerName" in team_def.columns else []
+    def_player_sel = st.selectbox("Player", ["— Select a player —"] + def_players,
+                                  label_visibility="collapsed", key="dm_player_sel")
+
+    _dm_z1, _dm_z2 = st.columns(2)
+    with _dm_z1:
+        dm_pitch_zone = st.selectbox(
+            "Pitch Zone",
+            options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+            format_func=lambda x: "Any pitch zone" if x == "" else x,
+            key="dm_pitch_zone_sel",
+            label_visibility="collapsed",
+        )
+    with _dm_z2:
+        dm_depth_zone = st.selectbox(
+            "Depth Zone",
+            options=["", "Defensive Third", "Middle Third", "Attacking Third"],
+            format_func=lambda x: "Any depth zone" if x == "" else x,
+            key="dm_depth_zone_sel",
+            label_visibility="collapsed",
+        )
+
+    _dm_fkey = f"{def_team_sel}|{def_player_sel}|{dm_pitch_zone}|{dm_depth_zone}"
+    if st.session_state.get("_dm_last_filter") != _dm_fkey:
+        st.session_state["_dm_last_filter"] = _dm_fkey
+        st.session_state["dm_selected_idx"] = None
+        st.session_state["dm_clip_path"]    = None
+        st.session_state["dm_clip_key"]     = None
+        st.session_state["dm_clip_error"]   = None
+
+    if def_player_sel == "— Select a player —":
+        render_def_stats(team_def)
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[DEF]", color=nd_gray, size=32)}</div>
+            Select a player above to view their defensive actions
+        </div>""", unsafe_allow_html=True)
+        return
+
+    player_def = team_def[team_def["playerName"] == def_player_sel].copy()
+    player_def = _filter_by_pitch_zone(player_def, dm_pitch_zone)
+    if dm_depth_zone and "depth_zone" in player_def.columns:
+        player_def = player_def[player_def["depth_zone"] == dm_depth_zone]
+    render_def_stats(player_def)
+
+    if player_def.empty:
+        st.info("No defensive actions found for this player.")
+        return
+
+    def_for_comp = []
+    for idx, row in player_def.iterrows():
+        def_for_comp.append({
+            "df_idx": int(idx),
+            "playerName": str(row.get("playerName", "")),
+            "team": str(row.get("team", "")),
+            "is_home": bool(row.get("team", "") == home_team),
+            "minute": int(row.get("minute", 0)),
+            "second": int(row.get("second", 0)),
+            "period": str(row.get("period", "")),
+            "type": str(row.get("type", "")),
+            "outcomeType": str(row.get("outcomeType", "")),
+            "x": safe_float(row.get("x")),
+            "y": safe_float(row.get("y")),
+        })
+
+    dm_sel_idx = st.session_state.get("dm_selected_idx")
+    if dm_sel_idx is not None:
+        if st.button("Clear selection", key="dm_clear_sel"):
+            st.session_state["dm_selected_idx"] = None
+            st.session_state["dm_clip_path"]    = None
+            st.session_state["dm_clip_key"]     = None
+            st.session_state["dm_clip_error"]   = None
+            st.rerun()
+
+    raw_dm = defensive_map(actions=def_for_comp, home_team=home_team or "",
+                           away_team=away_team or "", selected_idx=dm_sel_idx,
+                           key="dm_player",
+                           light_mode=st.session_state.get("light_mode", False),
+                           **_map_context(
+                               f"Defensive Actions - {def_player_sel}",
+                               team=def_team_sel,
+                               player=def_player_sel,
+                               subset="Defensive actions",
+                               pitch_zone=dm_pitch_zone,
+                               depth_zone=dm_depth_zone,
+                               count=len(player_def),
+                               unit="action",
+                               note="Subset: tackles, interceptions, clearances, aerials, blocks and related defensive events after the active filters.",
+                           ))
+    handle_click(raw_dm, "dm")
+
+    def def_label(row):
+        icon = {"Tackle": "Ⓣ", "Interception": "Ⓘ", "Clearance": "Ⓒ",
+            "Aerial": "Ⓐ", "Block": "Ⓑ", "Challenge": "Ⓗ",
+            "Dispossessed": "Ⓓ", "Error": "Ⓔ"}.get(row.get("type", ""), "●")
+        return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {row.get('type','')}  ({row.get('outcomeType','')})"
+
+    dm_indices = list(player_def.index)
+    dm_labels  = ["— Select an action to inspect —"] + [def_label(r) for _, r in player_def.iterrows()]
+    cur_dm     = st.session_state.get("dm_selected_idx")
+    dm_pos     = dm_indices.index(cur_dm) + 1 if cur_dm in dm_indices else 0
+    dm_chosen  = st.selectbox("Select an action", dm_labels, index=dm_pos, key="dm_action_sel")
+
+    if dm_chosen != "— Select an action to inspect —":
+        new_dm_idx = dm_indices[dm_labels.index(dm_chosen) - 1]
+        if new_dm_idx != st.session_state.get("dm_selected_idx"):
+            st.session_state["dm_selected_idx"] = new_dm_idx
+            st.session_state["dm_clip_path"]    = None
+            st.session_state["dm_clip_key"]     = None
+            st.session_state["dm_clip_error"]   = None
+            st.rerun()
+
+    dm_sel = st.session_state.get("dm_selected_idx")
+    if dm_sel is not None and dm_sel in def_df.index:
+        row    = def_df.loc[dm_sel].to_dict()
+        team   = row.get("team", "")
+        accent = HOME_COLOR if team == home_team else AWAY_COLOR
+        atype  = row.get("type", "")
+        badge_c = DEF_CLASS.get(atype, "badge badge-clear")
+        badge_l = theme.ui_html(DEF_LABEL.get(atype, atype.upper()))
+        _def_ctx_badges = " ".join(filter(None, [
+            theme.ui_html("[LAST LINE]")   if safe_bool(row.get("is_last_line", False)) else "",
+            theme.ui_html("[FORCED OUT]")  if safe_bool(row.get("is_forced_out", False)) else "",
+            theme.ui_html("[LED TO SHOT]") if safe_bool(row.get("is_error_led_to_shot", False)) else "",
+            theme.ui_html("[LED TO GOAL]") if safe_bool(row.get("is_error_led_to_goal", False)) else "",
+        ]))
+
+        st.divider()
+        dc, vc = st.columns([1, 1], gap="large")
+        with dc:
+            st.markdown(_h(f"""<div class="cm-event-panel">
+                <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                <span class="{badge_c}">{badge_l}</span>{" " + _def_ctx_badges if _def_ctx_badges else ""}
+                <div style="margin-top:12px">
+                    <div class="cm-detail-label">Outcome</div>
+                    <div class="cm-detail-value">{row.get('outcomeType','—')}</div>
+                </div>
+            </div>"""), unsafe_allow_html=True)
+        with vc:
+            render_watch_panel(row, "dm", def_label)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 — DRIBBLES & CARRIES
+# ─────────────────────────────────────────────────────────────────────────────
+@st.fragment
+def render_dc_tab():
+    if dribble_carry_df is None or dribble_carry_df.empty:
+        st.info("No dribble or carry data found in the loaded CSV.")
+        return
+
+    radio_dc_opts = []
+    if home_team: radio_dc_opts.append(home_team)
+    if away_team: radio_dc_opts.append(away_team)
+    if not radio_dc_opts:
+        radio_dc_opts = sorted(dribble_carry_df["team"].dropna().unique().tolist())[:2]
+
+    dc_team_sel = st.radio("Team", radio_dc_opts, horizontal=True,
+                           key="dcm_team_radio", label_visibility="collapsed")
+
+    team_dc      = dribble_carry_df[dribble_carry_df["team"] == dc_team_sel].copy()
+    dc_players   = sorted(team_dc["playerName"].dropna().unique().tolist()) if "playerName" in team_dc.columns else []
+    dc_player_sel = st.selectbox("Player", ["— Select a player —"] + dc_players,
+                                 label_visibility="collapsed", key="dcm_player_sel")
+
+    _dc_z1, _dc_z2 = st.columns(2)
+    with _dc_z1:
+        dcm_pitch_zone = st.selectbox(
+            "Pitch Zone",
+            options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+            format_func=lambda x: "Any pitch zone" if x == "" else x,
+            key="dcm_pitch_zone_sel",
+            label_visibility="collapsed",
+        )
+    with _dc_z2:
+        dcm_depth_zone = st.selectbox(
+            "Depth Zone",
+            options=["", "Defensive Third", "Middle Third", "Attacking Third"],
+            format_func=lambda x: "Any depth zone" if x == "" else x,
+            key="dcm_depth_zone_sel",
+            label_visibility="collapsed",
+        )
+
+    _dcm_fkey = f"{dc_team_sel}|{dc_player_sel}|{dcm_pitch_zone}|{dcm_depth_zone}"
+    if st.session_state.get("_dcm_last_filter") != _dcm_fkey:
+        st.session_state["_dcm_last_filter"] = _dcm_fkey
+        st.session_state["dcm_selected_idx"] = None
+        st.session_state["dcm_clip_path"]    = None
+        st.session_state["dcm_clip_key"]     = None
+        st.session_state["dcm_clip_error"]   = None
+
+    if dc_player_sel == "— Select a player —":
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[RUN]", color=nd_gray, size=32)}</div>
+            Select a player above to view their dribbles and carries
+        </div>""", unsafe_allow_html=True)
+        return
+
+    player_dc = team_dc[team_dc["playerName"] == dc_player_sel].copy()
+    player_dc = _filter_by_pitch_zone(player_dc, dcm_pitch_zone)
+    if dcm_depth_zone and "depth_zone" in player_dc.columns:
+        player_dc = player_dc[player_dc["depth_zone"] == dcm_depth_zone]
+    player_dc = player_dc.dropna(subset=["x", "y"])
+
+    # Stats bar
+    carries_dc   = player_dc[player_dc["type"] == "Carry"]
+    dribbles_dc  = player_dc[player_dc["type"] == "TakeOn"]
+    succ_drib    = dribbles_dc[dribbles_dc["outcomeType"] == "Successful"] if "outcomeType" in dribbles_dc.columns else pd.DataFrame()
+    drib_pct     = f"{round(len(succ_drib)/len(dribbles_dc)*100)}%" if len(dribbles_dc) > 0 else "—"
+    html_stats = f"""<div class="cm-stats-bar">
+        <div class="cm-stats-cell"><div class="cm-stats-label">Carries</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{len(carries_dc)}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Dribble Attempts</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{len(dribbles_dc)}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Successful</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{len(succ_drib)}</span></div></div>
+        <div class="cm-stats-cell"><div class="cm-stats-label">Dribble %</div>
+            <div class="cm-stats-split"><span class="cm-stats-home">{drib_pct}</span></div></div>
+    </div>"""
+    st.markdown(_h(html_stats), unsafe_allow_html=True)
+
+    if player_dc.empty:
+        st.info("No dribbles or carries match the current filter.")
+        return
+
+    dc_for_comp = []
+    for idx, row in player_dc.iterrows():
+        entry = {
+            "df_idx":     int(idx),
+            "type":       str(row.get("type", "")),
+            "playerName": str(row.get("playerName", "")),
+            "team":       str(row.get("team", "")),
+            "is_home":    bool(row.get("team", "") == home_team),
+            "minute":     int(row.get("minute", 0)),
+            "second":     int(row.get("second", 0)),
+            "period":     str(row.get("period", "")),
+            "x":          safe_float(row.get("x")),
+            "y":          safe_float(row.get("y")),
+            "outcomeType": str(row.get("outcomeType", "")),
+        }
+        if str(row.get("type", "")) == "Carry":
+            entry["endX"] = safe_float(row.get("endX"))
+            entry["endY"] = safe_float(row.get("endY"))
+        dc_for_comp.append(entry)
+
+    dcm_sel_idx = st.session_state.get("dcm_selected_idx")
+    if dcm_sel_idx is not None:
+        if st.button("Clear selection", key="dcm_clear_sel"):
+            st.session_state["dcm_selected_idx"] = None
+            st.session_state["dcm_clip_path"]    = None
+            st.session_state["dcm_clip_key"]     = None
+            st.session_state["dcm_clip_error"]   = None
+            st.rerun()
+
+    raw_dcm = dribble_carry_map(actions=dc_for_comp, home_team=home_team or "",
+                                away_team=away_team or "", selected_idx=dcm_sel_idx,
+                                key="dcm_player",
+                                light_mode=st.session_state.get("light_mode", False),
+                                **_map_context(
+                                    f"Dribbles And Carries - {dc_player_sel}",
+                                    team=dc_team_sel,
+                                    player=dc_player_sel,
+                                    subset="Carries and take-ons",
+                                    pitch_zone=dcm_pitch_zone,
+                                    depth_zone=dcm_depth_zone,
+                                    count=len(player_dc),
+                                    unit="action",
+                                    note="Subset: selected player's carries and take-ons after the active pitch-zone and depth-zone filters. Dotted lines are carries.",
+                                ))
+    handle_click(raw_dcm, "dcm")
+
+    st.markdown(
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+        f"<span style='color:{theme.light_color('#27ae60', '#1e7a42')}'>●</span> Succ. dribble &nbsp;"
+        f"<span style='color:{theme.light_color('#e74c3c', '#b83227')}'>●</span> Unsucc. dribble &nbsp;"
+        f"<span style='color:{theme.light_color('#e0c860', '#9a8530')}'>——</span> Carry &nbsp;·&nbsp;"
+        "Click to inspect</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    def dc_label(row):
+        atype = row.get("type", "")
+        outcome = row.get("outcomeType", "")
+        if atype == "Carry":
+            icon = "▶"
+        elif outcome == "Successful":
+            icon = "✓"
+        else:
+            icon = "✕"
+        return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {atype}  ({outcome})"
+
+    dcm_indices = list(player_dc.index)
+    dcm_labels  = ["— Select an action to inspect —"] + [dc_label(r) for _, r in player_dc.iterrows()]
+    cur_dcm     = st.session_state.get("dcm_selected_idx")
+    dcm_pos     = dcm_indices.index(cur_dcm) + 1 if cur_dcm in dcm_indices else 0
+    dcm_chosen  = st.selectbox("Select an action", dcm_labels, index=dcm_pos, key="dcm_action_sel")
+
+    if dcm_chosen != "— Select an action to inspect —":
+        new_dcm_idx = dcm_indices[dcm_labels.index(dcm_chosen) - 1]
+        if new_dcm_idx != st.session_state.get("dcm_selected_idx"):
+            st.session_state["dcm_selected_idx"] = new_dcm_idx
+            st.session_state["dcm_clip_path"]    = None
+            st.session_state["dcm_clip_key"]     = None
+            st.session_state["dcm_clip_error"]   = None
+            st.rerun()
+
+    dcm_sel = st.session_state.get("dcm_selected_idx")
+    if dcm_sel is not None and dcm_sel in dribble_carry_df.index:
+        row    = dribble_carry_df.loc[dcm_sel].to_dict()
+        team   = row.get("team", "")
+        accent = HOME_COLOR if team == home_team else AWAY_COLOR
+        atype  = row.get("type", "")
+        outcome = row.get("outcomeType", "")
+        if atype == "Carry":
+            badge_c = "badge badge-block"
+            badge_l = "CARRY"
+        elif outcome == "Successful":
+            badge_c = "badge badge-success"
+            badge_l = theme.ui_html("[OK] DRIBBLE SUCCESSFUL")
+        else:
+            badge_c = "badge badge-fail"
+            badge_l = theme.ui_html("[ERR] DRIBBLE UNSUCCESSFUL")
+
+        st.divider()
+        dc, vc = st.columns([1, 1], gap="large")
+        with dc:
+            st.markdown(_h(f"""<div class="cm-event-panel">
+                <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                <span class="{badge_c}">{badge_l}</span>
+                <div style="margin-top:12px">
+                    <div class="cm-detail-label">Outcome</div>
+                    <div class="cm-detail-value">{outcome or '—'}</div>
+                </div>
+            </div>"""), unsafe_allow_html=True)
+        with vc:
+            render_watch_panel(row, "dcm", dc_label)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 5 — GOALKEEPER ACTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+@st.fragment
+def render_gk_tab():
+    if gk_df is None or gk_df.empty:
+        st.info("No goalkeeper action data found in the loaded CSV.")
+        return
+
+    radio_gk_opts = []
+    if home_team: radio_gk_opts.append(home_team)
+    if away_team: radio_gk_opts.append(away_team)
+    if not radio_gk_opts:
+        radio_gk_opts = sorted(gk_df["team"].dropna().unique().tolist())[:2]
+
+    gk_team_sel = st.radio("Team", radio_gk_opts, horizontal=True,
+                           key="gk_team_radio", label_visibility="collapsed")
+
+    team_gk      = gk_df[gk_df["team"] == gk_team_sel].copy()
+    gk_players   = sorted(team_gk["playerName"].dropna().unique().tolist()) if "playerName" in team_gk.columns else []
+    gk_player_sel = st.selectbox("Player", ["— Select a goalkeeper —"] + gk_players,
+                                 label_visibility="collapsed", key="gk_player_sel")
+
+    gk_mode = st.radio(
+        "Mode", ["GK Actions", "Shots Faced", "Distribution"],
+        horizontal=True, key="gk_mode_radio", label_visibility="collapsed",
+    )
+
+    _gk_z1, _gk_z2 = st.columns(2)
+    with _gk_z1:
+        gk_pitch_zone = st.selectbox(
+            "Pitch Zone",
+            options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+            format_func=lambda x: "Any pitch zone" if x == "" else x,
+            key="gk_pitch_zone_sel",
+            label_visibility="collapsed",
+        )
+    with _gk_z2:
+        gk_depth_zone = st.selectbox(
+            "Depth Zone",
+            options=["", "Defensive Third", "Middle Third", "Attacking Third"],
+            format_func=lambda x: "Any depth zone" if x == "" else x,
+            key="gk_depth_zone_sel",
+            label_visibility="collapsed",
+        )
+
+    _gk_fkey = f"{gk_team_sel}|{gk_player_sel}|{gk_pitch_zone}|{gk_depth_zone}|{gk_mode}"
+    if st.session_state.get("_gk_last_filter") != _gk_fkey:
+        st.session_state["_gk_last_filter"] = _gk_fkey
+        st.session_state["gk_selected_idx"] = None
+        st.session_state["gk_clip_path"]    = None
+        st.session_state["gk_clip_key"]     = None
+        st.session_state["gk_clip_error"]   = None
+
+    if gk_player_sel == "— Select a goalkeeper —":
+        nd_gray = theme.light_color("#ccc", "#555")
+        st.markdown(f"""<div class="cm-no-data-msg" style="padding:40px 20px">
+            <div style="font-size:32px;margin-bottom:12px">{theme.icon_span("[GK]", color=nd_gray, size=32)}</div>
+            Select a goalkeeper above to view their actions
+        </div>""", unsafe_allow_html=True)
+        return
+
+    # ── SHOTS FACED MODE ──────────────────────────────────────────────────────
+    if gk_mode == "Shots Faced":
+        if shots_df is None or shots_df.empty:
+            st.info("No shot data available.")
+            return
+
+        # On-target shots by the opposing team
+        opp_team = away_team if gk_team_sel == home_team else home_team
+        ON_TARGET = {"SavedShot", "AttemptSaved", "Goal"}
+        opp_shots = shots_df[
+            (shots_df["team"] == opp_team) &
+            (shots_df["type"].isin(ON_TARGET))
+        ].copy()
+
+        opp_shots = _filter_by_pitch_zone(opp_shots, gk_pitch_zone)
+        if gk_depth_zone and "depth_zone" in opp_shots.columns:
+            opp_shots  = opp_shots[opp_shots["depth_zone"] == gk_depth_zone]
+        opp_shots = opp_shots.dropna(subset=["x", "y"])
+
+        # Stats bar
+        sf_saved = sum(1 for _, r in opp_shots.iterrows() if reclassify_shot(r) in {"SavedShot"})
+        sf_goals = sum(1 for _, r in opp_shots.iterrows() if reclassify_shot(r) == "Goal")
+        sf_cells = (
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Saved</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{sf_saved}</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Goals Conceded</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{sf_goals}</span></div></div>'
+        )
+        st.markdown(_h(f'<div class="cm-stats-bar">{sf_cells}</div>'), unsafe_allow_html=True)
+
+        if opp_shots.empty:
+            st.info("No on-target shots match the current filter.")
+            return
+
+        def sf_shot_to_dict(idx, row):
+            return {
+                "df_idx":       int(idx),
+                "type":         reclassify_shot(row),
+                "playerName":   str(row.get("playerName", "")),
+                "team":         str(row.get("team", "")),
+                "is_home":      bool(row.get("team", "") == home_team),
+                "minute":       int(row.get("minute", 0)),
+                "second":       int(row.get("second", 0)),
+                "period":       str(row.get("period", "")),
+                "x":            safe_float(row.get("x")),
+                "y":            safe_float(row.get("y")),
+                "goal_mouth_y": safe_float(row.get("goal_mouth_y")),
+                "goal_mouth_z": safe_float(row.get("goal_mouth_z")),
+            }
+
+        sf_for_comp = [sf_shot_to_dict(idx, row) for idx, row in opp_shots.iterrows()]
+        gk_sel_idx  = st.session_state.get("gk_selected_idx")
+
+        if gk_sel_idx is not None:
+            if st.button("Clear selection", key="gk_clear_sel"):
+                st.session_state["gk_selected_idx"] = None
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        # Goal frame preview above the pitch map
+        if gk_sel_idx is not None and gk_sel_idx in opp_shots.index:
+            sel_row = opp_shots.loc[gk_sel_idx]
+            shot_map([sf_shot_to_dict(gk_sel_idx, sel_row)],
+                     home_team=home_team or "", away_team=away_team or "",
+                     selected_idx=gk_sel_idx, view="goalframe", key="gk_sf_gf",
+                     light_mode=st.session_state.get("light_mode", False),
+                     **_map_context(
+                         f"Shot Faced Placement - {sel_row.get('playerName', 'Unknown')}",
+                         team=sel_row.get("team", ""),
+                         subset=reclassify_shot(sel_row),
+                         count=1,
+                         unit="shot",
+                         note=f"Goal-mouth placement for the selected on-target shot faced by {gk_player_sel}.",
+                     ))
+
+        raw_sf = goalkeeper_map(actions=sf_for_comp, home_team=home_team or "",
+                                away_team=away_team or "", selected_idx=gk_sel_idx,
+                                shots_faced=True, key="gk_sf_map",
+                                light_mode=st.session_state.get("light_mode", False),
+                                **_map_context(
+                                    f"Shots Faced - {gk_player_sel}",
+                                    team=gk_team_sel,
+                                    player=gk_player_sel,
+                                    subset=f"On-target shots by {opp_team}",
+                                    pitch_zone=gk_pitch_zone,
+                                    depth_zone=gk_depth_zone,
+                                    count=len(opp_shots),
+                                    unit="shot",
+                                    note="Subset: opposition on-target shots after the active pitch-zone and depth-zone filters. The map is drawn from the goalkeeper's defensive-half view.",
+                                ))
+        handle_click(raw_sf, "gk")
+
+        st.markdown(
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+            "● Saved &nbsp;✕ Goal &nbsp;·&nbsp;Click to inspect</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        def sf_label(row):
+            icon = "●" if reclassify_shot(row) == "SavedShot" else "✕"
+            return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {row.get('playerName','Unknown')}  ({row.get('team','')})"
+
+        sf_indices = list(opp_shots.index)
+        sf_labels  = ["— Select a shot to inspect —"] + [sf_label(r) for _, r in opp_shots.iterrows()]
+        cur_sf     = st.session_state.get("gk_selected_idx")
+        sf_pos     = sf_indices.index(cur_sf) + 1 if cur_sf in sf_indices else 0
+        sf_chosen  = st.selectbox("Select a shot", sf_labels, index=sf_pos, key="gk_sf_sel")
+
+        if sf_chosen != "— Select a shot to inspect —":
+            new_sf_idx = sf_indices[sf_labels.index(sf_chosen) - 1]
+            if new_sf_idx != st.session_state.get("gk_selected_idx"):
+                st.session_state["gk_selected_idx"] = new_sf_idx
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        gk_sel = st.session_state.get("gk_selected_idx")
+        if gk_sel is not None and gk_sel in shots_df.index:
+            row    = shots_df.loc[gk_sel].to_dict()
+            s_type = reclassify_shot(row)
+            team   = row.get("team", "")
+            accent = HOME_COLOR if team == home_team else AWAY_COLOR
+            badge_l = theme.ui_html("GOAL") if s_type == "Goal" else theme.ui_html("SAVED")
+
+            st.divider()
+            gc, vc = st.columns([1, 1], gap="large")
+            with gc:
+                st.markdown(_h(f"""<div class="cm-event-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                    <span class="badge badge-clear">{badge_l}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Type</div>
+                        <div class="cm-detail-value">{s_type}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+            with vc:
+                render_watch_panel(row, "gk", sf_label)
+        return
+
+    # ── DISTRIBUTION MODE ─────────────────────────────────────────────────────
+    if gk_mode == "Distribution":
+        if passes_df is None or passes_df.empty:
+            st.info("No pass data available.")
+            return
+
+        DIST_COLS = ["is_goal_kick", "is_keeper_throw", "is_gk_hoof", "is_gk_kick_from_hands"]
+        dist_passes = passes_df[
+            (passes_df["team"] == gk_team_sel) &
+            (passes_df["playerName"] == gk_player_sel)
+        ].copy()
+        avail_dist = [c for c in DIST_COLS if c in dist_passes.columns]
+        if avail_dist:
+            mask = dist_passes[avail_dist].apply(
+                lambda r: r.map(safe_bool).any(), axis=1
+            )
+            dist_passes = dist_passes[mask]
+        dist_passes = dist_passes.dropna(subset=["x", "endX"])
+
+        if dist_passes.empty:
+            st.info(f"No distribution passes (goal kicks, keeper throws, hoofs) found for {gk_player_sel}.")
+            return
+
+        total_dist = len(dist_passes)
+        endX_vals  = dist_passes["endX"].apply(lambda v: float(v or 0))
+        short_n = int((endX_vals < 40).sum())
+        med_n   = int(((endX_vals >= 40) & (endX_vals < 70)).sum())
+        long_n  = int((endX_vals >= 70).sum())
+        dist_cells = (
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Total</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{total_dist}</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Short (&lt;40)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(short_n/total_dist*100)}%</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Medium (40-70)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(med_n/total_dist*100)}%</span></div></div>'
+            f'<div class="cm-stats-cell"><div class="cm-stats-label">Long (&gt;70)</div>'
+            f'<div class="cm-stats-split"><span class="cm-stats-home">{round(long_n/total_dist*100)}%</span></div></div>'
+        )
+        st.markdown(_h(f'<div class="cm-stats-bar">{dist_cells}</div>'), unsafe_allow_html=True)
+
+        def _dist_type_label(row):
+            for label, col in [("Goal Kick", "is_goal_kick"), ("Keeper Throw", "is_keeper_throw"),
+                                ("GK Hoof", "is_gk_hoof"), ("GK Kick", "is_gk_kick_from_hands")]:
+                if col in row and safe_bool(row.get(col, False)):
+                    return label
+            return "Distribution"
+
+        dist_for_map = []
+        for idx, row in dist_passes.iterrows():
+            ex = float(row.get("endX", 0) or 0)
+            dist_for_map.append({
+                "df_idx": int(idx),
+                "playerName": str(row.get("playerName", "")),
+                "team": str(row.get("team", "")),
+                "is_home": bool(row.get("team", "") == home_team),
+                "minute": int(row.get("minute", 0)),
+                "second": int(row.get("second", 0)),
+                "period": str(row.get("period", "")),
+                "x": safe_float(row.get("x")),
+                "y": safe_float(row.get("y")),
+                "endX": safe_float(row.get("endX")),
+                "endY": safe_float(row.get("endY")),
+                "successful": str(row.get("outcomeType", "")).lower() == "successful",
+                "is_key_pass": False,
+                "is_cross": False,
+                "is_long_ball": ex >= 70,
+                "mode": "player",
+            })
+
+        gk_sel_idx = st.session_state.get("gk_selected_idx")
+        if gk_sel_idx is not None:
+            if st.button("Clear selection", key="gk_clear_sel"):
+                st.session_state["gk_selected_idx"] = None
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        raw_dist = pass_map(dist_for_map, home_team=home_team or "",
+                            away_team=away_team or "", selected_idx=gk_sel_idx,
+                            mode="player", key="gk_dist_map",
+                            light_mode=st.session_state.get("light_mode", False),
+                            **_map_context(
+                                f"Goalkeeper Distribution - {gk_player_sel}",
+                                team=gk_team_sel,
+                                player=gk_player_sel,
+                                subset="Goal kicks, throws and GK kicks",
+                                count=len(dist_passes),
+                                unit="pass",
+                                note="Subset: goalkeeper distribution events only. Short/medium/long buckets are based on pass endX distance.",
+                            ))
+        handle_click(raw_dist, "gk")
+
+        st.markdown(f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+                    f"<span style='color:{theme.light_color('#27ae60', '#1e7a42')}'>——</span> Successful &nbsp;"
+                    f"<span style='color:{theme.light_color('#e74c3c', '#b83227')}'>——</span> Unsuccessful &nbsp;·&nbsp;"
+                    "Click to inspect</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+        def dist_label(row):
+            ex   = float(row.get("endX", 0) or 0)
+            zone = "Short" if ex < 40 else ("Long" if ex >= 70 else "Med")
+            return f"▶  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {_dist_type_label(row)}  [{zone}]  endX={ex:.0f}"
+
+        dist_indices = list(dist_passes.index)
+        dist_labels  = ["— Select a distribution —"] + [dist_label(r) for _, r in dist_passes.iterrows()]
+        cur_dist     = st.session_state.get("gk_selected_idx")
+        dist_pos     = dist_indices.index(cur_dist) + 1 if cur_dist in dist_indices else 0
+        dist_chosen  = st.selectbox("Select a distribution", dist_labels, index=dist_pos, key="gk_dist_sel")
+
+        if dist_chosen != "— Select a distribution —":
+            new_dist_idx = dist_indices[dist_labels.index(dist_chosen) - 1]
+            if new_dist_idx != st.session_state.get("gk_selected_idx"):
+                st.session_state["gk_selected_idx"] = new_dist_idx
+                st.session_state["gk_clip_path"]    = None
+                st.session_state["gk_clip_key"]     = None
+                st.session_state["gk_clip_error"]   = None
+                st.rerun()
+
+        gk_sel = st.session_state.get("gk_selected_idx")
+        if gk_sel is not None and gk_sel in passes_df.index:
+            row    = passes_df.loc[gk_sel].to_dict()
+            team   = row.get("team", "")
+            accent = HOME_COLOR if team == home_team else AWAY_COLOR
+            ex     = float(row.get("endX", 0) or 0)
+            zone_l = "Short" if ex < 40 else ("Long" if ex >= 70 else "Medium")
+
+            st.divider()
+            gc, vc = st.columns([1, 1], gap="large")
+            with gc:
+                st.markdown(_h(f"""<div class="cm-event-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                    <span class="badge badge-clear">{theme.ui_html('[DIST] ' + zone_l.upper())}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Type · Distance</div>
+                        <div class="cm-detail-value">{_dist_type_label(row)} · endX {ex:.0f}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+            with vc:
+                render_watch_panel(row, "gk", dist_label)
+        return
+
+    # ── GK ACTIONS MODE ───────────────────────────────────────────────────────
+    player_gk = team_gk[team_gk["playerName"] == gk_player_sel].copy()
+    player_gk = _filter_by_pitch_zone(player_gk, gk_pitch_zone)
+    if gk_depth_zone and "depth_zone" in player_gk.columns:
+        player_gk = player_gk[player_gk["depth_zone"] == gk_depth_zone]
+    player_gk = player_gk.dropna(subset=["x", "y"])
+
+    # Stats bar
+    action_counts = player_gk["type"].value_counts()
+    cells = "".join(
+        f'<div class="cm-stats-cell"><div class="cm-stats-label">{t}</div>'
+        f'<div class="cm-stats-split"><span class="cm-stats-home">{action_counts.get(t, 0)}</span></div></div>'
+        for t in ["Punch", "Claim", "KeeperSweeper", "KeeperPickup", "PenaltyFaced"]
+        if action_counts.get(t, 0) > 0
+    )
+    st.markdown(_h(f'<div class="cm-stats-bar">{cells}</div>'), unsafe_allow_html=True)
+
+    if player_gk.empty:
+        st.info("No goalkeeper actions match the current filter.")
+        return
+
+    gk_for_comp = []
+    for idx, row in player_gk.iterrows():
+        gk_for_comp.append({
+            "df_idx":     int(idx),
+            "type":       str(row.get("type", "")),
+            "playerName": str(row.get("playerName", "")),
+            "team":       str(row.get("team", "")),
+            "is_home":    bool(row.get("team", "") == home_team),
+            "minute":     int(row.get("minute", 0)),
+            "second":     int(row.get("second", 0)),
+            "period":     str(row.get("period", "")),
+            "x":          safe_float(row.get("x")),
+            "y":          safe_float(row.get("y")),
+            "outcomeType": str(row.get("outcomeType", "")),
+        })
+
+    gk_sel_idx = st.session_state.get("gk_selected_idx")
+    if gk_sel_idx is not None:
+        if st.button("Clear selection", key="gk_clear_sel"):
+            st.session_state["gk_selected_idx"] = None
+            st.session_state["gk_clip_path"]    = None
+            st.session_state["gk_clip_key"]     = None
+            st.session_state["gk_clip_error"]   = None
+            st.rerun()
+
+    raw_gk = goalkeeper_map(actions=gk_for_comp, home_team=home_team or "",
+                            away_team=away_team or "", selected_idx=gk_sel_idx,
+                            key="gk_player",
+                            light_mode=st.session_state.get("light_mode", False),
+                            **_map_context(
+                                f"Goalkeeper Actions - {gk_player_sel}",
+                                team=gk_team_sel,
+                                player=gk_player_sel,
+                                subset=gk_mode,
+                                pitch_zone=gk_pitch_zone,
+                                depth_zone=gk_depth_zone,
+                                count=len(player_gk),
+                                unit="action",
+                                note="Subset: goalkeeper actions after the active pitch-zone and depth-zone filters. The map is drawn from the goalkeeper's defensive-half view.",
+                            ))
+    handle_click(raw_gk, "gk")
+
+    st.markdown(
+        f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+        "Punch (●) · Claim (●) · Sweep (●) · Pickup (●) · Penalty (●) · "
+        "Click to inspect</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    def gk_label(row):
+        return f"●  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"  {row.get('type','')}  ({row.get('outcomeType','')})"
+
+    gk_indices = list(player_gk.index)
+    gk_labels  = ["— Select an action to inspect —"] + [gk_label(r) for _, r in player_gk.iterrows()]
+    cur_gk     = st.session_state.get("gk_selected_idx")
+    gk_pos     = gk_indices.index(cur_gk) + 1 if cur_gk in gk_indices else 0
+    gk_chosen  = st.selectbox("Select an action", gk_labels, index=gk_pos, key="gk_action_sel")
+
+    if gk_chosen != "— Select an action to inspect —":
+        new_gk_idx = gk_indices[gk_labels.index(gk_chosen) - 1]
+        if new_gk_idx != st.session_state.get("gk_selected_idx"):
+            st.session_state["gk_selected_idx"] = new_gk_idx
+            st.session_state["gk_clip_path"]    = None
+            st.session_state["gk_clip_key"]     = None
+            st.session_state["gk_clip_error"]   = None
+            st.rerun()
+
+    gk_sel = st.session_state.get("gk_selected_idx")
+    if gk_sel is not None and gk_sel in gk_df.index:
+        row    = gk_df.loc[gk_sel].to_dict()
+        team   = row.get("team", "")
+        accent = HOME_COLOR if team == home_team else AWAY_COLOR
+        atype  = row.get("type", "")
+        outcome = row.get("outcomeType", "")
+        badge_c = "badge badge-clear"
+        badge_l = theme.ui_html(f"[GK] {atype.upper()}")
+
+        st.divider()
+        gc, vc = st.columns([1, 1], gap="large")
+        with gc:
+            st.markdown(_h(f"""<div class="cm-event-panel">
+                <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                <span class="{badge_c}">{badge_l}</span>
+                <div style="margin-top:12px">
+                    <div class="cm-detail-label">Outcome</div>
+                    <div class="cm-detail-value">{outcome or '—'}</div>
+                </div>
+            </div>"""), unsafe_allow_html=True)
+        with vc:
+            render_watch_panel(row, "gk", gk_label)
+
+# =============================================================================
+# TAB 6 — BUILD-UP SEQUENCES (D2)
+# =============================================================================
+
+def _bu_float(row, key, default=0.0):
+    try:
+        value = row.get(key, default)
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _bu_end_coord(row, axis):
+    if axis == "x":
+        keys = ("endX", "carry_end_x", "carryEndX")
+    else:
+        keys = ("endY", "carry_end_y", "carryEndY")
+    for key in keys:
+        value = row.get(key)
+        if value is not None and value != "":
+            return _bu_float(row, key)
+    return _bu_float(row, axis)
+
+
+def _fallback_entry_mask(df, entry_mode):
+    x = pd.to_numeric(df.get("x"), errors="coerce").fillna(0)
+    y = pd.to_numeric(df.get("y"), errors="coerce").fillna(0)
+    end_x = pd.to_numeric(df.get("endX"), errors="coerce").fillna(x)
+    end_y = pd.to_numeric(df.get("endY"), errors="coerce").fillna(y)
+    if entry_mode == "final_third":
+        return (x < 67) & (end_x >= 67)
+    start_in_box = (x > 83) & (y > 21) & (y < 79)
+    end_in_box = (end_x > 83) & (end_y > 21) & (end_y < 79)
+    return (~start_in_box) & end_in_box
+
+
+def build_up_entry_events(df_source, team, entry_mode):
+    if df_source is None or df_source.empty:
+        return pd.DataFrame()
+    if entry_mode == "final_third":
+        pass_col, carry_col = "is_final_third_entry_pass", "is_final_third_entry_carry"
+    else:
+        pass_col, carry_col = "is_box_entry_pass", "is_box_entry_carry"
+
+    team_df = df_source[df_source["team"] == team].copy()
+    if team_df.empty:
+        return team_df
+
+    pass_mask = pd.Series(False, index=team_df.index)
+    carry_mask = pd.Series(False, index=team_df.index)
+    if pass_col in team_df.columns:
+        pass_mask = team_df[pass_col].map(safe_bool)
+    else:
+        pass_mask = (team_df["type"] == "Pass") & _fallback_entry_mask(team_df, entry_mode)
+    if carry_col in team_df.columns:
+        carry_mask = team_df[carry_col].map(safe_bool)
+    else:
+        carry_mask = (team_df["type"] == "Carry") & _fallback_entry_mask(team_df, entry_mode)
+
+    entries = team_df[pass_mask | carry_mask].copy()
+    if entries.empty:
+        return entries
+    entries["_entry_kind"] = entries["type"].apply(lambda t: "Carry" if str(t) == "Carry" else "Pass")
+    entries["_end_x"] = entries.apply(lambda r: _bu_end_coord(r, "x"), axis=1)
+    entries["_end_y"] = entries.apply(lambda r: _bu_end_coord(r, "y"), axis=1)
+    return entries.sort_index()
+
+
+def entry_to_pitch_dict(idx, row, step, entry_label):
+    return {
+        "df_idx":      int(idx),
+        "step":        int(step),
+        "type":        str(row.get("type", "")),
+        "entry_kind":  str(row.get("_entry_kind", row.get("type", ""))),
+        "entry_label": entry_label,
+        "playerName":  str(row.get("playerName", "")),
+        "minute":      int(row.get("minute", 0) or 0),
+        "second":      int(row.get("second", 0) or 0),
+        "x":           _bu_float(row, "x"),
+        "y":           _bu_float(row, "y"),
+        "endX":        _bu_float(row, "_end_x", _bu_end_coord(row, "x")),
+        "endY":        _bu_float(row, "_end_y", _bu_end_coord(row, "y")),
+    }
+
+
+@st.fragment
+def render_build_up_tab():
+    if df_all is None or df_all.empty:
+        st.info("No match data loaded.")
+        return
+
+    radio_opts = []
+    if home_team: radio_opts.append(home_team)
+    if away_team: radio_opts.append(away_team)
+    if not radio_opts:
+        radio_opts = sorted(df_all["team"].dropna().unique().tolist())[:2]
+
+    team_sel = st.radio("Team", radio_opts, horizontal=True, key="bu_team_radio",
+                        label_visibility="collapsed")
+
+    mode_sel = st.radio(
+        "Mode",
+        ["Progressive Chains", "Possession Chains", "Final 3rd Entries", "Box Entries"],
+        horizontal=True,
+        key="bu_mode_radio",
+        help=(
+            "**Progressive Chains** — consecutive progressive passes/carries by the same team.\n\n"
+            "**Possession Chains** — full uninterrupted possession starting in own half, "
+            "ending when the ball is lost in the opponent's half or a shot is taken.\n\n"
+            "**Final 3rd Entries / Box Entries** — passes and carries that enter the selected zone. "
+            "Click an endpoint on the pitch to inspect and watch the clip."
+        ),
+    )
+
+    if mode_sel in ("Final 3rd Entries", "Box Entries"):
+        entry_mode = "final_third" if mode_sel == "Final 3rd Entries" else "box"
+        entry_label = "Final 3rd Entry" if entry_mode == "final_third" else "Box Entry"
+        entry_plural = "Final 3rd Entries" if entry_mode == "final_third" else "Box Entries"
+        entries_df = build_up_entry_events(df_all, team_sel, entry_mode)
+        _bu_fkey = f"{team_sel}|entry|{entry_mode}"
+
+        if st.session_state.get("_bu_last_filter") != _bu_fkey:
+            st.session_state["_bu_last_filter"] = _bu_fkey
+            st.session_state["bu_selected_chain_idx"] = None
+            st.session_state["bu_clip_path"] = None
+            st.session_state["bu_clip_key"] = None
+            st.session_state["bu_clip_error"] = None
+            st.session_state["bu_entry_selected_idx"] = None
+            st.session_state["bu_entry_clip_path"] = None
+            st.session_state["bu_entry_clip_key"] = None
+            st.session_state["bu_entry_clip_error"] = None
+
+        if entries_df.empty:
+            st.info(f"No {entry_label.lower()} passes or carries found for {team_sel}.")
+            return
+
+        pass_count = int((entries_df["_entry_kind"] == "Pass").sum())
+        carry_count = int((entries_df["_entry_kind"] == "Carry").sum())
+        success_count = int((entries_df.get("outcomeType", pd.Series(index=entries_df.index, dtype=object)) == "Successful").sum())
+        m1, m2, m3 = st.columns(3)
+        m1.metric(entry_plural, len(entries_df),
+                  help=f"Passes and carries that enter the {entry_label.lower()} zone")
+        m2.metric("Pass / Carry", f"{pass_count} / {carry_count}",
+                  help="Split between pass entries and carry entries")
+        m3.metric("Successful Passes", success_count,
+                  help="Successful pass entries; carries are counted separately in the split")
+
+        pitch_actions = [
+            entry_to_pitch_dict(idx, row, step, entry_label)
+            for step, (idx, row) in enumerate(entries_df.iterrows(), 1)
+        ]
+        is_home_team = (team_sel == home_team)
+        bu_entry_sel = st.session_state.get("bu_entry_selected_idx")
+        _map_pad_l, _map_col, _map_pad_r = st.columns([1, 5, 1])
+        with _map_col:
+            raw_entry_click = build_up_map(
+                pitch_actions,
+                is_home_team,
+                selected_idx=bu_entry_sel,
+                key=f"bu_entry_map_{entry_mode}_{team_sel}",
+                light_mode=st.session_state.get("light_mode", False),
+                entry_mode=entry_mode,
+                height=680,
+                **_map_context(
+                    f"{entry_plural} - {team_sel}",
+                    team=team_sel,
+                    subset=entry_plural,
+                    count=len(entries_df),
+                    unit="entry",
+                    note=f"Subset: {entry_label.lower()} passes and carries for the selected team. Numbered markers follow event order; endpoints are clickable.",
+                ),
+            )
+        handle_click(raw_entry_click, "bu_entry")
+        st.markdown(
+            f"<div style='font-size:11px;color:{theme.light_color('#767575', '#555555')};margin-top:-4px'>"
+            "Click an entry endpoint on the pitch to inspect it and cut the clip</div>",
+            unsafe_allow_html=True,
+        )
+
+        def entry_row_label(row):
+            kind = row.get("_entry_kind", row.get("type", "Entry"))
+            return f"{int(row.get('minute',0))}'{int(row.get('second',0)):02d}\"  {kind}  {row.get('playerName','Unknown')}"
+
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        list_col, detail_col = st.columns([2, 3], gap="large")
+        with list_col:
+            st.subheader(entry_plural)
+            entry_indices = list(entries_df.index)
+            entry_labels = ["— Select an entry to inspect —"] + [
+                entry_row_label(row) for _, row in entries_df.iterrows()
+            ]
+            cur_entry = st.session_state.get("bu_entry_selected_idx")
+            entry_pos = entry_indices.index(cur_entry) + 1 if cur_entry in entry_indices else 0
+            chosen_entry = st.selectbox("Select entry", entry_labels, index=entry_pos,
+                                        key=f"bu_entry_select_{entry_mode}")
+            if chosen_entry != "— Select an entry to inspect —":
+                new_entry_idx = entry_indices[entry_labels.index(chosen_entry) - 1]
+                if new_entry_idx != st.session_state.get("bu_entry_selected_idx"):
+                    st.session_state["bu_entry_selected_idx"] = new_entry_idx
+                    st.session_state["bu_entry_clip_path"] = None
+                    st.session_state["bu_entry_clip_key"] = None
+                    st.session_state["bu_entry_clip_error"] = None
+                    st.rerun()
+
+            if cur_entry is not None and st.button("Clear selection", key=f"bu_entry_clear_{entry_mode}",
+                                                   use_container_width=True):
+                st.session_state["bu_entry_selected_idx"] = None
+                st.session_state["bu_entry_clip_path"] = None
+                st.session_state["bu_entry_clip_key"] = None
+                st.session_state["bu_entry_clip_error"] = None
+                st.rerun()
+
+        with detail_col:
+            cur_entry = st.session_state.get("bu_entry_selected_idx")
+            if cur_entry is not None and cur_entry in entries_df.index:
+                row = entries_df.loc[cur_entry].to_dict()
+                team = row.get("team", "")
+                accent = HOME_COLOR if team == home_team else AWAY_COLOR
+                kind = row.get("_entry_kind", row.get("type", "Entry"))
+                outcome = str(row.get("outcomeType", "") or "")
+                badge_c = "badge badge-success" if outcome == "Successful" else "badge badge-clear"
+                badge_l = theme.ui_html(f"[ZONE] {entry_label.upper()} · {str(kind).upper()}")
+                st.markdown(_h(f"""<div class="cm-event-panel">
+                    <div class="cm-panel-title" style="color:{accent}">{row.get('playerName','Unknown')}</div>
+                    <div class="cm-panel-sub">{team} · {fmt_time(row.get('minute',0), row.get('second',0), row.get('period',''))}</div>
+                    <span class="{badge_c}">{badge_l}</span>
+                    <div style="margin-top:12px">
+                        <div class="cm-detail-label">Outcome</div>
+                        <div class="cm-detail-value">{outcome or 'Carry / movement'}</div>
+                    </div>
+                </div>"""), unsafe_allow_html=True)
+                render_watch_panel(row, "bu_entry", entry_row_label)
+            else:
+                st.caption("Select an entry from the map or list to inspect it.")
+        return
+
+    if mode_sel == "Progressive Chains":
+        has_prog = ("prog_pass" in df_all.columns) or ("prog_carry" in df_all.columns)
+        if not has_prog:
+            st.info("No progressive action columns (prog_pass / prog_carry) found in the data.")
+            return
+        min_chain = st.slider("Min actions per sequence", min_value=2, max_value=6, value=3,
+                              key="bu_min_chain")
+        all_chains   = detect_progressive_chains(df_all, min_chain_length=min_chain)
+        team_chains  = [c for c in all_chains if c["team"] == team_sel]
+        entry_chains = [c for c in team_chains if c["starts_in_own_half"] and c["reaches_opp_half"]]
+        _bu_fkey = f"{team_sel}|prog|{min_chain}"
+    else:
+        min_chain    = None
+        all_chains   = detect_possession_carries(df_all)
+        entry_chains = [c for c in all_chains if c["team"] == team_sel]
+        _bu_fkey = f"{team_sel}|carries"
+
+    if st.session_state.get("_bu_last_filter") != _bu_fkey:
+        st.session_state["_bu_last_filter"]       = _bu_fkey
+        st.session_state["bu_selected_chain_idx"] = None
+        st.session_state["bu_clip_path"]          = None
+        st.session_state["bu_clip_key"]           = None
+        st.session_state["bu_clip_error"]         = None
+
+    if not entry_chains:
+        if mode_sel == "Progressive Chains":
+            st.info(f"No progressive build-up sequences ({min_chain}+ actions) from own half to opposition half found for {team_sel}.")
+        else:
+            st.info(f"No possession chain sequences (own half → loss in opp half or shot) found for {team_sel}.")
+        return
+
+    avg_actions = sum(c["action_count"] for c in entry_chains) / len(entry_chains)
+    m1, m2, m3 = st.columns(3)
+
+    if mode_sel == "Progressive Chains":
+        direct_count = sum(1 for c in entry_chains if c["action_count"] <= 3)
+        direct_pct   = direct_count / len(entry_chains) * 100
+        m1.metric("Build-Up Entries", len(entry_chains),
+                  help="Sequences of consecutive progressive actions from own half to opposition half")
+        m2.metric("Avg Actions", f"{avg_actions:.1f}",
+                  help="Average number of consecutive progressive actions per sequence")
+        m3.metric("Direct %", f"{direct_pct:.0f}%",
+                  help="% of entries achieved in 3 or fewer progressive actions — higher = more direct")
+    else:
+        _SHOT_T = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost",
+                   "BlockedShot", "AttemptSaved", "Attempt"}
+        shot_count = sum(1 for c in entry_chains if c.get("terminal_type", "") in _SHOT_T)
+        shot_pct   = shot_count / len(entry_chains) * 100
+        m1.metric("Possession Chains", len(entry_chains),
+                  help="Uninterrupted possession sequences starting in own half, ending with ball lost or shot in opp half")
+        m2.metric("Avg Actions", f"{avg_actions:.1f}",
+                  help="Average number of team events per possession chain")
+        m3.metric("Shot %", f"{shot_pct:.0f}%",
+                  help="% of carries that ended with a shot — higher = more clinical progression")
+
+    team_chains = entry_chains
+
+    col_list, col_detail = st.columns([2, 3])
+
+    with col_list:
+        st.subheader("Sequences")
+        with st.container(height=520):
+            for ci, chain in enumerate(team_chains):
+                period_label = {
+                    "FirstHalf": "1H", "SecondHalf": "2H",
+                    "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2",
+                }.get(str(chain.get("start_period", "")), "")
+                label = (f"{int(chain['start_minute'])}'{int(chain['start_second']):02d}\" "
+                         f"→ {int(chain['end_minute'])}'{int(chain['end_second']):02d}\" "
+                         f"{period_label}  ·  {chain['action_count']} actions")
+                c_info, c_watch = st.columns([4, 1])
+                with c_info:
+                    if st.button(label, key=f"bu_chain_{ci}"):
+                        st.session_state["bu_selected_chain_idx"] = ci
+                        st.session_state["bu_clip_path"]          = None
+                        st.session_state["bu_clip_key"]           = None
+                        st.session_state["bu_clip_error"]         = None
+                        st.rerun()
+                with c_watch:
+                    if st.button("▶", key=f"bu_watch_{ci}"):
+                        _clip_key = f"bu_{ci}_{chain['start_idx']}_{chain['end_idx']}"
+                        existing   = st.session_state.get("bu_clip_path")
+                        existing_k = st.session_state.get("bu_clip_key")
+                        if existing_k == _clip_key and existing and os.path.exists(existing):
+                            pass  # already cached, detail column will render it
+                        else:
+                            with st.spinner("Cutting clip…"):
+                                try:
+                                    _path = cut_build_up_clip(chain, df_all)
+                                    st.session_state["bu_clip_path"]          = _path
+                                    st.session_state["bu_clip_key"]           = _clip_key
+                                    st.session_state["bu_clip_error"]         = None
+                                    st.session_state["bu_selected_chain_idx"] = ci
+                                except Exception as _e:
+                                    st.session_state["bu_clip_error"] = str(_e)
+                                    st.session_state["bu_clip_key"]   = _clip_key
+                        st.rerun()
+
+    with col_detail:
+        sel_idx  = st.session_state.get("bu_selected_chain_idx")
+        _bu_clip = st.session_state.get("bu_clip_path")
+        _bu_err  = st.session_state.get("bu_clip_error")
+
+        if sel_idx is not None and sel_idx < len(team_chains):
+            chain = team_chains[sel_idx]
+            chain_actions = get_chain_actions(df_all, chain)
+            st.subheader(f"Sequence Detail  ·  {int(chain['start_minute'])}' – {int(chain['end_minute'])}'")
+            is_home_team = (team_sel == home_team)
+            pitch_actions = []
+            for step, (_, row) in enumerate(chain_actions.iterrows(), 1):
+                pitch_actions.append({
+                    "step":       step,
+                    "type":       str(row.get("type", "")),
+                    "playerName": str(row.get("playerName", "")),
+                    "minute":     int(row.get("minute", 0)),
+                    "second":     int(row.get("second", 0)),
+                    "x":          float(row.get("x",    0) or 0),
+                    "y":          float(row.get("y",    0) or 0),
+                    "endX":       float(row.get("endX", 0) or 0),
+                    "endY":       float(row.get("endY", 0) or 0),
+                })
+            build_up_map(pitch_actions, is_home_team, key=f"bu_map_{sel_idx}",
+                         light_mode=st.session_state.get("light_mode", False),
+                         height=520,
+                         **_map_context(
+                             f"{mode_sel} - {team_sel}",
+                             team=team_sel,
+                             subset=(
+                                 "Sequence "
+                                 f"{int(chain['start_minute'])}:{int(chain.get('start_second', 0) or 0):02d}"
+                                 " to "
+                                 f"{int(chain['end_minute'])}:{int(chain.get('end_second', 0) or 0):02d}"
+                             ),
+                             count=len(pitch_actions),
+                             unit="action",
+                             note="Subset: the selected build-up sequence only. Numbered markers show action order and arrows show progression.",
+                         ))
+
+        if _bu_clip and os.path.exists(_bu_clip):
+            st.divider()
+            st.video(_bu_clip)
+        elif _bu_err:
+            st.error(f"Could not cut clip: {_bu_err}")
+
+        if sel_idx is None and not _bu_clip and not _bu_err:
+            st.caption("Select a sequence on the left to inspect it, or press ▶ to cut a clip.")
+
+
+# =============================================================================
+# TAB — PRESSING & HIGH TURNOVERS
+# =============================================================================
+@st.fragment
+def render_pressing_tab():
+    if df_all is None or df_all.empty:
+        st.info("No match data loaded.")
+        return
+
+    radio_opts = []
+    if home_team: radio_opts.append(home_team)
+    if away_team: radio_opts.append(away_team)
+    if not radio_opts:
+        radio_opts = sorted(df_all["team"].dropna().unique().tolist())[:2]
+
+    team_sel = st.radio("Team", radio_opts, horizontal=True, key="press_team_radio",
+                        label_visibility="collapsed")
+
+    zone_opts = ["All", "High Press (final third)", "Mid-Block"]
+    zone_sel  = st.radio("Zone", zone_opts, horizontal=True, key="press_zone_radio",
+                         label_visibility="collapsed")
+
+    _press_fkey = f"{team_sel}|{zone_sel}"
+    if st.session_state.get("_press_last_filter") != _press_fkey:
+        st.session_state["_press_last_filter"] = _press_fkey
+        st.session_state["press_selected_idx"] = None
+        st.session_state["press_clip_path"]    = None
+        st.session_state["press_clip_key"]     = None
+        st.session_state["press_clip_error"]   = None
+
+    all_wins = detect_press_wins(df_all, team_sel)
+    if zone_sel == "High Press (final third)":
+        wins = [w for w in all_wins if w["press_zone"] == "High"]
+    elif zone_sel == "Mid-Block":
+        wins = [w for w in all_wins if w["press_zone"] == "Mid"]
+    else:
+        wins = all_wins
+
+    if not wins:
+        st.info(f"No pressing wins found for {team_sel} with the current zone filter.")
+        return
+
+    total       = len(wins)
+    high_count  = sum(1 for w in all_wins if w["press_zone"] == "High")
+    high_pct    = high_count / len(all_wins) * 100 if all_wins else 0
+    avg_x       = sum(w["x"] for w in all_wins) / len(all_wins) if all_wins else 0
+    avg_press_height_m = avg_x / 100 * 105
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Press Wins", total if zone_sel == "All" else f"{total} / {len(all_wins)}",
+              help="Ball recoveries, interceptions and tackles in the opponent's half")
+    m2.metric("High Press %", f"{high_pct:.0f}%",
+              help="% of press wins in the opponent's final third")
+    m3.metric("Avg Press Height", f"{avg_press_height_m:.1f}m",
+              help="Average press-win distance from the team's own goal line")
+
+    is_home_team = (team_sel == home_team)
+
+    PERIOD_LABEL = {
+        "FirstHalf": "1H", "SecondHalf": "2H",
+        "FirstPeriodOfExtraTime": "ET1", "SecondPeriodOfExtraTime": "ET2",
+    }
+
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
+
+    # ── Full-width pressing map ────────────────────────────────────────────
+    pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main",
+                 light_mode=st.session_state.get("light_mode", False),
+                 **_map_context(
+                     f"Pressing Wins - {team_sel}",
+                     team=team_sel,
+                     subset=zone_sel,
+                     count=len(wins),
+                     unit="win",
+                     note="Subset: ball recoveries, interceptions and tackles in the selected press zone. High press is the final third; mid-block is the middle band.",
+                 ))
+
+    # ── Map click → video clip ─────────────────────────────────────────────
+    _map_state = st.session_state.get("press_map_main")
+    if _map_state and _map_state.get("selection") and _map_state["selection"].get("points"):
+        point = _map_state["selection"]["points"][0]
+        clicked_idx = point.get("customdata")
+        prev_clicked = st.session_state.get("_press_last_clicked_idx")
+        if clicked_idx is not None and str(clicked_idx) != str(prev_clicked):
+            st.session_state["_press_last_clicked_idx"] = clicked_idx
+            sel_win = next((w for w in wins if str(w["idx"]) == str(clicked_idx)), None)
+            if sel_win:
+                st.session_state["press_selected_idx"] = sel_win["idx"]
+                st.session_state["press_clip_path"]    = None
+                st.session_state["press_clip_key"]     = None
+                st.session_state["press_clip_error"]   = None
+                with st.spinner("Cutting clip…"):
+                    try:
+                        _path = cut_clip(sel_win["minute"], sel_win["second"], sel_win["period"])
+                        st.session_state["press_clip_path"] = _path
+                        st.session_state["press_clip_key"]  = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                    except Exception as _e:
+                        st.session_state["press_clip_error"] = str(_e)
+                        st.session_state["press_clip_key"]   = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+                st.rerun()
+
+    # Re-read after potential rerun
+    sel_idx  = st.session_state.get("press_selected_idx")
+    _pr_clip = st.session_state.get("press_clip_path")
+    _pr_err  = st.session_state.get("press_clip_error")
+
+    # ── Selected press win detail ──────────────────────────────────────────
+    sel_win = next((w for w in wins if w["idx"] == sel_idx), None)
+    if sel_win:
+        st.divider()
+        p = PERIOD_LABEL.get(sel_win["period"], "")
+        dcol1, dcol2, dcol3 = st.columns(3)
+        dcol1.metric("Player", sel_win["playerName"])
+        dcol2.metric("Type", f"{sel_win['type']}  ·  {sel_win['minute']}'{sel_win['second']:02d}\" {p}")
+        dcol3.metric("Zone", "High Press" if sel_win["press_zone"] == "High" else "Mid-Block")
+
+    # ── Video player ───────────────────────────────────────────────────────
+    if _pr_clip and os.path.exists(_pr_clip):
+        st.video(_pr_clip)
+    elif _pr_err:
+        st.error(f"Could not cut clip: {_pr_err}")
+
+    # ── Clear button ───────────────────────────────────────────────────────
+    if sel_idx is not None or _pr_clip or _pr_err:
+        _, cc = st.columns([5, 1])
+        with cc:
+            if st.button("Clear", key="press_clear", use_container_width=True,
+                         icon=theme.icon_shortcode("[X]")):
+                st.session_state["press_selected_idx"]       = None
+                st.session_state["press_clip_path"]          = None
+                st.session_state["press_clip_key"]           = None
+                st.session_state["press_clip_error"]         = None
+                st.session_state["_press_last_clicked_idx"]  = None
+                st.rerun()
+    else:
+        st.caption("Click a press win marker on the pitch map to view the clip.")
+
+
+# =============================================================================
+# PLAYER COMPARISON — RADAR INDEX HELPERS
+# =============================================================================
+
+def _is_gk(ev):
+    if ev.empty:
+        return False
+    if ev["type"].isin(GK_ACTIONS).any():
+        return True
+    if "is_gk_save" in ev.columns:
+        try:
+            return bool(pd.to_numeric(ev["is_gk_save"], errors="coerce").fillna(0).any())
+        except Exception:
+            return ev["is_gk_save"].astype(bool).any()
+    return False
+
+
+def _bool_col(ev, col):
+    """Return boolean series for a flag column, defaulting to False if absent."""
+    if col not in ev.columns:
+        return pd.Series(False, index=ev.index)
+    return pd.to_numeric(ev[col], errors="coerce").fillna(0).astype(bool)
+
+
+def _score_moments(ev, role):
+    """Score each event row for the Top 5 Moments widget.
+
+    Returns a copy of ev with a 'moment_score' column. Rows with score 0
+    and no positive xT are effectively excluded from the top 5.
+    """
+    if ev.empty:
+        return ev.assign(moment_score=0.0)
+
+    df = ev.copy()
+    df["moment_score"] = 0.0
+
+    outcome_ok = pd.Series(False, index=df.index)
+    if "outcomeType" in df.columns:
+        outcome_ok = df["outcomeType"] == "Successful"
+
+    xT_vals = pd.to_numeric(df.get("xT", 0), errors="coerce").fillna(0).clip(lower=0)
+
+    tiers = _MOMENT_TIERS.get(role, _MOMENT_TIERS["midfielder"])
+
+    for tier in tiers:
+        if len(tier) == 2:
+            # (type_set, base_score) — no outcome filter
+            type_set, base = tier
+            if type_set is not None:
+                mask = df["type"].isin(type_set)
+                df.loc[mask, "moment_score"] = df.loc[mask, "moment_score"].clip(lower=base)
+
+        elif len(tier) == 3:
+            type_set_or_none, qualifier, base = tier
+
+            if qualifier == "successful":
+                # (type_set, "successful", base_score)
+                mask = df["type"].isin(type_set_or_none) & outcome_ok
+                df.loc[mask, "moment_score"] = df.loc[mask, "moment_score"].clip(lower=base)
+
+            elif qualifier == "is_key_pass":
+                mask = _bool_col(df, "is_key_pass")
+                df.loc[mask, "moment_score"] = df.loc[mask, "moment_score"].clip(lower=base)
+
+            elif qualifier == "is_long_ball_successful":
+                mask = _bool_col(df, "is_long_ball") & outcome_ok & (df["type"] == "Pass")
+                df.loc[mask, "moment_score"] = df.loc[mask, "moment_score"].clip(lower=base)
+
+    # xT booster: scale 0–1 xT range to 0–20 pts, added on top
+    df["moment_score"] = df["moment_score"] + (xT_vals * 20).clip(upper=20)
+
+    return df
+
+
+def _score_gk_moments(ev):
+    """Score goalkeeper events for the comparison Top 5 Moments widget."""
+    if ev.empty:
+        return ev.assign(moment_score=0.0)
+
+    df = ev.copy()
+    df["moment_score"] = 0.0
+
+    outcome_ok = pd.Series(False, index=df.index)
+    if "outcomeType" in df.columns:
+        outcome_ok = df["outcomeType"] == "Successful"
+
+    prog_pass_vals = pd.to_numeric(df.get("prog_pass", 0), errors="coerce").fillna(0).clip(lower=0)
+
+    # Priority order:
+    # Save > KeeperSweeper > accurate long balls (with progression) > Claim > Punch > KeeperPickup
+    df.loc[df["type"] == "Save", "moment_score"] = 100.0
+    df.loc[(df["type"] == "KeeperSweeper") & outcome_ok, "moment_score"] = df.loc[
+        (df["type"] == "KeeperSweeper") & outcome_ok, "moment_score"
+    ].clip(lower=90.0)
+    df.loc[(df["type"] == "Claim") & outcome_ok, "moment_score"] = df.loc[
+        (df["type"] == "Claim") & outcome_ok, "moment_score"
+    ].clip(lower=70.0)
+    df.loc[(df["type"] == "Punch") & outcome_ok, "moment_score"] = df.loc[
+        (df["type"] == "Punch") & outcome_ok, "moment_score"
+    ].clip(lower=60.0)
+    df.loc[(df["type"] == "KeeperPickup") & outcome_ok, "moment_score"] = df.loc[
+        (df["type"] == "KeeperPickup") & outcome_ok, "moment_score"
+    ].clip(lower=50.0)
+    df.loc[(df["type"] == "Clearance") & outcome_ok, "moment_score"] = df.loc[
+        (df["type"] == "Clearance") & outcome_ok, "moment_score"
+    ].clip(lower=45.0)
+
+    # Distribution moments: accurate long balls outrank claims/punches and are boosted
+    # by progressive distance, but never above the save ceiling.
+    long_pass_mask = (df["type"] == "Pass") & outcome_ok & _bool_col(df, "is_long_ball")
+    long_pass_scores = 70.0 + prog_pass_vals.loc[long_pass_mask].clip(upper=18.0)
+    df.loc[long_pass_mask, "moment_score"] = (
+        df.loc[long_pass_mask, "moment_score"]
+        .clip(lower=0.0)
+        .combine(long_pass_scores.clip(upper=88.0), max)
+    )
+
+    df["moment_score"] = df["moment_score"].clip(upper=100.0)
+
+    return df
+
+
+def _raw_outfield(ev):
+    def_ev = ev[ev["type"].isin(DEF_ACTIONS - {"Dispossessed"})]
+    if "outcomeType" in def_ev.columns:
+        defensive = int(len(def_ev[def_ev["outcomeType"] == "Successful"]))
+    else:
+        defensive = int(len(def_ev))
+
+    creative = 0
+    if "is_key_pass" in ev.columns:
+        creative = int(
+            pd.to_numeric(ev["is_key_pass"], errors="coerce").fillna(0).astype(bool).sum()
+        )
+
+    progressive = 0
+    if "prog_pass" in ev.columns:
+        progressive += int(
+            pd.to_numeric(ev["prog_pass"], errors="coerce").fillna(0).gt(0).sum()
+        )
+    if "prog_carry" in ev.columns:
+        progressive += int(
+            pd.to_numeric(ev["prog_carry"], errors="coerce").fillna(0).gt(0).sum()
+        )
+
+    shooting = int(ev[ev["type"].isin(SHOT_TYPES)].shape[0])
+
+    danger = 0.0
+    if "xT" in ev.columns:
+        danger = float(
+            pd.to_numeric(
+                ev[ev["type"].isin({"Pass", "Carry"})]["xT"], errors="coerce"
+            ).fillna(0).sum()
+        )
+
+    dribbling = 0
+    if "outcomeType" in ev.columns:
+        dribbling = int(
+            ev[(ev["type"] == "TakeOn") & (ev["outcomeType"] == "Successful")].shape[0]
+        )
+
+    aerial = 0
+    if "outcomeType" in ev.columns:
+        aerial = int(
+            ev[(ev["type"] == "Aerial") & (ev["outcomeType"] == "Successful")].shape[0]
+        )
+
+    passes = ev[ev["type"] == "Pass"]
+    if len(passes) > 0 and "outcomeType" in passes.columns:
+        ball_retention = float(
+            len(passes[passes["outcomeType"] == "Successful"]) / len(passes) * 100
+        )
+    else:
+        ball_retention = 0.0
+
+    involvement = int(len(ev))
+
+    return {
+        "Defensive":      defensive,
+        "Creative":       creative,
+        "Progressive":    progressive,
+        "Shooting":       shooting,
+        "Danger":         danger,
+        "Dribbling":      dribbling,
+        "Aerial":         aerial,
+        "Pass Completion %": ball_retention,
+        "Involvement":    involvement,
+    }
+
+
+def _raw_gk(ev):
+    # Saves: "Save" event type only — is_gk_save is a flag on the same rows, not additional events
+    saves = int(ev[ev["type"] == "Save"].shape[0])
+
+    # Claiming: successful catches from crosses
+    _claims = ev[ev["type"] == "Claim"]
+    if "outcomeType" in _claims.columns:
+        claiming = int(len(_claims[_claims["outcomeType"] == "Successful"]))
+    else:
+        claiming = int(len(_claims))
+
+    # Punching: successful punch clearances
+    _punches = ev[ev["type"] == "Punch"]
+    if "outcomeType" in _punches.columns:
+        punching = int(len(_punches[_punches["outcomeType"] == "Successful"]))
+    else:
+        punching = int(len(_punches))
+
+    # Sweeping: successful off-line interventions
+    _sweeps = ev[ev["type"] == "KeeperSweeper"]
+    if "outcomeType" in _sweeps.columns:
+        sweeping = int(len(_sweeps[_sweeps["outcomeType"] == "Successful"]))
+    else:
+        sweeping = int(len(_sweeps))
+
+    # Distribution: successful passes
+    passes = ev[ev["type"] == "Pass"]
+    if "outcomeType" in passes.columns:
+        distribution = int(len(passes[passes["outcomeType"] == "Successful"]))
+    else:
+        distribution = int(len(passes))
+
+    # Long distribution: successful long passes
+    if "is_long_ball" in passes.columns and "outcomeType" in passes.columns:
+        long_passes = passes[
+            pd.to_numeric(passes["is_long_ball"], errors="coerce").fillna(0).astype(bool)
+        ]
+        long_distribution = int(len(long_passes[long_passes["outcomeType"] == "Successful"]))
+    else:
+        long_distribution = 0
+
+    # Ball recovery: successful keeper pickups
+    pickups = ev[ev["type"] == "KeeperPickup"]
+    if "outcomeType" in pickups.columns:
+        ball_recovery = int(len(pickups[pickups["outcomeType"] == "Successful"]))
+    else:
+        ball_recovery = int(len(pickups))
+
+    return {
+        "Saves":             saves,
+        "Claiming":          claiming,
+        "Punching":          punching,
+        "Sweeping":          sweeping,
+        "Distribution":      distribution,
+        "Long Distribution": long_distribution,
+        "Ball Recovery":     ball_recovery,
+    }
+
+
+def _build_percentile_pools():
+    outfield_pool = {}
+    gk_pool = {}
+    if df_all is None or df_all.empty:
+        return outfield_pool, gk_pool
+    for pname, pev in df_all.groupby("playerName"):
+        if _is_gk(pev):
+            gk_pool[pname] = _raw_gk(pev)
+        else:
+            outfield_pool[pname] = _raw_outfield(pev)
+    return outfield_pool, gk_pool
+
+
+def _gk_head_to_head(p1_raw, p2_raw):
+    """Normalize GK stats per-axis so the higher value = 100, the other proportional.
+    Returns (p1_norm, p2_norm) dicts scaled 0-100."""
+    p1_norm, p2_norm = {}, {}
+    for key in p1_raw:
+        v1, v2 = p1_raw[key], p2_raw[key]
+        max_v = max(v1, v2)
+        if max_v == 0:
+            p1_norm[key] = 0
+            p2_norm[key] = 0
+        else:
+            p1_norm[key] = round(v1 / max_v * 100)
+            p2_norm[key] = round(v2 / max_v * 100)
+    return p1_norm, p2_norm
+
+
+def _percentile_rank(player_raw, pool):
+    total = len(pool)
+    if total == 0:
+        return {k: 0 for k in player_raw}
+    result = {}
+    for key, val in player_raw.items():
+        below = sum(1 for other_raw in pool.values() if other_raw.get(key, 0) < val)
+        result[key] = min(100, int(below / total * 100))
+    return result
+
+
+def _build_radar_figure(axes, p1_pct, p2_pct, p1_raw, p2_raw, player1, player2,
+                         color1="#E8FF4D", color2="#ff7351", light=False,
+                         match_context=""):
+    closed_axes = axes + [axes[0]]
+    p1_vals = [p1_pct.get(a, 0) for a in axes] + [p1_pct.get(axes[0], 0)]
+    p2_vals = [p2_pct.get(a, 0) for a in axes] + [p2_pct.get(axes[0], 0)]
+
+    def _hover_text(axes_list, pct_dict, raw_dict):
+        lines = []
+        for a in axes_list[:-1]:
+            raw_val = raw_dict.get(a, 0)
+            fmt = f"{raw_val:.2f}" if isinstance(raw_val, float) else str(raw_val)
+            lines.append(f"{a}: {pct_dict.get(a, 0)}th pct  (raw {fmt})")
+        return lines + [lines[0]]
+
+    def _hex_to_rgba(hex_color, alpha=0.3):
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    fill1 = _hex_to_rgba(color1) if color1.startswith("#") else "rgba(232,255,77,0.3)"
+    fill2 = _hex_to_rgba(color2) if color2.startswith("#") else "rgba(255,115,81,0.3)"
+
+    trace1 = go.Scatterpolar(
+        r=p1_vals, theta=closed_axes, fill="toself",
+        fillcolor=fill1, line=dict(color=color1, width=2),
+        name=player1, hovertemplate="%{text}<extra></extra>",
+        text=_hover_text(closed_axes, p1_pct, p1_raw),
+        hoveron="points",
+    )
+    trace2 = go.Scatterpolar(
+        r=p2_vals, theta=closed_axes, fill="toself",
+        fillcolor=fill2, line=dict(color=color2, width=2),
+        name=player2, hovertemplate="%{text}<extra></extra>",
+        text=_hover_text(closed_axes, p2_pct, p2_raw),
+        hoveron="points",
+    )
+
+    fig = go.Figure(data=[trace1, trace2])
+    if light:
+        paper_bg = "#f5f0e8"
+        plot_bg  = "#f5f0e8"
+        font_c   = "#1a1a1a"
+        polar_bg = "#ede8df"
+        ang_tick = "#4a4035"
+        ang_line = "#c8bfb0"
+        rad_tick = "#7a7060"
+        leg_c    = "#1a1a1a"
+        leg_bc   = "#c8bfb0"
+    else:
+        paper_bg = "#0e0e0e"
+        plot_bg  = "#0e0e0e"
+        font_c   = "#ffffff"
+        polar_bg = "#131313"
+        ang_tick = "#adaaaa"
+        ang_line = "#2c2c2c"
+        rad_tick = "#767575"
+        leg_c    = "#ffffff"
+        leg_bc   = "#2c2c2c"
+    fig.update_layout(
+        height=600,
+        margin=dict(t=96, b=54, l=60, r=60),
+        paper_bgcolor=paper_bg,
+        plot_bgcolor=plot_bg,
+        font=dict(color=font_c, family="Inter, sans-serif"),
+        polar=dict(
+            domain=dict(y=[0.0, 0.88]),
+            bgcolor=polar_bg,
+            angularaxis=dict(
+                tickfont=dict(size=12, color=ang_tick),
+                linecolor=ang_line,
+                gridcolor=ang_line,
+            ),
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                tickvals=[0, 25, 50, 75, 100],
+                tickfont=dict(size=9, color=rad_tick),
+                gridcolor=ang_line,
+                linecolor=ang_line,
+            ),
+        ),
+        legend=dict(
+            font=dict(color=leg_c, size=12),
+            bgcolor="rgba(0,0,0,0)",
+            bordercolor=leg_bc,
+        ),
+        showlegend=True,
+    )
+    _plotly_header(
+        fig,
+        f"Performance Radar - {player1} vs {player2}",
+        subtitle=match_context,
+        note="Subset: selected players' events from the match source. Outfield values are percentile indexes; goalkeeper values are head-to-head normalized.",
+        light=light,
+        height=600,
+    )
+    return fig
+
+
+# =============================================================================
+# TAB 7 — PLAYER COMPARISON (E1)
+# =============================================================================
+@st.fragment
+def render_comparison_tab():
+    if df_all is None or df_all.empty:
+        st.info("No match data loaded.")
+        return
+
+    if not _PLOTLY_AVAILABLE:
+        st.warning("Install plotly (`pip install plotly`) to use the comparison view.")
+        return
+
+    st.subheader("Player Comparison")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Player 1**")
+        _team1_opts = [t for t in [home_team, away_team] if t]
+        if not _team1_opts:
+            _team1_opts = sorted(df_all["team"].dropna().unique().tolist())[:2]
+        team1 = st.radio("Team 1", _team1_opts, horizontal=True, key="comp_team1",
+                         label_visibility="collapsed")
+        players1 = sorted(df_all[df_all["team"] == team1]["playerName"].dropna().unique().tolist())
+        player1  = st.selectbox("Player 1", players1, key="comp_player1",
+                                label_visibility="collapsed") if players1 else None
+
+    with col2:
+        st.markdown("**Player 2**")
+        _team2_opts = [t for t in [home_team, away_team] if t]
+        if not _team2_opts:
+            _team2_opts = sorted(df_all["team"].dropna().unique().tolist())[:2]
+        team2 = st.radio("Team 2", _team2_opts, horizontal=True, key="comp_team2",
+                         label_visibility="collapsed")
+        players2 = sorted(df_all[df_all["team"] == team2]["playerName"].dropna().unique().tolist())
+        player2  = st.selectbox("Player 2", players2, key="comp_player2",
+                                label_visibility="collapsed") if players2 else None
+
+    if not player1 or not player2:
+        st.info("Select two players to compare.")
+        return
+
+    p1_ev = df_all[df_all["playerName"] == player1].copy()
+    p2_ev = df_all[df_all["playerName"] == player2].copy()
+
+    # ── Performance Radar ────────────────────────────────────────────────────
+    st.subheader("Performance Radar")
+
+    _p1_is_gk = _is_gk(p1_ev)
+    _p2_is_gk = _is_gk(p2_ev)
+
+    if _p1_is_gk != _p2_is_gk:
+        st.warning(
+            f"Role mismatch: **{player1}** is classified as "
+            f"{'a goalkeeper' if _p1_is_gk else 'an outfield player'} and "
+            f"**{player2}** is classified as "
+            f"{'a goalkeeper' if _p2_is_gk else 'an outfield player'}. "
+            "Radar uses outfield indexes — comparison may not be meaningful."
+        )
+
+    _outfield_pool, _gk_pool = _build_percentile_pools()
+
+    _use_gk_axes = _p1_is_gk and _p2_is_gk
+    if _use_gk_axes:
+        _axes   = ["Saves", "Claiming", "Punching", "Sweeping",
+                   "Distribution", "Long Distribution", "Ball Recovery"]
+        _p1_raw = _raw_gk(p1_ev)
+        _p2_raw = _raw_gk(p2_ev)
+        _p1_pct, _p2_pct = _gk_head_to_head(_p1_raw, _p2_raw)
+    else:
+        _axes   = ["Defensive", "Creative", "Progressive", "Shooting", "Danger",
+                   "Dribbling", "Aerial", "Pass Completion %", "Involvement"]
+        _p1_raw = _raw_outfield(p1_ev)
+        _p2_raw = _raw_outfield(p2_ev)
+        _pool   = _outfield_pool
+        _p1_pct = _percentile_rank(_p1_raw, _pool)
+        _p2_pct = _percentile_rank(_p2_raw, _pool)
+
+    _light = st.session_state.get("light_mode", False)
+    _match_context = _match_export_context(df_all)
+    st.plotly_chart(
+        brand_plotly_export(_build_radar_figure(
+            axes=_axes,
+            p1_pct=_p1_pct, p2_pct=_p2_pct,
+            p1_raw=_p1_raw, p2_raw=_p2_raw,
+            player1=player1, player2=player2,
+            color1="#E8FF4D", color2=AWAY_COLOR,
+            light=_light,
+            match_context=_match_context,
+        ), light=_light),
+        use_container_width=True,
+        config=plotly_export_config("performance_radar", player1, "vs", player2, _match_context),
+    )
+
+    # ── Pitch Zone Activity ──────────────────────────────────────────────────
+    st.subheader("Pitch Zone Activity")
+    _zones = ["Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing"]
+    z1, z2 = st.columns(2)
+
+    def _zone_bar(ev, player_name, color):
+        zs = _effective_pitch_zone_series(ev).value_counts()
+        counts = [zs.get(z, 0) for z in _zones]
+        fig = go.Figure(go.Bar(y=_zones, x=counts, orientation="h",
+                               marker=dict(color=color)))
+        fig.update_layout(
+            xaxis_title="Event count",
+            yaxis_title="Pitch zone",
+            height=390,
+            margin=dict(t=118, b=44, l=90, r=30),
+        )
+        _plotly_header(
+            fig,
+            f"Pitch Zone Activity - {player_name}",
+            subtitle=_match_context,
+            light=st.session_state.get("light_mode", False),
+            height=390,
+        )
+        return brand_plotly_export(fig, light=st.session_state.get("light_mode", False))
+
+    with z1:
+        st.plotly_chart(
+            _zone_bar(p1_ev, player1, HOME_COLOR),
+            use_container_width=True,
+            config=plotly_clean_static_config("pitch_zone_activity", player1, _match_context),
+        )
+    with z2:
+        st.plotly_chart(
+            _zone_bar(p2_ev, player2, AWAY_COLOR),
+            use_container_width=True,
+            config=plotly_clean_static_config("pitch_zone_activity", player2, _match_context),
+        )
+
+    # ── Top 5 Moments ─────────────────────────────────────────────────────────
+    st.subheader("Top 5 Moments")
+    _ROLE_OPTS = ["Attacker", "Midfielder", "Defender"]
+    _role_col1, _role_col2 = st.columns(2)
+
+    with _role_col1:
+        if _p1_is_gk:
+            st.caption(f"{player1} — Goalkeeper")
+            _role1 = None
+        else:
+            _role1 = st.selectbox(
+                f"Role — {player1}", _ROLE_OPTS, key="comp_role1",
+                label_visibility="visible"
+            ).lower()
+
+    with _role_col2:
+        if _p2_is_gk:
+            st.caption(f"{player2} — Goalkeeper")
+            _role2 = None
+        else:
+            _role2 = st.selectbox(
+                f"Role — {player2}", _ROLE_OPTS, key="comp_role2",
+                label_visibility="visible"
+            ).lower()
+
+    def _top5_moments(ev, role, is_gk=False):
+        """Return (full_top5_df, display_df) for the given role."""
+        scored = _score_gk_moments(ev) if is_gk else _score_moments(ev, role)
+        scored = scored[scored["moment_score"] > 0]
+        top5 = scored.nlargest(5, "moment_score")
+        disp = top5[["minute", "second", "type", "moment_score"]].copy()
+        disp = disp.rename(columns={"moment_score": "Score"})
+        disp["Score"] = disp["Score"].round(1)
+        return top5, disp
+
+    def _generate_reel(moments_df):
+        """Cut top-5 moment clips and concatenate them. Returns output path."""
+        if not video_path:
+            raise ValueError("No video file loaded. Go to Home and set a video path.")
+        ffmpeg_bin = get_ffmpeg()
+        _before_buf, _after_buf = _analysts_room_buffers()
+        _period_col = "period" if "period" in moments_df.columns else "resolved_period"
+        tmp_clips = []
+        for _, row in moments_df.iterrows():
+            p = cut_clip(int(row["minute"]), int(row["second"]),
+                         str(row[_period_col]) if _period_col in row.index else "FirstHalf",
+                         before=_before_buf, after=_after_buf)
+            tmp_clips.append(p)
+        if len(tmp_clips) == 1:
+            return tmp_clips[0]
+        list_file = tempfile.NamedTemporaryFile(
+            suffix=".txt", delete=False, mode="w", encoding="utf-8"
+        )
+        for p in tmp_clips:
+            list_file.write(f"file '{p.replace(os.sep, '/')}'\n")
+        list_file.close()
+        out_tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        out_path = out_tmp.name
+        out_tmp.close()
+        r = subprocess.run([
+            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0",
+            "-i", list_file.name, "-c", "copy", out_path
+        ], capture_output=True, text=True)
+        for p in tmp_clips:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+        try:
+            os.remove(list_file.name)
+        except Exception:
+            pass
+        if r.returncode != 0:
+            raise ValueError(f"FFmpeg concat error: {r.stderr[-400:]}")
+        return out_path
+
+    def _render_moment_col(ev, role, player_name, is_gk, prefix):
+        top5_df, disp_df = _top5_moments(ev, role, is_gk=is_gk)
+        if disp_df.empty:
+            st.caption("No qualifying moments found for this player.")
+            return
+        st.dataframe(disp_df, use_container_width=True, hide_index=True)
+        reel_key = (
+            f"{player_name}|{'goalkeeper' if is_gk else role}|"
+            + ",".join(
+                f"{int(r['minute'])}:{int(r['second'])}"
+                for _, r in top5_df.iterrows()
+            )
+        )
+        existing_path  = st.session_state.get(f"{prefix}_reel_path")
+        existing_key   = st.session_state.get(f"{prefix}_reel_key")
+        existing_error = st.session_state.get(f"{prefix}_reel_error")
+
+        if existing_key == reel_key and existing_path and os.path.exists(existing_path):
+            st.video(existing_path)
+            with open(existing_path, "rb") as _dl:
+                st.download_button(
+                    "Download reel", data=_dl.read(),
+                    file_name=f"{player_name}_top5_moments.mp4",
+                    mime="video/mp4", key=f"{prefix}_dl"
+                )
+        elif existing_error and existing_key == reel_key:
+            st.error(f"Could not generate reel: {existing_error}")
+            if st.button("Retry", key=f"{prefix}_retry"):
+                st.session_state[f"{prefix}_reel_error"] = None
+                st.session_state[f"{prefix}_reel_key"] = None
+                st.rerun()
+        else:
+            if not video_path:
+                st.caption("Load a video file on the Home page to generate a highlight reel.")
+            else:
+                if st.button("▶ Show Top Moments", key=f"{prefix}_gen"):
+                    with st.spinner("Cutting clips…"):
+                        try:
+                            path = _generate_reel(top5_df)
+                            st.session_state[f"{prefix}_reel_path"]  = path
+                            st.session_state[f"{prefix}_reel_key"]   = reel_key
+                            st.session_state[f"{prefix}_reel_error"] = None
+                        except Exception as _exc:
+                            st.session_state[f"{prefix}_reel_error"] = str(_exc)
+                            st.session_state[f"{prefix}_reel_key"]   = reel_key
+                    st.rerun()
+
+    _mc1, _mc2 = st.columns(2)
+    with _mc1:
+        _render_moment_col(p1_ev, _role1, player1, _p1_is_gk, "comp_p1")
+    with _mc2:
+        _render_moment_col(p2_ev, _role2, player2, _p2_is_gk, "comp_p2")
+
+
+# =============================================================================
+# RENDER TABS
+# =============================================================================
+with tab_shot:
+    render_shot_tab()
+
+with tab_pass:
+    render_pass_tab()
+
+with tab_def:
+    render_def_tab()
+
+with tab_dc:
+    render_dc_tab()
+
+with tab_gk:
+    render_gk_tab()
+
+with tab_bu:
+    render_build_up_tab()
+
+with tab_press:
+    render_pressing_tab()
+
+with tab_comp:
+    render_comparison_tab()
+
+theme.render_support_footer("Analyst's Room")
