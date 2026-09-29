@@ -5,8 +5,8 @@ ClipMaker uses one shared application source in `app/`.
 ## Windows and Linux
 
 Pushing a version tag such as `v1.3.0` starts `.github/workflows/release.yml`.
-GitHub's hosted runners build the Windows NSIS installer and Linux AppImage,
-then attach both files to the GitHub release.
+GitHub's hosted runners build the Windows NSIS installer plus Linux `.deb` and
+`.rpm` packages, then attach the files to the GitHub release.
 
 The desktop shell starts the packaged Streamlit backend on an available local
 port and displays it inside the ClipMaker window. The user does not need Python,
