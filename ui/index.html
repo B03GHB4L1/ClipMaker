@@ -3,15 +3,407 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClipMaker</title>
-    <style>
-      :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101214; color: #f2f4f5; }
-      body { min-height: 100vh; margin: 0; display: grid; place-items: center; }
-      main { text-align: center; }
-      p { margin: 0; color: #aeb6bc; }
-    </style>
+    <meta name="theme-color" content="#f4f4f0" />
+    <title>ClipMaker - Match Intake</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
+    <script type="module" src="app.js?v=3"></script>
   </head>
   <body>
-    <main><p>Starting ClipMaker...</p></main>
+    <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
+    <div class="scrub-cursor" aria-hidden="true">SCRUB</div>
+    <header class="topbar">
+      <button
+        class="brand control"
+        type="button"
+        data-drawer-toggle
+        aria-expanded="false"
+        aria-controls="nav-drawer"
+      >
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span
+        ><span>ClipMaker</span
+        ><span class="menu-dots" aria-hidden="true">•••</span>
+      </button>
+      <div class="top-actions">
+        <span class="engine-state"><i aria-hidden="true"></i> Engine ready</span
+        ><button class="primary-button" type="button" data-new-project>
+          <span class="button-label">New project</span
+          ><span class="button-label button-label-hover" aria-hidden="true"
+            >New project</span
+          >
+        </button>
+      </div>
+    </header>
+    <div class="drawer-overlay" data-drawer-overlay></div>
+    <nav
+      class="nav-drawer"
+      id="nav-drawer"
+      aria-label="Primary navigation"
+      aria-hidden="true"
+    >
+      <div class="drawer-head">
+        <p>Workspace</p>
+        <span>v1.3.0</span>
+      </div>
+      <a class="drawer-link is-active" href="#intake"
+        ><span>01</span>Match intake<small>Prepare footage</small></a
+      >
+      <a class="drawer-link" href="#filter"
+        ><span>02</span>Filter events<small>Build the reel</small></a
+      >
+      <a class="drawer-link" href="#analysis"
+        ><span>03</span>Analyst room<small>Read the match</small></a
+      >
+      <a class="drawer-link" href="#tactics"
+        ><span>04</span>Tactical lab<small>Map the action</small></a
+      >
+      <div class="drawer-foot">
+        <span>Local workspace</span><span>No cloud upload</span>
+      </div>
+    </nav>
+    <main id="intake">
+      <section class="intro reveal" aria-labelledby="page-title">
+        <div class="hero-ball" aria-hidden="true" data-hero-ball>
+          <div class="hero-ball-fallback"><span>CM</span><sup>1.3</sup></div>
+        </div>
+        <div class="eyebrow"><span>01</span> Match intake</div>
+        <div class="intro-grid">
+          <h1 id="page-title">
+            <span class="line"><span>Turn the full match</span></span
+            ><span class="line"><span>into the moments.</span></span>
+          </h1>
+          <div class="intro-copy">
+            <p>
+              Bring in event data and match footage. ClipMaker aligns the
+              timeline before you shape the reel.
+            </p>
+            <div class="step-track" aria-label="Workflow progress: step 1 of 4">
+              <b class="is-current"></b><b></b><b></b><b></b><span>1 / 4</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="workspace reveal" aria-label="Match setup">
+        <div class="source-panel">
+          <div class="section-heading">
+            <div>
+              <span class="section-number">A</span>
+              <h2>Match source</h2>
+            </div>
+            <span class="status-tag">Required</span>
+          </div>
+          <label for="match-url">Scoresway or WhoScored URL</label>
+          <div class="url-control">
+            <input
+              id="match-url"
+              type="url"
+              value="https://www.scoresway.com/en_GB/soccer/match/..."
+              aria-describedby="source-note"
+            /><button
+              type="button"
+              class="square-button"
+              data-fetch
+              title="Fetch match data"
+              aria-label="Fetch match data"
+            >
+              ↗
+            </button>
+          </div>
+          <p class="field-note" id="source-note">
+            One match per line. The source is detected automatically.
+          </p>
+          <div class="match-ticket" data-match-ticket>
+            <div class="ticket-meta">
+              <span>Premier League</span><span>18 May 2025</span>
+            </div>
+            <div class="teams">
+              <div>
+                <span class="team-badge arsenal">A</span
+                ><strong>Arsenal</strong>
+              </div>
+              <div class="score">
+                <strong>2</strong><span>FT</span><strong>1</strong>
+              </div>
+              <div>
+                <span class="team-badge newcastle">N</span
+                ><strong>Newcastle</strong>
+              </div>
+            </div>
+            <div class="ticket-foot">
+              <span>1,486 events found</span
+              ><span class="verified">Timeline verified</span>
+            </div>
+          </div>
+          <details class="event-browser">
+            <summary>
+              <span>Browse event data</span><strong>1,486 rows</strong>
+            </summary>
+            <div class="event-toolbar">
+              <label
+                ><span class="sr-only">Search events</span
+                ><input
+                  type="search"
+                  placeholder="Search player or event"
+                  data-event-search
+              /></label>
+              <select aria-label="Filter event period" data-period-filter>
+                <option value="all">All periods</option>
+                <option value="1">First half</option>
+                <option value="2">Second half</option>
+              </select>
+            </div>
+            <div class="event-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Player</th>
+                    <th>Event</th>
+                    <th>Team</th>
+                    <th>xT</th>
+                  </tr>
+                </thead>
+                <tbody data-event-body>
+                  <tr data-period="1">
+                    <td>03:18</td>
+                    <td>B. Saka</td>
+                    <td><span class="event-pill pass">Pass</span></td>
+                    <td>ARS</td>
+                    <td>0.04</td>
+                  </tr>
+                  <tr data-period="1">
+                    <td>07:42</td>
+                    <td>A. Isak</td>
+                    <td><span class="event-pill shot">Shot</span></td>
+                    <td>NEW</td>
+                    <td>0.18</td>
+                  </tr>
+                  <tr data-period="1">
+                    <td>21:09</td>
+                    <td>M. Ødegaard</td>
+                    <td><span class="event-pill carry">Carry</span></td>
+                    <td>ARS</td>
+                    <td>0.07</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>52:31</td>
+                    <td>D. Rice</td>
+                    <td><span class="event-pill recover">Recovery</span></td>
+                    <td>ARS</td>
+                    <td>0.01</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>68:04</td>
+                    <td>A. Gordon</td>
+                    <td><span class="event-pill shot">Shot</span></td>
+                    <td>NEW</td>
+                    <td>0.24</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>83:56</td>
+                    <td>B. Saka</td>
+                    <td><span class="event-pill goal">Goal</span></td>
+                    <td>ARS</td>
+                    <td>0.61</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="event-footer">
+              <span>Showing sample rows</span
+              ><button type="button">Open full table ↗</button>
+            </div>
+          </details>
+        </div>
+        <div class="media-panel">
+          <div class="section-heading">
+            <div>
+              <span class="section-number">B</span>
+              <h2>Match footage</h2>
+            </div>
+            <span class="status-tag">1 file</span>
+          </div>
+          <button class="dropzone" type="button" data-dropzone>
+            <span class="drop-icon" aria-hidden="true">+</span
+            ><span class="drop-title">Drop the full match here</span
+            ><span class="drop-detail">or choose a video · MP4, MKV, MOV</span>
+          </button>
+          <input
+            class="sr-only"
+            type="file"
+            accept="video/*,.mkv"
+            data-video-input
+          />
+          <div class="file-row" data-file-row>
+            <span class="file-thumb"><i></i></span
+            ><span class="file-info"
+              ><strong>ARS_NEW_full_match.mp4</strong
+              ><small>8.4 GB · 01:53:42</small></span
+            ><span class="file-ready">Ready</span
+            ><button
+              type="button"
+              class="remove-button"
+              aria-label="Remove video"
+              title="Remove video"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="sync-section reveal" aria-labelledby="sync-title">
+        <div class="sync-copy">
+          <div class="eyebrow"><span>02</span> Timeline sync</div>
+          <h2 id="sync-title">Find the whistle.<br />We’ll map the rest.</h2>
+          <p>
+            Choose a match period, then scrub to its opening whistle. ClipMaker
+            uses each marker to align the full event timeline.
+          </p>
+          <div class="period-selector" role="tablist" aria-label="Match period">
+            <button
+              class="is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              data-period="1H"
+              data-marker="00:03:18"
+            >
+              1H
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="2H"
+              data-marker="00:50:46"
+            >
+              2H
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="ET1"
+              data-marker="01:38:12"
+              disabled
+              title="Enable when the match includes extra time"
+            >
+              ET1
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="ET2"
+              data-marker="01:55:04"
+              disabled
+              title="Enable when the match includes extra time"
+            >
+              ET2
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="PEN"
+              data-marker="02:12:20"
+              disabled
+              title="Enable when the match includes penalties"
+            >
+              PEN
+            </button>
+          </div>
+          <div class="time-readout">
+            <span data-period-label>First-half kick-off</span
+            ><strong data-time>00:03:18</strong>
+          </div>
+          <p class="period-note">
+            Extra time and penalties are enabled only when the match includes
+            them.
+          </p>
+        </div>
+        <div class="preview-shell" data-preview>
+          <div class="preview-top">
+            <span>ARS_NEW_full_match.mp4</span><span>01:53:42</span>
+          </div>
+          <div class="match-frame" aria-label="Football match video preview">
+            <video
+              class="match-video"
+              data-match-video
+              preload="metadata"
+            ></video>
+            <div class="stadium-light light-one"></div>
+            <div class="stadium-light light-two"></div>
+            <div class="crowd"></div>
+            <div class="pitch">
+              <i class="halfway"></i><i class="centre-circle"></i
+              ><i class="box left-box"></i><i class="box right-box"></i
+              ><span class="player p1"></span><span class="player p2"></span
+              ><span class="player p3"></span><span class="player p4"></span
+              ><span class="player p5"></span><span class="ball"></span>
+            </div>
+            <div class="frame-score">
+              <span>ARS</span><strong>0 - 0</strong><span>NEW</span
+              ><time>00:03</time>
+            </div>
+            <button class="play-button" type="button" aria-label="Play preview">
+              ▶
+            </button>
+          </div>
+          <div class="timeline" data-timeline>
+            <div class="filmstrip" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <div class="playhead" data-playhead><span></span></div>
+            <div class="timeline-label">
+              <span>00:00</span><strong data-timeline-time>00:03:18</strong
+              ><span>10:00</span>
+            </div>
+          </div>
+          <div class="preview-actions">
+            <button type="button" class="text-button">Reset marker</button
+            ><button
+              type="button"
+              class="primary-button continue-button"
+              data-continue
+            >
+              <span class="button-label">Confirm & continue</span
+              ><span class="button-label button-label-hover" aria-hidden="true"
+                >Confirm & continue</span
+              >
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="recent-section reveal" aria-labelledby="recent-title">
+        <div>
+          <div class="eyebrow">Local history</div>
+          <h2 id="recent-title">Pick up where<br />you left off.</h2>
+        </div>
+        <div class="recent-list">
+          <button type="button" class="recent-row">
+            <span class="recent-index">01</span
+            ><span
+              ><strong>Arsenal vs Newcastle</strong
+              ><small>Match intake · Today, 14:32</small></span
+            ><span class="recent-state">In progress</span><i>↗</i>
+          </button>
+          <button type="button" class="recent-row">
+            <span class="recent-index">02</span
+            ><span
+              ><strong>Liverpool vs Brighton</strong
+              ><small>24 clips exported · Yesterday</small></span
+            ><span class="recent-state done">Complete</span><i>↗</i>
+          </button>
+          <button type="button" class="recent-row">
+            <span class="recent-index">03</span
+            ><span
+              ><strong>Man City vs Bournemouth</strong
+              ><small>12 clips exported · 24 Sep</small></span
+            ><span class="recent-state done">Complete</span><i>↗</i>
+          </button>
+        </div>
+      </section>
+    </main>
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
   </body>
 </html>
