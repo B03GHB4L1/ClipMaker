@@ -993,11 +993,11 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
-        log(f"Found {len(df)} events â†’ {len(windows)} clips after merging.\n")
+        log(f"Found {len(df)} events -> {len(windows)} clips after merging.\n")
 
         if config["dry_run"]:
             for i, (s, e, lbl, p) in enumerate(windows, 1):
-                log(f"  Clip {i:02d}: {s:.1f}s â€“ {e:.1f}s  ({e-s:.0f}s)  |  {lbl}")
+                log(f"  Clip {i:02d}: {s:.1f}s - {e:.1f}s  ({e-s:.0f}s)  |  {lbl}")
             log("\n[OK] DRY RUN complete.")
             log_queue.put({"type": "done"})
             return
