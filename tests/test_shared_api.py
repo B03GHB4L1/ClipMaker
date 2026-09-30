@@ -1,6 +1,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -67,6 +68,73 @@ class SharedApiTests(unittest.TestCase):
     def test_source_detection(self):
         self.assertEqual(detect_source("https://www.scoresway.com/match/1"), "scoresway")
         self.assertEqual(detect_source("https://www.whoscored.com/Matches/1"), "whoscored")
+
+    def test_dry_run_job_uses_saved_match_and_real_engine(self):
+        csv_path = Path(self.temporary.name) / "events.csv"
+        csv_path.write_text(
+            "minute,second,type,period,playerName,team\n"
+            "12,30,Goal,1,Player One,Home\n"
+            "68,5,SavedShot,2,Player Two,Away\n",
+            encoding="utf-8",
+        )
+        _, saved = self.request(
+            "/api/matches",
+            method="POST",
+            payload={
+                "home_team": "Home",
+                "away_team": "Away",
+                "csv_path": str(csv_path),
+                "event_count": 2,
+                "markers": {"1H": "00:00:10", "2H": "00:48:00"},
+            },
+        )
+        status, started = self.request(
+            "/api/jobs",
+            method="POST",
+            payload={
+                "match_id": saved["match"]["id"],
+                "options": {
+                    "dry_run": True,
+                    "filter_types": ["Goal", "SavedShot"],
+                    "before_buffer": 4,
+                    "after_buffer": 7,
+                },
+            },
+        )
+        self.assertEqual(status, 202)
+
+        job = started["job"]
+        deadline = time.time() + 5
+        while job["status"] not in {"complete", "failed", "cancelled"} and time.time() < deadline:
+            time.sleep(0.05)
+            _, result = self.request(f"/api/jobs/{job['id']}")
+            job = result["job"]
+
+        self.assertEqual(job["status"], "complete", "\n".join(job["logs"]))
+        self.assertTrue(any("2 clips" in line for line in job["logs"]))
+        self.assertTrue(any("DRY RUN complete" in line for line in job["logs"]))
+
+    def test_render_job_requires_native_video_path(self):
+        csv_path = Path(self.temporary.name) / "events.csv"
+        csv_path.write_text("minute,second,type,period\n1,0,Goal,1\n", encoding="utf-8")
+        _, saved = self.request(
+            "/api/matches",
+            method="POST",
+            payload={
+                "home_team": "Home",
+                "away_team": "Away",
+                "csv_path": str(csv_path),
+                "markers": {"1H": "00:00:00", "2H": "00:48:00"},
+            },
+        )
+        with self.assertRaises(HTTPError) as context:
+            self.request(
+                "/api/jobs",
+                method="POST",
+                payload={"match_id": saved["match"]["id"], "options": {"dry_run": False}},
+            )
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
 
 
 if __name__ == "__main__":
