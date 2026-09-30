@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=4" />
-    <script type="module" src="app.js?v=4"></script>
+    <link rel="stylesheet" href="styles.css?v=5" />
+    <script type="module" src="app.js?v=5"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
@@ -375,6 +375,125 @@
             </button>
           </div>
         </div>
+      </section>
+      <section
+        class="filter-section reveal"
+        id="filter"
+        aria-labelledby="filter-title"
+      >
+        <div class="filter-heading">
+          <div class="eyebrow"><span>03</span> Filter events</div>
+          <h2 id="filter-title">
+            Choose the actions.<br />See the reel first.
+          </h2>
+          <p>
+            ClipMaker calculates the exact clip windows from your event data and
+            whistle markers before it touches the footage.
+          </p>
+        </div>
+        <form class="filter-workspace" data-filter-form>
+          <fieldset class="event-choices">
+            <legend>Actions to include</legend>
+            <label
+              ><input type="checkbox" value="Goal" checked /><span
+                >Goals</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="SavedShot" checked /><span
+                >Saved shots</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="MissedShot" checked /><span
+                >Missed shots</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Pass" /><span>Passes</span></label
+            >
+            <label
+              ><input type="checkbox" value="Carry" /><span
+                >Carries</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Tackle" /><span
+                >Tackles</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Interception" /><span
+                >Interceptions</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="BallRecovery" /><span
+                >Ball recoveries</span
+              ></label
+            >
+          </fieldset>
+          <div class="filter-settings">
+            <label>
+              <span>Match period</span>
+              <select data-half-filter>
+                <option>Both halves</option>
+                <option>1st half only</option>
+                <option>2nd half only</option>
+              </select>
+            </label>
+            <label>
+              <span>Seconds before</span>
+              <input
+                type="number"
+                min="0"
+                max="60"
+                value="5"
+                data-before-buffer
+              />
+            </label>
+            <label>
+              <span>Seconds after</span>
+              <input
+                type="number"
+                min="0"
+                max="60"
+                value="8"
+                data-after-buffer
+              />
+            </label>
+            <label>
+              <span>Merge gap</span>
+              <input type="number" min="0" max="60" value="6" data-min-gap />
+            </label>
+          </div>
+          <div class="plan-actions">
+            <div>
+              <span class="plan-kicker">Safe preview</span>
+              <strong data-plan-summary>Ready to calculate clip windows</strong>
+            </div>
+            <button
+              type="submit"
+              class="primary-button plan-button"
+              data-plan-button
+            >
+              <span class="button-label">Preview clip plan</span>
+              <span class="button-label button-label-hover" aria-hidden="true"
+                >Preview clip plan</span
+              >
+            </button>
+          </div>
+          <div class="plan-output" data-plan-output hidden aria-live="polite">
+            <div class="plan-output-head">
+              <span data-job-state>Calculating</span>
+              <button type="button" class="text-button" data-cancel-job hidden>
+                Cancel
+              </button>
+            </div>
+            <div class="plan-progress"><i data-job-progress></i></div>
+            <pre data-job-logs></pre>
+          </div>
+        </form>
       </section>
       <section class="recent-section reveal" aria-labelledby="recent-title">
         <div>

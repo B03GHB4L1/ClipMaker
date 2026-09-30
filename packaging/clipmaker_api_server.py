@@ -9,6 +9,8 @@ import queue
 import sys
 import tempfile
 import threading
+import time
+import uuid
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +51,8 @@ class MatchStore:
             "source": str(match.get("source") or "").strip(),
             "event_count": int(match.get("event_count") or 0),
             "video_name": str(match.get("video_name") or "").strip(),
+            "video_path": str(match.get("video_path") or "").strip(),
+            "csv_path": str(match.get("csv_path") or "").strip(),
             "markers": match.get("markers") if isinstance(match.get("markers"), dict) else {},
             "status": str(match.get("status") or "in_progress"),
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -80,6 +84,195 @@ class MatchStore:
                 if os.path.exists(temporary_name):
                     os.unlink(temporary_name)
         return clean
+
+    def get(self, match_id: str) -> dict[str, Any] | None:
+        return next((item for item in self.list() if item.get("id") == match_id), None)
+
+
+FILTER_FLAGS = {
+    "progressive_only",
+    "key_passes_only",
+    "shots_and_key_passes_only",
+    "successful_only",
+    "unsuccessful_only",
+    "crosses_only",
+    "long_balls_only",
+    "through_balls_only",
+    "corners_only",
+    "freekicks_only",
+    "headers_only",
+    "big_chances_only",
+    "penalties_only",
+    "volleys_only",
+    "gk_saves_only",
+    "yellow_cards_only",
+    "red_cards_only",
+}
+
+
+class JobManager:
+    def __init__(self) -> None:
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._cancellations: dict[str, threading.Event] = {}
+        self._lock = threading.Lock()
+
+    def start(self, config: dict[str, Any]) -> dict[str, Any]:
+        job_id = uuid.uuid4().hex[:12]
+        job = {
+            "id": job_id,
+            "status": "queued",
+            "dry_run": bool(config["dry_run"]),
+            "logs": [],
+            "progress": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        cancellation = threading.Event()
+        with self._lock:
+            self._jobs[job_id] = job
+            self._cancellations[job_id] = cancellation
+        threading.Thread(
+            target=self._run,
+            args=(job_id, config, cancellation),
+            daemon=True,
+        ).start()
+        return dict(job)
+
+    def get(self, job_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return json.loads(json.dumps(job)) if job else None
+
+    def cancel(self, job_id: str) -> bool:
+        with self._lock:
+            cancellation = self._cancellations.get(job_id)
+            job = self._jobs.get(job_id)
+            if not cancellation or not job:
+                return False
+            cancellation.set()
+            if job["status"] == "queued":
+                job["status"] = "cancelled"
+            return True
+
+    def _update(self, job_id: str, **values: Any) -> None:
+        with self._lock:
+            if job_id in self._jobs:
+                self._jobs[job_id].update(values)
+
+    def _append_log(self, job_id: str, message: str) -> None:
+        with self._lock:
+            if job_id in self._jobs:
+                self._jobs[job_id]["logs"].append(message)
+
+    def _run(self, job_id: str, config: dict[str, Any], cancellation: threading.Event) -> None:
+        try:
+            from clipmaker_core import run_clip_maker
+        except Exception as error:
+            self._append_log(job_id, f"Could not start the ClipMaker engine: {error}")
+            self._update(
+                job_id,
+                status="failed",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return
+
+        logs: queue.Queue[dict[str, Any]] = queue.Queue()
+        progress: queue.Queue[dict[str, Any]] = queue.Queue()
+        self._update(job_id, status="running")
+
+        def execute_engine() -> None:
+            try:
+                run_clip_maker(config, logs, progress, cancellation)
+            except Exception as error:
+                logs.put({"type": "error", "msg": f"ClipMaker engine stopped: {error}"})
+
+        engine = threading.Thread(
+            target=execute_engine,
+            daemon=True,
+        )
+        engine.start()
+        terminal_status = None
+        while engine.is_alive() or not logs.empty() or not progress.empty():
+            while not logs.empty():
+                message = logs.get_nowait()
+                if message.get("msg"):
+                    self._append_log(job_id, str(message["msg"]))
+                if message.get("type") == "done":
+                    terminal_status = "complete"
+                elif message.get("type") == "error":
+                    terminal_status = "failed"
+                elif message.get("type") == "cancelled":
+                    terminal_status = "cancelled"
+            while not progress.empty():
+                update = progress.get_nowait()
+                if update.get("error"):
+                    self._append_log(job_id, str(update["error"]))
+                    terminal_status = "failed"
+                self._update(job_id, progress=update)
+            time.sleep(0.05)
+        engine.join()
+        self._update(
+            job_id,
+            status=terminal_status or ("cancelled" if cancellation.is_set() else "complete"),
+            finished_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
+def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path) -> dict[str, Any]:
+    csv_path = str(match.get("csv_path") or "").strip()
+    if not csv_path or not Path(csv_path).is_file():
+        raise ValueError("This match has no saved event CSV. Scrape it again before filtering.")
+    markers = match.get("markers") if isinstance(match.get("markers"), dict) else {}
+    filter_types = options.get("filter_types") if isinstance(options.get("filter_types"), list) else []
+    clean_types = [str(value) for value in filter_types if str(value).strip()][:50]
+    half_filter = str(options.get("half_filter") or "Both halves")
+    if half_filter not in {"1st half only", "2nd half only", "Both halves"}:
+        raise ValueError("Choose first half, second half, or both halves.")
+    if half_filter != "2nd half only" and not str(markers.get("1H") or "").strip():
+        raise ValueError("Set the first-half kick-off marker before building a clip plan.")
+    if half_filter != "1st half only" and not str(markers.get("2H") or "").strip():
+        raise ValueError("Set the second-half kick-off marker before building a clip plan.")
+
+    config = {
+        "video_file": str(match.get("video_path") or ""),
+        "video2_file": "",
+        "video3_file": "",
+        "video4_file": "",
+        "video5_file": "",
+        "split_video": False,
+        "extra_time_video_mode": "single",
+        "data_file": csv_path,
+        "half1_time": str(markers.get("1H") or ""),
+        "half2_time": str(markers.get("2H") or ""),
+        "half3_time": str(markers.get("ET1") or ""),
+        "half4_time": str(markers.get("ET2") or ""),
+        "half5_time": str(markers.get("PEN") or ""),
+        "period_column": "period",
+        "fallback_row": None,
+        "before_buffer": max(0, min(60, int(options.get("before_buffer", 5)))),
+        "after_buffer": max(0, min(60, int(options.get("after_buffer", 8)))),
+        "min_gap": max(0, min(60, int(options.get("min_gap", 6)))),
+        "output_dir": str((data_dir / "exports").resolve()),
+        "output_filename": str(options.get("output_filename") or "Highlights.mp4"),
+        "output_format": ".mp4",
+        "video_crf": 20,
+        "encoder_preset": "veryfast",
+        "audio_bitrate": "128k",
+        "timeline_corrections": [],
+        "individual_clips": bool(options.get("individual_clips", False)),
+        "dry_run": bool(options.get("dry_run", True)),
+        "half_filter": half_filter,
+        "filter_types": clean_types,
+        "qualifier_logic": "any",
+        "pitch_zone_filter": options.get("pitch_zone_filter") or None,
+        "depth_zone_filter": options.get("depth_zone_filter") or None,
+        "xt_min": float(options.get("xt_min", 0) or 0),
+        "top_n": int(options["top_n"]) if options.get("top_n") else None,
+    }
+    for flag in FILTER_FLAGS:
+        config[flag] = bool(options.get(flag, False))
+    if not config["dry_run"] and not Path(config["video_file"]).is_file():
+        raise ValueError("A native video path is required before rendering clips.")
+    return config
 
 
 def detect_source(url: str) -> str:
@@ -163,6 +356,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
     def match_data_dir(self) -> Path:
         return self.server.match_data_dir  # type: ignore[attr-defined]
 
+    @property
+    def jobs(self) -> JobManager:
+        return self.server.jobs  # type: ignore[attr-defined]
+
     def translate_path(self, path: str) -> str:
         parsed = urlparse(path).path
         relative = parsed.lstrip("/") or "index.html"
@@ -197,6 +394,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/matches":
             self.send_json(HTTPStatus.OK, {"matches": self.store.list()})
             return
+        if path.startswith("/api/jobs/"):
+            job_id = path.rsplit("/", 1)[-1]
+            job = self.jobs.get(job_id)
+            if job is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown clip job"})
+            else:
+                self.send_json(HTTPStatus.OK, {"job": job})
+            return
         if path.startswith("/api/"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown API endpoint"})
             return
@@ -215,6 +420,23 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 scraped = scrape_match(url, self.match_data_dir)
                 self.send_json(HTTPStatus.OK, {"match": scraped})
                 return
+            if path == "/api/jobs":
+                match_id = str(body.get("match_id") or "").strip()
+                match = self.store.get(match_id)
+                if match is None:
+                    raise ValueError("Save the match setup before building a clip plan.")
+                options = body.get("options") if isinstance(body.get("options"), dict) else {}
+                config = build_clip_config(match, options, self.store.data_dir)
+                job = self.jobs.start(config)
+                self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+                return
+            if path.startswith("/api/jobs/") and path.endswith("/cancel"):
+                job_id = path.split("/")[-2]
+                if not self.jobs.cancel(job_id):
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown clip job"})
+                else:
+                    self.send_json(HTTPStatus.OK, {"cancelled": True})
+                return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown API endpoint"})
         except (ValueError, json.JSONDecodeError) as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
@@ -229,6 +451,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), ClipMakerHandler)
     server.match_store = MatchStore(data_dir)  # type: ignore[attr-defined]
     server.match_data_dir = data_dir / "match-data"  # type: ignore[attr-defined]
+    server.jobs = JobManager()  # type: ignore[attr-defined]
     return server
 
 

@@ -277,10 +277,130 @@ document
       renderHistory(history.matches || []);
       activeMatch = saved.match;
       showToast("Match setup saved locally. Event filtering is next.");
+      document.querySelector("#filter").scrollIntoView({ behavior: "smooth" });
     } catch (error) {
       showToast(error.message);
     }
   });
+
+const filterForm = document.querySelector("[data-filter-form]");
+const planButton = document.querySelector("[data-plan-button]");
+const planOutput = document.querySelector("[data-plan-output]");
+const jobState = document.querySelector("[data-job-state]");
+const jobLogs = document.querySelector("[data-job-logs]");
+const jobProgress = document.querySelector("[data-job-progress]");
+const cancelJobButton = document.querySelector("[data-cancel-job]");
+let activeJobId;
+
+const renderJob = (job) => {
+  const labels = {
+    queued: "Queued",
+    running: "Calculating clip windows",
+    complete: "Clip plan ready",
+    failed: "Could not build plan",
+    cancelled: "Plan cancelled",
+  };
+  const finished = ["complete", "failed", "cancelled"].includes(job.status);
+  jobState.textContent = labels[job.status] || job.status;
+  jobLogs.textContent = (job.logs || []).join("\n") || "Reading match events…";
+  jobLogs.scrollTop = jobLogs.scrollHeight;
+  const progress = job.progress;
+  const ratio = progress?.total ? progress.current / progress.total : 0;
+  jobProgress.style.width = `${job.status === "complete" ? 100 : Math.min(100, ratio * 100)}%`;
+  planButton.disabled = !finished;
+  cancelJobButton.hidden = finished;
+  if (finished) {
+    activeJobId = undefined;
+    document.querySelector("[data-plan-summary]").textContent =
+      job.status === "complete"
+        ? "The plan is ready for review"
+        : labels[job.status];
+  }
+};
+
+const pollJob = async (jobId) => {
+  try {
+    const result = await apiRequest(`/api/jobs/${jobId}`);
+    renderJob(result.job);
+    if (!["complete", "failed", "cancelled"].includes(result.job.status)) {
+      setTimeout(() => pollJob(jobId), 300);
+    }
+  } catch (error) {
+    planButton.disabled = false;
+    cancelJobButton.hidden = true;
+    jobState.textContent = "Connection interrupted";
+    jobLogs.textContent = error.message;
+  }
+};
+
+filterForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!apiAvailable) {
+    showToast("Start the ClipMaker engine to calculate a real clip plan");
+    return;
+  }
+  if (!activeMatch.id) {
+    showToast("Confirm the match setup before building a clip plan");
+    document.querySelector("[data-continue]").focus();
+    return;
+  }
+  const filterTypes = Array.from(
+    filterForm.querySelectorAll(
+      '.event-choices input[type="checkbox"]:checked',
+    ),
+    (input) => input.value,
+  );
+  planOutput.hidden = false;
+  planButton.disabled = true;
+  cancelJobButton.hidden = false;
+  jobState.textContent = "Starting engine";
+  jobLogs.textContent = "Preparing event filters…";
+  jobProgress.style.width = "4%";
+  try {
+    const result = await apiRequest("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        match_id: activeMatch.id,
+        options: {
+          dry_run: true,
+          filter_types: filterTypes,
+          half_filter: document.querySelector("[data-half-filter]").value,
+          before_buffer: Number(
+            document.querySelector("[data-before-buffer]").value,
+          ),
+          after_buffer: Number(
+            document.querySelector("[data-after-buffer]").value,
+          ),
+          min_gap: Number(document.querySelector("[data-min-gap]").value),
+        },
+      }),
+    });
+    activeJobId = result.job.id;
+    renderJob(result.job);
+    pollJob(activeJobId);
+  } catch (error) {
+    activeJobId = undefined;
+    planButton.disabled = false;
+    cancelJobButton.hidden = true;
+    jobState.textContent = "Setup needs attention";
+    jobLogs.textContent = error.message;
+    jobProgress.style.width = "0%";
+    showToast(error.message);
+  }
+});
+
+cancelJobButton.addEventListener("click", async () => {
+  if (!activeJobId) return;
+  try {
+    await apiRequest(`/api/jobs/${activeJobId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    jobState.textContent = "Cancelling";
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 
 const timeline = document.querySelector("[data-timeline]");
 const playhead = document.querySelector("[data-playhead]");
