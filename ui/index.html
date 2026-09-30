@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=3" />
-    <script type="module" src="app.js?v=3"></script>
+    <link rel="stylesheet" href="styles.css?v=4" />
+    <script type="module" src="app.js?v=4"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
@@ -24,7 +24,8 @@
         ><span class="menu-dots" aria-hidden="true">•••</span>
       </button>
       <div class="top-actions">
-        <span class="engine-state"><i aria-hidden="true"></i> Engine ready</span
+        <span class="engine-state" data-engine-state
+          ><i aria-hidden="true"></i><span>Connecting engine</span></span
         ><button class="primary-button" type="button" data-new-project>
           <span class="button-label">New project</span
           ><span class="button-label button-label-hover" aria-hidden="true"
@@ -118,24 +119,25 @@
             <div class="teams">
               <div>
                 <span class="team-badge arsenal">A</span
-                ><strong>Arsenal</strong>
+                ><strong data-home-team>Arsenal</strong>
               </div>
               <div class="score">
                 <strong>2</strong><span>FT</span><strong>1</strong>
               </div>
               <div>
                 <span class="team-badge newcastle">N</span
-                ><strong>Newcastle</strong>
+                ><strong data-away-team>Newcastle</strong>
               </div>
             </div>
             <div class="ticket-foot">
-              <span>1,486 events found</span
+              <span data-event-count>1,486 events found</span
               ><span class="verified">Timeline verified</span>
             </div>
           </div>
           <details class="event-browser">
             <summary>
-              <span>Browse event data</span><strong>1,486 rows</strong>
+              <span>Browse event data</span
+              ><strong data-row-count>1,486 rows</strong>
             </summary>
             <div class="event-toolbar">
               <label
@@ -379,7 +381,7 @@
           <div class="eyebrow">Local history</div>
           <h2 id="recent-title">Pick up where<br />you left off.</h2>
         </div>
-        <div class="recent-list">
+        <div class="recent-list" data-recent-list>
           <button type="button" class="recent-row">
             <span class="recent-index">01</span
             ><span
