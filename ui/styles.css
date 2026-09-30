@@ -127,6 +127,10 @@ button {
   border-radius: 50%;
   box-shadow: 0 0 0 4px rgba(130, 166, 29, 0.12);
 }
+.engine-state.is-offline i {
+  background: #9a9d94;
+  box-shadow: 0 0 0 4px rgba(120, 123, 115, 0.1);
+}
 .primary-button {
   position: relative;
   min-height: 36px;
@@ -293,9 +297,22 @@ main {
   border-radius: 50%;
   background:
     radial-gradient(circle at 70% 24%, #fff 0 4%, transparent 16%),
-    repeating-conic-gradient(from 18deg, rgba(66, 70, 63, 0.4) 0 2deg, transparent 2deg 58deg),
-    radial-gradient(circle at 30% 28%, #eff4d7, #aeb3a8 46%, #f8f8f4 68%, #747a70 100%);
-  box-shadow: inset -28px -18px 48px rgba(31, 34, 29, 0.28), inset 18px 12px 32px rgba(255, 255, 255, 0.75), 0 28px 60px rgba(31, 35, 27, 0.2);
+    repeating-conic-gradient(
+      from 18deg,
+      rgba(66, 70, 63, 0.4) 0 2deg,
+      transparent 2deg 58deg
+    ),
+    radial-gradient(
+      circle at 30% 28%,
+      #eff4d7,
+      #aeb3a8 46%,
+      #f8f8f4 68%,
+      #747a70 100%
+    );
+  box-shadow:
+    inset -28px -18px 48px rgba(31, 34, 29, 0.28),
+    inset 18px 12px 32px rgba(255, 255, 255, 0.75),
+    0 28px 60px rgba(31, 35, 27, 0.2);
   color: #11130f;
   animation: fallback-ball-turn 10s ease-in-out infinite alternate;
 }
@@ -308,11 +325,37 @@ main {
   border: 8px solid rgba(77, 82, 73, 0.42);
   transform: rotate(30deg);
 }
-.hero-ball-fallback:before { left: 4%; top: 18%; }
-.hero-ball-fallback:after { right: 5%; bottom: 15%; }
-.hero-ball-fallback span { position: relative; z-index: 2; font-size: clamp(58px, 9vw, 130px); font-weight: 800; }
-.hero-ball-fallback sup { position: relative; z-index: 2; align-self: center; margin: -3.5em 0 0 .12em; color: #c8f135; font-size: clamp(18px, 2.6vw, 38px); font-weight: 800; }
-@keyframes fallback-ball-turn { from { transform: rotate(-3deg) translateX(-2%); } to { transform: rotate(4deg) translateX(2%); } }
+.hero-ball-fallback:before {
+  left: 4%;
+  top: 18%;
+}
+.hero-ball-fallback:after {
+  right: 5%;
+  bottom: 15%;
+}
+.hero-ball-fallback span {
+  position: relative;
+  z-index: 2;
+  font-size: clamp(58px, 9vw, 130px);
+  font-weight: 800;
+}
+.hero-ball-fallback sup {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  margin: -3.5em 0 0 0.12em;
+  color: #c8f135;
+  font-size: clamp(18px, 2.6vw, 38px);
+  font-weight: 800;
+}
+@keyframes fallback-ball-turn {
+  from {
+    transform: rotate(-3deg) translateX(-2%);
+  }
+  to {
+    transform: rotate(4deg) translateX(2%);
+  }
+}
 .eyebrow {
   font:
     11px/1.2 ui-monospace,

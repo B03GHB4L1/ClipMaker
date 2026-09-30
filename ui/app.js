@@ -5,7 +5,130 @@ const drawerButton = document.querySelector("[data-drawer-toggle]");
 const drawer = document.querySelector("#nav-drawer");
 const overlay = document.querySelector("[data-drawer-overlay]");
 const toast = document.querySelector("[data-toast]");
+const engineState = document.querySelector("[data-engine-state]");
 let toastTimer;
+let apiAvailable = false;
+let activeMatch = {
+  home_team: "Arsenal",
+  away_team: "Newcastle",
+  event_count: 1486,
+  source: "scoresway",
+};
+
+const apiRequest = async (path, options = {}) => {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+  return payload;
+};
+
+const setEngineState = (label, connected) => {
+  engineState.querySelector("span").textContent = label;
+  engineState.classList.toggle("is-offline", !connected);
+};
+
+const renderEvents = (events) => {
+  const eventBody = document.querySelector("[data-event-body]");
+  eventBody.replaceChildren();
+  events.forEach((event) => {
+    const minute = Number(event.minute || 0);
+    const second = Number(event.second || 0);
+    const time = `${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+    const values = [
+      time,
+      event.playerName || "—",
+      event.type || "Event",
+      event.team || "—",
+      event.xT ?? "—",
+    ];
+    const row = document.createElement("tr");
+    row.dataset.period = String(event.period || "");
+    values.forEach((value, index) => {
+      const cell = document.createElement("td");
+      if (index === 2) {
+        const pill = document.createElement("span");
+        pill.className = "event-pill";
+        pill.textContent = String(value);
+        cell.appendChild(pill);
+      } else {
+        cell.textContent = String(value);
+      }
+      row.appendChild(cell);
+    });
+    eventBody.appendChild(row);
+  });
+};
+
+const renderMatch = (match) => {
+  activeMatch = { ...activeMatch, ...match };
+  document.querySelector("[data-home-team]").textContent =
+    match.home_team || "Home";
+  document.querySelector("[data-away-team]").textContent =
+    match.away_team || "Away";
+  const count = Number(match.event_count || 0).toLocaleString();
+  document.querySelector("[data-event-count]").textContent =
+    `${count} events found`;
+  document.querySelector("[data-row-count]").textContent = `${count} rows`;
+  if (Array.isArray(match.events)) renderEvents(match.events);
+};
+
+const renderHistory = (matches) => {
+  if (!matches.length) return;
+  const list = document.querySelector("[data-recent-list]");
+  list.replaceChildren();
+  matches.slice(0, 5).forEach((match, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recent-row";
+
+    const number = document.createElement("span");
+    number.className = "recent-index";
+    number.textContent = String(index + 1).padStart(2, "0");
+
+    const details = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = `${match.home_team || "Home"} vs ${match.away_team || "Away"}`;
+    const subtitle = document.createElement("small");
+    const updated = match.updated_at
+      ? new Date(match.updated_at).toLocaleString([], {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "Saved locally";
+    subtitle.textContent = `${Number(match.event_count || 0).toLocaleString()} events · ${updated}`;
+    details.append(title, subtitle);
+
+    const state = document.createElement("span");
+    state.className = `recent-state${match.status === "complete" ? " done" : ""}`;
+    state.textContent =
+      match.status === "complete" ? "Complete" : "In progress";
+    const arrow = document.createElement("i");
+    arrow.textContent = "↗";
+    button.append(number, details, state, arrow);
+    button.addEventListener("click", () => renderMatch(match));
+    list.appendChild(button);
+  });
+};
+
+const connectApi = async () => {
+  try {
+    await apiRequest("/api/health");
+    apiAvailable = true;
+    setEngineState("Engine ready", true);
+    const history = await apiRequest("/api/matches");
+    renderHistory(history.matches || []);
+  } catch {
+    setEngineState("Design preview", false);
+  }
+};
 
 const showToast = (message) => {
   toast.textContent = message;
@@ -32,7 +155,10 @@ document
   .forEach((link) => link.addEventListener("click", () => setDrawer(false)));
 
 window.addEventListener("load", () =>
-  requestAnimationFrame(() => body.classList.add("is-loaded")),
+  requestAnimationFrame(() => {
+    body.classList.add("is-loaded");
+    connectApi();
+  }),
 );
 
 const observer = new IntersectionObserver(
@@ -50,16 +176,36 @@ document
   .querySelectorAll(".reveal")
   .forEach((element) => observer.observe(element));
 
-document.querySelector("[data-fetch]").addEventListener("click", (event) => {
-  const button = event.currentTarget;
-  button.textContent = "···";
-  document.querySelector("[data-match-ticket]").style.opacity = ".35";
-  setTimeout(() => {
-    button.textContent = "✓";
-    document.querySelector("[data-match-ticket]").style.opacity = "1";
-    showToast("Match data refreshed: 1,486 events found");
-  }, 700);
-});
+document
+  .querySelector("[data-fetch]")
+  .addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.textContent = "···";
+    document.querySelector("[data-match-ticket]").style.opacity = ".35";
+    try {
+      if (!apiAvailable) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        showToast("Design preview: connect the local engine for live scraping");
+      } else {
+        const url = document.querySelector("#match-url").value.trim();
+        const result = await apiRequest("/api/scrape", {
+          method: "POST",
+          body: JSON.stringify({ url }),
+        });
+        renderMatch(result.match);
+        document.querySelector(".event-browser").open = true;
+        showToast(
+          `${Number(result.match.event_count).toLocaleString()} events loaded from Python`,
+        );
+      }
+      button.textContent = "✓";
+      document.querySelector("[data-match-ticket]").style.opacity = "1";
+    } catch (error) {
+      button.textContent = "↗";
+      document.querySelector("[data-match-ticket]").style.opacity = "1";
+      showToast(error.message);
+    }
+  });
 
 document
   .querySelector("[data-dropzone]")
@@ -104,9 +250,37 @@ document
   .addEventListener("click", () => showToast("New project workspace ready"));
 document
   .querySelector("[data-continue]")
-  .addEventListener("click", () =>
-    showToast("Timeline confirmed. Event filtering is next."),
-  );
+  .addEventListener("click", async () => {
+    if (!apiAvailable) {
+      showToast("Design preview: timeline confirmation is ready to connect");
+      return;
+    }
+    const markers = {};
+    document
+      .querySelectorAll(".period-selector [data-period]")
+      .forEach((button) => {
+        if (!button.disabled)
+          markers[button.dataset.period] = button.dataset.marker;
+      });
+    try {
+      const saved = await apiRequest("/api/matches", {
+        method: "POST",
+        body: JSON.stringify({
+          ...activeMatch,
+          source_url: document.querySelector("#match-url").value.trim(),
+          video_name: document.querySelector(".file-info strong").textContent,
+          markers,
+          status: "in_progress",
+        }),
+      });
+      const history = await apiRequest("/api/matches");
+      renderHistory(history.matches || []);
+      activeMatch = saved.match;
+      showToast("Match setup saved locally. Event filtering is next.");
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
 
 const timeline = document.querySelector("[data-timeline]");
 const playhead = document.querySelector("[data-playhead]");
@@ -139,6 +313,8 @@ const updateTimeline = (clientX) => {
   timeLabels.forEach((label) => {
     label.textContent = value;
   });
+  const activePeriod = document.querySelector(".period-selector .is-active");
+  if (activePeriod) activePeriod.dataset.marker = value;
 };
 timeline.addEventListener("pointerdown", (event) => {
   scrubbing = true;
@@ -165,6 +341,8 @@ document.querySelector(".text-button").addEventListener("click", () => {
   timeLabels.forEach((label) => {
     label.textContent = "00:03:18";
   });
+  const activePeriod = document.querySelector(".period-selector .is-active");
+  if (activePeriod) activePeriod.dataset.marker = "00:03:18";
   showToast("Kick-off marker reset");
 });
 document.querySelector(".play-button").addEventListener("click", (event) => {
