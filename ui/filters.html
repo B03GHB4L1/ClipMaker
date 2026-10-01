@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f4f0" />
+    <title>ClipMaker - Filter Events</title>
+    <link rel="stylesheet" href="styles.css?v=8" />
+    <link rel="stylesheet" href="filters.css?v=1" />
+    <script type="module" src="filters.js?v=1"></script>
+  </head>
+  <body class="filter-page">
+    <header class="filter-topbar">
+      <a class="filter-brand" href="/" aria-label="Back to match intake">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>ClipMaker</span>
+      </a>
+      <nav aria-label="Workflow">
+        <a href="/">01 Intake</a>
+        <a class="is-active" href="/filters.html">02 Filter</a>
+      </nav>
+      <span class="engine-state" data-engine-state>
+        <i aria-hidden="true"></i><span>Connecting engine</span>
+      </span>
+    </header>
+
+    <main class="filters-main">
+      <header class="filters-titlebar">
+        <div>
+          <span class="eyebrow">02 Event filtering</span>
+          <h1>Build the reel from the data.</h1>
+        </div>
+        <p>
+          Set the scope, actions and qualifiers. Empty selections include every
+          available event.
+        </p>
+      </header>
+
+      <section class="match-context" aria-label="Selected match">
+        <label>
+          <span>Match</span>
+          <select data-match-select aria-label="Choose saved match"></select>
+        </label>
+        <div class="context-score">
+          <strong data-match-name>Loading match</strong>
+          <span data-match-score>--</span>
+        </div>
+        <div class="context-stat">
+          <span>Events</span><strong data-match-events>--</strong>
+        </div>
+        <div class="context-stat">
+          <span>Footage</span><strong data-match-video>--</strong>
+        </div>
+        <a class="context-edit" href="/">Edit intake</a>
+      </section>
+
+      <section class="preset-row" aria-labelledby="preset-title">
+        <div>
+          <span class="section-kicker">Quick start</span>
+          <h2 id="preset-title">Presets</h2>
+        </div>
+        <div class="preset-buttons">
+          <button type="button" data-preset="set-pieces">Set pieces</button>
+          <button type="button" data-preset="progression">
+            Ball progression
+          </button>
+          <button type="button" data-preset="attacking">Attacking chaos</button>
+          <button type="button" data-preset="defensive">
+            Defensive display
+          </button>
+          <button type="button" data-reset-filters>Reset all</button>
+        </div>
+      </section>
+
+      <form class="filter-builder" data-filter-form>
+        <div class="filter-flow">
+          <section class="filter-band" id="scope">
+            <header>
+              <span>01</span>
+              <div>
+                <h2>Scope</h2>
+                <p>Choose whose events and which period.</p>
+              </div>
+            </header>
+            <div class="control-grid two-up">
+              <fieldset>
+                <legend>Team</legend>
+                <div class="segmented-control" data-team-options></div>
+              </fieldset>
+              <fieldset>
+                <legend>Match period</legend>
+                <div class="segmented-control">
+                  <label
+                    ><input
+                      type="radio"
+                      name="half"
+                      value="Both halves"
+                      checked
+                    /><span>Both</span></label
+                  >
+                  <label
+                    ><input
+                      type="radio"
+                      name="half"
+                      value="1st half only"
+                    /><span>1st half</span></label
+                  >
+                  <label
+                    ><input
+                      type="radio"
+                      name="half"
+                      value="2nd half only"
+                    /><span>2nd half</span></label
+                  >
+                </div>
+              </fieldset>
+            </div>
+            <fieldset class="players-fieldset">
+              <div class="legend-row">
+                <legend>Players</legend>
+                <div>
+                  <button type="button" data-select-all-players>All</button
+                  ><button type="button" data-clear-players>Clear</button>
+                </div>
+              </div>
+              <p class="field-note">
+                Leave everyone unselected to include all players in the team
+                scope.
+              </p>
+              <div class="choice-grid player-grid" data-player-options></div>
+            </fieldset>
+          </section>
+
+          <section class="filter-band" id="actions">
+            <header>
+              <span>02</span>
+              <div>
+                <h2>Action types</h2>
+                <p>These come directly from the selected match.</p>
+              </div>
+              <div class="section-tools">
+                <button type="button" data-select-all-actions>All</button
+                ><button type="button" data-clear-actions>Clear</button>
+              </div>
+            </header>
+            <div class="choice-grid action-grid" data-action-options></div>
+          </section>
+
+          <section class="filter-band" id="qualifiers">
+            <header>
+              <span>03</span>
+              <div>
+                <h2>Action qualifiers</h2>
+                <p>Only qualifiers found in this scrape are enabled.</p>
+              </div>
+              <strong class="availability" data-qualifier-availability
+                >Checking data</strong
+              >
+            </header>
+            <fieldset class="logic-control">
+              <legend>
+                When several qualifiers affect the same action family
+              </legend>
+              <div class="segmented-control compact">
+                <label
+                  ><input
+                    type="radio"
+                    name="qualifier-logic"
+                    value="any"
+                    checked
+                  /><span>Match any</span></label
+                >
+                <label
+                  ><input
+                    type="radio"
+                    name="qualifier-logic"
+                    value="all"
+                  /><span>Match all</span></label
+                >
+              </div>
+            </fieldset>
+            <div class="qualifier-groups" data-qualifier-groups></div>
+          </section>
+
+          <section class="filter-band" id="location">
+            <header>
+              <span>04</span>
+              <div>
+                <h2>Location and value</h2>
+                <p>Narrow actions by pitch area or expected threat.</p>
+              </div>
+            </header>
+            <div class="control-grid four-up">
+              <label
+                ><span>Pitch lane</span
+                ><select data-pitch-zone>
+                  <option value="">Any lane</option>
+                  <option>Entire Left Side</option>
+                  <option>Left Wing</option>
+                  <option>Left Half Space</option>
+                  <option>Centre</option>
+                  <option>Right Half Space</option>
+                  <option>Right Wing</option>
+                  <option>Entire Right Side</option>
+                </select></label
+              >
+              <label
+                ><span>Pitch depth</span
+                ><select data-depth-zone>
+                  <option value="">Any depth</option>
+                  <option>Defensive Third</option>
+                  <option>Middle Third</option>
+                  <option>Attacking Third</option>
+                </select></label
+              >
+              <label
+                ><span>Minimum xT</span
+                ><input
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  value="0"
+                  data-xt-min
+              /></label>
+              <label
+                ><span>Top N by xT</span
+                ><input type="number" min="0" step="1" value="0" data-top-n
+              /></label>
+            </div>
+          </section>
+
+          <section class="filter-band" id="timing">
+            <header>
+              <span>05</span>
+              <div>
+                <h2>Clip timing and output</h2>
+                <p>Control the context around each matching event.</p>
+              </div>
+            </header>
+            <div class="control-grid four-up">
+              <label
+                ><span>Seconds before</span
+                ><input
+                  type="number"
+                  min="0"
+                  max="60"
+                  value="5"
+                  data-before-buffer
+              /></label>
+              <label
+                ><span>Seconds after</span
+                ><input
+                  type="number"
+                  min="0"
+                  max="60"
+                  value="8"
+                  data-after-buffer
+              /></label>
+              <label
+                ><span>Merge gap</span
+                ><input type="number" min="0" max="60" value="6" data-min-gap
+              /></label>
+              <label
+                ><span>Output name</span
+                ><input type="text" value="Highlights.mp4" data-output-name
+              /></label>
+            </div>
+            <label class="binary-option"
+              ><input type="checkbox" data-individual-clips /><span
+                >Save individual clips instead of one combined reel</span
+              ></label
+            >
+          </section>
+
+          <section class="snapshot-band" aria-labelledby="snapshot-title">
+            <div>
+              <span class="section-kicker">Reusable setups</span>
+              <h2 id="snapshot-title">Filter snapshots</h2>
+            </div>
+            <label
+              ><span>Snapshot name</span
+              ><input
+                type="text"
+                placeholder="e.g. Wing attacks"
+                data-snapshot-name
+            /></label>
+            <button type="button" data-save-snapshot>Save</button>
+            <label
+              ><span>Saved snapshots</span
+              ><select data-snapshot-select>
+                <option value="">No snapshots saved</option>
+              </select></label
+            >
+            <button type="button" data-load-snapshot disabled>Load</button>
+            <button type="button" data-delete-snapshot disabled>Delete</button>
+          </section>
+        </div>
+
+        <aside class="filter-summary">
+          <span class="section-kicker">Current selection</span>
+          <h2 data-summary-title>All match events</h2>
+          <div class="summary-lines">
+            <p>
+              <span>Team</span><strong data-summary-team>Both teams</strong>
+            </p>
+            <p>
+              <span>Players</span
+              ><strong data-summary-players>All players</strong>
+            </p>
+            <p>
+              <span>Period</span><strong data-summary-half>Both halves</strong>
+            </p>
+            <p>
+              <span>Actions</span
+              ><strong data-summary-actions>All actions</strong>
+            </p>
+            <p>
+              <span>Qualifiers</span
+              ><strong data-summary-qualifiers>None</strong>
+            </p>
+          </div>
+          <button type="submit" class="primary-button filter-preview-button">
+            Preview clip plan
+          </button>
+          <button
+            type="button"
+            class="export-button"
+            data-export-button
+            disabled
+          >
+            Export reel
+          </button>
+          <p class="summary-note" data-summary-note>
+            Preview first to confirm the matching clips.
+          </p>
+          <div
+            class="plan-output filter-job-output"
+            data-plan-output
+            hidden
+            aria-live="polite"
+          >
+            <div class="plan-output-head">
+              <span data-job-state>Calculating</span
+              ><button type="button" class="text-button" data-cancel-job hidden>
+                Cancel
+              </button>
+            </div>
+            <div class="plan-progress"><i data-job-progress></i></div>
+            <pre data-job-logs></pre>
+          </div>
+        </aside>
+      </form>
+    </main>
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
+  </body>
+</html>

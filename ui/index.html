@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f4f0" />
+    <title>ClipMaker - Match Intake</title>
+    <link rel="stylesheet" href="styles.css?v=8" />
+    <script type="module" src="app.js?v=8"></script>
+  </head>
+  <body>
+    <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
+    <div class="scrub-cursor" aria-hidden="true">SCRUB</div>
+    <header class="topbar">
+      <button
+        class="brand control"
+        type="button"
+        data-drawer-toggle
+        aria-expanded="false"
+        aria-controls="nav-drawer"
+      >
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span
+        ><span>ClipMaker</span
+        ><span class="menu-dots" aria-hidden="true">•••</span>
+      </button>
+      <div class="top-actions">
+        <span class="engine-state" data-engine-state
+          ><i aria-hidden="true"></i><span>Connecting engine</span></span
+        ><button class="primary-button" type="button" data-new-project>
+          <span class="button-label">New project</span
+          ><span class="button-label button-label-hover" aria-hidden="true"
+            >New project</span
+          >
+        </button>
+      </div>
+    </header>
+    <div class="drawer-overlay" data-drawer-overlay></div>
+    <nav
+      class="nav-drawer"
+      id="nav-drawer"
+      aria-label="Primary navigation"
+      aria-hidden="true"
+    >
+      <div class="drawer-head">
+        <p>Workspace</p>
+        <span>v1.3.0</span>
+      </div>
+      <a class="drawer-link is-active" href="#intake"
+        ><span>01</span>Match intake<small>Prepare footage</small></a
+      >
+      <a class="drawer-link" href="/filters.html"
+        ><span>02</span>Filter events<small>Build the reel</small></a
+      >
+      <a class="drawer-link" href="#analysis"
+        ><span>03</span>Analyst room<small>Read the match</small></a
+      >
+      <a class="drawer-link" href="#tactics"
+        ><span>04</span>Tactical lab<small>Map the action</small></a
+      >
+      <div class="drawer-foot">
+        <span>Local workspace</span><span>No cloud upload</span>
+      </div>
+    </nav>
+    <main id="intake">
+      <section class="intro reveal" aria-labelledby="page-title">
+        <div class="hero-ball" aria-hidden="true" data-hero-ball>
+          <div class="hero-ball-fallback"><span>CM</span><sup>1.3</sup></div>
+        </div>
+        <div class="eyebrow"><span>01</span> Match intake</div>
+        <div class="intro-grid">
+          <h1 id="page-title">
+            <span class="line"><span>Turn the full match</span></span
+            ><span class="line"><span>into the moments.</span></span>
+          </h1>
+          <div class="intro-copy">
+            <p>
+              Bring in event data and match footage. ClipMaker aligns the
+              timeline before you shape the reel.
+            </p>
+            <div
+              class="step-track"
+              aria-label="Workflow progress"
+              data-workflow-progress
+            >
+              <button
+                class="is-current"
+                type="button"
+                data-step="1"
+                aria-label="Go to match intake"
+              ></button>
+              <button
+                type="button"
+                data-step="2"
+                aria-label="Go to timeline sync"
+              ></button>
+              <button
+                type="button"
+                data-step="3"
+                aria-label="Go to event filters"
+              ></button>
+              <button
+                type="button"
+                data-step="4"
+                aria-label="Go to export"
+              ></button>
+              <output data-step-label>1 / 4</output>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="workspace reveal" aria-label="Match setup">
+        <div class="source-panel">
+          <div class="section-heading">
+            <div>
+              <span class="section-number">A</span>
+              <h2>Match source</h2>
+            </div>
+            <span class="status-tag">Required</span>
+          </div>
+          <label for="match-url">Scoresway or WhoScored URL</label>
+          <div class="url-control">
+            <input
+              id="match-url"
+              type="url"
+              value="https://www.scoresway.com/en_GB/soccer/match/..."
+              aria-describedby="source-note"
+            /><button
+              type="button"
+              class="square-button"
+              data-fetch
+              title="Fetch match data"
+              aria-label="Fetch match data"
+            >
+              ↗
+            </button>
+          </div>
+          <p class="field-note" id="source-note">
+            One match per line. The source is detected automatically.
+          </p>
+          <div class="match-ticket" data-match-ticket>
+            <div class="ticket-meta">
+              <span>Premier League</span><span>18 May 2025</span>
+            </div>
+            <div class="teams">
+              <div>
+                <span class="team-badge arsenal">A</span
+                ><strong data-home-team>Arsenal</strong>
+              </div>
+              <div class="score">
+                <strong data-home-score>0</strong
+                ><span data-score-status>FT</span
+                ><strong data-away-score>0</strong>
+              </div>
+              <div>
+                <span class="team-badge newcastle">N</span
+                ><strong data-away-team>Newcastle</strong>
+              </div>
+            </div>
+            <div class="ticket-foot">
+              <span data-event-count>1,486 events found</span
+              ><span class="verified">Timeline verified</span>
+            </div>
+          </div>
+          <details class="event-browser">
+            <summary>
+              <span>Browse event data</span
+              ><strong data-row-count>1,486 rows</strong>
+            </summary>
+            <div class="event-toolbar">
+              <label
+                ><span class="sr-only">Search events</span
+                ><input
+                  type="search"
+                  placeholder="Search player or event"
+                  data-event-search
+              /></label>
+              <select aria-label="Filter event period" data-period-filter>
+                <option value="all">All periods</option>
+                <option value="1">First half</option>
+                <option value="2">Second half</option>
+              </select>
+            </div>
+            <div class="event-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Player</th>
+                    <th>Event</th>
+                    <th>Team</th>
+                    <th>xT</th>
+                  </tr>
+                </thead>
+                <tbody data-event-body>
+                  <tr data-period="1">
+                    <td>03:18</td>
+                    <td>B. Saka</td>
+                    <td><span class="event-pill pass">Pass</span></td>
+                    <td>ARS</td>
+                    <td>0.04</td>
+                  </tr>
+                  <tr data-period="1">
+                    <td>07:42</td>
+                    <td>A. Isak</td>
+                    <td><span class="event-pill shot">Shot</span></td>
+                    <td>NEW</td>
+                    <td>0.18</td>
+                  </tr>
+                  <tr data-period="1">
+                    <td>21:09</td>
+                    <td>M. Ødegaard</td>
+                    <td><span class="event-pill carry">Carry</span></td>
+                    <td>ARS</td>
+                    <td>0.07</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>52:31</td>
+                    <td>D. Rice</td>
+                    <td><span class="event-pill recover">Recovery</span></td>
+                    <td>ARS</td>
+                    <td>0.01</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>68:04</td>
+                    <td>A. Gordon</td>
+                    <td><span class="event-pill shot">Shot</span></td>
+                    <td>NEW</td>
+                    <td>0.24</td>
+                  </tr>
+                  <tr data-period="2">
+                    <td>83:56</td>
+                    <td>B. Saka</td>
+                    <td><span class="event-pill goal">Goal</span></td>
+                    <td>ARS</td>
+                    <td>0.61</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="event-footer">
+              <span>Showing sample rows</span
+              ><button type="button" data-open-table>Open full table ↗</button>
+            </div>
+          </details>
+        </div>
+        <div class="media-panel">
+          <div class="section-heading">
+            <div>
+              <span class="section-number">B</span>
+              <h2>Match footage</h2>
+            </div>
+            <span class="status-tag" data-file-count>No file</span>
+          </div>
+          <button class="dropzone" type="button" data-dropzone>
+            <span class="drop-icon" aria-hidden="true">+</span
+            ><span class="drop-title">Drop the full match here</span
+            ><span class="drop-detail">or choose a video · MP4, MKV, MOV</span>
+          </button>
+          <input
+            class="sr-only"
+            type="file"
+            accept="video/*,.mkv"
+            data-video-input
+          />
+          <div class="file-row" data-file-row hidden>
+            <span class="file-thumb"><i></i></span
+            ><span class="file-info"
+              ><strong>ARS_NEW_full_match.mp4</strong
+              ><small>8.4 GB · 01:53:42</small></span
+            ><span class="file-ready">Ready</span
+            ><button
+              type="button"
+              class="remove-button"
+              aria-label="Remove video"
+              title="Remove video"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="sync-section reveal" aria-labelledby="sync-title">
+        <div class="sync-copy">
+          <div class="eyebrow"><span>02</span> Timeline sync</div>
+          <h2 id="sync-title">Find the whistle.<br />We’ll map the rest.</h2>
+          <p>
+            Choose a match period, then scrub to its opening whistle. ClipMaker
+            uses each marker to align the full event timeline.
+          </p>
+          <div class="period-selector" role="tablist" aria-label="Match period">
+            <button
+              class="is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              data-period="1H"
+              data-marker="00:03:18"
+            >
+              1H
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="2H"
+              data-marker="00:50:46"
+            >
+              2H
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="ET1"
+              data-marker="01:38:12"
+              disabled
+              title="Enable when the match includes extra time"
+            >
+              ET1
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="ET2"
+              data-marker="01:55:04"
+              disabled
+              title="Enable when the match includes extra time"
+            >
+              ET2
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected="false"
+              data-period="PEN"
+              data-marker="02:12:20"
+              disabled
+              title="Enable when the match includes penalties"
+            >
+              PEN
+            </button>
+          </div>
+          <div class="period-options">
+            <label><input type="checkbox" data-extra-time /> Extra time</label>
+            <label><input type="checkbox" data-penalties /> Penalties</label>
+          </div>
+          <div class="time-readout">
+            <span data-period-label>First-half kick-off</span
+            ><input
+              type="text"
+              inputmode="numeric"
+              value="00:03:18"
+              aria-label="Selected period kick-off time"
+              data-time
+            />
+          </div>
+          <p class="period-note">
+            Extra time and penalties are enabled only when the match includes
+            them.
+          </p>
+        </div>
+        <div class="preview-shell" data-preview>
+          <div class="preview-top">
+            <span>No footage selected</span><span>--:--:--</span>
+          </div>
+          <div class="match-frame" aria-label="Football match video preview">
+            <video
+              class="match-video"
+              data-match-video
+              preload="metadata"
+            ></video>
+            <div class="stadium-light light-one"></div>
+            <div class="stadium-light light-two"></div>
+            <div class="crowd"></div>
+            <div class="pitch">
+              <i class="halfway"></i><i class="centre-circle"></i
+              ><i class="box left-box"></i><i class="box right-box"></i
+              ><span class="player p1"></span><span class="player p2"></span
+              ><span class="player p3"></span><span class="player p4"></span
+              ><span class="player p5"></span><span class="ball"></span>
+            </div>
+            <div class="frame-score">
+              <span data-frame-home>HOME</span
+              ><strong data-frame-score>0 - 0</strong
+              ><span data-frame-away>AWAY</span><time>00:03</time>
+            </div>
+            <button
+              class="play-button"
+              type="button"
+              aria-label="Play preview"
+              disabled
+            >
+              ▶
+            </button>
+          </div>
+          <div class="timeline" data-timeline>
+            <div class="filmstrip" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <div class="playhead" data-playhead><span></span></div>
+            <div class="timeline-label">
+              <span>00:00</span><strong data-timeline-time>00:03:18</strong
+              ><span data-timeline-end>--:--:--</span>
+            </div>
+          </div>
+          <div class="preview-actions">
+            <button type="button" class="text-button">Reset marker</button
+            ><button
+              type="button"
+              class="primary-button continue-button"
+              data-continue
+            >
+              <span class="button-label">Confirm & continue</span
+              ><span class="button-label button-label-hover" aria-hidden="true"
+                >Confirm & continue</span
+              >
+            </button>
+          </div>
+        </div>
+      </section>
+      <section
+        class="filter-section reveal"
+        id="filter"
+        aria-labelledby="filter-title"
+        hidden
+      >
+        <div class="filter-heading">
+          <div class="eyebrow"><span>03</span> Filter events</div>
+          <h2 id="filter-title">
+            Choose the actions.<br />See the reel first.
+          </h2>
+          <p>
+            ClipMaker calculates the exact clip windows from your event data and
+            whistle markers before it touches the footage.
+          </p>
+        </div>
+        <form class="filter-workspace" data-filter-form>
+          <fieldset class="event-choices">
+            <legend>Actions to include</legend>
+            <label
+              ><input type="checkbox" value="Goal" checked /><span
+                >Goals</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="SavedShot" checked /><span
+                >Saved shots</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="MissedShot" checked /><span
+                >Missed shots</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Pass" /><span>Passes</span></label
+            >
+            <label
+              ><input type="checkbox" value="Carry" /><span
+                >Carries</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Tackle" /><span
+                >Tackles</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="Interception" /><span
+                >Interceptions</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" value="BallRecovery" /><span
+                >Ball recoveries</span
+              ></label
+            >
+          </fieldset>
+          <div class="filter-settings">
+            <label>
+              <span>Match period</span>
+              <select data-half-filter>
+                <option>Both halves</option>
+                <option>1st half only</option>
+                <option>2nd half only</option>
+              </select>
+            </label>
+            <label>
+              <span>Seconds before</span>
+              <input
+                type="number"
+                min="0"
+                max="60"
+                value="5"
+                data-before-buffer
+              />
+            </label>
+            <label>
+              <span>Seconds after</span>
+              <input
+                type="number"
+                min="0"
+                max="60"
+                value="8"
+                data-after-buffer
+              />
+            </label>
+            <label>
+              <span>Merge gap</span>
+              <input type="number" min="0" max="60" value="6" data-min-gap />
+            </label>
+          </div>
+          <details class="advanced-filters">
+            <summary>
+              <span>Refine selection</span><small>Optional</small>
+            </summary>
+            <div class="advanced-filter-grid">
+              <fieldset>
+                <legend>Outcome &amp; movement</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="successful_only"
+                  />Successful</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="unsuccessful_only"
+                  />Unsuccessful</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="progressive_only"
+                  />Progressive</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="fast_break_only"
+                  />Fast break</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="touch_in_box_only"
+                  />Touch in box</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Passing</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="key_passes_only"
+                  />Key passes</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="crosses_only"
+                  />Crosses</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="long_balls_only"
+                  />Long balls</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="through_balls_only"
+                  />Through balls</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="switches_only"
+                  />Switches</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="diagonals_only"
+                  />Diagonals</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="corners_only"
+                  />Corners</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="freekicks_only"
+                  />Free kicks</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Shots &amp; assists</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="big_chances_only"
+                  />Big chances</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="penalties_only"
+                  />Penalties</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="volleys_only"
+                  />Volleys</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="headers_only"
+                  />Headers</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="left_foot_only"
+                  />Left foot</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="right_foot_only"
+                  />Right foot</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="intentional_assists_only"
+                  />Assists</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Location</legend>
+                <label class="select-filter"
+                  >Pitch lane
+                  <select data-pitch-zone>
+                    <option value="">Any lane</option>
+                    <option>Left Wing</option>
+                    <option>Left Half Space</option>
+                    <option>Centre</option>
+                    <option>Right Half Space</option>
+                    <option>Right Wing</option>
+                    <option>Entire Left Side</option>
+                    <option>Entire Right Side</option>
+                  </select>
+                </label>
+                <label class="select-filter"
+                  >Pitch depth
+                  <select data-depth-zone>
+                    <option value="">Any depth</option>
+                    <option>Defensive Third</option>
+                    <option>Middle Third</option>
+                    <option>Attacking Third</option>
+                  </select>
+                </label>
+              </fieldset>
+            </div>
+          </details>
+          <div class="plan-actions">
+            <div>
+              <span class="plan-kicker">Safe preview</span>
+              <strong data-plan-summary>Ready to calculate clip windows</strong>
+            </div>
+            <div class="plan-buttons">
+              <button
+                type="button"
+                class="export-button"
+                data-export-button
+                disabled
+              >
+                Export reel
+              </button>
+              <button
+                type="submit"
+                class="primary-button plan-button"
+                data-plan-button
+              >
+                <span class="button-label">Preview clip plan</span>
+                <span class="button-label button-label-hover" aria-hidden="true"
+                  >Preview clip plan</span
+                >
+              </button>
+            </div>
+          </div>
+          <div class="plan-output" data-plan-output hidden aria-live="polite">
+            <div class="plan-output-head">
+              <span data-job-state>Calculating</span>
+              <button type="button" class="text-button" data-cancel-job hidden>
+                Cancel
+              </button>
+            </div>
+            <div class="plan-progress"><i data-job-progress></i></div>
+            <pre data-job-logs></pre>
+          </div>
+        </form>
+      </section>
+      <section class="recent-section reveal" aria-labelledby="recent-title">
+        <div>
+          <div class="eyebrow">Local history</div>
+          <h2 id="recent-title">Pick up where<br />you left off.</h2>
+        </div>
+        <div class="recent-list" data-recent-list>
+          <button type="button" class="recent-row">
+            <span class="recent-index">01</span
+            ><span
+              ><strong>Arsenal vs Newcastle</strong
+              ><small>Match intake · Today, 14:32</small></span
+            ><span class="recent-state">In progress</span><i>↗</i>
+          </button>
+          <button type="button" class="recent-row">
+            <span class="recent-index">02</span
+            ><span
+              ><strong>Liverpool vs Brighton</strong
+              ><small>24 clips exported · Yesterday</small></span
+            ><span class="recent-state done">Complete</span><i>↗</i>
+          </button>
+          <button type="button" class="recent-row">
+            <span class="recent-index">03</span
+            ><span
+              ><strong>Man City vs Bournemouth</strong
+              ><small>12 clips exported · 24 Sep</small></span
+            ><span class="recent-state done">Complete</span><i>↗</i>
+          </button>
+        </div>
+      </section>
+    </main>
+    <dialog class="event-dialog" data-event-dialog>
+      <div class="event-dialog-head">
+        <div>
+          <span class="eyebrow">Full event table</span>
+          <h2 data-table-title>Match events</h2>
+        </div>
+        <button
+          type="button"
+          data-close-table
+          aria-label="Close full event table"
+        >
+          ×
+        </button>
+      </div>
+      <div class="event-toolbar event-dialog-toolbar">
+        <label
+          ><span class="sr-only">Search full event table</span
+          ><input
+            type="search"
+            placeholder="Search player or event"
+            data-full-event-search
+        /></label>
+        <select aria-label="Filter full table period" data-full-period-filter>
+          <option value="all">All periods</option>
+          <option value="1">First half</option>
+          <option value="2">Second half</option>
+          <option value="3">Extra time 1</option>
+          <option value="4">Extra time 2</option>
+          <option value="5">Penalties</option>
+        </select>
+      </div>
+      <div class="event-table-wrap event-dialog-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Player</th>
+              <th>Event</th>
+              <th>Team</th>
+              <th>xT</th>
+            </tr>
+          </thead>
+          <tbody data-full-event-body></tbody>
+        </table>
+      </div>
+      <div class="event-dialog-foot">
+        <span data-full-row-count>Loading events…</span>
+        <button type="button" data-close-table>Done</button>
+      </div>
+    </dialog>
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
+  </body>
+</html>

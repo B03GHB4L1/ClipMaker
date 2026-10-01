@@ -1,0 +1,104 @@
+name: Desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: "deb,rpm"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf python3-tk rpm
+      - run: python -m pip install -r requirements-build.txt
+      - name: Install bundled browser
+        shell: bash
+        run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
+      - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+      - name: Place backend where Tauri expects it
+        shell: pwsh
+        run: Copy-Item "dist/clipmaker-server/*" "src-tauri/resources/backend/" -Recurse -Force
+      - run: npm ci
+      - run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipMaker-${{ runner.os }}-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Generate Homebrew formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          curl --fail --location --retry 3 \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" \
+            --output release-artifacts/clipmaker-source.tar.gz
+          sha256="$(sha256sum release-artifacts/clipmaker-source.tar.gz | cut -d ' ' -f 1)"
+          python packaging/render_homebrew_formula.py \
+            --version "$version" \
+            --sha256 "$sha256" \
+            --output release-artifacts/clipmaker.rb
+          rm release-artifacts/clipmaker-source.tar.gz
+      - name: Generate WinGet manifests
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          installer="$(find release-artifacts -type f -name '*-setup.exe' -print -quit)"
+          test -n "$installer"
+          installer_sha256="$(sha256sum "$installer" | cut -d ' ' -f 1)"
+          installer_name="$(basename "$installer")"
+          installer_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer_name}"
+          python packaging/render_winget_manifests.py \
+            --version "$version" \
+            --installer-url "$installer_url" \
+            --installer-sha256 "$installer_sha256" \
+            --output release-artifacts/winget
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/clipmaker.rb
+            release-artifacts/winget/*.yaml
+          generate_release_notes: true

@@ -1,0 +1,16 @@
+{
+  "name": "clipmaker-desktop",
+  "private": true,
+  "version": "1.3.0",
+  "scripts": {
+    "tauri": "tauri",
+    "preview:ui": "python -m http.server 4173 -d ui",
+    "dev:shared": "python packaging/clipmaker_api_server.py --port 4174 --data-dir build/shared-ui-data"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  }
+}
