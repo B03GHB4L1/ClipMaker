@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 from packaging.clipmaker_api_server import (
+    build_clip_config,
     create_server,
     detect_source,
     infer_score,
@@ -110,6 +111,71 @@ class SharedApiTests(unittest.TestCase):
         self.assertEqual(result["event_count"], 2)
         self.assertEqual(result["events"][1]["playerName"], "Player Two")
         self.assertEqual(result["events"][1]["period"], 2)
+
+    def test_filter_options_follow_the_saved_scrape(self):
+        csv_path = Path(self.temporary.name) / "filter-options.csv"
+        csv_path.write_text(
+            "minute,second,type,period,playerName,team,outcomeType,is_cross,is_own_goal,prog_pass,xT\n"
+            "1,0,Pass,1,Player One,Home,Successful,True,False,4.5,0.2\n"
+            "2,0,Goal,1,Player Two,Away,Successful,False,False,0,0.8\n",
+            encoding="utf-8",
+        )
+        _, saved = self.request(
+            "/api/matches",
+            method="POST",
+            payload={
+                "home_team": "Home",
+                "away_team": "Away",
+                "csv_path": str(csv_path),
+                "markers": {"1H": "00:00:00", "2H": "00:48:00"},
+            },
+        )
+        status, result = self.request(
+            "/api/filter-options",
+            method="POST",
+            payload={"match_id": saved["match"]["id"]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["action_types"], ["Goal", "Pass"])
+        self.assertEqual(result["team_players"]["Home"], ["Player One"])
+        qualifier_map = {item["flag"]: item for item in result["qualifiers"]}
+        self.assertTrue(qualifier_map["crosses_only"]["available"])
+        self.assertTrue(qualifier_map["progressive_only"]["available"])
+        self.assertFalse(qualifier_map["own_goals_only"]["available"])
+
+    def test_config_applies_team_players_and_extended_qualifiers(self):
+        csv_path = Path(self.temporary.name) / "scope.csv"
+        csv_path.write_text(
+            "minute,second,type,period,playerName,team,is_goal_kick\n"
+            "1,0,Pass,1,Player One,Home,True\n"
+            "2,0,Pass,1,Player Two,Home,False\n"
+            "3,0,Pass,1,Player Three,Away,True\n",
+            encoding="utf-8",
+        )
+        match = {
+            "id": "home-vs-away",
+            "csv_path": str(csv_path),
+            "video_path": "",
+            "markers": {"1H": "00:00:00", "2H": "00:48:00"},
+        }
+        config = build_clip_config(
+            match,
+            {
+                "dry_run": True,
+                "team_filter": "Home",
+                "player_filters": ["Player One"],
+                "qualifier_logic": "all",
+                "goal_kicks_only": True,
+            },
+            Path(self.temporary.name),
+        )
+        import pandas as pd
+
+        filtered = pd.read_csv(config["data_file"])
+        self.assertEqual(filtered["playerName"].tolist(), ["Player One"])
+        self.assertEqual(config["qualifier_logic"], "all")
+        self.assertTrue(config["goal_kicks_only"])
+        Path(config["_temporary_data_file"]).unlink()
 
     def test_dry_run_job_uses_saved_match_and_real_engine(self):
         csv_path = Path(self.temporary.name) / "events.csv"

@@ -32,14 +32,19 @@ const setWorkflowStep = (step) => {
 const workflowTargets = {
   1: ".workspace",
   2: ".sync-section",
-  3: "#filter",
-  4: ".plan-actions",
 };
 
 document
   .querySelectorAll("[data-workflow-progress] [data-step]")
   .forEach((button) => {
     button.addEventListener("click", () => {
+      if (Number(button.dataset.step) >= 3) {
+        const query = activeMatch.id
+          ? `?match=${encodeURIComponent(activeMatch.id)}`
+          : "";
+        window.location.href = `/filters.html${query}`;
+        return;
+      }
       document
         .querySelector(workflowTargets[button.dataset.step])
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -430,8 +435,8 @@ document
       renderHistory(history.matches || []);
       activeMatch = saved.match;
       setWorkflowStep(3);
-      showToast("Match setup saved locally. Event filtering is next.");
-      document.querySelector("#filter").scrollIntoView({ behavior: "smooth" });
+      sessionStorage.setItem("clipmaker.active-match", activeMatch.id);
+      window.location.href = `/filters.html?match=${encodeURIComponent(activeMatch.id)}`;
     } catch (error) {
       showToast(error.message);
     }
