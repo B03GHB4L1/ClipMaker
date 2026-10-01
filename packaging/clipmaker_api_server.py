@@ -59,6 +59,9 @@ class MatchStore:
             "source_url": str(match.get("source_url") or "").strip(),
             "source": str(match.get("source") or "").strip(),
             "event_count": int(match.get("event_count") or 0),
+            "home_score": int(match.get("home_score") or 0),
+            "away_score": int(match.get("away_score") or 0),
+            "score_status": str(match.get("score_status") or "FT").strip(),
             "video_name": str(match.get("video_name") or "").strip(),
             "video_path": str(match.get("video_path") or "").strip(),
             "csv_path": str(match.get("csv_path") or "").strip(),
@@ -353,6 +356,67 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 
+def normalize_period(value: Any) -> int | str:
+    labels = {
+        "firsthalf": 1,
+        "secondhalf": 2,
+        "firstperiodofextratime": 3,
+        "secondperiodofextratime": 4,
+        "extratimefirsthalf": 3,
+        "extratimesecondhalf": 4,
+        "penaltyshootout": 5,
+        "penalties": 5,
+    }
+    text = str(value or "").strip()
+    compact = "".join(character for character in text.lower() if character.isalnum())
+    if compact in labels:
+        return labels[compact]
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return text
+
+
+def infer_score(frame: Any, home_team: str, away_team: str) -> tuple[int, int]:
+    scores = {home_team: 0, away_team: 0}
+    if "type" not in frame.columns or "team" not in frame.columns:
+        return 0, 0
+    for _, event in frame.iterrows():
+        if str(event.get("type") or "").strip().lower() != "goal":
+            continue
+        if normalize_period(event.get("period")) == 5:
+            continue
+        team = str(event.get("team") or "").strip()
+        own_goal = str(event.get("is_own_goal") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if own_goal:
+            team = away_team if team == home_team else home_team if team == away_team else team
+        if team in scores:
+            scores[team] += 1
+    return scores[home_team], scores[away_team]
+
+
+def load_event_rows(csv_path: str) -> dict[str, Any]:
+    import pandas as pd
+
+    path = Path(csv_path).resolve()
+    if not path.is_file():
+        raise ValueError("The saved event table is no longer available.")
+    frame = pd.read_csv(path, low_memory=False)
+    preferred_columns = ["minute", "second", "playerName", "type", "team", "period", "xT"]
+    columns = [column for column in preferred_columns if column in frame.columns]
+    rows = []
+    for row in frame[columns].head(5000).to_dict(orient="records"):
+        clean = {key: json_value(value) for key, value in row.items()}
+        if "period" in clean:
+            clean["period"] = normalize_period(clean["period"])
+        rows.append(clean)
+    return {"events": rows, "event_count": len(frame), "truncated": len(frame) > 5000}
+
+
 def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
     from scoresway_scraper import scrape_scoresway
     from whoscored_scraper import save_scraped_match_csv, scrape_whoscored
@@ -374,6 +438,9 @@ def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
         raise RuntimeError(errors[-1] if errors else "The scraper returned no match data")
 
     frame = result["df"]
+    home_team = str(result.get("home_team") or "")
+    away_team = str(result.get("away_team") or "")
+    home_score, away_score = infer_score(frame, home_team, away_team)
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = save_scraped_match_csv(
         frame,
@@ -389,8 +456,11 @@ def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
         for row in frame[columns].head(200).to_dict(orient="records")
     ]
     return {
-        "home_team": result.get("home_team", ""),
-        "away_team": result.get("away_team", ""),
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_score": home_score,
+        "away_score": away_score,
+        "score_status": "FT",
         "source": result.get("source", source),
         "source_url": url,
         "event_count": len(frame),
@@ -476,7 +546,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 chunk = media.read(min(1024 * 1024, remaining))
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
                 remaining -= len(chunk)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -534,6 +607,33 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                         }
                     },
                 )
+                return
+            if path == "/api/files/reopen":
+                match = self.store.get(str(body.get("match_id") or "").strip())
+                if match is None:
+                    raise ValueError("That saved match is no longer available.")
+                selected = Path(str(match.get("video_path") or "")).resolve()
+                if not selected.is_file():
+                    raise ValueError("The saved video has moved or is no longer available.")
+                token = uuid.uuid4().hex
+                self.media_files[token] = selected
+                self.send_json(
+                    HTTPStatus.OK,
+                    {
+                        "file": {
+                            "name": selected.name,
+                            "path": str(selected),
+                            "size": selected.stat().st_size,
+                            "url": f"/api/media/{token}",
+                        }
+                    },
+                )
+                return
+            if path == "/api/events":
+                csv_path = str(body.get("csv_path") or "").strip()
+                if not csv_path:
+                    raise ValueError("Scrape or reopen a saved match before opening the table.")
+                self.send_json(HTTPStatus.OK, load_event_rows(csv_path))
                 return
             if path == "/api/jobs":
                 match_id = str(body.get("match_id") or "").strip()
