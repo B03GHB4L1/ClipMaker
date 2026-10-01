@@ -44,7 +44,7 @@ def wait_until_ready(port: int, timeout: float = 90.0) -> bool:
 def main() -> int:
     install_root = Path(__file__).resolve().parent
     requirements = install_root / "requirements.txt"
-    server = install_root / "clipmaker_server.py"
+    server = install_root / "clipmaker_api_server.py"
     digest = hashlib.sha256(requirements.read_bytes()).hexdigest()
 
     root = runtime_root()
@@ -69,7 +69,10 @@ def main() -> int:
         stamp.write_text(digest, encoding="utf-8")
 
     port = available_port()
-    process = subprocess.Popen([str(python), str(server), "--port", str(port)])
+    data_dir = root / "data"
+    process = subprocess.Popen(
+        [str(python), str(server), "--port", str(port), "--data-dir", str(data_dir)]
+    )
     try:
         if not wait_until_ready(port):
             process.terminate()

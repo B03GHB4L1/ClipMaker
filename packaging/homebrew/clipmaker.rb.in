@@ -7,11 +7,12 @@ class Clipmaker < Formula
 
   depends_on "ffmpeg"
   depends_on "python@3.12"
+  depends_on "python-tk@3.12"
 
   def install
-    libexec.install "app", "requirements.txt"
+    libexec.install "app", "ui", "requirements.txt"
     libexec.install "packaging/clipmaker_bootstrap.py"
-    libexec.install "packaging/clipmaker_server.py"
+    libexec.install "packaging/clipmaker_api_server.py"
 
     (bin/"clipmaker").write <<~SH
       #!/bin/bash

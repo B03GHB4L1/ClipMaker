@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from unittest.mock import patch
 
 from packaging.clipmaker_api_server import create_server, detect_source
 
@@ -135,6 +136,26 @@ class SharedApiTests(unittest.TestCase):
             )
         self.assertEqual(context.exception.code, 400)
         context.exception.close()
+
+    def test_native_video_picker_returns_path_and_streams_ranges(self):
+        video_path = Path(self.temporary.name) / "match.mp4"
+        video_path.write_bytes(b"0123456789")
+        with patch(
+            "packaging.clipmaker_api_server.choose_video_file",
+            return_value=video_path,
+        ):
+            status, result = self.request("/api/files/video", method="POST", payload={})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["file"]["path"], str(video_path))
+        request = Request(
+            self.base_url + result["file"]["url"],
+            headers={"Range": "bytes=2-5"},
+        )
+        with urlopen(request, timeout=3) as response:
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.headers["Content-Range"], "bytes 2-5/10")
+            self.assertEqual(response.read(), b"2345")
 
 
 if __name__ == "__main__":

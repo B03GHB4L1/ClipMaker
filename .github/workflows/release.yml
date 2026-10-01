@@ -43,7 +43,7 @@ jobs:
       - name: Install bundled browser
         shell: bash
         run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
-      - run: python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+      - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
       - name: Place backend where Tauri expects it
         shell: pwsh
         run: Copy-Item "dist/clipmaker-server/*" "src-tauri/resources/backend/" -Recurse -Force

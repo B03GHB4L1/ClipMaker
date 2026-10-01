@@ -78,6 +78,22 @@ const renderMatch = (match) => {
     `${count} events found`;
   document.querySelector("[data-row-count]").textContent = `${count} rows`;
   if (Array.isArray(match.events)) renderEvents(match.events);
+  if (match.markers) {
+    document
+      .querySelectorAll(".period-selector [data-period]")
+      .forEach((button) => {
+        const marker = match.markers[button.dataset.period];
+        if (marker) button.dataset.marker = marker;
+      });
+    const hasExtraTime = Boolean(match.markers.ET1 || match.markers.ET2);
+    document.querySelector("[data-extra-time]").checked = hasExtraTime;
+    document.querySelector("[data-penalties]").checked = Boolean(
+      match.markers.PEN,
+    );
+    setOptionalPeriods();
+    const activePeriod = document.querySelector(".period-selector .is-active");
+    if (activePeriod) updateTimeLabels(activePeriod.dataset.marker);
+  }
 };
 
 const renderHistory = (matches) => {
@@ -207,30 +223,58 @@ document
     }
   });
 
-document
-  .querySelector("[data-dropzone]")
-  .addEventListener("click", () =>
-    document.querySelector("[data-video-input]").click(),
-  );
 const videoInput = document.querySelector("[data-video-input]");
 const matchVideo = document.querySelector("[data-match-video]");
 const matchFrame = document.querySelector(".match-frame");
 const previewName = document.querySelector(".preview-top span:first-child");
 const previewDuration = document.querySelector(".preview-top span:last-child");
 let videoUrl;
-videoInput.addEventListener("change", () => {
-  const file = videoInput.files[0];
-  if (!file) return;
-  if (videoUrl) URL.revokeObjectURL(videoUrl);
-  videoUrl = URL.createObjectURL(file);
+
+const showSelectedVideo = ({ name, size, url, path }) => {
+  if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
+  videoUrl = url;
   matchVideo.src = videoUrl;
   matchFrame.classList.add("has-video");
   document.querySelector("[data-file-row]").hidden = false;
-  document.querySelector(".file-info strong").textContent = file.name;
+  document.querySelector(".file-info strong").textContent = name;
   document.querySelector(".file-info small").textContent =
-    `${(file.size / 1073741824).toFixed(1)} GB · local file`;
-  previewName.textContent = file.name;
+    `${(size / 1073741824).toFixed(1)} GB · local file`;
+  previewName.textContent = name;
+  activeMatch.video_name = name;
+  activeMatch.video_path = path || "";
+  if (jobState?.textContent === "Clip plan ready") {
+    exportButton.disabled = !activeMatch.video_path;
+  }
   showToast("Footage loaded locally. It never leaves this device.");
+};
+
+document
+  .querySelector("[data-dropzone]")
+  .addEventListener("click", async () => {
+    if (!apiAvailable) {
+      videoInput.click();
+      return;
+    }
+    try {
+      const result = await apiRequest("/api/files/video", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (!result.cancelled) showSelectedVideo(result.file);
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
+
+videoInput.addEventListener("change", () => {
+  const file = videoInput.files[0];
+  if (!file) return;
+  showSelectedVideo({
+    name: file.name,
+    size: file.size,
+    url: URL.createObjectURL(file),
+    path: "",
+  });
 });
 matchVideo.addEventListener("loadedmetadata", () => {
   previewDuration.textContent = formatTime(matchVideo.duration);
@@ -240,14 +284,28 @@ document.querySelector(".remove-button").addEventListener("click", () => {
   matchVideo.pause();
   matchVideo.removeAttribute("src");
   matchFrame.classList.remove("has-video");
-  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
   videoUrl = undefined;
+  activeMatch.video_name = "";
+  activeMatch.video_path = "";
   videoInput.value = "";
   showToast("Video removed from this setup");
 });
 document
   .querySelector("[data-new-project]")
   .addEventListener("click", () => showToast("New project workspace ready"));
+
+const getActiveMarkers = () => {
+  const markers = {};
+  document
+    .querySelectorAll(".period-selector [data-period]")
+    .forEach((button) => {
+      if (!button.disabled)
+        markers[button.dataset.period] = button.dataset.marker;
+    });
+  return markers;
+};
+
 document
   .querySelector("[data-continue]")
   .addEventListener("click", async () => {
@@ -255,13 +313,6 @@ document
       showToast("Design preview: timeline confirmation is ready to connect");
       return;
     }
-    const markers = {};
-    document
-      .querySelectorAll(".period-selector [data-period]")
-      .forEach((button) => {
-        if (!button.disabled)
-          markers[button.dataset.period] = button.dataset.marker;
-      });
     try {
       const saved = await apiRequest("/api/matches", {
         method: "POST",
@@ -269,7 +320,7 @@ document
           ...activeMatch,
           source_url: document.querySelector("#match-url").value.trim(),
           video_name: document.querySelector(".file-info strong").textContent,
-          markers,
+          markers: getActiveMarkers(),
           status: "in_progress",
         }),
       });
@@ -285,6 +336,7 @@ document
 
 const filterForm = document.querySelector("[data-filter-form]");
 const planButton = document.querySelector("[data-plan-button]");
+const exportButton = document.querySelector("[data-export-button]");
 const planOutput = document.querySelector("[data-plan-output]");
 const jobState = document.querySelector("[data-job-state]");
 const jobLogs = document.querySelector("[data-job-logs]");
@@ -308,12 +360,15 @@ const renderJob = (job) => {
   const ratio = progress?.total ? progress.current / progress.total : 0;
   jobProgress.style.width = `${job.status === "complete" ? 100 : Math.min(100, ratio * 100)}%`;
   planButton.disabled = !finished;
+  exportButton.disabled = !finished || !activeMatch.video_path;
   cancelJobButton.hidden = finished;
   if (finished) {
     activeJobId = undefined;
     document.querySelector("[data-plan-summary]").textContent =
       job.status === "complete"
-        ? "The plan is ready for review"
+        ? job.dry_run
+          ? "The plan is ready for review"
+          : "Your reel has been exported"
         : labels[job.status];
   }
 };
@@ -333,8 +388,29 @@ const pollJob = async (jobId) => {
   }
 };
 
-filterForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
+const getFilterOptions = (dryRun) => {
+  const options = {
+    dry_run: dryRun,
+    filter_types: Array.from(
+      filterForm.querySelectorAll(
+        '.event-choices input[type="checkbox"]:checked',
+      ),
+      (input) => input.value,
+    ),
+    half_filter: document.querySelector("[data-half-filter]").value,
+    before_buffer: Number(document.querySelector("[data-before-buffer]").value),
+    after_buffer: Number(document.querySelector("[data-after-buffer]").value),
+    min_gap: Number(document.querySelector("[data-min-gap]").value),
+    pitch_zone_filter: document.querySelector("[data-pitch-zone]").value,
+    depth_zone_filter: document.querySelector("[data-depth-zone]").value,
+  };
+  filterForm.querySelectorAll("[data-filter-flag]").forEach((input) => {
+    options[input.dataset.filterFlag] = input.checked;
+  });
+  return options;
+};
+
+const startClipJob = async (dryRun) => {
   if (!apiAvailable) {
     showToast("Start the ClipMaker engine to calculate a real clip plan");
     return;
@@ -344,35 +420,34 @@ filterForm.addEventListener("submit", async (event) => {
     document.querySelector("[data-continue]").focus();
     return;
   }
-  const filterTypes = Array.from(
-    filterForm.querySelectorAll(
-      '.event-choices input[type="checkbox"]:checked',
-    ),
-    (input) => input.value,
-  );
+  if (!dryRun && !activeMatch.video_path) {
+    showToast("Choose match footage before exporting the reel");
+    return;
+  }
   planOutput.hidden = false;
   planButton.disabled = true;
+  exportButton.disabled = true;
   cancelJobButton.hidden = false;
-  jobState.textContent = "Starting engine";
-  jobLogs.textContent = "Preparing event filters…";
+  jobState.textContent = dryRun ? "Starting engine" : "Starting export";
+  jobLogs.textContent = dryRun
+    ? "Preparing event filters…"
+    : "Preparing video export…";
   jobProgress.style.width = "4%";
   try {
+    const saved = await apiRequest("/api/matches", {
+      method: "POST",
+      body: JSON.stringify({
+        ...activeMatch,
+        markers: getActiveMarkers(),
+        status: "in_progress",
+      }),
+    });
+    activeMatch = saved.match;
     const result = await apiRequest("/api/jobs", {
       method: "POST",
       body: JSON.stringify({
         match_id: activeMatch.id,
-        options: {
-          dry_run: true,
-          filter_types: filterTypes,
-          half_filter: document.querySelector("[data-half-filter]").value,
-          before_buffer: Number(
-            document.querySelector("[data-before-buffer]").value,
-          ),
-          after_buffer: Number(
-            document.querySelector("[data-after-buffer]").value,
-          ),
-          min_gap: Number(document.querySelector("[data-min-gap]").value),
-        },
+        options: getFilterOptions(dryRun),
       }),
     });
     activeJobId = result.job.id;
@@ -381,13 +456,21 @@ filterForm.addEventListener("submit", async (event) => {
   } catch (error) {
     activeJobId = undefined;
     planButton.disabled = false;
+    exportButton.disabled = !activeMatch.video_path;
     cancelJobButton.hidden = true;
     jobState.textContent = "Setup needs attention";
     jobLogs.textContent = error.message;
     jobProgress.style.width = "0%";
     showToast(error.message);
   }
+};
+
+filterForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await startClipJob(true);
 });
+
+exportButton.addEventListener("click", () => startClipJob(false));
 
 cancelJobButton.addEventListener("click", async () => {
   if (!activeJobId) return;
@@ -407,6 +490,12 @@ const playhead = document.querySelector("[data-playhead]");
 const timeLabels = document.querySelectorAll(
   "[data-time], [data-timeline-time]",
 );
+const updateTimeLabels = (value) => {
+  timeLabels.forEach((label) => {
+    if (label instanceof HTMLInputElement) label.value = value;
+    else label.textContent = value;
+  });
+};
 const scrubCursor = document.querySelector(".scrub-cursor");
 let scrubbing = false;
 const formatTime = (seconds) => {
@@ -430,9 +519,7 @@ const updateTimeline = (clientX) => {
   if (matchFrame.classList.contains("has-video"))
     matchVideo.currentTime = seconds;
   const value = formatTime(seconds);
-  timeLabels.forEach((label) => {
-    label.textContent = value;
-  });
+  updateTimeLabels(value);
   const activePeriod = document.querySelector(".period-selector .is-active");
   if (activePeriod) activePeriod.dataset.marker = value;
 };
@@ -458,9 +545,7 @@ timeline.addEventListener("pointerleave", () => {
 });
 document.querySelector(".text-button").addEventListener("click", () => {
   playhead.style.left = "32%";
-  timeLabels.forEach((label) => {
-    label.textContent = "00:03:18";
-  });
+  updateTimeLabels("00:03:18");
   const activePeriod = document.querySelector(".period-selector .is-active");
   if (activePeriod) activePeriod.dataset.marker = "00:03:18";
   showToast("Kick-off marker reset");
@@ -485,6 +570,33 @@ const periodLabels = {
   ET2: "Extra-time second-half kick-off",
   PEN: "First penalty kick",
 };
+const setOptionalPeriods = () => {
+  const extraTime = document.querySelector("[data-extra-time]").checked;
+  const penalties = document.querySelector("[data-penalties]").checked;
+  document.querySelector('[data-period="ET1"]').disabled = !extraTime;
+  document.querySelector('[data-period="ET2"]').disabled = !extraTime;
+  document.querySelector('[data-period="PEN"]').disabled = !penalties;
+  const active = document.querySelector(".period-selector .is-active");
+  if (active?.disabled) document.querySelector('[data-period="1H"]').click();
+};
+
+document
+  .querySelectorAll("[data-extra-time], [data-penalties]")
+  .forEach((input) => input.addEventListener("change", setOptionalPeriods));
+
+document.querySelector("[data-time]").addEventListener("change", (event) => {
+  const value = event.currentTarget.value.trim();
+  if (!/^\d{2}:\d{2}:\d{2}$/.test(value)) {
+    const active = document.querySelector(".period-selector .is-active");
+    updateTimeLabels(active.dataset.marker);
+    showToast("Use kickoff time format HH:MM:SS");
+    return;
+  }
+  const active = document.querySelector(".period-selector .is-active");
+  active.dataset.marker = value;
+  updateTimeLabels(value);
+});
+
 document
   .querySelectorAll(".period-selector [data-period]")
   .forEach((button) => {
@@ -498,9 +610,7 @@ document
         });
       document.querySelector("[data-period-label]").textContent =
         periodLabels[button.dataset.period];
-      timeLabels.forEach((label) => {
-        label.textContent = button.dataset.marker;
-      });
+      updateTimeLabels(button.dataset.marker);
       const seconds = button.dataset.marker
         .split(":")
         .reduce((total, part) => total * 60 + Number(part), 0);

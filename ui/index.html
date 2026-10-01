@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=5" />
-    <script type="module" src="app.js?v=5"></script>
+    <link rel="stylesheet" href="styles.css?v=6" />
+    <script type="module" src="app.js?v=6"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
@@ -314,9 +314,19 @@
               PEN
             </button>
           </div>
+          <div class="period-options">
+            <label><input type="checkbox" data-extra-time /> Extra time</label>
+            <label><input type="checkbox" data-penalties /> Penalties</label>
+          </div>
           <div class="time-readout">
             <span data-period-label>First-half kick-off</span
-            ><strong data-time>00:03:18</strong>
+            ><input
+              type="text"
+              inputmode="numeric"
+              value="00:03:18"
+              aria-label="Selected period kick-off time"
+              data-time
+            />
           </div>
           <p class="period-note">
             Extra time and penalties are enabled only when the match includes
@@ -467,21 +477,192 @@
               <input type="number" min="0" max="60" value="6" data-min-gap />
             </label>
           </div>
+          <details class="advanced-filters">
+            <summary>
+              <span>Refine selection</span><small>Optional</small>
+            </summary>
+            <div class="advanced-filter-grid">
+              <fieldset>
+                <legend>Outcome &amp; movement</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="successful_only"
+                  />Successful</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="unsuccessful_only"
+                  />Unsuccessful</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="progressive_only"
+                  />Progressive</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="fast_break_only"
+                  />Fast break</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="touch_in_box_only"
+                  />Touch in box</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Passing</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="key_passes_only"
+                  />Key passes</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="crosses_only"
+                  />Crosses</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="long_balls_only"
+                  />Long balls</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="through_balls_only"
+                  />Through balls</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="switches_only"
+                  />Switches</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="diagonals_only"
+                  />Diagonals</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="corners_only"
+                  />Corners</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="freekicks_only"
+                  />Free kicks</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Shots &amp; assists</legend>
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="big_chances_only"
+                  />Big chances</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="penalties_only"
+                  />Penalties</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="volleys_only"
+                  />Volleys</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="headers_only"
+                  />Headers</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="left_foot_only"
+                  />Left foot</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="right_foot_only"
+                  />Right foot</label
+                >
+                <label
+                  ><input
+                    type="checkbox"
+                    data-filter-flag="intentional_assists_only"
+                  />Assists</label
+                >
+              </fieldset>
+              <fieldset>
+                <legend>Location</legend>
+                <label class="select-filter"
+                  >Pitch lane
+                  <select data-pitch-zone>
+                    <option value="">Any lane</option>
+                    <option>Left Wing</option>
+                    <option>Left Half Space</option>
+                    <option>Centre</option>
+                    <option>Right Half Space</option>
+                    <option>Right Wing</option>
+                    <option>Entire Left Side</option>
+                    <option>Entire Right Side</option>
+                  </select>
+                </label>
+                <label class="select-filter"
+                  >Pitch depth
+                  <select data-depth-zone>
+                    <option value="">Any depth</option>
+                    <option>Defensive Third</option>
+                    <option>Middle Third</option>
+                    <option>Attacking Third</option>
+                  </select>
+                </label>
+              </fieldset>
+            </div>
+          </details>
           <div class="plan-actions">
             <div>
               <span class="plan-kicker">Safe preview</span>
               <strong data-plan-summary>Ready to calculate clip windows</strong>
             </div>
-            <button
-              type="submit"
-              class="primary-button plan-button"
-              data-plan-button
-            >
-              <span class="button-label">Preview clip plan</span>
-              <span class="button-label button-label-hover" aria-hidden="true"
-                >Preview clip plan</span
+            <div class="plan-buttons">
+              <button
+                type="button"
+                class="export-button"
+                data-export-button
+                disabled
               >
-            </button>
+                Export reel
+              </button>
+              <button
+                type="submit"
+                class="primary-button plan-button"
+                data-plan-button
+              >
+                <span class="button-label">Preview clip plan</span>
+                <span class="button-label button-label-hover" aria-hidden="true"
+                  >Preview clip plan</span
+                >
+              </button>
+            </div>
           </div>
           <div class="plan-output" data-plan-output hidden aria-live="polite">
             <div class="plan-output-head">
