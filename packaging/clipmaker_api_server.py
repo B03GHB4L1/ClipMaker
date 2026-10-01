@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import queue
 import sys
@@ -19,7 +20,15 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def resource_root() -> Path:
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        return Path(bundle_root)
+    script_root = Path(__file__).resolve().parent
+    return script_root if (script_root / "app").is_dir() else script_root.parent
+
+
+ROOT = resource_root()
 APP_DIR = ROOT / "app"
 UI_DIR = ROOT / "ui"
 if str(APP_DIR) not in sys.path:
@@ -107,7 +116,52 @@ FILTER_FLAGS = {
     "gk_saves_only",
     "yellow_cards_only",
     "red_cards_only",
+    "switches_only",
+    "diagonals_only",
+    "big_chances_created_only",
+    "own_goals_only",
+    "chipped_only",
+    "direct_from_corner_only",
+    "left_foot_only",
+    "right_foot_only",
+    "fast_break_only",
+    "touch_in_box_only",
+    "assist_throughball_only",
+    "assist_cross_only",
+    "assist_corner_only",
+    "assist_freekick_only",
+    "intentional_assists_only",
+    "second_yellow_only",
+    "nutmegs_only",
+    "success_in_box_only",
+    "throw_ins_only",
+    "box_entry_pass_only",
+    "deep_completion_only",
+    "final_third_entry_pass_only",
+    "box_entry_carry_only",
+    "final_third_entry_carry_only",
 }
+
+
+def choose_video_file() -> Path | None:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        selected = filedialog.askopenfilename(
+            parent=root,
+            title="Choose full match footage",
+            filetypes=[
+                ("Video files", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v"),
+                ("All files", "*.*"),
+            ],
+        )
+    finally:
+        root.destroy()
+    return Path(selected).resolve() if selected else None
 
 
 class JobManager:
@@ -360,6 +414,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
     def jobs(self) -> JobManager:
         return self.server.jobs  # type: ignore[attr-defined]
 
+    @property
+    def media_files(self) -> dict[str, Path]:
+        return self.server.media_files  # type: ignore[attr-defined]
+
     def translate_path(self, path: str) -> str:
         parsed = urlparse(path).path
         relative = parsed.lstrip("/") or "index.html"
@@ -386,6 +444,41 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             raise ValueError("The request body must be a JSON object")
         return value
 
+    def send_media(self, token: str) -> None:
+        media_path = self.media_files.get(token)
+        if media_path is None or not media_path.is_file():
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Video is no longer available"})
+            return
+        size = media_path.stat().st_size
+        start = 0
+        end = size - 1
+        range_header = self.headers.get("Range", "")
+        if range_header.startswith("bytes="):
+            requested = range_header.removeprefix("bytes=").split(",", 1)[0]
+            first, _, last = requested.partition("-")
+            if first:
+                start = max(0, min(int(first), size - 1))
+            if last:
+                end = max(start, min(int(last), size - 1))
+        length = end - start + 1
+        status = HTTPStatus.PARTIAL_CONTENT if range_header else HTTPStatus.OK
+        self.send_response(status)
+        self.send_header("Content-Type", mimetypes.guess_type(media_path.name)[0] or "video/mp4")
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        with media_path.open("rb") as media:
+            media.seek(start)
+            remaining = length
+            while remaining:
+                chunk = media.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/api/health":
@@ -393,6 +486,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/matches":
             self.send_json(HTTPStatus.OK, {"matches": self.store.list()})
+            return
+        if path.startswith("/api/media/"):
+            self.send_media(path.rsplit("/", 1)[-1])
             return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
@@ -419,6 +515,25 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 url = str(body.get("url") or "").strip()
                 scraped = scrape_match(url, self.match_data_dir)
                 self.send_json(HTTPStatus.OK, {"match": scraped})
+                return
+            if path == "/api/files/video":
+                selected = choose_video_file()
+                if selected is None:
+                    self.send_json(HTTPStatus.OK, {"cancelled": True})
+                    return
+                token = uuid.uuid4().hex
+                self.media_files[token] = selected
+                self.send_json(
+                    HTTPStatus.OK,
+                    {
+                        "file": {
+                            "name": selected.name,
+                            "path": str(selected),
+                            "size": selected.stat().st_size,
+                            "url": f"/api/media/{token}",
+                        }
+                    },
+                )
                 return
             if path == "/api/jobs":
                 match_id = str(body.get("match_id") or "").strip()
@@ -452,6 +567,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.match_store = MatchStore(data_dir)  # type: ignore[attr-defined]
     server.match_data_dir = data_dir / "match-data"  # type: ignore[attr-defined]
     server.jobs = JobManager()  # type: ignore[attr-defined]
+    server.media_files = {}  # type: ignore[attr-defined]
     return server
 
 

@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_all
 
 ROOT = Path(SPECPATH).parents[1]
 
-datas = [(str(ROOT / "app"), "app")]
+datas = [(str(ROOT / "app"), "app"), (str(ROOT / "ui"), "ui")]
 binaries = []
 hiddenimports = [
     "clipmaker_core",
@@ -16,11 +16,6 @@ hiddenimports = [
     "tkinter",
     "tkinter.filedialog",
 ]
-hiddenimports += collect_submodules("streamlit.runtime.scriptrunner")
-
-datas += collect_data_files("streamlit")
-datas += copy_metadata("streamlit")
-
 for package in ("playwright", "imageio_ffmpeg"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
@@ -28,7 +23,7 @@ for package in ("playwright", "imageio_ffmpeg"):
     hiddenimports += package_hidden
 
 a = Analysis(
-    [str(ROOT / "packaging" / "clipmaker_server.py")],
+    [str(ROOT / "packaging" / "clipmaker_api_server.py")],
     pathex=[str(ROOT), str(ROOT / "app")],
     binaries=binaries,
     datas=datas,
@@ -47,6 +42,7 @@ a = Analysis(
         "pytest",
         "scipy",
         "sklearn",
+        "streamlit",
         "sympy",
         "tensorflow",
         "torch",
