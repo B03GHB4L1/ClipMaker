@@ -428,14 +428,26 @@ body:not(.is-loaded) .line > span {
   align-items: center;
   margin-top: 42px;
 }
-.step-track b {
+.step-track button {
+  min-width: 0;
   height: 3px;
+  padding: 0;
+  border: 0;
   background: #d7d8d2;
+  cursor: pointer;
+  transition:
+    height 0.2s,
+    background 0.2s;
 }
-.step-track b.is-current {
+.step-track button:hover,
+.step-track button.is-current {
+  height: 5px;
   background: #11130f;
 }
-.step-track span {
+.step-track button.is-complete {
+  background: #8eae27;
+}
+.step-track output {
   margin-left: 10px;
   font:
     10px ui-monospace,
@@ -621,12 +633,14 @@ input:focus {
   overflow: auto;
   border-top: 1px solid #e7e8e2;
 }
-.event-browser table {
+.event-browser table,
+.event-dialog table {
   width: 100%;
   border-collapse: collapse;
   font-size: 11px;
 }
-.event-browser th {
+.event-browser th,
+.event-dialog th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -641,7 +655,9 @@ input:focus {
   text-transform: uppercase;
 }
 .event-browser th,
-.event-browser td {
+.event-browser td,
+.event-dialog th,
+.event-dialog td {
   height: 38px;
   padding: 0 10px;
   border-bottom: 1px solid #ebebe7;
@@ -1146,12 +1162,17 @@ input:focus {
   top: 50%;
   width: 52px;
   height: 52px;
-  border: 0;
+  border: 1px solid rgba(255, 255, 255, 0.62);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
-  color: #11130f;
+  background: rgba(255, 255, 255, 0.46);
+  color: rgba(17, 19, 15, 0.82);
+  backdrop-filter: blur(7px);
   transform: translate(-50%, -50%);
   cursor: pointer;
+}
+.play-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.32;
 }
 .timeline {
   position: relative;
@@ -1635,6 +1656,76 @@ input:focus {
 }
 .recent-row:hover i {
   transform: translate(3px, -3px);
+}
+.event-dialog {
+  width: min(1120px, calc(100vw - 40px));
+  height: min(780px, calc(100vh - 40px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #d5d7cf;
+  border-radius: 8px;
+  background: #f8f8f5;
+  color: #11130f;
+  box-shadow: 0 30px 90px rgba(17, 19, 15, 0.24);
+}
+.event-dialog[open] {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+.event-dialog::backdrop {
+  background: rgba(17, 19, 15, 0.5);
+  backdrop-filter: blur(5px);
+}
+.event-dialog-head,
+.event-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+}
+.event-dialog-head {
+  border-bottom: 1px solid #ddded8;
+}
+.event-dialog-head h2 {
+  margin: 7px 0 0;
+  font-size: 24px;
+}
+.event-dialog-head button {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: #e8e9e3;
+  font-size: 24px;
+  cursor: pointer;
+}
+.event-dialog-toolbar {
+  padding: 14px 24px;
+  border-bottom: 1px solid #ddded8;
+}
+.event-dialog-table {
+  max-height: none;
+  margin: 0 24px;
+  overflow: auto;
+  border: 1px solid #e0e1db;
+}
+.event-dialog-foot {
+  border-top: 1px solid #ddded8;
+  color: #777a72;
+  font:
+    10px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.event-dialog-foot button {
+  min-height: 36px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 5px;
+  background: #11130f;
+  color: #fff;
+  cursor: pointer;
 }
 .toast {
   position: fixed;

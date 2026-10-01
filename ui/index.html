@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=6" />
-    <script type="module" src="app.js?v=6"></script>
+    <link rel="stylesheet" href="styles.css?v=7" />
+    <script type="module" src="app.js?v=7"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
@@ -77,8 +77,33 @@
               Bring in event data and match footage. ClipMaker aligns the
               timeline before you shape the reel.
             </p>
-            <div class="step-track" aria-label="Workflow progress: step 1 of 4">
-              <b class="is-current"></b><b></b><b></b><b></b><span>1 / 4</span>
+            <div
+              class="step-track"
+              aria-label="Workflow progress"
+              data-workflow-progress
+            >
+              <button
+                class="is-current"
+                type="button"
+                data-step="1"
+                aria-label="Go to match intake"
+              ></button>
+              <button
+                type="button"
+                data-step="2"
+                aria-label="Go to timeline sync"
+              ></button>
+              <button
+                type="button"
+                data-step="3"
+                aria-label="Go to event filters"
+              ></button>
+              <button
+                type="button"
+                data-step="4"
+                aria-label="Go to export"
+              ></button>
+              <output data-step-label>1 / 4</output>
             </div>
           </div>
         </div>
@@ -122,7 +147,9 @@
                 ><strong data-home-team>Arsenal</strong>
               </div>
               <div class="score">
-                <strong>2</strong><span>FT</span><strong>1</strong>
+                <strong data-home-score>0</strong
+                ><span data-score-status>FT</span
+                ><strong data-away-score>0</strong>
               </div>
               <div>
                 <span class="team-badge newcastle">N</span
@@ -212,7 +239,7 @@
             </div>
             <div class="event-footer">
               <span>Showing sample rows</span
-              ><button type="button">Open full table ↗</button>
+              ><button type="button" data-open-table>Open full table ↗</button>
             </div>
           </details>
         </div>
@@ -222,7 +249,7 @@
               <span class="section-number">B</span>
               <h2>Match footage</h2>
             </div>
-            <span class="status-tag">1 file</span>
+            <span class="status-tag" data-file-count>No file</span>
           </div>
           <button class="dropzone" type="button" data-dropzone>
             <span class="drop-icon" aria-hidden="true">+</span
@@ -235,7 +262,7 @@
             accept="video/*,.mkv"
             data-video-input
           />
-          <div class="file-row" data-file-row>
+          <div class="file-row" data-file-row hidden>
             <span class="file-thumb"><i></i></span
             ><span class="file-info"
               ><strong>ARS_NEW_full_match.mp4</strong
@@ -335,7 +362,7 @@
         </div>
         <div class="preview-shell" data-preview>
           <div class="preview-top">
-            <span>ARS_NEW_full_match.mp4</span><span>01:53:42</span>
+            <span>No footage selected</span><span>--:--:--</span>
           </div>
           <div class="match-frame" aria-label="Football match video preview">
             <video
@@ -354,10 +381,16 @@
               ><span class="player p5"></span><span class="ball"></span>
             </div>
             <div class="frame-score">
-              <span>ARS</span><strong>0 - 0</strong><span>NEW</span
-              ><time>00:03</time>
+              <span data-frame-home>HOME</span
+              ><strong data-frame-score>0 - 0</strong
+              ><span data-frame-away>AWAY</span><time>00:03</time>
             </div>
-            <button class="play-button" type="button" aria-label="Play preview">
+            <button
+              class="play-button"
+              type="button"
+              aria-label="Play preview"
+              disabled
+            >
               ▶
             </button>
           </div>
@@ -368,7 +401,7 @@
             <div class="playhead" data-playhead><span></span></div>
             <div class="timeline-label">
               <span>00:00</span><strong data-timeline-time>00:03:18</strong
-              ><span>10:00</span>
+              ><span data-timeline-end>--:--:--</span>
             </div>
           </div>
           <div class="preview-actions">
@@ -706,6 +739,56 @@
         </div>
       </section>
     </main>
+    <dialog class="event-dialog" data-event-dialog>
+      <div class="event-dialog-head">
+        <div>
+          <span class="eyebrow">Full event table</span>
+          <h2 data-table-title>Match events</h2>
+        </div>
+        <button
+          type="button"
+          data-close-table
+          aria-label="Close full event table"
+        >
+          ×
+        </button>
+      </div>
+      <div class="event-toolbar event-dialog-toolbar">
+        <label
+          ><span class="sr-only">Search full event table</span
+          ><input
+            type="search"
+            placeholder="Search player or event"
+            data-full-event-search
+        /></label>
+        <select aria-label="Filter full table period" data-full-period-filter>
+          <option value="all">All periods</option>
+          <option value="1">First half</option>
+          <option value="2">Second half</option>
+          <option value="3">Extra time 1</option>
+          <option value="4">Extra time 2</option>
+          <option value="5">Penalties</option>
+        </select>
+      </div>
+      <div class="event-table-wrap event-dialog-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Player</th>
+              <th>Event</th>
+              <th>Team</th>
+              <th>xT</th>
+            </tr>
+          </thead>
+          <tbody data-full-event-body></tbody>
+        </table>
+      </div>
+      <div class="event-dialog-foot">
+        <span data-full-row-count>Loading events…</span>
+        <button type="button" data-close-table>Done</button>
+      </div>
+    </dialog>
     <div class="toast" role="status" aria-live="polite" data-toast></div>
   </body>
 </html>
