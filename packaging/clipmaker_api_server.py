@@ -101,48 +101,75 @@ class MatchStore:
         return next((item for item in self.list() if item.get("id") == match_id), None)
 
 
-FILTER_FLAGS = {
-    "progressive_only",
-    "key_passes_only",
-    "shots_and_key_passes_only",
-    "successful_only",
-    "unsuccessful_only",
-    "crosses_only",
-    "long_balls_only",
-    "through_balls_only",
-    "corners_only",
-    "freekicks_only",
-    "headers_only",
-    "big_chances_only",
-    "penalties_only",
-    "volleys_only",
-    "gk_saves_only",
-    "yellow_cards_only",
-    "red_cards_only",
-    "switches_only",
-    "diagonals_only",
-    "big_chances_created_only",
-    "own_goals_only",
-    "chipped_only",
-    "direct_from_corner_only",
-    "left_foot_only",
-    "right_foot_only",
-    "fast_break_only",
-    "touch_in_box_only",
-    "assist_throughball_only",
-    "assist_cross_only",
-    "assist_corner_only",
-    "assist_freekick_only",
-    "intentional_assists_only",
-    "second_yellow_only",
-    "nutmegs_only",
-    "success_in_box_only",
-    "throw_ins_only",
-    "box_entry_pass_only",
-    "deep_completion_only",
-    "final_third_entry_pass_only",
-    "box_entry_carry_only",
-    "final_third_entry_carry_only",
+FILTER_QUALIFIERS = [
+    ("successful_only", "outcomeType", "Successful", "Outcome & movement", "Successful"),
+    ("unsuccessful_only", "outcomeType", "Unsuccessful", "Outcome & movement", "Unsuccessful"),
+    ("progressive_only", "__progressive__", "Progressive actions", "Outcome & movement", None),
+    ("fast_break_only", "is_fast_break", "Fast break", "Outcome & movement", None),
+    ("touch_in_box_only", "is_touch_in_box", "Touch in box", "Outcome & movement", None),
+    ("key_passes_only", "is_key_pass", "Key passes", "Passing", None),
+    ("crosses_only", "is_cross", "Crosses", "Passing", None),
+    ("long_balls_only", "is_long_ball", "Long balls", "Passing", None),
+    ("switches_only", "is_switch_of_play", "Switches of play", "Passing", None),
+    ("diagonals_only", "is_diagonal_long_ball", "Diagonals", "Passing", None),
+    ("through_balls_only", "is_through_ball", "Through balls", "Passing", None),
+    ("corners_only", "is_corner", "Corners", "Passing", None),
+    ("freekicks_only", "is_freekick", "Free kicks", "Passing", None),
+    ("headers_only", "is_header", "Headers", "Passing", None),
+    ("throw_ins_only", "is_throw_in", "Throw ins", "Passing", None),
+    ("goal_kicks_only", "is_goal_kick", "Goal kicks", "Passing", None),
+    ("keeper_throws_only", "is_keeper_throw", "Keeper throws", "Passing", None),
+    ("gk_hoofs_only", "is_gk_hoof", "Goalkeeper hoofs", "Passing", None),
+    ("pull_backs_only", "is_pull_back", "Pull backs", "Passing", None),
+    ("lay_offs_only", "is_lay_off", "Lay offs", "Passing", None),
+    ("flick_ons_only", "is_flick_on", "Flick ons", "Passing", None),
+    ("launches_only", "is_launch", "Launches", "Passing", None),
+    ("assists_only", "is_assist", "Assists", "Passing", None),
+    ("attacking_passes_only", "is_attacking_pass", "Attacking passes", "Passing", None),
+    ("box_entry_pass_only", "is_box_entry_pass", "Box entry passes", "Passing", None),
+    ("deep_completion_only", "is_deep_completion", "Deep completions", "Passing", None),
+    ("final_third_entry_pass_only", "is_final_third_entry_pass", "Final-third entry passes", "Passing", None),
+    ("big_chances_only", "is_big_chance_shot", "Big chances", "Shots", None),
+    ("own_goals_only", "is_own_goal", "Own goals", "Shots", None),
+    ("penalties_only", "is_penalty", "Penalties", "Shots", None),
+    ("volleys_only", "is_volley", "Volleys", "Shots", None),
+    ("chipped_only", "is_chipped", "Chipped shots", "Shots", None),
+    ("direct_from_corner_only", "is_direct_from_corner", "Direct from corner", "Shots", None),
+    ("left_foot_only", "is_left_foot", "Left foot", "Shots", None),
+    ("right_foot_only", "is_right_foot", "Right foot", "Shots", None),
+    ("scrambles_only", "is_scramble", "Scrambles", "Shots", None),
+    ("corner_situations_only", "is_corner_situation", "Corner situations", "Shots", None),
+    ("shot_strong_only", "is_shot_strong", "Strong shots", "Shots", None),
+    ("shot_weak_only", "is_shot_weak", "Weak shots", "Shots", None),
+    ("individual_play_only", "is_individual_play", "Individual play", "Shots", None),
+    ("follows_dribble_only", "is_follows_dribble", "Follows dribble", "Shots", None),
+    ("one_on_one_only", "is_1on1", "One on one", "Shots", None),
+    ("deflected_only", "is_deflected", "Deflected", "Shots", None),
+    ("woodwork_only", "is_hit_woodwork", "Hit woodwork", "Shots", None),
+    ("back_heel_only", "is_back_heel", "Back heel", "Shots", None),
+    ("big_chances_created_only", "is_big_chance", "Big chances created", "Assists", None),
+    ("assist_throughball_only", "is_assist_throughball", "Through-ball assists", "Assists", None),
+    ("assist_cross_only", "is_assist_cross", "Cross assists", "Assists", None),
+    ("assist_corner_only", "is_assist_corner", "Corner assists", "Assists", None),
+    ("assist_freekick_only", "is_assist_freekick", "Free-kick assists", "Assists", None),
+    ("intentional_assists_only", "is_intentional_assist", "Intentional assists", "Assists", None),
+    ("gk_saves_only", "is_gk_save", "Goalkeeper saves", "Goalkeeping", None),
+    ("yellow_cards_only", "is_yellow_card", "Yellow cards", "Discipline", None),
+    ("red_cards_only", "is_red_card", "Red cards", "Discipline", None),
+    ("second_yellow_only", "is_second_yellow", "Second yellows", "Discipline", None),
+    ("nutmegs_only", "is_nutmeg", "Nutmegs", "Dribbling & carrying", None),
+    ("success_in_box_only", "is_success_in_box", "Successful in box", "Dribbling & carrying", None),
+    ("box_entry_carry_only", "is_box_entry_carry", "Box-entry carries", "Dribbling & carrying", None),
+    ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final-third entry carries", "Dribbling & carrying", None),
+    ("last_line_only", "is_last_line", "Last-line actions", "Defending & errors", None),
+    ("forced_out_only", "is_forced_out", "Forced out", "Defending & errors", None),
+    ("blocked_cross_only", "is_blocked_cross", "Blocked crosses", "Defending & errors", None),
+    ("errors_to_shot_only", "is_error_led_to_shot", "Errors leading to shot", "Defending & errors", None),
+    ("errors_to_goal_only", "is_error_led_to_goal", "Errors leading to goal", "Defending & errors", None),
+]
+
+FILTER_FLAGS = {definition[0] for definition in FILTER_QUALIFIERS} | {
+    "shots_and_key_passes_only"
 }
 
 
@@ -230,6 +257,7 @@ class JobManager:
                 status="failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
+            self._cleanup_temporary_data(config)
             return
 
         logs: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -272,6 +300,54 @@ class JobManager:
             status=terminal_status or ("cancelled" if cancellation.is_set() else "complete"),
             finished_at=datetime.now(timezone.utc).isoformat(),
         )
+        self._cleanup_temporary_data(config)
+
+    @staticmethod
+    def _cleanup_temporary_data(config: dict[str, Any]) -> None:
+        temporary_path = str(config.get("_temporary_data_file") or "")
+        if not temporary_path:
+            return
+        try:
+            Path(temporary_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def prepare_filtered_data(
+    csv_path: str,
+    match_id: str,
+    options: dict[str, Any],
+    data_dir: Path,
+) -> tuple[str, str | None]:
+    team_filter = str(options.get("team_filter") or "").strip()
+    player_filters = options.get("player_filters")
+    players = (
+        [str(value).strip() for value in player_filters if str(value).strip()][:100]
+        if isinstance(player_filters, list)
+        else []
+    )
+    if not team_filter and not players:
+        return csv_path, None
+
+    import pandas as pd
+
+    frame = pd.read_csv(csv_path, low_memory=False)
+    if team_filter and "team" in frame.columns:
+        frame = frame[frame["team"].astype(str) == team_filter]
+    if players and "playerName" in frame.columns:
+        frame = frame[frame["playerName"].astype(str).isin(players)]
+    if frame.empty:
+        raise ValueError("No events match the selected team and players.")
+
+    working_dir = data_dir / "job-data"
+    working_dir.mkdir(parents=True, exist_ok=True)
+    safe_match_id = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in match_id
+    ).strip("-") or "match"
+    path = working_dir / f"{safe_match_id}-{uuid.uuid4().hex[:10]}.csv"
+    frame.to_csv(path, index=False)
+    return str(path), str(path)
 
 
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path) -> dict[str, Any]:
@@ -288,6 +364,15 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         raise ValueError("Set the first-half kick-off marker before building a clip plan.")
     if half_filter != "1st half only" and not str(markers.get("2H") or "").strip():
         raise ValueError("Set the second-half kick-off marker before building a clip plan.")
+    qualifier_logic = str(options.get("qualifier_logic") or "any").strip().lower()
+    if qualifier_logic not in {"any", "all"}:
+        raise ValueError("Qualifier logic must be either any or all.")
+    data_file, temporary_data_file = prepare_filtered_data(
+        csv_path,
+        str(match.get("id") or "match"),
+        options,
+        data_dir,
+    )
 
     config = {
         "video_file": str(match.get("video_path") or ""),
@@ -297,7 +382,8 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         "video5_file": "",
         "split_video": False,
         "extra_time_video_mode": "single",
-        "data_file": csv_path,
+        "data_file": data_file,
+        "_temporary_data_file": temporary_data_file,
         "half1_time": str(markers.get("1H") or ""),
         "half2_time": str(markers.get("2H") or ""),
         "half3_time": str(markers.get("ET1") or ""),
@@ -319,11 +405,13 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         "dry_run": bool(options.get("dry_run", True)),
         "half_filter": half_filter,
         "filter_types": clean_types,
-        "qualifier_logic": "any",
+        "qualifier_logic": qualifier_logic,
         "pitch_zone_filter": options.get("pitch_zone_filter") or None,
         "depth_zone_filter": options.get("depth_zone_filter") or None,
         "xt_min": float(options.get("xt_min", 0) or 0),
         "top_n": int(options["top_n"]) if options.get("top_n") else None,
+        "minute_min": float(options["minute_min"]) if options.get("minute_min") not in {None, ""} else None,
+        "minute_max": float(options["minute_max"]) if options.get("minute_max") not in {None, ""} else None,
     }
     for flag in FILTER_FLAGS:
         config[flag] = bool(options.get(flag, False))
@@ -415,6 +503,86 @@ def load_event_rows(csv_path: str) -> dict[str, Any]:
             clean["period"] = normalize_period(clean["period"])
         rows.append(clean)
     return {"events": rows, "event_count": len(frame), "truncated": len(frame) > 5000}
+
+
+def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
+    import pandas as pd
+
+    csv_path = Path(str(match.get("csv_path") or "")).resolve()
+    if not csv_path.is_file():
+        raise ValueError("This match has no saved event table. Scrape it again first.")
+    frame = pd.read_csv(csv_path, low_memory=False)
+
+    action_types = []
+    if "type" in frame.columns:
+        action_types = sorted(
+            {str(value).strip() for value in frame["type"].dropna() if str(value).strip()},
+            key=str.casefold,
+        )
+
+    team_players: dict[str, list[str]] = {}
+    if "team" in frame.columns:
+        teams = sorted(
+            {str(value).strip() for value in frame["team"].dropna() if str(value).strip()},
+            key=str.casefold,
+        )
+        for team in teams:
+            if "playerName" not in frame.columns:
+                team_players[team] = []
+                continue
+            team_rows = frame[frame["team"].astype(str) == team]
+            team_players[team] = sorted(
+                {
+                    str(value).strip()
+                    for value in team_rows["playerName"].dropna()
+                    if str(value).strip()
+                },
+                key=str.casefold,
+            )
+
+    qualifiers = []
+    for flag, column, label, group, expected in FILTER_QUALIFIERS:
+        count = 0
+        if column == "__progressive__":
+            progressive = pd.Series(False, index=frame.index)
+            for progressive_column in ("prog_pass", "prog_carry"):
+                if progressive_column in frame.columns:
+                    progressive |= (
+                        pd.to_numeric(frame[progressive_column], errors="coerce")
+                        .fillna(0)
+                        .gt(0)
+                    )
+            count = int(progressive.sum())
+        elif column in frame.columns:
+            if expected is not None:
+                count = int(frame[column].astype(str).eq(expected).sum())
+            else:
+                count = int(
+                    frame[column]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .isin({"true", "1", "yes"})
+                    .sum()
+                )
+        qualifiers.append(
+            {
+                "flag": flag,
+                "label": label,
+                "group": group,
+                "available": count > 0,
+                "count": count,
+            }
+        )
+
+    return {
+        "match": match,
+        "action_types": action_types,
+        "team_players": team_players,
+        "qualifiers": qualifiers,
+        "has_xt": "xT" in frame.columns,
+        "event_count": len(frame),
+    }
 
 
 def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
@@ -548,7 +716,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     break
                 try:
                     self.wfile.write(chunk)
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     break
                 remaining -= len(chunk)
 
@@ -634,6 +802,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if not csv_path:
                     raise ValueError("Scrape or reopen a saved match before opening the table.")
                 self.send_json(HTTPStatus.OK, load_event_rows(csv_path))
+                return
+            if path == "/api/filter-options":
+                match = self.store.get(str(body.get("match_id") or "").strip())
+                if match is None:
+                    raise ValueError("Choose a saved match before filtering.")
+                self.send_json(HTTPStatus.OK, load_filter_options(match))
                 return
             if path == "/api/jobs":
                 match_id = str(body.get("match_id") or "").strip()
