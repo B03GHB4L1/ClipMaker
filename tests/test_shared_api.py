@@ -8,7 +8,12 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest.mock import patch
 
-from packaging.clipmaker_api_server import create_server, detect_source
+from packaging.clipmaker_api_server import (
+    create_server,
+    detect_source,
+    infer_score,
+    normalize_period,
+)
 
 
 class SharedApiTests(unittest.TestCase):
@@ -69,6 +74,42 @@ class SharedApiTests(unittest.TestCase):
     def test_source_detection(self):
         self.assertEqual(detect_source("https://www.scoresway.com/match/1"), "scoresway")
         self.assertEqual(detect_source("https://www.whoscored.com/Matches/1"), "whoscored")
+
+    def test_score_is_inferred_from_goal_events(self):
+        import pandas as pd
+
+        frame = pd.DataFrame(
+            [
+                {"type": "Goal", "team": "Home", "period": 1},
+                {"type": "Goal", "team": "Away", "period": 2},
+                {"type": "Goal", "team": "Away", "period": 2, "is_own_goal": True},
+                {"type": "Goal", "team": "Away", "period": 5},
+            ]
+        )
+        self.assertEqual(infer_score(frame, "Home", "Away"), (2, 1))
+
+    def test_named_periods_are_normalized(self):
+        self.assertEqual(normalize_period("FirstHalf"), 1)
+        self.assertEqual(normalize_period("SecondHalf"), 2)
+        self.assertEqual(normalize_period("PenaltyShootout"), 5)
+
+    def test_full_event_table_reads_saved_csv(self):
+        csv_path = Path(self.temporary.name) / "events.csv"
+        csv_path.write_text(
+            "minute,second,type,period,playerName,team,xT\n"
+            "12,30,Goal,1,Player One,Home,0.5\n"
+            "68,5,SavedShot,2,Player Two,Away,0.2\n",
+            encoding="utf-8",
+        )
+        status, result = self.request(
+            "/api/events",
+            method="POST",
+            payload={"csv_path": str(csv_path)},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["event_count"], 2)
+        self.assertEqual(result["events"][1]["playerName"], "Player Two")
+        self.assertEqual(result["events"][1]["period"], 2)
 
     def test_dry_run_job_uses_saved_match_and_real_engine(self):
         csv_path = Path(self.temporary.name) / "events.csv"
@@ -156,6 +197,27 @@ class SharedApiTests(unittest.TestCase):
             self.assertEqual(response.status, 206)
             self.assertEqual(response.headers["Content-Range"], "bytes 2-5/10")
             self.assertEqual(response.read(), b"2345")
+
+    def test_saved_video_can_be_reopened(self):
+        video_path = Path(self.temporary.name) / "saved-match.mp4"
+        video_path.write_bytes(b"abcdefghij")
+        _, saved = self.request(
+            "/api/matches",
+            method="POST",
+            payload={
+                "home_team": "Home",
+                "away_team": "Away",
+                "video_name": video_path.name,
+                "video_path": str(video_path),
+            },
+        )
+        status, result = self.request(
+            "/api/files/reopen",
+            method="POST",
+            payload={"match_id": saved["match"]["id"]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["file"]["path"], str(video_path))
 
 
 if __name__ == "__main__":
