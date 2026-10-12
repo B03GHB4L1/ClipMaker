@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Filter Events</title>
-    <link rel="stylesheet" href="styles.css?v=8" />
+    <link rel="stylesheet" href="styles.css?v=9" />
     <link rel="stylesheet" href="filters.css?v=2" />
-    <link rel="stylesheet" href="compact.css?v=2" />
-    <script type="module" src="filters.js?v=4"></script>
+    <link rel="stylesheet" href="compact.css?v=7" />
+    <script type="module" src="filters.js?v=5"></script>
   </head>
   <body class="filter-page">
     <header class="filter-topbar">
@@ -17,8 +17,10 @@
         <span class="menu-dots" aria-hidden="true">•••</span>
       </button>
       <nav aria-label="Workflow">
-        <a href="/">01 Intake</a>
-        <a class="is-active" href="/filters.html">02 Filter</a>
+        <a href="/" data-project-navigation>Intake</a>
+        <a class="is-active" href="/filters.html" aria-current="page" data-project-navigation>Filter</a>
+        <a href="/analysis.html?view=analyst" data-project-navigation>Analyst</a>
+        <a href="/analysis.html?view=tactical" data-project-navigation>Tactical</a>
       </nav>
       <span class="engine-state" data-engine-state>
         <i aria-hidden="true"></i><span>Connecting engine</span>

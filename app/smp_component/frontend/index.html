@@ -4,8 +4,7 @@
   <meta charset="utf-8" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    @import url('https://fonts.googleapis.com/css2?family=Iosevka+Charon+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
-    body { background: #0e0e0e; overflow: hidden; font-family: 'Iosevka Charon Mono', monospace; color: #f0f0f0; }
+    body { background: #0e0e0e; overflow: hidden; font-family: Arial, Helvetica, sans-serif; color: #f0f0f0; }
   body.cm-light { background: #f5f0e8; color: #1a1a1a; }
   body.cm-light .modebar-btn svg,
   body.cm-light svg [fill="#DFFF00"],
@@ -28,7 +27,7 @@
       height: 28px;
       padding: 0 9px;
       border-radius: 5px;
-      font: 700 10px 'Iosevka Charon Mono', monospace;
+      font: 600 12px Arial, Helvetica, sans-serif;
       cursor: pointer;
     }
     .cm-export-controls button:hover { border-color: rgba(142,255,113,0.72); }
@@ -39,7 +38,7 @@
       height: 28px;
       padding: 0 7px;
       border-radius: 5px;
-      font: 700 10px 'Iosevka Charon Mono', monospace;
+      font: 600 12px Arial, Helvetica, sans-serif;
       cursor: pointer;
       outline: none;
     }
@@ -75,7 +74,7 @@
       height: 28px;
       padding: 0 7px;
       border-radius: 5px;
-      font: 700 10px 'Iosevka Charon Mono', monospace;
+      font: 600 12px Arial, Helvetica, sans-serif;
       cursor: pointer;
       outline: none;
     }
@@ -242,7 +241,7 @@
       text: "ATTACK ->",
       x: 0.94, y: 0.94, xref: "paper", yref: "paper",
       xanchor: "right", yanchor: "bottom", showarrow: false,
-      font: { size: 11, color: _hud, family: "Iosevka Charon Mono, monospace" },
+      font: { size: 12, color: _hud, family: "Arial, Helvetica, sans-serif" },
       bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(11,14,20,0.72)",
       bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(142,255,113,0.28)",
       borderwidth: 1, borderpad: 4,
@@ -562,7 +561,7 @@
         text: [titleLine, subtitleLine].filter(Boolean).join("<br>"),
         x: 0.012,
         xanchor: "left",
-        font: { size: 16, color: titleColor, family: "Iosevka Charon Mono, monospace" },
+        font: { size: 16, color: titleColor, family: "Arial, Helvetica, sans-serif" },
         pad: { t: 8, b: 4 },
         automargin: true,
       };
@@ -586,7 +585,7 @@
         yanchor: "top",
         showarrow: false,
         align: "left",
-        font: { size: 9, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Iosevka Charon Mono, monospace" },
+        font: { size: 10, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Arial, Helvetica, sans-serif" },
         bgcolor: ctx.isLight ? "rgba(245,240,232,0.94)" : "rgba(7,16,8,0.94)",
         bordercolor: ctx.isLight ? "rgba(80,60,30,0.24)" : "rgba(142,255,113,0.20)",
         borderwidth: 1,
@@ -602,7 +601,7 @@
       xanchor: "right",
       yanchor: "bottom",
       showarrow: false,
-      font: { size: 9, color: _exportBrandColor, family: "Iosevka Charon Mono, monospace" },
+      font: { size: 10, color: _exportBrandColor, family: "Arial, Helvetica, sans-serif" },
     });
     branded.annotations = annotations;
     return branded;
@@ -1128,7 +1127,7 @@
           style: {
             text: stripHtml(ann.text || ""),
             fill: ann.font && ann.font.color || layout.font && layout.font.color || "#f4f7f2",
-            font: `${ann.font && ann.font.size || 10}px Iosevka Charon Mono, monospace`,
+            font: `${ann.font && ann.font.size || 10}px Arial, Helvetica, sans-serif`,
             align: xanchor === "right" ? "right" : xanchor === "center" ? "center" : "left",
             verticalAlign: yanchor === "bottom" ? "bottom" : yanchor === "middle" ? "middle" : "top",
           },
@@ -2852,7 +2851,7 @@
         x: stepX, y: stepY, mode: isEntryMap ? "markers" : "markers+text",
         text: stepText,
         textposition: "middle center",
-        textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Iosevka Charon Mono, monospace" },
+        textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Arial, Helvetica, sans-serif" },
         marker: {
           symbol: "circle", size: isEntryMap ? 7 : 20,
           color: isEntryMap ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.42 : 0.28, isLight) : rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight),

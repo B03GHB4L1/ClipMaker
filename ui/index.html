@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=8" />
-    <link rel="stylesheet" href="compact.css?v=2" />
+    <link rel="stylesheet" href="styles.css?v=9" />
+    <link rel="stylesheet" href="compact.css?v=7" />
     <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
-    <script type="module" src="app.js?v=11"></script>
+    <script type="module" src="app.js?v=12"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>ClipMaker</span></div>
@@ -42,6 +42,7 @@
       id="nav-drawer"
       aria-label="Primary navigation"
       aria-hidden="true"
+      inert
     >
       <div class="drawer-head">
         <p>Workspace</p>
@@ -51,7 +52,7 @@
       <a class="drawer-link is-active" href="#intake"
         ><span>01</span>Match intake<small>Prepare footage</small></a
       >
-      <a class="drawer-link" href="/filters.html"
+      <a class="drawer-link" href="/filters.html" data-project-navigation
         ><span>02</span>Filter events<small>Build the reel</small></a
       >
       <a class="drawer-link" href="/analysis.html?view=analyst" data-project-navigation
@@ -84,34 +85,6 @@
               Bring in event data and match footage. ClipMaker aligns the
               timeline before you shape the reel.
             </p>
-            <div
-              class="step-track"
-              aria-label="Workflow progress"
-              data-workflow-progress
-            >
-              <button
-                class="is-current"
-                type="button"
-                data-step="1"
-                aria-label="Go to match intake"
-              ></button>
-              <button
-                type="button"
-                data-step="2"
-                aria-label="Go to timeline sync"
-              ></button>
-              <button
-                type="button"
-                data-step="3"
-                aria-label="Go to event filters"
-              ></button>
-              <button
-                type="button"
-                data-step="4"
-                aria-label="Go to export"
-              ></button>
-              <output data-step-label>1 / 4</output>
-            </div>
           </div>
         </div>
       </section>
@@ -316,7 +289,7 @@
               role="tab"
               aria-selected="true"
               data-period="1H"
-              data-marker="00:03:18"
+              data-marker="00:00:00"
             >
               1H
             </button>
@@ -325,7 +298,7 @@
               role="tab"
               aria-selected="false"
               data-period="2H"
-              data-marker="00:50:46"
+              data-marker="00:00:00"
             >
               2H
             </button>
@@ -334,7 +307,7 @@
               role="tab"
               aria-selected="false"
               data-period="ET1"
-              data-marker="01:38:12"
+              data-marker="00:00:00"
               disabled
               title="Enable when the match includes extra time"
             >
@@ -345,7 +318,7 @@
               role="tab"
               aria-selected="false"
               data-period="ET2"
-              data-marker="01:55:04"
+              data-marker="00:00:00"
               disabled
               title="Enable when the match includes extra time"
             >
@@ -356,7 +329,7 @@
               role="tab"
               aria-selected="false"
               data-period="PEN"
-              data-marker="02:12:20"
+              data-marker="00:00:00"
               disabled
               title="Enable when the match includes penalties"
             >
@@ -372,7 +345,7 @@
             ><input
               type="text"
               inputmode="numeric"
-              value="00:03:18"
+              value="00:00:00"
               aria-label="Selected period kick-off time"
               data-time
             />
@@ -406,7 +379,7 @@
             <div class="frame-score">
               <span data-frame-home>HOME</span
               ><strong data-frame-score>0 - 0</strong
-              ><span data-frame-away>AWAY</span><time>00:03</time>
+              ><span data-frame-away>AWAY</span><time>00:00</time>
             </div>
             <button
               class="play-button"
@@ -423,7 +396,7 @@
             </div>
             <div class="playhead" data-playhead><span></span></div>
             <div class="timeline-label">
-              <span>00:00</span><strong data-timeline-time>00:03:18</strong
+              <span>00:00</span><strong data-timeline-time>00:00:00</strong
               ><span data-timeline-end>--:--:--</span>
             </div>
           </div>

@@ -22,6 +22,8 @@ def main():
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.goto(base)
                 page.locator('[data-project-name]').wait_for()
+                assert page.locator('[data-workflow-progress]').count() == 0
+                assert page.locator('#nav-drawer').get_attribute('inert') is not None
                 page.get_by_role("button", name="New project", exact=True).click()
                 page.locator('[data-toast]').filter(has_text="New local project created").wait_for()
                 page.get_by_role("textbox", name="Project name").fill("Browser test project")
@@ -60,6 +62,12 @@ def main():
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
                     assert page.locator('.app-footer').is_visible()
                     page.screenshot(path=str(evidence / f"intake-{width}.png"))
+                    page.goto(base + "/filters.html?match=" + project_id)
+                    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                    expect(page.get_by_role("navigation", name="Workflow").get_by_role("link")).to_have_count(4)
+                    page.locator('#export-settings summary').click()
+                    page.screenshot(path=str(evidence / f"filters-{width}.png"))
                 assert not errors, errors
                 (evidence / "result.json").write_text(json.dumps({"errors": errors, "status": "passed"}), encoding="utf-8")
                 browser.close()
