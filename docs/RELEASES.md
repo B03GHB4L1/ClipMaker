@@ -1,6 +1,11 @@
 # Desktop release process
 
-ClipMaker uses one shared application source in `app/`.
+ClipMaker uses the shared frontend in `ui/`, its local API in `packaging/`, and
+the existing clipping and analytical implementations in `app/`.
+
+Release readiness is tracked in `docs/FEATURE_PARITY.md`. Do not treat a
+successful build as proof that installation, native interactions, or upgrades
+have passed. New remote builds are currently on hold at the user's request.
 
 ## Windows and Linux
 
@@ -13,8 +18,9 @@ version is accepted into the WinGet community repository, Windows users can
 install with `winget install --id B4L1.ClipMaker -e` and receive later versions
 with `winget upgrade --id B4L1.ClipMaker -e`.
 
-The desktop shell starts the packaged Streamlit backend on an available local
-port and displays it inside the ClipMaker window. The user does not need Python,
+The desktop shell starts the packaged shared-UI backend on an available local
+port and displays it inside the ClipMaker window. Analytical workspaces start
+a second local server on demand. The user does not need Python,
 FFmpeg, Playwright, Chromium, Node.js, or Rust.
 
 ## macOS
@@ -24,6 +30,14 @@ formula installs the shared source and a `clipmaker` launcher. On its first run,
 the launcher creates a private Python environment under the user's Library,
 installs the pinned dependencies and Playwright headless browser, then opens the
 local ClipMaker interface in the default browser.
+The formula includes the analytical-server adapter. Video and CSV selection use
+browser-safe local imports on macOS; the export-folder picker uses macOS's own
+folder chooser, with a typed-path fallback. No quarantine-removal workaround is
+installed or promised.
+
+The formula currently downloads a tagged source archive. It is not a way to
+distribute an anonymously installable application while concealing that source;
+resolve the private-source distribution plan before publishing it.
 
 The tagged release automatically includes a rendered `clipmaker.rb` formula
 with the correct source SHA-256. To render it locally when troubleshooting, run:
@@ -57,3 +71,27 @@ sudo dnf install ./ClipMaker-1.3.0-1.x86_64.rpm
 
 Installing a newer package with the same command upgrades the existing app and
 keeps ClipMaker's per-user runtime data.
+
+## Verification
+
+Run the source tests and a real local-media smoke test:
+
+```text
+python -m unittest discover -s tests -v
+python packaging/smoke_test.py
+```
+
+After PyInstaller builds, use `--server` with the actual packaged executable.
+The smoke test creates disposable synthetic data, renders and decodes a clip,
+checks media seeking, and starts the analytical server. It does not operate
+on the user's saved projects.
+
+The Checks workflow has Windows, Linux, and macOS matrices plus a CI-only
+browser regression in `tests/browser_smoke.py`. Do not claim those runs passed
+until there are actual results from the latest commit.
+
+Local project JSON lives under `projects/<id>/project.json` in the backend's
+data directory. Legacy `matches.json` is read without being overwritten.
+Project video paths reference selected files; browser imports make a local copy
+under the project. Snapshots live in `filter-snapshots.json`, independent of the
+random server port. Deleted snapshots are retained under `snapshot-trash/`.

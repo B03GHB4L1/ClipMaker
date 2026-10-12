@@ -1,13 +1,21 @@
 name: Checks
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, "codex/**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  python:
-    runs-on: ubuntu-22.04
+  application:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,8 +23,46 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m compileall -q app packaging
-      - run: python packaging/clipmaker_server.py --help
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python -m compileall -q app packaging tests
+      - run: python -m unittest discover -s tests -v
+      - run: node --check ui/app.js
+      - run: node --check ui/filters.js
+      - run: node --check ui/projects.js
+      - run: node --check ui/analysis.js
+      - run: node --test tests/projects.test.mjs
+      - run: python packaging/clipmaker_api_server.py --help
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence-${{ runner.os }}
+          path: build/browser-evidence/
+          if-no-files-found: ignore
+
+  packaged-backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements-build.txt
+      - name: Install bundled browser
+        shell: bash
+        run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
+      - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+      - name: Launch packaged backend and exercise media rendering
+        shell: bash
+        run: python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}"
 
   tauri:
     runs-on: ubuntu-22.04

@@ -1,3 +1,5 @@
+import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
+
 const form = document.querySelector("[data-filter-form]");
 const toast = document.querySelector("[data-toast]");
 const engineState = document.querySelector("[data-engine-state]");
@@ -14,12 +16,37 @@ const jobProgress = document.querySelector("[data-job-progress]");
 const cancelJobButton = document.querySelector("[data-cancel-job]");
 const snapshotSelect = document.querySelector("[data-snapshot-select]");
 const snapshotStorageKey = "clipmaker.filter-snapshots.v1";
+let snapshotLibrary = {};
 
 let activeMatch;
 let filterMetadata;
 let activeJobId;
 let previewComplete = false;
 let toastTimer;
+let corrections = [];
+let previewWindows = [];
+let previewRevision = 0;
+let previewBusy = false;
+let shotsAndKeyPasses = false;
+let selectedRange = { first: 1, last: null };
+let restoringProject = false;
+const persistFilters = () => {
+  if (!activeMatch?.id || restoringProject) return Promise.resolve();
+  const saving = saveProject(activeMatch.id, {
+    project_name: document.querySelector("[data-project-name]").value.trim() || "Untitled project",
+    filter_settings: collectOptions(true), preview_windows: structuredClone(previewWindows),
+    preview_range: selectedRange,
+  });
+  saving.catch((error) => showToast(error.message));
+  return saving;
+};
+const setExportBusy = (busy) => {
+  document
+    .querySelectorAll(".filter-flow, .preset-row, [data-preview-results]")
+    .forEach((element) => (element.inert = busy));
+  matchSelect.disabled = busy;
+  form.querySelector("[type=submit]").disabled = busy;
+};
 
 const apiRequest = async (path, options = {}) => {
   const response = await fetch(path, {
@@ -79,6 +106,13 @@ const selectedValues = (selector) =>
   );
 
 const resetPreview = () => {
+  previewRevision++;
+  previewWindows = [];
+  selectedRange = { first: 1, last: null };
+  document
+    .querySelectorAll("[data-clip-list] video")
+    .forEach((video) => video.pause());
+  document.querySelector("[data-preview-results]").hidden = true;
   previewComplete = false;
   exportButton.disabled = true;
   document.querySelector("[data-summary-note]").textContent =
@@ -152,9 +186,10 @@ const renderQualifiers = () => {
     grouped.get(qualifier.group).push(qualifier);
   });
   grouped.forEach((qualifiers, groupName) => {
-    const group = document.createElement("section");
+    const group = document.createElement("details");
+    group.open = false;
     group.className = "qualifier-group";
-    const heading = document.createElement("h3");
+    const heading = document.createElement("summary");
     heading.textContent = groupName;
     const choices = document.createElement("div");
     qualifiers.forEach((qualifier) => {
@@ -235,6 +270,13 @@ const collectOptions = (dryRun) => {
       document.querySelector("[data-output-name]").value.trim() ||
       "Highlights.mp4",
     individual_clips: document.querySelector("[data-individual-clips]").checked,
+    shots_and_key_passes_only: shotsAndKeyPasses,
+    timeline_corrections: structuredClone(corrections),
+    output_dir: document.querySelector("[data-output-dir]").value.trim(),
+    output_format: document.querySelector("[data-output-format]").value,
+    video_crf: Number(document.querySelector("[data-video-crf]").value),
+    encoder_preset: document.querySelector("[data-encoder-preset]").value,
+    audio_bitrate: document.querySelector("[data-audio-bitrate]").value,
   };
   selectedValues('input[name="qualifier"]').forEach((flag) => {
     options[flag] = true;
@@ -251,6 +293,9 @@ const setCheckedValues = (name, values = []) => {
 
 const resetFilters = () => {
   form.reset();
+  shotsAndKeyPasses = false;
+  corrections = [];
+  renderCorrections();
   setCheckedValues("action");
   setCheckedValues("qualifier");
   const bothTeams = form.querySelector('input[name="team"][value=""]');
@@ -262,6 +307,7 @@ const resetFilters = () => {
 
 const applyOptions = (options = {}) => {
   resetFilters();
+  shotsAndKeyPasses = Boolean(options.shots_and_key_passes_only);
   setCheckedValues("action", options.filter_types || []);
   const team = form.querySelector(
     `input[name="team"][value="${CSS.escape(options.team_filter || "")}"]`,
@@ -289,6 +335,11 @@ const applyOptions = (options = {}) => {
     "[data-after-buffer]": options.after_buffer ?? 8,
     "[data-min-gap]": options.min_gap ?? 6,
     "[data-output-name]": options.output_filename || "Highlights.mp4",
+    "[data-output-dir]": options.output_dir || "",
+    "[data-output-format]": options.output_format || ".mp4",
+    "[data-video-crf]": options.video_crf ?? 20,
+    "[data-encoder-preset]": options.encoder_preset || "veryfast",
+    "[data-audio-bitrate]": options.audio_bitrate || "128k",
   };
   Object.entries(values).forEach(([selector, value]) => {
     document.querySelector(selector).value = value;
@@ -296,6 +347,9 @@ const applyOptions = (options = {}) => {
   document.querySelector("[data-individual-clips]").checked = Boolean(
     options.individual_clips,
   );
+  corrections = structuredClone(options.timeline_corrections || []);
+  renderCorrections();
+  document.querySelector("[data-quality]").value = "custom";
   updateSummary();
 };
 
@@ -341,12 +395,7 @@ const presets = {
 };
 
 const getSnapshots = () => {
-  try {
-    const value = JSON.parse(localStorage.getItem(snapshotStorageKey) || "{}");
-    return value && typeof value === "object" ? value : {};
-  } catch {
-    return {};
-  }
+  return structuredClone(snapshotLibrary);
 };
 
 const renderSnapshots = () => {
@@ -388,6 +437,8 @@ const renderJob = (job) => {
   cancelJobButton.hidden = finished;
   if (!finished) return;
   activeJobId = undefined;
+  setExportBusy(false);
+  exportButton.disabled = !previewComplete || !activeMatch?.video_path;
   if (job.status === "complete" && job.dry_run) {
     previewComplete = true;
     exportButton.disabled = !activeMatch.video_path;
@@ -397,7 +448,19 @@ const renderJob = (job) => {
         : "Plan ready. Add match footage in Intake before exporting.";
   } else if (job.status === "complete") {
     document.querySelector("[data-summary-note]").textContent =
-      "The reel was saved in ClipMaker's local exports folder.";
+      "Export finished. See the log for the saved file location.";
+    const list = document.querySelector("[data-export-files]");
+    list.replaceChildren();
+    (job.files || []).forEach((file) => {
+      const link = document.createElement("a");
+      link.href = file.url;
+      link.download = file.name;
+      link.textContent = file.name;
+      list.append(link);
+    });
+    const previous = activeMatch.export_history || [];
+    activeMatch.export_history = [...previous, { id: job.id, finished_at: job.finished_at, files: job.files || [] }].slice(-50);
+    saveProject(activeMatch.id, { status: "complete", export_history: activeMatch.export_history }).catch((error) => showToast(error.message));
   }
 };
 
@@ -411,11 +474,14 @@ const pollJob = async (jobId) => {
   } catch (error) {
     jobState.textContent = "Connection interrupted";
     jobLogs.textContent = error.message;
-    cancelJobButton.hidden = true;
+    setTimeout(() => pollJob(jobId), 2000);
   }
 };
 
 const startClipJob = async (dryRun) => {
+  if (activeJobId || previewBusy) return;
+  if (dryRun) return buildPreview();
+  if (!previewComplete || !previewWindows.length) return;
   if (!activeMatch?.id) {
     showToast("Choose a saved match before filtering");
     return;
@@ -425,17 +491,20 @@ const startClipJob = async (dryRun) => {
     return;
   }
   planOutput.hidden = false;
+  setExportBusy(true);
   cancelJobButton.hidden = false;
   exportButton.disabled = true;
   jobState.textContent = dryRun ? "Starting preview" : "Starting export";
   jobLogs.textContent = "Preparing filters...";
   jobProgress.style.width = "4%";
   try {
+    await persistFilters();
+    await flushProject();
     const result = await apiRequest("/api/jobs", {
       method: "POST",
       body: JSON.stringify({
         match_id: activeMatch.id,
-        options: collectOptions(dryRun),
+        options: { ...collectOptions(dryRun), clip_windows: exportWindows() },
       }),
     });
     activeJobId = result.job.id;
@@ -443,6 +512,7 @@ const startClipJob = async (dryRun) => {
     pollJob(activeJobId);
   } catch (error) {
     activeJobId = undefined;
+    setExportBusy(false);
     cancelJobButton.hidden = true;
     jobState.textContent = "Setup needs attention";
     jobLogs.textContent = error.message;
@@ -453,13 +523,18 @@ const startClipJob = async (dryRun) => {
 };
 
 const loadMatch = async (matchId) => {
+  resetPreview();
+  activeMatch = undefined;
+  const revision = previewRevision;
   const result = await apiRequest("/api/filter-options", {
     method: "POST",
     body: JSON.stringify({ match_id: matchId }),
   });
+  if (revision !== previewRevision) return;
   activeMatch = result.match;
   filterMetadata = result;
   sessionStorage.setItem("clipmaker.active-match", activeMatch.id);
+  rememberProject(activeMatch);
   const url = new URL(window.location.href);
   url.searchParams.set("match", activeMatch.id);
   history.replaceState({}, "", url);
@@ -467,15 +542,34 @@ const loadMatch = async (matchId) => {
   renderTeams();
   renderActions();
   renderQualifiers();
-  resetFilters();
+  restoringProject = true;
+  applyOptions(activeMatch.filter_settings || {});
+  if (activeMatch.preview_windows?.length) {
+    previewWindows = structuredClone(activeMatch.preview_windows);
+    selectedRange = activeMatch.preview_range || { first: 1, last: null };
+    previewComplete = true;
+    renderPreviews();
+    exportButton.disabled = !activeMatch.video_path;
+  }
+  restoringProject = false;
 };
 
 const connect = async () => {
   try {
     await apiRequest("/api/health");
     setEngineState("Engine ready", true);
+    snapshotLibrary = (await apiRequest("/api/snapshots")).snapshots;
+    try {
+      const legacy = JSON.parse(localStorage.getItem(snapshotStorageKey) || "{}");
+      for (const [name, options] of Object.entries(legacy)) {
+        if (!(name in snapshotLibrary) && options && typeof options === "object") {
+          snapshotLibrary = (await apiRequest("/api/snapshots", { method: "POST", body: JSON.stringify({ name, options }) })).snapshots;
+        }
+      }
+      localStorage.removeItem(snapshotStorageKey);
+    } catch (error) { showToast(error.message); }
     const historyResult = await apiRequest("/api/matches");
-    const matches = historyResult.matches || [];
+    const matches = (historyResult.matches || []).filter((match) => match.csv_path);
     if (!matches.length) {
       throw new Error("Scrape and save a match in Intake before filtering.");
     }
@@ -483,7 +577,7 @@ const connect = async () => {
     matches.forEach((match) => {
       const option = document.createElement("option");
       option.value = match.id;
-      option.textContent = `${match.home_team} vs ${match.away_team}`;
+      option.textContent = match.project_name || `${match.home_team} vs ${match.away_team}`;
       matchSelect.appendChild(option);
     });
     const requested = new URLSearchParams(window.location.search).get("match");
@@ -503,6 +597,8 @@ const connect = async () => {
 
 matchSelect.addEventListener("change", async () => {
   try {
+    await persistFilters();
+    await flushProject();
     await loadMatch(matchSelect.value);
   } catch (error) {
     showToast(error.message);
@@ -515,7 +611,11 @@ teamOptions.addEventListener("change", () => {
   updateSummary();
 });
 
-form.addEventListener("change", () => {
+form.addEventListener("input", (event) => {
+  if (event.target.closest("#export-settings, #snapshots, #corrections"))
+    return;
+  if (event.target.name === "action" || event.target.name === "qualifier")
+    shotsAndKeyPasses = false;
   resetPreview();
   updateSummary();
 });
@@ -559,7 +659,17 @@ document.querySelector("[data-clear-players]").addEventListener("click", () => {
 
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => {
-    applyOptions(presets[button.dataset.preset]);
+    const current = collectOptions(true);
+    applyOptions({
+      ...presets[button.dataset.preset],
+      timeline_corrections: current.timeline_corrections,
+      output_dir: current.output_dir,
+      output_format: current.output_format,
+      output_filename: current.output_filename,
+      video_crf: current.video_crf,
+      encoder_preset: current.encoder_preset,
+      audio_bitrate: current.audio_bitrate,
+    });
     showToast(`${button.textContent.trim()} preset applied`);
   });
 });
@@ -569,19 +679,19 @@ document.querySelector("[data-reset-filters]").addEventListener("click", () => {
   showToast("All filters cleared");
 });
 
-document.querySelector("[data-save-snapshot]").addEventListener("click", () => {
+document.querySelector("[data-save-snapshot]").addEventListener("click", async () => {
   const name = document.querySelector("[data-snapshot-name]").value.trim();
   if (!name) {
     showToast("Enter a snapshot name first");
     return;
   }
-  const snapshots = getSnapshots();
-  snapshots[name] = collectOptions(true);
-  localStorage.setItem(snapshotStorageKey, JSON.stringify(snapshots));
-  renderSnapshots();
-  snapshotSelect.value = name;
-  snapshotSelect.dispatchEvent(new Event("change"));
-  showToast(`Saved snapshot: ${name}`);
+  try {
+    snapshotLibrary = (await apiRequest("/api/snapshots", { method: "POST", body: JSON.stringify({ name, options: collectOptions(true) }) })).snapshots;
+    renderSnapshots();
+    snapshotSelect.value = name;
+    snapshotSelect.dispatchEvent(new Event("change"));
+    showToast(`Saved snapshot: ${name}`);
+  } catch (error) { showToast(error.message); }
 });
 
 snapshotSelect.addEventListener("change", () => {
@@ -599,13 +709,13 @@ document.querySelector("[data-load-snapshot]").addEventListener("click", () => {
 
 document
   .querySelector("[data-delete-snapshot]")
-  .addEventListener("click", () => {
+  .addEventListener("click", async () => {
     const name = snapshotSelect.value;
-    const snapshots = getSnapshots();
-    delete snapshots[name];
-    localStorage.setItem(snapshotStorageKey, JSON.stringify(snapshots));
-    renderSnapshots();
-    showToast(`Deleted snapshot: ${name}`);
+    try {
+      snapshotLibrary = (await apiRequest("/api/snapshots/delete", { method: "POST", body: JSON.stringify({ name }) })).snapshots;
+      renderSnapshots();
+      showToast(`Deleted snapshot: ${name}`);
+    } catch (error) { showToast(error.message); }
   });
 
 exportButton.addEventListener("click", () => startClipJob(false));
@@ -622,5 +732,272 @@ cancelJobButton.addEventListener("click", async () => {
     showToast(error.message);
   }
 });
+
+const field = (name) => document.querySelector(`[data-${name}]`);
+const clockSeconds = (value) => {
+  if (!/^\d+:\d{2}(?::\d{2})?$/.test(value.trim()))
+    throw new Error("Use MM:SS or HH:MM:SS.");
+  const parts = value.trim().split(":").map(Number);
+  if (parts.slice(1).some((part) => part > 59))
+    throw new Error("Seconds and minutes must be below 60.");
+  return parts.reduce((total, part) => total * 60 + part, 0);
+};
+const renderCorrections = () => {
+  field("correction-list").replaceChildren();
+  field("correction-count").textContent = `${corrections.length} active`;
+  corrections.forEach((correction, index) => {
+    const row = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `P${correction.period} from ${correction.clock || correction.at_seconds + "s"}: ${correction.seconds ?? correction.amount_seconds}s ${correction.note || ""}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.onclick = () => {
+      corrections.splice(index, 1);
+      renderCorrections();
+      resetPreview();
+      persistFilters();
+    };
+    row.append(label, remove);
+    field("correction-list").append(row);
+  });
+};
+field("add-correction").onclick = () => {
+  try {
+    const at = clockSeconds(field("correction-clock").value);
+    const amount = clockSeconds(field("correction-amount").value);
+    if (!amount) throw new Error("Enter a non-zero correction.");
+    corrections.push({
+      period: Number(field("correction-period").value),
+      at_seconds: at,
+      seconds:
+        amount * (field("correction-direction").value === "subtract" ? -1 : 1),
+      note: field("correction-note").value.trim(),
+    });
+    renderCorrections();
+    resetPreview();
+    persistFilters();
+  } catch (error) {
+    showToast(error.message);
+  }
+};
+field("browse-output").onclick = async () => {
+  try {
+    const result = await apiRequest("/api/folders/output", {
+      method: "POST",
+      body: JSON.stringify({ initial_dir: field("output-dir").value }),
+    });
+    if (!result.cancelled) field("output-dir").value = result.path;
+    persistFilters();
+  } catch (error) {
+    showToast(error.message);
+  }
+};
+field("quality").onchange = () => {
+  const values = {
+    balanced: [20, "veryfast", "128k"],
+    small: [24, "veryfast", "96k"],
+    high: [18, "slow", "160k"],
+  }[field("quality").value];
+  if (values)
+    ["video-crf", "encoder-preset", "audio-bitrate"].forEach(
+      (key, index) => (field(key).value = values[index]),
+    );
+  persistFilters();
+};
+["video-crf", "encoder-preset", "audio-bitrate"].forEach((key) =>
+  field(key).addEventListener(
+    "change",
+    () => (field("quality").value = "custom"),
+  ),
+);
+field("clear-preview").onclick = resetPreview;
+
+const renderPreviews = () => {
+  const list = field("clip-list");
+  list.querySelectorAll("video").forEach((video) => video.pause());
+  list.replaceChildren();
+  field("preview-results").hidden = false;
+  field("preview-count").textContent = previewWindows.length;
+  field("range-first").max = previewWindows.length || 1;
+  field("range-last").max = previewWindows.length || 1;
+  selectedRange.first = Math.min(selectedRange.first || 1, previewWindows.length || 1);
+  selectedRange.last = Math.min(selectedRange.last || previewWindows.length || 1, previewWindows.length || 1);
+  field("range-first").value = selectedRange.first;
+  field("range-last").value = selectedRange.last;
+  field("range-count").textContent = `${Math.max(0, selectedRange.last - selectedRange.first + 1)} selected`;
+  previewWindows.forEach((window, index) => {
+    const item = document.createElement("details");
+    item.className = "clip-preview";
+    const summary = document.createElement("summary");
+    summary.textContent = `${index + 1}. ${window.label}`;
+    const controls = document.createElement("div");
+    controls.className = "clip-editor";
+    const video = document.createElement("video");
+    video.controls = true;
+    video.preload = "metadata";
+    video.hidden = true;
+    const status = document.createElement("p");
+    status.setAttribute("role", "status");
+    const play = document.createElement("button");
+    play.type = "button";
+    play.textContent = "Render preview";
+    const download = document.createElement("a");
+    download.hidden = true;
+    download.textContent = "Download clip";
+    let revision = 0;
+    ["start", "end"].forEach((key) => {
+      const label = document.createElement("label");
+      label.textContent = `${key === "start" ? "Start" : "End"} (video seconds)`;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "0.1";
+      input.value = window[key];
+      input.oninput = () => {
+        revision++;
+        video.pause();
+        video.hidden = true;
+        download.hidden = true;
+        window[key] = Number(input.value);
+        const valid = previewWindows.every(
+          (clip) =>
+            Number.isFinite(clip.start) &&
+            Number.isFinite(clip.end) &&
+            clip.start >= 0 &&
+            clip.end > clip.start,
+        );
+        exportButton.disabled =
+          !valid || Boolean(activeJobId) || !activeMatch.video_path;
+        status.textContent = valid
+          ? "Window changed. Render to review."
+          : "End must be later than start.";
+        if (valid) persistFilters();
+      };
+      label.append(input);
+      controls.append(label);
+    });
+    play.onclick = async () => {
+      if (!(window.end > window.start && window.start >= 0)) {
+        status.textContent = "Enter a valid clip window.";
+        return;
+      }
+      const version = revision;
+      const generation = previewRevision;
+      play.disabled = true;
+      status.textContent = "Rendering preview...";
+      try {
+        const result = await apiRequest("/api/previews/render", {
+          method: "POST",
+          body: JSON.stringify({ match_id: activeMatch.id, ...window }),
+        });
+        if (version !== revision || generation !== previewRevision) return;
+        video.src = result.file.url;
+        video.hidden = false;
+        download.href = result.file.url;
+        download.download = `clip-${index + 1}.mp4`;
+        download.hidden = false;
+        status.textContent = "Preview ready";
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        play.disabled = false;
+      }
+    };
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Exclude clip";
+    remove.onclick = () => {
+      previewWindows.splice(index, 1);
+      renderPreviews();
+      exportButton.disabled =
+        !previewWindows.length ||
+        Boolean(activeJobId) ||
+        !activeMatch.video_path;
+      persistFilters();
+    };
+    controls.append(play, remove, download);
+    item.append(summary, controls, status, video);
+    list.append(item);
+  });
+};
+const buildPreview = async () => {
+  if (!activeMatch?.id) {
+    showToast("Choose a match first.");
+    return;
+  }
+  resetPreview();
+  const generation = previewRevision;
+  previewBusy = true;
+  const button = form.querySelector("[type=submit]");
+  button.disabled = true;
+  field("summary-note").textContent = "Calculating clip windows...";
+  try {
+    const result = await apiRequest("/api/previews", {
+      method: "POST",
+      body: JSON.stringify({
+        match_id: activeMatch.id,
+        options: collectOptions(true),
+      }),
+    });
+    if (generation !== previewRevision) return;
+    previewWindows = result.windows;
+    previewComplete = previewWindows.length > 0;
+    renderPreviews();
+    await persistFilters();
+    exportButton.disabled = !previewComplete || !activeMatch.video_path;
+    field("summary-note").textContent = previewComplete
+      ? `${previewWindows.length} clips ready to review.`
+      : "No matching clips. Adjust the filters.";
+    field("preview-results").scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  } catch (error) {
+    showToast(error.message);
+    field("summary-note").textContent = error.message;
+  } finally {
+    previewBusy = false;
+    button.disabled = false;
+  }
+};
+
+const exportWindows = () => {
+  const first = Number(field("range-first").value);
+  const last = Number(field("range-last").value);
+  if (!Number.isInteger(first) || !Number.isInteger(last) || first < 1 || last > previewWindows.length || last < first) {
+    throw new Error("Choose a valid first and last clip.");
+  }
+  return previewWindows.slice(first - 1, last);
+};
+["range-first", "range-last"].forEach((key) => field(key).addEventListener("input", () => {
+  try {
+    const windows = exportWindows();
+    selectedRange = { first: Number(field("range-first").value), last: Number(field("range-last").value) };
+    field("range-count").textContent = `${windows.length} selected`;
+    exportButton.disabled = Boolean(activeJobId) || !activeMatch?.video_path;
+    persistFilters();
+  } catch (error) { field("range-count").textContent = error.message; exportButton.disabled = true; }
+}));
+
+form.addEventListener("change", persistFilters);
+form.addEventListener("input", persistFilters);
+document.querySelector("[data-project-name]").addEventListener("change", persistFilters);
+document.querySelectorAll("[data-preset], [data-reset-filters], [data-load-snapshot], [data-select-all-actions], [data-clear-actions], [data-select-all-players], [data-clear-players], [data-clear-preview]").forEach((button) => button.addEventListener("click", persistFilters));
+const menuButton = document.querySelector("[data-filter-menu]");
+const menu = document.querySelector("#filter-menu");
+const closeMenu = () => { menu.hidden = true; menuButton.setAttribute("aria-expanded", "false"); };
+menuButton.onclick = () => { menu.hidden = !menu.hidden; menuButton.setAttribute("aria-expanded", String(!menu.hidden)); };
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(); });
+document.addEventListener("click", (event) => { if (!event.target.closest("#filter-menu, [data-filter-menu]")) closeMenu(); });
+document.querySelector("[data-new-project]").onclick = async (event) => {
+  event.currentTarget.disabled = true;
+  try {
+    await persistFilters();
+    const project = await newProject();
+    location.href = `/?project=${encodeURIComponent(project.id)}`;
+  } catch (error) { event.currentTarget.disabled = false; showToast(error.message); }
+};
+document.querySelectorAll('.filter-topbar a, .context-edit').forEach((link) => link.setAttribute("data-project-navigation", ""));
 
 connect();

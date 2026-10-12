@@ -1,4 +1,5 @@
 import * as THREE from "./vendor/three.module.js";
+import { saveProject, flushProject, newProject, rememberProject, projectRequest, beginProjectOperation } from "./projects.js";
 
 const body = document.body;
 const drawerButton = document.querySelector("[data-drawer-toggle]");
@@ -9,10 +10,7 @@ const engineState = document.querySelector("[data-engine-state]");
 let toastTimer;
 let apiAvailable = false;
 let activeMatch = {
-  home_team: "Arsenal",
-  away_team: "Newcastle",
-  event_count: 1486,
-  source: "scoresway",
+  home_team: "", away_team: "", event_count: 0, markers: {},
 };
 let workflowStep = 1;
 
@@ -115,7 +113,9 @@ const shortTeamName = (name = "") =>
     .toUpperCase() || "—";
 
 const renderMatch = (match) => {
-  activeMatch = { ...activeMatch, ...match };
+  activeMatch = { ...match };
+  if (match.id) rememberProject(match);
+  document.querySelector("#match-url").value = match.source_url || "";
   document.querySelector("[data-home-team]").textContent =
     match.home_team || "Home";
   document.querySelector("[data-away-team]").textContent =
@@ -150,18 +150,21 @@ const renderMatch = (match) => {
   document.querySelector("[data-event-count]").textContent =
     `${count} events found`;
   document.querySelector("[data-row-count]").textContent = `${count} rows`;
+  document.querySelector(".ticket-foot span:last-child").textContent = match.csv_path ? "Data saved locally" : "No match loaded";
+  document.querySelector(".event-footer span").textContent = match.csv_path ? `${count} saved rows` : "No event data";
   if (Array.isArray(match.events)) renderEvents(match.events);
   if (match.markers) {
     document
       .querySelectorAll(".period-selector [data-period]")
       .forEach((button) => {
         const marker = match.markers[button.dataset.period];
-        if (marker) button.dataset.marker = marker;
+        button.dataset.marker = marker || "00:00:00";
+        button.dataset.markerSet = String(Boolean(marker));
       });
-    const hasExtraTime = Boolean(match.markers.ET1 || match.markers.ET2);
+    const hasExtraTime = Boolean(match.had_extra_time || match.markers.ET1 || match.markers.ET2);
     document.querySelector("[data-extra-time]").checked = hasExtraTime;
     document.querySelector("[data-penalties]").checked = Boolean(
-      match.markers.PEN,
+      match.had_penalties || match.markers.PEN,
     );
     setOptionalPeriods();
     const activePeriod = document.querySelector(".period-selector .is-active");
@@ -170,10 +173,9 @@ const renderMatch = (match) => {
 };
 
 const renderHistory = (matches) => {
-  if (!matches.length) return;
   const list = document.querySelector("[data-recent-list]");
   list.replaceChildren();
-  matches.slice(0, 5).forEach((match, index) => {
+  matches.forEach((match, index) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "recent-row";
@@ -184,7 +186,7 @@ const renderHistory = (matches) => {
 
     const details = document.createElement("span");
     const title = document.createElement("strong");
-    title.textContent = `${match.home_team || "Home"} vs ${match.away_team || "Away"}`;
+    title.textContent = match.project_name || `${match.home_team || "Home"} vs ${match.away_team || "Away"}`;
     const subtitle = document.createElement("small");
     const updated = match.updated_at
       ? new Date(match.updated_at).toLocaleString([], {
@@ -203,21 +205,8 @@ const renderHistory = (matches) => {
     arrow.textContent = "↗";
     button.append(number, details, state, arrow);
     button.addEventListener("click", async () => {
-      renderMatch(match);
-      if (apiAvailable && match.video_path) {
-        try {
-          const result = await apiRequest("/api/files/reopen", {
-            method: "POST",
-            body: JSON.stringify({ match_id: match.id }),
-          });
-          showSelectedVideo(result.file);
-          showToast("Saved match and footage reopened");
-        } catch (error) {
-          showToast(error.message);
-        }
-      } else {
-        showToast("Saved match reopened");
-      }
+      try { await flushProject(); await openProject(match); }
+      catch (error) { showToast(error.message); return; }
       document
         .querySelector(".workspace")
         .scrollIntoView({ behavior: "smooth", block: "start" });
@@ -230,11 +219,17 @@ const connectApi = async () => {
   try {
     await apiRequest("/api/health");
     apiAvailable = true;
+    const result = await apiRequest("/api/projects");
+    renderHistory(result.projects || []);
+    const requested = new URLSearchParams(location.search).get("project") || sessionStorage.getItem("clipmaker.active-match");
+    const project = result.projects.find((item) => item.id === requested) || result.projects[0] || await newProject();
+    await openProject(project);
     setEngineState("Engine ready", true);
-    const history = await apiRequest("/api/matches");
-    renderHistory(history.matches || []);
-  } catch {
-    setEngineState("Design preview", false);
+    document.querySelector("[data-new-project]").disabled = false;
+    document.querySelector("main").inert = false;
+  } catch (error) {
+    setEngineState("Engine unavailable", false);
+    showToast(error.message);
   }
 };
 
@@ -288,6 +283,7 @@ document
   .querySelector("[data-fetch]")
   .addEventListener("click", async (event) => {
     const button = event.currentTarget;
+    let finish;
     button.textContent = "···";
     document.querySelector("[data-match-ticket]").style.opacity = ".35";
     try {
@@ -296,9 +292,11 @@ document
         showToast("Design preview: connect the local engine for live scraping");
       } else {
         const url = document.querySelector("#match-url").value.trim();
+        await flushProject();
+        finish = beginProjectOperation();
         const result = await apiRequest("/api/scrape", {
           method: "POST",
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, project_id: activeMatch.id }),
         });
         renderMatch(result.match);
         document.querySelector(".event-browser").open = true;
@@ -313,17 +311,46 @@ document
       button.textContent = "↗";
       document.querySelector("[data-match-ticket]").style.opacity = "1";
       showToast(error.message);
-    }
+    } finally { finish?.(); }
   });
 
 const videoInput = document.querySelector("[data-video-input]");
+document.querySelector("[data-batch-fetch]").addEventListener("click", async (event) => {
+  const urls = document.querySelector("[data-batch-urls]").value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
+  if (!urls.length || urls.length > 20) { showToast("Enter between 1 and 20 match URLs."); return; }
+  const button = event.currentTarget;
+  const output = document.querySelector("[data-batch-status]");
+  button.disabled = true;
+  const completed = [];
+  const errors = [];
+  let finish;
+  try {
+    await persistIntake();
+    await flushProject();
+    finish = beginProjectOperation();
+    for (const [index, url] of urls.entries()) {
+      output.textContent = `Scraping ${index + 1} of ${urls.length}...`;
+      try {
+        const { project } = await projectRequest("/api/projects", {});
+        await saveProject(project.id, { source_url: url });
+        const result = await apiRequest("/api/scrape", { method: "POST", body: JSON.stringify({ url, project_id: project.id }) });
+        completed.push(result.match);
+      } catch (error) { errors.push(`${index + 1}: ${error.message}`); }
+    }
+    output.textContent = `${completed.length} matches saved. ${errors.join("; ")}`;
+    const result = await projectRequest("/api/projects");
+    renderHistory(result.projects);
+    if (completed.length) await openProject(completed[0]);
+  } catch (error) { showToast(error.message); }
+  finally { finish?.(); button.disabled = false; }
+});
 const matchVideo = document.querySelector("[data-match-video]");
 const matchFrame = document.querySelector(".match-frame");
 const previewName = document.querySelector(".preview-top span:first-child");
 const previewDuration = document.querySelector(".preview-top span:last-child");
 let videoUrl;
 
-const showSelectedVideo = ({ name, size, url, path }) => {
+const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
   videoUrl = url;
   matchVideo.src = videoUrl;
@@ -336,11 +363,11 @@ const showSelectedVideo = ({ name, size, url, path }) => {
   previewName.textContent = name;
   document.querySelector(".play-button").disabled = false;
   setWorkflowStep(2);
-  activeMatch.video_name = name;
-  activeMatch.video_path = path || "";
-  if (jobState?.textContent === "Clip plan ready") {
-    exportButton.disabled = !activeMatch.video_path;
+  if (save) {
+    activeMatch.video_name = name;
+    activeMatch.video_path = path || "";
   }
+  if (save) persistIntake();
   showToast("Footage loaded locally. It never leaves this device.");
 };
 
@@ -351,27 +378,71 @@ document
       videoInput.click();
       return;
     }
+    let finish;
     try {
+      await flushProject();
+      finish = beginProjectOperation();
+      if (navigator.platform.toLowerCase().includes("mac")) { videoInput.click(); return; }
       const result = await apiRequest("/api/files/video", {
         method: "POST",
         body: JSON.stringify({}),
       });
-      if (!result.cancelled) showSelectedVideo(result.file);
+      if (result.browser_picker) videoInput.click();
+      else if (!result.cancelled) showSelectedVideo(result.file);
     } catch (error) {
-      showToast(error.message);
-    }
+      showToast("Native picker unavailable. Choose the file in the browser.");
+      videoInput.click();
+    } finally { finish?.(); }
   });
 
-videoInput.addEventListener("change", () => {
+const importFile = async (file) => {
+  if (!activeMatch.id || !apiAvailable) throw new Error("The local engine must be connected before importing.");
+  const response = await fetch(`/api/files/upload?project=${encodeURIComponent(activeMatch.id)}`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Could not import file.");
+  return result;
+};
+videoInput.addEventListener("change", async () => {
   const file = videoInput.files[0];
   if (!file) return;
-  showSelectedVideo({
-    name: file.name,
-    size: file.size,
-    url: URL.createObjectURL(file),
-    path: "",
-  });
+  const finish = beginProjectOperation();
+  try { showToast("Copying footage into this local project..."); showSelectedVideo((await importFile(file)).file); }
+  catch (error) { showToast(error.message); }
+  finally { finish(); }
+  videoInput.value = "";
 });
+
+document.querySelector("[data-csv-input]").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  let finish;
+  try { await flushProject(); finish = beginProjectOperation(); renderMatch((await importFile(file)).match); showToast("Match data imported and saved locally"); }
+  catch (error) { showToast(error.message); }
+  finally { finish?.(); }
+  event.target.value = "";
+});
+document.querySelectorAll("[data-period-video]").forEach((input) => input.addEventListener("change", async () => {
+  const file = input.files[0];
+  if (!file) return;
+  const finish = beginProjectOperation();
+  try {
+    const result = await importFile(file);
+    activeMatch.period_videos = { ...(activeMatch.period_videos || {}), [input.dataset.periodVideo]: result.file.path };
+    document.querySelector(`[data-period-file="${input.dataset.periodVideo}"]`).textContent = file.name;
+    await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos });
+  } catch (error) { showToast(error.message); }
+  finally { finish(); }
+  input.value = "";
+}));
+document.querySelectorAll("[data-remove-period]").forEach((button) => button.addEventListener("click", async () => {
+  const period = button.dataset.removePeriod;
+  delete (activeMatch.period_videos || {})[period];
+  document.querySelector(`[data-period-file="${period}"]`).textContent = "";
+  try { await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos || {} }); }
+  catch (error) { showToast(error.message); }
+}));
 matchVideo.addEventListener("loadedmetadata", () => {
   previewDuration.textContent = formatTime(matchVideo.duration);
   document.querySelector("[data-timeline-end]").textContent = formatTime(
@@ -379,7 +450,7 @@ matchVideo.addEventListener("loadedmetadata", () => {
   );
   syncPlaybackUi();
 });
-document.querySelector(".remove-button").addEventListener("click", () => {
+const clearFootage = () => {
   document.querySelector("[data-file-row]").hidden = true;
   matchVideo.pause();
   matchVideo.removeAttribute("src");
@@ -396,22 +467,97 @@ document.querySelector(".remove-button").addEventListener("click", () => {
   document.querySelector("[data-timeline-time]").textContent = "00:00:00";
   playhead.style.left = "0%";
   videoInput.value = "";
-  showToast("Video removed from this setup");
+};
+document.querySelector(".remove-button").addEventListener("click", () => {
+  clearFootage();
+  persistIntake();
+  showToast("Video removed from this project");
 });
 document
   .querySelector("[data-new-project]")
-  .addEventListener("click", () => showToast("New project workspace ready"));
+  .addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await persistIntake();
+      await openProject(await newProject());
+      const result = await projectRequest("/api/projects");
+      renderHistory(result.projects);
+      showToast("New local project created");
+    } catch (error) { showToast(error.message); }
+    finally { button.disabled = false; }
+  });
 
 const getActiveMarkers = () => {
   const markers = {};
   document
     .querySelectorAll(".period-selector [data-period]")
     .forEach((button) => {
-      if (!button.disabled)
+      if (!button.disabled && button.dataset.markerSet === "true")
         markers[button.dataset.period] = button.dataset.marker;
     });
   return markers;
 };
+
+const persistIntake = () => {
+  if (!apiAvailable || !activeMatch.id) return Promise.resolve();
+  const period = document.querySelector(".period-selector .is-active");
+  const clock = document.querySelector("[data-time]").value.trim();
+  if (/^\d{1,3}:[0-5]\d:[0-5]\d$/.test(clock) && clock !== period.dataset.marker) {
+    period.dataset.marker = clock;
+    period.dataset.markerSet = "true";
+  }
+  const patch = {
+    project_name: document.querySelector("[data-project-name]").value.trim() || "Untitled project",
+    source_url: document.querySelector("#match-url").value.trim(),
+    markers: getActiveMarkers(), video_path: activeMatch.video_path || "",
+    video_name: activeMatch.video_name || "",
+    had_extra_time: document.querySelector("[data-extra-time]").checked,
+    had_penalties: document.querySelector("[data-penalties]").checked,
+  };
+  activeMatch = { ...activeMatch, ...patch };
+  const saving = saveProject(activeMatch.id, patch);
+  saving.catch((error) => showToast(error.message));
+  return saving;
+};
+
+const openProject = async (project) => {
+  clearFootage();
+  renderEvents([]);
+  document.querySelector("[data-event-search]").value = "";
+  document.querySelector("[data-period-filter]").value = "all";
+  document.querySelector(".event-footer span").textContent = "No event data";
+  document.querySelector(".ticket-meta span:first-child").textContent = "Saved match";
+  document.querySelector(".ticket-meta span:last-child").textContent = "";
+  document.querySelector(".ticket-foot span:last-child").textContent = project.csv_path ? "Data saved locally" : "No match loaded";
+  renderMatch(project);
+  document.querySelectorAll("[data-period-file]").forEach((span) => {
+    span.textContent = (project.period_videos?.[span.dataset.periodFile] || "").split(/[\\/]/).pop();
+  });
+  workflowStep = 1;
+  setWorkflowStep(project.video_path || project.csv_path ? 2 : 1);
+  const url = new URL(location.href);
+  url.searchParams.set("project", project.id);
+  history.replaceState({}, "", url);
+  if (project.csv_path) {
+    try {
+      const result = await apiRequest("/api/events", { method: "POST", body: JSON.stringify({ csv_path: project.csv_path }) });
+      renderEvents(result.events);
+      document.querySelector(".event-footer span").textContent = `${result.event_count.toLocaleString()} saved rows`;
+    } catch (error) { showToast("Saved event data is unavailable. Import the CSV or scrape the match again."); }
+  }
+  if (project.video_path) {
+    try {
+      const result = await apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: project.id }) });
+      showSelectedVideo(result.file, false);
+    } catch (error) { showToast(error.message); }
+  }
+};
+
+document.querySelector("[data-project-name]").addEventListener("change", persistIntake);
+document.querySelector("#match-url").addEventListener("change", persistIntake);
+document.querySelector("[data-project-name]").addEventListener("input", persistIntake);
+document.querySelector("#match-url").addEventListener("input", persistIntake);
 
 document
   .querySelector("[data-continue]")
@@ -421,19 +567,9 @@ document
       return;
     }
     try {
-      const saved = await apiRequest("/api/matches", {
-        method: "POST",
-        body: JSON.stringify({
-          ...activeMatch,
-          source_url: document.querySelector("#match-url").value.trim(),
-          video_name: document.querySelector(".file-info strong").textContent,
-          markers: getActiveMarkers(),
-          status: "in_progress",
-        }),
-      });
-      const history = await apiRequest("/api/matches");
-      renderHistory(history.matches || []);
-      activeMatch = saved.match;
+      if (!activeMatch.csv_path) throw new Error("Scrape or import event data before filtering.");
+      await persistIntake();
+      await flushProject();
       setWorkflowStep(3);
       sessionStorage.setItem("clipmaker.active-match", activeMatch.id);
       window.location.href = `/filters.html?match=${encodeURIComponent(activeMatch.id)}`;
@@ -441,158 +577,6 @@ document
       showToast(error.message);
     }
   });
-
-const filterForm = document.querySelector("[data-filter-form]");
-const planButton = document.querySelector("[data-plan-button]");
-const exportButton = document.querySelector("[data-export-button]");
-const planOutput = document.querySelector("[data-plan-output]");
-const jobState = document.querySelector("[data-job-state]");
-const jobLogs = document.querySelector("[data-job-logs]");
-const jobProgress = document.querySelector("[data-job-progress]");
-const cancelJobButton = document.querySelector("[data-cancel-job]");
-let activeJobId;
-
-const renderJob = (job) => {
-  const labels = {
-    queued: "Queued",
-    running: "Calculating clip windows",
-    complete: "Clip plan ready",
-    failed: "Could not build plan",
-    cancelled: "Plan cancelled",
-  };
-  const finished = ["complete", "failed", "cancelled"].includes(job.status);
-  jobState.textContent = labels[job.status] || job.status;
-  jobLogs.textContent = (job.logs || []).join("\n") || "Reading match events…";
-  jobLogs.scrollTop = jobLogs.scrollHeight;
-  const progress = job.progress;
-  const ratio = progress?.total ? progress.current / progress.total : 0;
-  jobProgress.style.width = `${job.status === "complete" ? 100 : Math.min(100, ratio * 100)}%`;
-  planButton.disabled = !finished;
-  exportButton.disabled = !finished || !activeMatch.video_path;
-  cancelJobButton.hidden = finished;
-  if (finished) {
-    activeJobId = undefined;
-    document.querySelector("[data-plan-summary]").textContent =
-      job.status === "complete"
-        ? job.dry_run
-          ? "The plan is ready for review"
-          : "Your reel has been exported"
-        : labels[job.status];
-    if (job.status === "complete") setWorkflowStep(4);
-  }
-};
-
-const pollJob = async (jobId) => {
-  try {
-    const result = await apiRequest(`/api/jobs/${jobId}`);
-    renderJob(result.job);
-    if (!["complete", "failed", "cancelled"].includes(result.job.status)) {
-      setTimeout(() => pollJob(jobId), 300);
-    }
-  } catch (error) {
-    planButton.disabled = false;
-    cancelJobButton.hidden = true;
-    jobState.textContent = "Connection interrupted";
-    jobLogs.textContent = error.message;
-  }
-};
-
-const getFilterOptions = (dryRun) => {
-  const options = {
-    dry_run: dryRun,
-    filter_types: Array.from(
-      filterForm.querySelectorAll(
-        '.event-choices input[type="checkbox"]:checked',
-      ),
-      (input) => input.value,
-    ),
-    half_filter: document.querySelector("[data-half-filter]").value,
-    before_buffer: Number(document.querySelector("[data-before-buffer]").value),
-    after_buffer: Number(document.querySelector("[data-after-buffer]").value),
-    min_gap: Number(document.querySelector("[data-min-gap]").value),
-    pitch_zone_filter: document.querySelector("[data-pitch-zone]").value,
-    depth_zone_filter: document.querySelector("[data-depth-zone]").value,
-  };
-  filterForm.querySelectorAll("[data-filter-flag]").forEach((input) => {
-    options[input.dataset.filterFlag] = input.checked;
-  });
-  return options;
-};
-
-const startClipJob = async (dryRun) => {
-  if (!apiAvailable) {
-    showToast("Start the ClipMaker engine to calculate a real clip plan");
-    return;
-  }
-  if (!activeMatch.id) {
-    showToast("Confirm the match setup before building a clip plan");
-    document.querySelector("[data-continue]").focus();
-    return;
-  }
-  if (!dryRun && !activeMatch.video_path) {
-    showToast("Choose match footage before exporting the reel");
-    return;
-  }
-  planOutput.hidden = false;
-  planButton.disabled = true;
-  exportButton.disabled = true;
-  cancelJobButton.hidden = false;
-  jobState.textContent = dryRun ? "Starting engine" : "Starting export";
-  jobLogs.textContent = dryRun
-    ? "Preparing event filters…"
-    : "Preparing video export…";
-  jobProgress.style.width = "4%";
-  try {
-    const saved = await apiRequest("/api/matches", {
-      method: "POST",
-      body: JSON.stringify({
-        ...activeMatch,
-        markers: getActiveMarkers(),
-        status: "in_progress",
-      }),
-    });
-    activeMatch = saved.match;
-    const result = await apiRequest("/api/jobs", {
-      method: "POST",
-      body: JSON.stringify({
-        match_id: activeMatch.id,
-        options: getFilterOptions(dryRun),
-      }),
-    });
-    activeJobId = result.job.id;
-    renderJob(result.job);
-    pollJob(activeJobId);
-  } catch (error) {
-    activeJobId = undefined;
-    planButton.disabled = false;
-    exportButton.disabled = !activeMatch.video_path;
-    cancelJobButton.hidden = true;
-    jobState.textContent = "Setup needs attention";
-    jobLogs.textContent = error.message;
-    jobProgress.style.width = "0%";
-    showToast(error.message);
-  }
-};
-
-filterForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await startClipJob(true);
-});
-
-exportButton.addEventListener("click", () => startClipJob(false));
-
-cancelJobButton.addEventListener("click", async () => {
-  if (!activeJobId) return;
-  try {
-    await apiRequest(`/api/jobs/${activeJobId}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    jobState.textContent = "Cancelling";
-  } catch (error) {
-    showToast(error.message);
-  }
-});
 
 const timeline = document.querySelector("[data-timeline]");
 const playhead = document.querySelector("[data-playhead]");
@@ -625,7 +609,7 @@ const syncPlaybackUi = () => {
     formatTime(current).slice(3);
   playhead.style.left = `${duration ? (current / duration) * 100 : 0}%`;
 };
-const setScrubTime = (seconds, updateMarker = true) => {
+const setScrubTime = (seconds, updateMarker = false) => {
   const duration = Number.isFinite(matchVideo.duration)
     ? matchVideo.duration
     : 600;
@@ -641,7 +625,7 @@ const setScrubTime = (seconds, updateMarker = true) => {
     const value = formatTime(safeSeconds);
     updateMarkerTime(value);
     const activePeriod = document.querySelector(".period-selector .is-active");
-    if (activePeriod) activePeriod.dataset.marker = value;
+    if (activePeriod) { activePeriod.dataset.marker = value; activePeriod.dataset.markerSet = "true"; }
   }
 };
 const updateTimeline = (clientX) => {
@@ -667,6 +651,7 @@ timeline.addEventListener("pointermove", (event) => {
 });
 timeline.addEventListener("pointerup", () => {
   scrubbing = false;
+  persistIntake();
 });
 timeline.addEventListener("pointerenter", () =>
   scrubCursor.classList.add("is-visible"),
@@ -677,11 +662,15 @@ timeline.addEventListener("pointerleave", () => {
 });
 document.querySelector(".text-button").addEventListener("click", () => {
   const activePeriod = document.querySelector(".period-selector .is-active");
-  const resetValue = activePeriod?.dataset.defaultMarker || "00:00:00";
+  const resetValue = "00:00:00";
+  activePeriod.dataset.marker = resetValue;
+  activePeriod.dataset.markerSet = "false";
   const seconds = resetValue
     .split(":")
     .reduce((total, part) => total * 60 + Number(part), 0);
   setScrubTime(seconds);
+  updateMarkerTime(resetValue);
+  persistIntake();
   showToast("Kick-off marker reset");
 });
 const togglePlayback = () => {
@@ -721,6 +710,7 @@ document.addEventListener("keydown", (event) => {
     setScrubTime(
       matchVideo.currentTime + direction * (event.shiftKey ? 10 : 5),
     );
+    persistIntake();
   }
 });
 
@@ -731,6 +721,11 @@ const periodLabels = {
   ET2: "Extra-time second-half kick-off",
   PEN: "First penalty kick",
 };
+document.querySelector("[data-set-marker]").addEventListener("click", () => {
+  if (!Number.isFinite(matchVideo.duration)) { showToast("Load footage before setting a marker from playback."); return; }
+  setScrubTime(matchVideo.currentTime, true);
+  persistIntake();
+});
 const setOptionalPeriods = () => {
   const extraTime = document.querySelector("[data-extra-time]").checked;
   const penalties = document.querySelector("[data-penalties]").checked;
@@ -743,11 +738,11 @@ const setOptionalPeriods = () => {
 
 document
   .querySelectorAll("[data-extra-time], [data-penalties]")
-  .forEach((input) => input.addEventListener("change", setOptionalPeriods));
+  .forEach((input) => input.addEventListener("change", () => { setOptionalPeriods(); persistIntake(); }));
 
 document.querySelector("[data-time]").addEventListener("change", (event) => {
   const value = event.currentTarget.value.trim();
-  if (!/^\d{2}:\d{2}:\d{2}$/.test(value)) {
+  if (!/^\d{1,3}:[0-5]\d:[0-5]\d$/.test(value)) {
     const active = document.querySelector(".period-selector .is-active");
     updateMarkerTime(active.dataset.marker);
     showToast("Use kickoff time format HH:MM:SS");
@@ -755,11 +750,21 @@ document.querySelector("[data-time]").addEventListener("change", (event) => {
   }
   const active = document.querySelector(".period-selector .is-active");
   active.dataset.marker = value;
+  active.dataset.markerSet = "true";
   updateMarkerTime(value);
   const seconds = value
     .split(":")
     .reduce((total, part) => total * 60 + Number(part), 0);
   setScrubTime(seconds, false);
+  persistIntake();
+});
+document.querySelector("[data-time]").addEventListener("input", (event) => {
+  const value = event.currentTarget.value.trim();
+  if (!/^\d{1,3}:[0-5]\d:[0-5]\d$/.test(value)) return;
+  const active = document.querySelector(".period-selector .is-active");
+  active.dataset.marker = value;
+  active.dataset.markerSet = "true";
+  persistIntake();
 });
 
 document
@@ -777,6 +782,10 @@ document
       document.querySelector("[data-period-label]").textContent =
         periodLabels[button.dataset.period];
       updateMarkerTime(button.dataset.marker);
+      if (activeMatch.id && (activeMatch.video_path || activeMatch.period_videos?.[button.dataset.period])) {
+        apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: activeMatch.id, period: button.dataset.period }) })
+          .then((result) => showSelectedVideo(result.file, false)).catch((error) => showToast(error.message));
+      }
       const seconds = button.dataset.marker
         .split(":")
         .reduce((total, part) => total * 60 + Number(part), 0);
@@ -869,91 +878,77 @@ eventDialog.addEventListener("click", (event) => {
 });
 
 const heroBall = document.querySelector("[data-hero-ball]");
-const reducedMotion = window.matchMedia(
-  "(prefers-reduced-motion: reduce)",
-).matches;
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-camera.position.z = 6.6;
-const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(heroBall.clientWidth, heroBall.clientHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-heroBall.appendChild(renderer.domElement);
-
-const textureCanvas = document.createElement("canvas");
-textureCanvas.width = 1024;
-textureCanvas.height = 512;
-const textureContext = textureCanvas.getContext("2d");
-textureContext.fillStyle = "#d9d9d5";
-textureContext.fillRect(0, 0, 1024, 512);
-textureContext.strokeStyle = "#60635e";
-textureContext.lineWidth = 9;
-for (let x = -100; x < 1124; x += 150) {
-  for (let y = -70; y < 600; y += 130) {
-    textureContext.beginPath();
-    for (let side = 0; side < 6; side += 1) {
-      const angle = (Math.PI / 3) * side;
-      const px = x + (y % 260 ? 75 : 0) + Math.cos(angle) * 52;
-      const py = y + Math.sin(angle) * 52;
-      if (side === 0) textureContext.moveTo(px, py);
-      else textureContext.lineTo(px, py);
-    }
-    textureContext.closePath();
-    textureContext.stroke();
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const initializeBall = async () => {
+  let renderer;
+  let environment;
+  try {
+    const [{ GLTFLoader }, { RoomEnvironment }] = await Promise.all([
+      import("./vendor/loaders/GLTFLoader.js"),
+      import("./vendor/environments/RoomEnvironment.js"),
+    ]);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    camera.position.set(0, 0.04, 4.9);
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.85;
+    const studio = new RoomEnvironment();
+    const generator = new THREE.PMREMGenerator(renderer);
+    environment = generator.fromScene(studio, 0.03);
+    studio.dispose();
+    generator.dispose();
+    scene.environment = environment.texture;
+    const model = await new GLTFLoader().loadAsync("./assets/cm-chrome-football.glb");
+    const ball = model.scene;
+    ball.traverse(object => {
+      if (!object.isMesh) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach(material => {
+        material.envMapIntensity = 0.75;
+        material.roughness = Math.max(material.roughness, 0.28);
+      });
+    });
+    scene.add(ball);
+    heroBall.appendChild(renderer.domElement);
+    const resize = () => {
+      const width = heroBall.clientWidth;
+      const height = heroBall.clientHeight;
+      if (!width || !height) return;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    };
+    resize();
+    new ResizeObserver(resize).observe(heroBall);
+    let visible = true;
+    new IntersectionObserver(entries => visible = entries[0].isIntersecting).observe(heroBall);
+    renderer.setAnimationLoop(time => {
+      if (!visible || document.hidden) return;
+      ball.rotation.y = reducedMotion.matches ? 0 : Math.sin(time * 0.00018) * 0.22;
+      ball.rotation.x = reducedMotion.matches ? 0 : Math.sin(time * 0.00012) * 0.025;
+      renderer.render(scene, camera);
+      heroBall.classList.add("model-ready");
+    });
+    renderer.domElement.addEventListener("webglcontextlost", () => {
+      heroBall.classList.remove("model-ready");
+      renderer.setAnimationLoop(null);
+    });
+  } catch (error) {
+    renderer?.dispose();
+    environment?.dispose();
+    console.warn("Chrome ball preview fallback:", error.message);
   }
-}
-const ballTexture = new THREE.CanvasTexture(textureCanvas);
-ballTexture.colorSpace = THREE.SRGBColorSpace;
-const ballGroup = new THREE.Group();
-const sphere = new THREE.Mesh(
-  new THREE.SphereGeometry(1.56, 96, 64),
-  new THREE.MeshPhysicalMaterial({
-    map: ballTexture,
-    color: 0xf5f6ef,
-    metalness: 0.72,
-    roughness: 0.14,
-    clearcoat: 1,
-    clearcoatRoughness: 0.08,
-  }),
-);
-ballGroup.add(sphere);
-const badgeCanvas = document.createElement("canvas");
-badgeCanvas.width = 768;
-badgeCanvas.height = 320;
-const badgeContext = badgeCanvas.getContext("2d");
-badgeContext.fillStyle = "#10120e";
-badgeContext.font = "800 210px Arial";
-badgeContext.textAlign = "center";
-badgeContext.fillText("CM", 330, 230);
-badgeContext.fillStyle = "#c8f135";
-badgeContext.font = "800 76px Arial";
-badgeContext.fillText("1.3", 610, 112);
-const badgeTexture = new THREE.CanvasTexture(badgeCanvas);
-badgeTexture.colorSpace = THREE.SRGBColorSpace;
-const badge = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.7, 0.71),
-  new THREE.MeshBasicMaterial({ map: badgeTexture, transparent: true }),
-);
-badge.position.z = 1.68;
-ballGroup.add(badge);
-scene.add(ballGroup);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x575b50, 2.8));
-const rimLight = new THREE.DirectionalLight(0xc8f135, 5);
-rimLight.position.set(-3, 2, 4);
-scene.add(rimLight);
-const keyLight = new THREE.DirectionalLight(0xffffff, 7);
-keyLight.position.set(4, 4, 5);
-scene.add(keyLight);
-const renderBall = () => {
-  if (!reducedMotion) {
-    ballGroup.rotation.y = Math.sin(performance.now() * 0.00022) * 0.12;
-    ballGroup.rotation.x = Math.sin(performance.now() * 0.00035) * 0.06;
-  }
-  renderer.render(scene, camera);
-  requestAnimationFrame(renderBall);
 };
-renderBall();
-new ResizeObserver(() => {
-  renderer.setSize(heroBall.clientWidth, heroBall.clientHeight);
-}).observe(heroBall);
+renderMatch({ home_team: "", away_team: "", event_count: 0, markers: {} });
+renderHistory([]);
+renderEvents([]);
+document.querySelector(".event-footer span").textContent = "No event data";
+document.querySelector(".ticket-meta span:first-child").textContent = "No match loaded";
+document.querySelector(".ticket-meta span:last-child").textContent = "";
+document.querySelector(".ticket-foot span:last-child").textContent = "Awaiting data";
+document.querySelector("main").inert = true;
+document.querySelector("[data-new-project]").disabled = true;
+initializeBall();

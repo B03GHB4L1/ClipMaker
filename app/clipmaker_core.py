@@ -993,6 +993,18 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
+        edited_windows = config.get("clip_windows") or []
+        if edited_windows:
+            windows = [
+                (
+                    float(window["start"]),
+                    float(window["end"]),
+                    str(window.get("label") or "Edited clip"),
+                    int(window.get("period") or 1),
+                )
+                for window in edited_windows
+            ]
+            log(f"Using {len(windows)} edited preview windows for export.")
         log(f"Found {len(df)} events -> {len(windows)} clips after merging.\n")
 
         if config["dry_run"]:

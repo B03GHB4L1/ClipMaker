@@ -10,6 +10,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
+from project_analysis import analysis_frame, preserve_analysis_controls
 from clipmaker_core import (
     read_csv_safe, to_seconds, resolve_period_starts_for_video, match_clock_to_video_time,
     normalise_timeline_corrections, apply_timeline_corrections,
@@ -34,6 +35,7 @@ theme.inject(
     logo_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
 )
 theme.init_shared_state()
+preserve_analysis_controls(("dt_", "at_", "style_", "set_", "vl_", "tl_"))
 theme.render_top_nav("tactical")
 
 HOME_COLOR = "#7ab4ff"
@@ -352,7 +354,7 @@ def _arrow_pitch(df, title, color=ACCENT, limit=80):
 
 
 def _prepare_df(df):
-    df = df.copy()
+    df = analysis_frame(df)
     df["period_order"] = _str_series(df, "period").map(PERIOD_ORDER).fillna(1).astype(int)
     df["minute"] = _num(df, "minute").astype(int)
     df["second"] = _num(df, "second").astype(int)
@@ -699,7 +701,7 @@ def _source_video(row):
     if state["split_video"] and period >= 2:
         if not state["video2_path"]:
             raise ValueError("2nd half video file is required for this second-half clip.")
-        return state["video2_path"]
+        return st.session_state.get(f"video{period}_path") or state["video2_path"]
     return state["video_path"]
 
 
@@ -1007,7 +1009,7 @@ def render_video_lab(df, team):
         try:
             st.plotly_chart(
                 _sequence_trace(window, selected.get("event_id"), team),
-                use_container_width=True,
+                width="stretch",
                 config=_plotly_export_config("event_trace", team, playlist, selected.get("playerName"), selected.get("time")),
             )
         except Exception as exc:
@@ -1019,7 +1021,7 @@ def render_video_lab(df, team):
     b1, b2, b3 = st.columns([1, 1, 2])
     with b1:
         disabled = not _video_ready()
-        if st.button("Cut Moment", key="vl_cut", use_container_width=True, disabled=disabled):
+        if st.button("Cut Moment", key="vl_cut", width="stretch", disabled=disabled):
             with st.spinner("Cutting tactical clip..."):
                 try:
                     path = _cut_tactical_clip(selected, before=before, after=after)
@@ -1032,7 +1034,7 @@ def render_video_lab(df, team):
             st.rerun()
     with b2:
         reel_key = f"{team}|{playlist}|{before}|{after}|{reel_count}|" + ",".join(current.head(reel_count)["event_id"].astype(str))
-        if st.button("Build Reel", key="vl_reel", use_container_width=True, disabled=not _video_ready()):
+        if st.button("Build Reel", key="vl_reel", width="stretch", disabled=not _video_ready()):
             made = []
             with st.spinner("Building tactical reel..."):
                 try:
@@ -1103,7 +1105,7 @@ def render_defensive_transitions(df, team):
     }
     st.plotly_chart(
         _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"], height=TRANSITION_PITCH_HEIGHT),
-        use_container_width=True,
+        width="stretch",
         config=_plotly_export_config("defensive_transitions", team, _export_scope_label()),
     )
 
@@ -1149,7 +1151,7 @@ def render_attacking_transitions(df, team):
     }
     st.plotly_chart(
         _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"], height=TRANSITION_PITCH_HEIGHT),
-        use_container_width=True,
+        width="stretch",
         config=_plotly_export_config("attacking_transitions", team, _export_scope_label()),
     )
 
@@ -1405,7 +1407,7 @@ def render_style_profile(df, team):
     with t1:
         st.plotly_chart(
             _radar_chart(dims, team),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("style_profile_radar", team, _export_scope_label()),
             key="style_profile_radar",
         )
@@ -1435,7 +1437,7 @@ def render_style_profile(df, team):
         fig.update_layout(showlegend=False)
         st.plotly_chart(
             _brand_fig(fig, 420),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("threat_created_passes_carries", team, _export_scope_label()),
         )
 
@@ -1456,7 +1458,7 @@ def render_style_profile(df, team):
         fig = px.funnel(funnel, x="Per Match", y="Stage", title="Progression Funnel Per Match")
         st.plotly_chart(
             _brand_fig(fig, 420),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("progression_funnel", team, _export_scope_label()),
         )
     with f2:
@@ -1480,7 +1482,7 @@ def render_style_profile(df, team):
         )
         st.plotly_chart(
             _brand_fig(fig, 420),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("territory_heatmap", team, _export_scope_label()),
         )
 
@@ -1499,7 +1501,7 @@ def render_style_profile(df, team):
             fig.add_hline(y=50, line_dash="dot", line_color=MUTED)
             st.plotly_chart(
                 _brand_fig(fig, 340),
-                use_container_width=True,
+                width="stretch",
                 config=_plotly_export_config("style_profile_trend", selected_dim, team),
                 key="style_profile_trend",
             )
@@ -1591,7 +1593,7 @@ def render_set_pieces(df, team):
     with left:
         st.plotly_chart(
             _arrow_pitch(profile, "Restart Delivery Map", color=ACCENT),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("restart_delivery_map", team, _export_scope_label()),
         )
     with right:
@@ -1604,13 +1606,13 @@ def render_set_pieces(df, team):
         fig = px.bar(counts, x="restart_type", y="Count", color="Threat", title="Restart Mix And Threat %")
         st.plotly_chart(
             _brand_fig(fig, 440),
-            use_container_width=True,
+            width="stretch",
             config=_plotly_export_config("restart_mix_threat", team, _export_scope_label()),
         )
     st.markdown("##### Restart Outcomes")
     show = profile.sort_values(["shot", "box_entry", "xT_created"], ascending=False).copy()
     show["time"] = show.apply(_event_clock, axis=1)
-    st.dataframe(show[["time", "restart_type", "playerName", "retained", "box_entry", "shot", "xT_created"]].head(16), hide_index=True, use_container_width=True)
+    st.dataframe(show[["time", "restart_type", "playerName", "retained", "box_entry", "shot", "xT_created"]].head(16), hide_index=True, width="stretch")
 
 
 _logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
@@ -1663,15 +1665,15 @@ tab_dt, tab_at, tab_style, tab_set, tab_video = st.tabs([
     "Style Profile",
     "Set Pieces",
     "Video Lab",
-])
+], key="tactical_tabs", on_change="rerun")
 
 with tab_dt:
-    render_defensive_transitions(df_all, team)
+    if tab_dt.open: render_defensive_transitions(df_all, team)
 with tab_at:
-    render_attacking_transitions(df_all, team)
+    if tab_at.open: render_attacking_transitions(df_all, team)
 with tab_style:
-    render_style_profile(df_all, team)
+    if tab_style.open: render_style_profile(df_all, team)
 with tab_set:
-    render_set_pieces(df_all, team)
+    if tab_set.open: render_set_pieces(df_all, team)
 with tab_video:
-    render_video_lab(df_all, team)
+    if tab_video.open: render_video_lab(df_all, team)

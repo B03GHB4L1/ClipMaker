@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClipMaker - Analysis</title>
+  <link rel="stylesheet" href="styles.css?v=8" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=2" />
+  <script type="module" src="analysis.js"></script>
+</head>
+<body class="analysis-page">
+  <header class="filter-topbar">
+    <button type="button" class="filter-brand" data-analysis-menu aria-label="Open navigation" aria-expanded="false" aria-controls="analysis-menu"><span class="cm-logo" aria-hidden="true">CM<sup>1.3</sup></span><span class="menu-dots" aria-hidden="true">•••</span></button>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-view="analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-view="tactical" data-project-navigation>Tactical</a></nav>
+    <span data-analysis-status role="status">Loading workspace...</span>
+  </header>
+  <nav id="analysis-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
+  <main class="analysis-main">
+    <div class="project-bar"><strong data-analysis-project></strong><span data-project-status role="status">Saved locally</span></div>
+    <p data-analysis-error role="alert" hidden></p>
+    <iframe class="analysis-frame" title="Match analysis workspace" data-analysis-frame hidden></iframe>
+  </main>
+  <footer class="app-footer"><span>ClipMaker</span><span>Version 1.3.0</span></footer>
+</body>
+</html>

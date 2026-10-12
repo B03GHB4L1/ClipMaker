@@ -1550,6 +1550,10 @@ def init_shared_state():
 def render_top_nav(current_page: str = ""):
     import streamlit as st
     import streamlit.components.v1 as _cv1
+    import os
+
+    if os.environ.get("CLIPMAKER_ANALYSIS_MODE"):
+        return
 
     items = [
         ("home", "ClipMaker.py", "Home", "[SETUP]"),
@@ -1676,6 +1680,10 @@ def step_header(num: int, label: str) -> str:
 
 
 def logo_header(title: str, subtitle: str, logo_b64: str = None, uppercase_title: bool = True) -> str:
+    import os
+    if os.environ.get("CLIPMAKER_ANALYSIS_MODE"):
+        from html import escape
+        return f"<h1 class='project-analysis-title'>{escape(title)}</h1>"
     # No border-radius or background box — logo stands alone against the page bg
     if logo_b64:
         img = (

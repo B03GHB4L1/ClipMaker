@@ -14,10 +14,64 @@ from packaging.clipmaker_api_server import (
     detect_source,
     infer_score,
     normalize_period,
+    compute_clip_windows,
+    render_preview_clip,
 )
 
 
 class SharedApiTests(unittest.TestCase):
+    def preview_match(self):
+        import pandas as pd
+        path = Path(self.temporary.name) / 'preview-events.csv'
+        pd.DataFrame([
+            {'minute': 1, 'second': 0, 'period': 1, 'type': 'Goal', 'team': 'Home'},
+            {'minute': 2, 'second': 0, 'period': 1, 'type': 'Goal', 'team': 'Home'},
+            {'minute': 46, 'second': 0, 'period': 2, 'type': 'Goal', 'team': 'Away'},
+        ]).to_csv(path, index=False)
+        return {'id': 'preview-test', 'csv_path': str(path), 'markers': {'1H': '00:00:00', '2H': '00:50:00'}}
+
+    def test_preview_correction_boundary_and_period(self):
+        match = self.preview_match()
+        config = build_clip_config(match, {}, Path(self.temporary.name))
+        original = compute_clip_windows(config)
+        config['timeline_corrections'] = [{'period': 1, 'at_seconds': 120, 'seconds': -10}]
+        corrected = compute_clip_windows(config)
+        self.assertEqual(len(original), 3)
+        self.assertEqual(corrected[0]['start'], original[0]['start'])
+        self.assertEqual(corrected[1]['start'], original[1]['start'] - 10)
+        self.assertEqual(corrected[2]['start'], original[2]['start'])
+
+    def test_edited_window_and_export_settings(self):
+        match = self.preview_match()
+        window = {'start': 14.5, 'end': 18.5, 'period': 1, 'label': 'Edited'}
+        config = build_clip_config(match, {'clip_windows': [window], 'output_format': '.mkv',
+            'output_filename': 'test.mp4', 'video_crf': 24, 'encoder_preset': 'fast',
+            'audio_bitrate': '96k'}, Path(self.temporary.name))
+        self.assertEqual(config['clip_windows'], [window])
+        self.assertEqual(config['output_filename'], 'test.mkv')
+        self.assertEqual(config['video_crf'], 24)
+        self.assertEqual(config['encoder_preset'], 'fast')
+        self.assertEqual(config['audio_bitrate'], '96k')
+
+    def test_invalid_windows_rejected(self):
+        match = self.preview_match()
+        for start, end in [(5, 4), (-1, 4), (0, float('nan')), (0, float('inf'))]:
+            with self.subTest(start=start, end=end), self.assertRaises(ValueError):
+                build_clip_config(match, {'clip_windows': [{'start': start, 'end': end}]}, Path(self.temporary.name))
+
+    def test_preview_endpoint_returns_windows(self):
+        match = self.preview_match()
+        self.server.match_store.upsert(match)
+        _, result = self.request('/api/previews', 'POST', {'match_id': match['id'], 'options': {}})
+        self.assertEqual(len(result['windows']), 3)
+        self.assertGreater(result['windows'][0]['end'], result['windows'][0]['start'])
+
+    def test_preview_render_rejects_reversed_window(self):
+        video = Path(self.temporary.name) / 'source.mp4'
+        video.touch()
+        with self.assertRaises(ValueError):
+            render_preview_clip(str(video), 10, 5, Path(self.temporary.name), 20, 'veryfast', '128k')
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.server = create_server("127.0.0.1", 0, Path(self.temporary.name))
@@ -102,6 +156,7 @@ class SharedApiTests(unittest.TestCase):
             "68,5,SavedShot,2,Player Two,Away,0.2\n",
             encoding="utf-8",
         )
+        self.server.match_store.upsert({"id": "table-test", "csv_path": str(csv_path)})
         status, result = self.request(
             "/api/events",
             method="POST",

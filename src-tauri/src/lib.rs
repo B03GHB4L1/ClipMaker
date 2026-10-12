@@ -1,4 +1,5 @@
 use std::net::{TcpListener, TcpStream};
+use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -6,7 +7,7 @@ use std::time::{Duration, Instant};
 use tauri::path::BaseDirectory;
 use tauri::{Manager, RunEvent, Url};
 
-struct BackendProcess(Mutex<Option<Child>>);
+struct BackendProcess(Mutex<Option<(Child, u16)>>);
 
 fn available_port() -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
@@ -38,14 +39,19 @@ pub fn run() {
                 "backend/clipmaker-server"
             };
             let server = app.path().resolve(executable, BaseDirectory::Resource)?;
-            let child = Command::new(server)
-                .args(["--port", &port.to_string()])
+            let mut command = Command::new(server);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            let child = command.args(["--port", &port.to_string()])
                 .current_dir(data_dir)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()?;
-            *app.state::<BackendProcess>().0.lock().expect("backend lock") = Some(child);
+            *app.state::<BackendProcess>().0.lock().expect("backend lock") = Some((child, port));
 
             let window = app
                 .get_webview_window("main")
@@ -65,8 +71,21 @@ pub fn run() {
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
             if let Ok(mut guard) = app_handle.state::<BackendProcess>().0.lock() {
-                if let Some(mut child) = guard.take() {
-                    let _ = child.kill();
+                if let Some((mut child, port)) = guard.take() {
+                    if let Ok(mut stream) = TcpStream::connect_timeout(
+                        &format!("127.0.0.1:{port}").parse().expect("local address"),
+                        Duration::from_secs(1),
+                    ) {
+                        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                        let _ = write!(stream, "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while Instant::now() < deadline {
+                        if matches!(child.try_wait(), Ok(Some(_))) { break; }
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    if matches!(child.try_wait(), Ok(None)) { let _ = child.kill(); }
+                    let _ = child.wait();
                 }
             }
         }
