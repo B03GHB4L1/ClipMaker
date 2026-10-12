@@ -8,6 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
+from project_analysis import analysis_frame, session_video, preserve_analysis_controls
 from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map, pressing_map
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
@@ -41,6 +42,7 @@ theme.inject(
     logo_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ClipMaker_logo.png")
 )
 theme.init_shared_state()
+preserve_analysis_controls(("smp_", "pm_", "dm_", "dcm_", "gk_", "bu_", "press_", "comp_"))
 theme.render_top_nav("analyst")
 # =============================================================================
 # CONSTANTS
@@ -535,7 +537,7 @@ gk_df            = None
 
 if data_loaded:
     try:
-        df_all           = read_csv_safe(csv_path)
+        df_all           = analysis_frame(read_csv_safe(csv_path))
         # The selected CSV is the source of truth; use event team names for filters/maps.
         home_team, away_team = _resolve_event_team_names(df_all)
         pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy() if "period" in df_all.columns else pd.DataFrame()
@@ -549,13 +551,13 @@ if data_loaded:
         gk_df            = df_all[df_all["type"].isin(GK_ACTIONS)].copy().reset_index(drop=True)
         # Re-attribute own goals to the benefiting team so all filtering/display is correct
         if "is_own_goal" in shots_df.columns and home_team and away_team:
-            og = shots_df["is_own_goal"].astype(bool)
+            og = shots_df["is_own_goal"].astype(str).str.lower().isin(["true", "1", "yes"])
             home_og = og & (shots_df["team"] == home_team)
             away_og = og & (shots_df["team"] == away_team)
             shots_df.loc[home_og, "team"] = away_team
             shots_df.loc[away_og, "team"] = home_team
         if "is_own_goal" in pso_shots_df.columns and home_team and away_team:
-            og = pso_shots_df["is_own_goal"].astype(bool)
+            og = pso_shots_df["is_own_goal"].astype(str).str.lower().isin(["true", "1", "yes"])
             home_og = og & (pso_shots_df["team"] == home_team)
             away_og = og & (pso_shots_df["team"] == away_team)
             pso_shots_df.loc[home_og, "team"] = away_team
@@ -652,7 +654,7 @@ def cut_clip(minute, second, period_str, before=None, after=None):
     if split_video and period_int >= 2:
         if not video2_path:
             raise ValueError("2nd half video file is required for this second-half clip.")
-        src = video2_path
+        src = session_video(period_int)
     else:
         src = video_path
     ffmpeg = get_ffmpeg()
@@ -703,7 +705,7 @@ def cut_build_up_clip(chain, df_source):
     if split_video and period_int >= 2:
         if not video2_path:
             raise ValueError("2nd half video file is required for this second-half clip.")
-        src = video2_path
+        src = session_video(period_int)
     else:
         src = video_path
     ffmpeg = get_ffmpeg()
@@ -861,15 +863,15 @@ def render_watch_panel(row, prefix, label_fn):
         with open(existing_clip, "rb") as _dl:
             st.download_button("Download clip", data=_dl.read(),
                                file_name=safe_name, mime="video/mp4",
-                               use_container_width=True,
+                               width="stretch",
                                icon=theme.icon_shortcode("[DL]"))
-        if st.button("Clear preview", use_container_width=True, key=f"{prefix}_clear",
+        if st.button("Clear preview", width="stretch", key=f"{prefix}_clear",
                      icon=theme.icon_shortcode("[X]")):
             _clear_clip(prefix)
             st.rerun()
     elif clip_error and existing_key == full_key:
         st.error(f"Could not cut clip: {clip_error}")
-        if st.button("Retry", use_container_width=True, key=f"{prefix}_retry", icon=theme.icon_shortcode("[RETRY]")):
+        if st.button("Retry", width="stretch", key=f"{prefix}_retry", icon=theme.icon_shortcode("[RETRY]")):
             st.session_state[f"{prefix}_clip_error"] = None
             st.session_state[f"{prefix}_clip_key"]   = None
             st.rerun()
@@ -889,7 +891,7 @@ def render_watch_panel(row, prefix, label_fn):
                 st.session_state[f"{prefix}_clip_key"]   = full_key
                 st.rerun()
     else:
-        if st.button("Watch", type="primary", use_container_width=True, key=f"{prefix}_watch", icon=theme.icon_shortcode("[RUN]")):
+        if st.button("Watch", type="primary", width="stretch", key=f"{prefix}_watch", icon=theme.icon_shortcode("[RUN]")):
             with st.spinner("Cutting clip…"):
                 try:
                     new_path = cut_clip(minute_val, second_val, period_val,
@@ -951,7 +953,7 @@ tab_shot, tab_pass, tab_def, tab_dc, tab_gk, tab_bu, tab_press, tab_comp = st.ta
     "↗ Build-Up",
     "◆ Pressing",
     "⇄ Comparison",
-])
+], key="analyst_tabs", on_change="rerun")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 1 — SHOT MAP
@@ -967,6 +969,8 @@ def render_shot_tab():
     if has_pso:
         mode = st.radio("Mode", ["Normal", "Penalty Shootout"], horizontal=True,
                        key="smp_mode_radio", label_visibility="collapsed")
+    elif os.environ.get("CLIPMAKER_ANALYSIS_MODE"):
+        mode = "Normal"
     else:
         mode = st.radio("Mode", ["Normal"], horizontal=True, disabled=True,
                        key="smp_mode_radio", label_visibility="collapsed")
@@ -1089,22 +1093,26 @@ def render_shot_tab():
     if not radio_opts:
         radio_opts = sorted(shots_df["team"].dropna().unique().tolist())[:2]
 
-    team_sel = st.radio("Team", radio_opts, horizontal=True, key="smp_team_radio",
-                        label_visibility="collapsed")
+    controls = st.columns([1.2, 1, 1]) if os.environ.get("CLIPMAKER_ANALYSIS_MODE") else [st.container() for _ in range(3)]
+    with controls[0]:
+        team_sel = st.radio("Team", radio_opts, horizontal=True, key="smp_team_radio",
+                            label_visibility="collapsed")
 
     all_shot_players  = sorted(shots_df["playerName"].dropna().unique()) if "playerName" in shots_df.columns else []
     team_shot_players = [p for p in all_shot_players
                          if p in shots_df[shots_df["team"] == team_sel]["playerName"].values]
-    player_filter_shot = st.selectbox("Player", ["All players"] + team_shot_players,
-                                      label_visibility="collapsed", key="smp_player_sel")
+    with controls[1]:
+        player_filter_shot = st.selectbox("Player", ["All players"] + team_shot_players,
+                                          label_visibility="collapsed", key="smp_player_sel")
 
-    smp_pitch_zone = st.selectbox(
-        "Pitch Zone",
-        options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
-        format_func=lambda x: "Any pitch zone" if x == "" else x,
-        key="smp_pitch_zone_sel",
-        label_visibility="collapsed",
-    )
+    with controls[2]:
+        smp_pitch_zone = st.selectbox(
+            "Pitch Zone",
+            options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+            format_func=lambda x: "Any pitch zone" if x == "" else x,
+            key="smp_pitch_zone_sel",
+            label_visibility="collapsed",
+        )
 
     _smp_fkey = f"{team_sel}|{player_filter_shot}|{smp_pitch_zone}"
     if st.session_state.get("_smp_last_filter") != _smp_fkey:
@@ -2600,7 +2608,7 @@ def render_build_up_tab():
                     st.rerun()
 
             if cur_entry is not None and st.button("Clear selection", key=f"bu_entry_clear_{entry_mode}",
-                                                   use_container_width=True):
+                                                   width="stretch"):
                 st.session_state["bu_entry_selected_idx"] = None
                 st.session_state["bu_entry_clip_path"] = None
                 st.session_state["bu_entry_clip_key"] = None
@@ -2907,7 +2915,7 @@ def render_pressing_tab():
     if sel_idx is not None or _pr_clip or _pr_err:
         _, cc = st.columns([5, 1])
         with cc:
-            if st.button("Clear", key="press_clear", use_container_width=True,
+            if st.button("Clear", key="press_clear", width="stretch",
                          icon=theme.icon_shortcode("[X]")):
                 st.session_state["press_selected_idx"]       = None
                 st.session_state["press_clip_path"]          = None
@@ -3005,7 +3013,7 @@ def _score_gk_moments(ev):
     if "outcomeType" in df.columns:
         outcome_ok = df["outcomeType"] == "Successful"
 
-    prog_pass_vals = pd.to_numeric(df.get("prog_pass", 0), errors="coerce").fillna(0).clip(lower=0)
+    prog_pass_vals = pd.to_numeric(df.get("prog_pass", pd.Series(0, index=df.index)), errors="coerce").fillna(0).clip(lower=0)
 
     # Priority order:
     # Save > KeeperSweeper > accurate long balls (with progression) > Claim > Punch > KeeperPickup
@@ -3030,13 +3038,14 @@ def _score_gk_moments(ev):
     # by progressive distance, but never above the save ceiling.
     long_pass_mask = (df["type"] == "Pass") & outcome_ok & _bool_col(df, "is_long_ball")
     long_pass_scores = 70.0 + prog_pass_vals.loc[long_pass_mask].clip(upper=18.0)
-    df.loc[long_pass_mask, "moment_score"] = (
-        df.loc[long_pass_mask, "moment_score"]
-        .clip(lower=0.0)
-        .combine(long_pass_scores.clip(upper=88.0), max)
-    )
+    if long_pass_mask.any():
+        df.loc[long_pass_mask, "moment_score"] = (
+            df.loc[long_pass_mask, "moment_score"]
+            .clip(lower=0.0)
+            .combine(long_pass_scores.clip(upper=88.0), max)
+        )
 
-    df["moment_score"] = df["moment_score"].clip(upper=100.0)
+    df["moment_score"] = pd.to_numeric(df["moment_score"], errors="coerce").fillna(0).clip(upper=100.0)
 
     return df
 
@@ -3399,7 +3408,7 @@ def render_comparison_tab():
             light=_light,
             match_context=_match_context,
         ), light=_light),
-        use_container_width=True,
+        width="stretch",
         config=plotly_export_config("performance_radar", player1, "vs", player2, _match_context),
     )
 
@@ -3431,13 +3440,13 @@ def render_comparison_tab():
     with z1:
         st.plotly_chart(
             _zone_bar(p1_ev, player1, HOME_COLOR),
-            use_container_width=True,
+            width="stretch",
             config=plotly_clean_static_config("pitch_zone_activity", player1, _match_context),
         )
     with z2:
         st.plotly_chart(
             _zone_bar(p2_ev, player2, AWAY_COLOR),
-            use_container_width=True,
+            width="stretch",
             config=plotly_clean_static_config("pitch_zone_activity", player2, _match_context),
         )
 
@@ -3522,7 +3531,7 @@ def render_comparison_tab():
         if disp_df.empty:
             st.caption("No qualifying moments found for this player.")
             return
-        st.dataframe(disp_df, use_container_width=True, hide_index=True)
+        st.dataframe(disp_df, width="stretch", hide_index=True)
         reel_key = (
             f"{player_name}|{'goalkeeper' if is_gk else role}|"
             + ",".join(
@@ -3575,27 +3584,27 @@ def render_comparison_tab():
 # RENDER TABS
 # =============================================================================
 with tab_shot:
-    render_shot_tab()
+    if tab_shot.open: render_shot_tab()
 
 with tab_pass:
-    render_pass_tab()
+    if tab_pass.open: render_pass_tab()
 
 with tab_def:
-    render_def_tab()
+    if tab_def.open: render_def_tab()
 
 with tab_dc:
-    render_dc_tab()
+    if tab_dc.open: render_dc_tab()
 
 with tab_gk:
-    render_gk_tab()
+    if tab_gk.open: render_gk_tab()
 
 with tab_bu:
-    render_build_up_tab()
+    if tab_bu.open: render_build_up_tab()
 
 with tab_press:
-    render_pressing_tab()
+    if tab_press.open: render_pressing_tab()
 
 with tab_comp:
-    render_comparison_tab()
+    if tab_comp.open: render_comparison_tab()
 
 theme.render_support_footer("Analyst's Room")

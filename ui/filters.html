@@ -6,15 +6,16 @@
     <meta name="theme-color" content="#f4f4f0" />
     <title>ClipMaker - Filter Events</title>
     <link rel="stylesheet" href="styles.css?v=8" />
-    <link rel="stylesheet" href="filters.css?v=1" />
-    <script type="module" src="filters.js?v=1"></script>
+    <link rel="stylesheet" href="filters.css?v=2" />
+    <link rel="stylesheet" href="compact.css?v=2" />
+    <script type="module" src="filters.js?v=4"></script>
   </head>
   <body class="filter-page">
     <header class="filter-topbar">
-      <a class="filter-brand" href="/" aria-label="Back to match intake">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>ClipMaker</span>
-      </a>
+      <button type="button" class="filter-brand" data-filter-menu aria-label="Open navigation" aria-expanded="false" aria-controls="filter-menu">
+        <span class="cm-logo" aria-hidden="true">CM<sup>1.3</sup></span>
+        <span class="menu-dots" aria-hidden="true">•••</span>
+      </button>
       <nav aria-label="Workflow">
         <a href="/">01 Intake</a>
         <a class="is-active" href="/filters.html">02 Filter</a>
@@ -23,8 +24,19 @@
         <i aria-hidden="true"></i><span>Connecting engine</span>
       </span>
     </header>
+    <nav id="filter-menu" class="project-menu" aria-label="Primary navigation" hidden>
+      <a href="/" data-project-navigation>Match intake</a>
+      <a href="/analysis.html?view=analyst" data-project-navigation>Analyst Room</a>
+      <a href="/analysis.html?view=tactical" data-project-navigation>Tactical Lab</a>
+      <button type="button" data-open-projects>Local projects</button>
+      <button type="button" data-new-project>New project</button>
+    </nav>
 
     <main class="filters-main">
+      <div class="project-bar">
+        <label>Project <input data-project-name aria-label="Project name" maxlength="120" value="Untitled project" /></label>
+        <span data-project-status role="status">Local workspace</span>
+      </div>
       <header class="filters-titlebar">
         <div>
           <span class="eyebrow">02 Event filtering</span>
@@ -74,80 +86,86 @@
 
       <form class="filter-builder" data-filter-form>
         <div class="filter-flow">
-          <section class="filter-band" id="scope">
-            <header>
+          <details class="filter-band" id="scope">
+            <summary class="filter-band-summary">
               <span>01</span>
               <div>
                 <h2>Scope</h2>
                 <p>Choose whose events and which period.</p>
               </div>
-            </header>
-            <div class="control-grid two-up">
-              <fieldset>
-                <legend>Team</legend>
-                <div class="segmented-control" data-team-options></div>
-              </fieldset>
-              <fieldset>
-                <legend>Match period</legend>
-                <div class="segmented-control">
-                  <label
-                    ><input
-                      type="radio"
-                      name="half"
-                      value="Both halves"
-                      checked
-                    /><span>Both</span></label
-                  >
-                  <label
-                    ><input
-                      type="radio"
-                      name="half"
-                      value="1st half only"
-                    /><span>1st half</span></label
-                  >
-                  <label
-                    ><input
-                      type="radio"
-                      name="half"
-                      value="2nd half only"
-                    /><span>2nd half</span></label
-                  >
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <div class="control-grid two-up">
+                <fieldset>
+                  <legend>Team</legend>
+                  <div class="segmented-control" data-team-options></div>
+                </fieldset>
+                <fieldset>
+                  <legend>Match period</legend>
+                  <div class="segmented-control">
+                    <label
+                      ><input
+                        type="radio"
+                        name="half"
+                        value="Both halves"
+                        checked
+                      /><span>Both</span></label
+                    >
+                    <label
+                      ><input
+                        type="radio"
+                        name="half"
+                        value="1st half only"
+                      /><span>1st half</span></label
+                    >
+                    <label
+                      ><input
+                        type="radio"
+                        name="half"
+                        value="2nd half only"
+                      /><span>2nd half</span></label
+                    >
+                  </div>
+                </fieldset>
+              </div>
+              <fieldset class="players-fieldset">
+                <div class="legend-row">
+                  <legend>Players</legend>
+                  <div>
+                    <button type="button" data-select-all-players>All</button
+                    ><button type="button" data-clear-players>Clear</button>
+                  </div>
                 </div>
+                <p class="field-note">
+                  Leave everyone unselected to include all players in the team
+                  scope.
+                </p>
+                <div class="choice-grid player-grid" data-player-options></div>
               </fieldset>
             </div>
-            <fieldset class="players-fieldset">
-              <div class="legend-row">
-                <legend>Players</legend>
-                <div>
-                  <button type="button" data-select-all-players>All</button
-                  ><button type="button" data-clear-players>Clear</button>
-                </div>
-              </div>
-              <p class="field-note">
-                Leave everyone unselected to include all players in the team
-                scope.
-              </p>
-              <div class="choice-grid player-grid" data-player-options></div>
-            </fieldset>
-          </section>
+          </details>
 
-          <section class="filter-band" id="actions">
-            <header>
+          <details class="filter-band" id="actions">
+            <summary class="filter-band-summary">
               <span>02</span>
               <div>
                 <h2>Action types</h2>
                 <p>These come directly from the selected match.</p>
               </div>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
               <div class="section-tools">
-                <button type="button" data-select-all-actions>All</button
+                <button type="button" data-select-all-actions>Select all</button
                 ><button type="button" data-clear-actions>Clear</button>
               </div>
-            </header>
-            <div class="choice-grid action-grid" data-action-options></div>
-          </section>
+              <div class="choice-grid action-grid" data-action-options></div>
+            </div>
+          </details>
 
-          <section class="filter-band" id="qualifiers">
-            <header>
+          <details class="filter-band" id="qualifiers">
+            <summary class="filter-band-summary">
               <span>03</span>
               <div>
                 <h2>Action qualifiers</h2>
@@ -156,144 +174,306 @@
               <strong class="availability" data-qualifier-availability
                 >Checking data</strong
               >
-            </header>
-            <fieldset class="logic-control">
-              <legend>
-                When several qualifiers affect the same action family
-              </legend>
-              <div class="segmented-control compact">
-                <label
-                  ><input
-                    type="radio"
-                    name="qualifier-logic"
-                    value="any"
-                    checked
-                  /><span>Match any</span></label
-                >
-                <label
-                  ><input
-                    type="radio"
-                    name="qualifier-logic"
-                    value="all"
-                  /><span>Match all</span></label
-                >
-              </div>
-            </fieldset>
-            <div class="qualifier-groups" data-qualifier-groups></div>
-          </section>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <fieldset class="logic-control">
+                <legend>
+                  When several qualifiers affect the same action family
+                </legend>
+                <div class="segmented-control compact">
+                  <label
+                    ><input
+                      type="radio"
+                      name="qualifier-logic"
+                      value="any"
+                      checked
+                    /><span>Match any</span></label
+                  >
+                  <label
+                    ><input
+                      type="radio"
+                      name="qualifier-logic"
+                      value="all"
+                    /><span>Match all</span></label
+                  >
+                </div>
+              </fieldset>
+              <div class="qualifier-groups" data-qualifier-groups></div>
+            </div>
+          </details>
 
-          <section class="filter-band" id="location">
-            <header>
+          <details class="filter-band" id="location">
+            <summary class="filter-band-summary">
               <span>04</span>
               <div>
                 <h2>Location and value</h2>
                 <p>Narrow actions by pitch area or expected threat.</p>
               </div>
-            </header>
-            <div class="control-grid four-up">
-              <label
-                ><span>Pitch lane</span
-                ><select data-pitch-zone>
-                  <option value="">Any lane</option>
-                  <option>Entire Left Side</option>
-                  <option>Left Wing</option>
-                  <option>Left Half Space</option>
-                  <option>Centre</option>
-                  <option>Right Half Space</option>
-                  <option>Right Wing</option>
-                  <option>Entire Right Side</option>
-                </select></label
-              >
-              <label
-                ><span>Pitch depth</span
-                ><select data-depth-zone>
-                  <option value="">Any depth</option>
-                  <option>Defensive Third</option>
-                  <option>Middle Third</option>
-                  <option>Attacking Third</option>
-                </select></label
-              >
-              <label
-                ><span>Minimum xT</span
-                ><input
-                  type="number"
-                  min="0"
-                  step="0.001"
-                  value="0"
-                  data-xt-min
-              /></label>
-              <label
-                ><span>Top N by xT</span
-                ><input type="number" min="0" step="1" value="0" data-top-n
-              /></label>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <div class="control-grid four-up">
+                <label
+                  ><span>Pitch lane</span
+                  ><select data-pitch-zone>
+                    <option value="">Any lane</option>
+                    <option>Entire Left Side</option>
+                    <option>Left Wing</option>
+                    <option>Left Half Space</option>
+                    <option>Centre</option>
+                    <option>Right Half Space</option>
+                    <option>Right Wing</option>
+                    <option>Entire Right Side</option>
+                  </select></label
+                >
+                <label
+                  ><span>Pitch depth</span
+                  ><select data-depth-zone>
+                    <option value="">Any depth</option>
+                    <option>Defensive Third</option>
+                    <option>Middle Third</option>
+                    <option>Attacking Third</option>
+                  </select></label
+                >
+                <label
+                  ><span>Minimum xT</span
+                  ><input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value="0"
+                    data-xt-min
+                /></label>
+                <label
+                  ><span>Top N by xT</span
+                  ><input type="number" min="0" step="1" value="0" data-top-n
+                /></label>
+              </div>
             </div>
-          </section>
+          </details>
 
-          <section class="filter-band" id="timing">
-            <header>
+          <details class="filter-band" id="timing">
+            <summary class="filter-band-summary">
               <span>05</span>
               <div>
-                <h2>Clip timing and output</h2>
+                <h2>Clip timing</h2>
                 <p>Control the context around each matching event.</p>
               </div>
-            </header>
-            <div class="control-grid four-up">
-              <label
-                ><span>Seconds before</span
-                ><input
-                  type="number"
-                  min="0"
-                  max="60"
-                  value="5"
-                  data-before-buffer
-              /></label>
-              <label
-                ><span>Seconds after</span
-                ><input
-                  type="number"
-                  min="0"
-                  max="60"
-                  value="8"
-                  data-after-buffer
-              /></label>
-              <label
-                ><span>Merge gap</span
-                ><input type="number" min="0" max="60" value="6" data-min-gap
-              /></label>
-              <label
-                ><span>Output name</span
-                ><input type="text" value="Highlights.mp4" data-output-name
-              /></label>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <div class="control-grid three-up">
+                <label
+                  ><span>Seconds before</span
+                  ><input
+                    type="number"
+                    min="0"
+                    max="60"
+                    value="5"
+                    data-before-buffer
+                /></label>
+                <label
+                  ><span>Seconds after</span
+                  ><input
+                    type="number"
+                    min="0"
+                    max="60"
+                    value="8"
+                    data-after-buffer
+                /></label>
+                <label
+                  ><span>Merge gap</span
+                  ><input type="number" min="0" max="60" value="6" data-min-gap
+                /></label>
+              </div>
             </div>
-            <label class="binary-option"
-              ><input type="checkbox" data-individual-clips /><span
-                >Save individual clips instead of one combined reel</span
-              ></label
-            >
-          </section>
+          </details>
 
-          <section class="snapshot-band" aria-labelledby="snapshot-title">
-            <div>
-              <span class="section-kicker">Reusable setups</span>
-              <h2 id="snapshot-title">Filter snapshots</h2>
+          <details class="filter-band" id="corrections">
+            <summary class="filter-band-summary">
+              <span>06</span>
+              <div>
+                <h2>Timing corrections</h2>
+                <p>
+                  Shift every later clip in a period after a recording gap or
+                  interruption.
+                </p>
+              </div>
+              <strong class="availability" data-correction-count
+                >None active</strong
+              >
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <div class="correction-list" data-correction-list></div>
+              <div class="control-grid correction-grid">
+                <label
+                  ><span>Period</span
+                  ><select data-correction-period>
+                    <option value="1">P1</option>
+                    <option value="2">P2</option>
+                    <option value="3">P3</option>
+                    <option value="4">P4</option>
+                    <option value="5">P5</option>
+                  </select></label
+                >
+                <label
+                  ><span>From match clock</span
+                  ><input
+                    type="text"
+                    value="25:52"
+                    placeholder="MM:SS"
+                    data-correction-clock
+                /></label>
+                <label
+                  ><span>Recording problem</span
+                  ><select data-correction-direction>
+                    <option value="subtract">
+                      Recording is shorter; move later clips earlier
+                    </option>
+                    <option value="add">
+                      Recording has extra time; move later clips later
+                    </option>
+                  </select></label
+                >
+                <label
+                  ><span>Shift by</span
+                  ><input
+                    type="text"
+                    value="00:30"
+                    placeholder="MM:SS"
+                    data-correction-amount
+                /></label>
+                <label
+                  ><span>Note</span
+                  ><input
+                    type="text"
+                    placeholder="Optional"
+                    data-correction-note
+                /></label>
+                <button type="button" data-add-correction>
+                  Add correction
+                </button>
+              </div>
             </div>
-            <label
-              ><span>Snapshot name</span
-              ><input
-                type="text"
-                placeholder="e.g. Wing attacks"
-                data-snapshot-name
-            /></label>
-            <button type="button" data-save-snapshot>Save</button>
-            <label
-              ><span>Saved snapshots</span
-              ><select data-snapshot-select>
-                <option value="">No snapshots saved</option>
-              </select></label
+          </details>
+
+          <details class="filter-band" id="export-settings">
+            <summary class="filter-band-summary">
+              <span>07</span>
+              <div>
+                <h2>Export settings</h2>
+                <p>Choose the destination, format and encoding quality.</p>
+              </div>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div class="filter-band-content">
+              <div class="folder-control">
+                <label
+                  ><span>Output folder</span
+                  ><input
+                    type="text"
+                    placeholder="ClipMaker local exports folder"
+                    data-output-dir
+                /></label>
+                <button type="button" data-browse-output>Browse</button>
+              </div>
+              <div class="control-grid four-up export-grid">
+                <label
+                  ><span>Output name</span
+                  ><input type="text" value="Highlights" data-output-name
+                /></label>
+                <label
+                  ><span>Format</span
+                  ><select data-output-format>
+                    <option value=".mp4">MP4 (.mp4)</option>
+                    <option value=".mov">MOV (.mov)</option>
+                    <option value=".mkv">MKV (.mkv)</option>
+                  </select></label
+                >
+                <label
+                  ><span>Quality</span
+                  ><select data-quality>
+                    <option value="balanced">Balanced (recommended)</option>
+                    <option value="small">Smaller file</option>
+                    <option value="high">High quality</option>
+                    <option value="custom">Custom</option>
+                  </select></label
+                >
+                <label
+                  ><span>Encoder speed</span
+                  ><select data-encoder-preset>
+                    <option>ultrafast</option>
+                    <option>superfast</option>
+                    <option selected>veryfast</option>
+                    <option>faster</option>
+                    <option>fast</option>
+                    <option>medium</option>
+                    <option>slow</option>
+                  </select></label
+                >
+                <label
+                  ><span>Video quality (CRF)</span
+                  ><input
+                    type="number"
+                    min="16"
+                    max="30"
+                    value="20"
+                    data-video-crf
+                /></label>
+                <label
+                  ><span>Audio bitrate</span
+                  ><select data-audio-bitrate>
+                    <option>96k</option>
+                    <option selected>128k</option>
+                    <option>160k</option>
+                    <option>192k</option>
+                    <option>256k</option>
+                  </select></label
+                >
+              </div>
+              <label class="binary-option"
+                ><input type="checkbox" data-individual-clips /><span
+                  >Save individual clips instead of one combined reel</span
+                ></label
+              >
+            </div>
+          </details>
+
+          <details class="filter-band snapshot-details" id="snapshots">
+            <summary class="filter-band-summary">
+              <span>08</span>
+              <div>
+                <h2 id="snapshot-title">Filter snapshots</h2>
+                <p>Save and reload useful filter combinations.</p>
+              </div>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div
+              class="filter-band-content snapshot-band"
+              aria-labelledby="snapshot-title"
             >
-            <button type="button" data-load-snapshot disabled>Load</button>
-            <button type="button" data-delete-snapshot disabled>Delete</button>
-          </section>
+              <label
+                ><span>Snapshot name</span
+                ><input
+                  type="text"
+                  placeholder="e.g. Wing attacks"
+                  data-snapshot-name
+              /></label>
+              <button type="button" data-save-snapshot>Save</button>
+              <label
+                ><span>Saved snapshots</span
+                ><select data-snapshot-select>
+                  <option value="">No snapshots saved</option>
+                </select></label
+              >
+              <button type="button" data-load-snapshot disabled>Load</button>
+              <button type="button" data-delete-snapshot disabled>
+                Delete
+              </button>
+            </div>
+          </details>
         </div>
 
         <aside class="filter-summary">
@@ -347,10 +527,39 @@
             </div>
             <div class="plan-progress"><i data-job-progress></i></div>
             <pre data-job-logs></pre>
+            <div class="export-files" data-export-files></div>
           </div>
         </aside>
       </form>
+
+      <section
+        class="clip-preview-section"
+        data-preview-results
+        hidden
+        aria-labelledby="preview-title"
+      >
+        <header>
+          <div>
+            <span class="section-kicker">Editable clip list</span>
+            <h2 id="preview-title">
+              <span data-preview-count>0</span> clips match
+            </h2>
+          </div>
+          <button type="button" data-clear-preview>Clear preview</button>
+        </header>
+        <p>
+          Open a clip to watch it, extend or trim its window, then export
+          exactly this list.
+        </p>
+        <div class="clip-range">
+          <label>First clip <input type="number" min="1" value="1" data-range-first /></label>
+          <label>Last clip <input type="number" min="1" value="1" data-range-last /></label>
+          <output data-range-count></output>
+        </div>
+        <div class="clip-list" data-clip-list></div>
+      </section>
     </main>
+    <footer class="app-footer"><span>ClipMaker</span><span>Version 1.3.0</span></footer>
     <div class="toast" role="status" aria-live="polite" data-toast></div>
   </body>
 </html>

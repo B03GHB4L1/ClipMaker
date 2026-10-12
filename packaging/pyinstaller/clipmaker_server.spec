@@ -13,10 +13,12 @@ hiddenimports = [
     "whoscored_scraper",
     "theme",
     "smp_component",
+    "project_analysis",
+    "analysis_server",
     "tkinter",
     "tkinter.filedialog",
 ]
-for package in ("playwright", "imageio_ffmpeg"):
+for package in ("playwright", "imageio_ffmpeg", "streamlit"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -24,7 +26,7 @@ for package in ("playwright", "imageio_ffmpeg"):
 
 a = Analysis(
     [str(ROOT / "packaging" / "clipmaker_api_server.py")],
-    pathex=[str(ROOT), str(ROOT / "app")],
+    pathex=[str(ROOT), str(ROOT / "app"), str(ROOT / "packaging")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -42,7 +44,6 @@ a = Analysis(
         "pytest",
         "scipy",
         "sklearn",
-        "streamlit",
         "sympy",
         "tensorflow",
         "torch",
@@ -62,7 +63,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -40,13 +40,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf python3-tk rpm
       - run: python -m pip install -r requirements-build.txt
+      - run: python -m unittest discover -s tests -v
       - name: Install bundled browser
         shell: bash
         run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
       - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+      - name: Verify packaged engine before bundling
+        shell: bash
+        run: python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}"
       - name: Place backend where Tauri expects it
         shell: pwsh
-        run: Copy-Item "dist/clipmaker-server/*" "src-tauri/resources/backend/" -Recurse -Force
+        run: |
+          New-Item -ItemType Directory -Path "src-tauri/resources/backend" -Force
+          Copy-Item "dist/clipmaker-server/*" "src-tauri/resources/backend/" -Recurse -Force
       - run: npm ci
       - run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - uses: actions/upload-artifact@v4
