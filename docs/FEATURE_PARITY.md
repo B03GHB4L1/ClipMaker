@@ -132,3 +132,21 @@ Remaining release blockers:
 No guarantee is made that unsigned macOS software bypasses Gatekeeper. The
 Homebrew approach uses a source/CLI launcher rather than an unsigned app bundle,
 but native installation and security behavior still need verification.
+
+## UI Cleanup Pass (2026-10-12)
+
+- Removed the intake progress strip and its obsolete navigation/state handlers.
+- Standardized control typography, label sizes, file inputs, filename truncation,
+  focus indicators, and the four-view workflow navigation.
+- Removed sample kickoff values from initial markup; saved project values remain
+  authoritative. Closed intake navigation is inert for keyboard users.
+- Analysis statistics, tabs, chart labels, and export controls use consistent
+  sans-serif typography without a remote chart-font dependency.
+- Responsive analysis height follows the actual header rather than a fixed
+  subtraction. Narrow export grids and playback controls retain their controls.
+- Local regression suite: 40 Python tests and the project autosave Node test
+  passed. CI browser checks were extended but not dispatched or run locally.
+- Browser verification covers intake, filtering/export controls, and loaded
+  analyst/tactical views. Cross-frame tab clicks remain limited by the browser
+  automation tool; analytical AppTest coverage is not a substitute for native
+  webview interaction acceptance. The release blockers above remain open.

@@ -986,8 +986,17 @@ document.querySelector("[data-project-name]").addEventListener("change", persist
 document.querySelectorAll("[data-preset], [data-reset-filters], [data-load-snapshot], [data-select-all-actions], [data-clear-actions], [data-select-all-players], [data-clear-players], [data-clear-preview]").forEach((button) => button.addEventListener("click", persistFilters));
 const menuButton = document.querySelector("[data-filter-menu]");
 const menu = document.querySelector("#filter-menu");
-const closeMenu = () => { menu.hidden = true; menuButton.setAttribute("aria-expanded", "false"); };
-menuButton.onclick = () => { menu.hidden = !menu.hidden; menuButton.setAttribute("aria-expanded", String(!menu.hidden)); };
+const closeMenu = () => {
+  if (menu.contains(document.activeElement)) menuButton.focus();
+  menu.hidden = true;
+  menuButton.setAttribute("aria-expanded", "false");
+};
+menuButton.onclick = () => {
+  if (!menu.hidden) { closeMenu(); return; }
+  menu.hidden = false;
+  menuButton.setAttribute("aria-expanded", "true");
+  menu.querySelector("a, button")?.focus();
+};
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(); });
 document.addEventListener("click", (event) => { if (!event.target.closest("#filter-menu, [data-filter-menu]")) closeMenu(); });
 document.querySelector("[data-new-project]").onclick = async (event) => {

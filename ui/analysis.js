@@ -5,7 +5,12 @@ const projectId = params.get("project") || sessionStorage.getItem("clipmaker.act
 const view = params.get("view") === "tactical" ? "tactical" : "analyst";
 const menu = document.querySelector("#analysis-menu");
 const menuButton = document.querySelector("[data-analysis-menu]");
-const setMenu = (open) => { menu.hidden = !open; menuButton.setAttribute("aria-expanded", String(open)); };
+const setMenu = (open) => {
+  if (!open && menu.contains(document.activeElement)) menuButton.focus();
+  menu.hidden = !open;
+  menuButton.setAttribute("aria-expanded", String(open));
+  if (open) menu.querySelector("a, button")?.focus();
+};
 menuButton.onclick = () => setMenu(menu.hidden);
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") setMenu(false); });
 document.addEventListener("click", (event) => { if (!event.target.closest("#analysis-menu, [data-analysis-menu]")) setMenu(false); });
@@ -15,6 +20,7 @@ document.querySelector("[data-new-project]").onclick = async () => {
 };
 document.querySelectorAll("[data-view]").forEach((link) => {
   link.classList.toggle("is-active", link.dataset.view === view);
+  if (link.dataset.view === view) link.setAttribute("aria-current", "page");
   link.href = `/analysis.html?view=${link.dataset.view}&project=${encodeURIComponent(projectId || "")}`;
 });
 const connect = async () => {

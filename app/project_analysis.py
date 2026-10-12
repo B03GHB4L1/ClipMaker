@@ -145,6 +145,15 @@ def compact_analysis_style():
     .stTabs [data-baseweb='tab-list'] {gap:8px!important;}
     .stTabs [data-baseweb='tab'] {font-size:12px!important;padding:8px!important;}
     [data-testid='stWidgetLabel'] p, .stTabs p {letter-spacing:0!important;}
+    .stApp :is(h1,h2,h3,p,label,button,input,textarea),
+    .stApp [data-baseweb='select'] :is(div,span) {font-family:Arial,Helvetica,sans-serif!important;letter-spacing:0!important;}
+    .stApp :is(h1,h2,h3), .stApp [data-testid='stWidgetLabel'] p {text-transform:none!important;}
+    .stApp [data-testid='stWidgetLabel'] p {font-size:13px!important;line-height:1.4!important;}
+    .stApp :is(.cm-stats-label,.cm-stats-home,.cm-stats-away) {font-family:Arial,Helvetica,sans-serif!important;letter-spacing:0!important;text-transform:none!important;}
+    .stApp .cm-stats-label {color:#62655d!important;font-size:12px!important;}
+    .stApp .stTabs p {text-transform:none!important;}
+    .stTabs [data-baseweb='tab-list'] {overflow-x:auto!important;flex-wrap:nowrap!important;}
+    .stTabs [data-baseweb='tab'] {white-space:nowrap!important;flex-shrink:0!important;}
     </style>""", unsafe_allow_html=True)
 
 

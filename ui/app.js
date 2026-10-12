@@ -12,42 +12,6 @@ let apiAvailable = false;
 let activeMatch = {
   home_team: "", away_team: "", event_count: 0, markers: {},
 };
-let workflowStep = 1;
-
-const setWorkflowStep = (step) => {
-  workflowStep = Math.max(workflowStep, step);
-  document
-    .querySelectorAll("[data-workflow-progress] [data-step]")
-    .forEach((button) => {
-      const buttonStep = Number(button.dataset.step);
-      button.classList.toggle("is-current", buttonStep === workflowStep);
-      button.classList.toggle("is-complete", buttonStep < workflowStep);
-    });
-  document.querySelector("[data-step-label]").textContent =
-    `${workflowStep} / 4`;
-};
-
-const workflowTargets = {
-  1: ".workspace",
-  2: ".sync-section",
-};
-
-document
-  .querySelectorAll("[data-workflow-progress] [data-step]")
-  .forEach((button) => {
-    button.addEventListener("click", () => {
-      if (Number(button.dataset.step) >= 3) {
-        const query = activeMatch.id
-          ? `?match=${encodeURIComponent(activeMatch.id)}`
-          : "";
-        window.location.href = `/filters.html${query}`;
-        return;
-      }
-      document
-        .querySelector(workflowTargets[button.dataset.step])
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  });
 
 const apiRequest = async (path, options = {}) => {
   const response = await fetch(path, {
@@ -244,6 +208,9 @@ const setDrawer = (open) => {
   body.classList.toggle("drawer-open", open);
   drawerButton.setAttribute("aria-expanded", String(open));
   drawer.setAttribute("aria-hidden", String(!open));
+  drawer.inert = !open;
+  if (open) drawer.querySelector("button, a")?.focus();
+  else if (drawer.contains(document.activeElement)) drawerButton.focus();
 };
 
 drawerButton.addEventListener("click", () =>
@@ -300,7 +267,6 @@ document
         });
         renderMatch(result.match);
         document.querySelector(".event-browser").open = true;
-        setWorkflowStep(2);
         showToast(
           `${Number(result.match.event_count).toLocaleString()} events loaded from Python`,
         );
@@ -358,11 +324,12 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   document.querySelector("[data-file-row]").hidden = false;
   document.querySelector("[data-file-count]").textContent = "1 file";
   document.querySelector(".file-info strong").textContent = name;
+  document.querySelector(".file-info strong").title = name;
   document.querySelector(".file-info small").textContent =
     `${(size / 1073741824).toFixed(1)} GB · local file`;
   previewName.textContent = name;
+  previewName.title = name;
   document.querySelector(".play-button").disabled = false;
-  setWorkflowStep(2);
   if (save) {
     activeMatch.video_name = name;
     activeMatch.video_path = path || "";
@@ -534,8 +501,6 @@ const openProject = async (project) => {
   document.querySelectorAll("[data-period-file]").forEach((span) => {
     span.textContent = (project.period_videos?.[span.dataset.periodFile] || "").split(/[\\/]/).pop();
   });
-  workflowStep = 1;
-  setWorkflowStep(project.video_path || project.csv_path ? 2 : 1);
   const url = new URL(location.href);
   url.searchParams.set("project", project.id);
   history.replaceState({}, "", url);
@@ -570,7 +535,6 @@ document
       if (!activeMatch.csv_path) throw new Error("Scrape or import event data before filtering.");
       await persistIntake();
       await flushProject();
-      setWorkflowStep(3);
       sessionStorage.setItem("clipmaker.active-match", activeMatch.id);
       window.location.href = `/filters.html?match=${encodeURIComponent(activeMatch.id)}`;
     } catch (error) {
