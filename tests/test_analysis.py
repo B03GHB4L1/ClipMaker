@@ -48,6 +48,7 @@ class AnalysisViewsTests(unittest.TestCase):
                 app.session_state[f"{view}_tabs"] = tab.label
                 app.run(timeout=60)
                 self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+                self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
             self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
             self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
             return app
@@ -78,4 +79,76 @@ class AnalysisViewsTests(unittest.TestCase):
                         app.session_state[key] = choice
                         app.run(timeout=60)
                         self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+                        self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
                         self.assertEqual(app.radio(key=key).value, choice)
+
+    def test_build_up_sequence_selection_survives_reruns_and_tab_switches(self):
+        from streamlit.testing.v1 import AppTest
+        csv = self.root / "events.csv"
+        frame = pd.read_csv(csv)
+        for index in range(4):
+            frame.loc[index, ["team", "type", "outcomeType", "x", "endX", "prog_pass"]] = [
+                "Home", "Pass", "Successful", 20 + index * 10, 45 + index * 10, 25,
+            ]
+        frame.to_csv(csv, index=False)
+        with patch.dict(os.environ, {"CLIPMAKER_ANALYSIS_MODE": "1", "CLIPMAKER_DATA_DIR": str(self.root)}):
+            app = AppTest.from_file(str(ROOT / "app" / "analysis_entry.py"))
+            app.query_params.update({"project": self.project["id"], "view": "analyst"})
+            app.run(timeout=60)
+            app.session_state["analyst_tabs"] = "↗ Build-Up"
+            app.run(timeout=60)
+            for _ in range(2):
+                # AppTest does not serialize the active lazy-tab widget yet.
+                app.session_state["analyst_tabs"] = "↗ Build-Up"
+                app.button(key="bu_chain_0").click().run(timeout=60)
+                app.session_state["analyst_tabs"] = "↗ Build-Up"
+                app.run(timeout=60)
+                self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+                self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
+                self.assertEqual(app.session_state["bu_selected_chain_idx"], 0)
+            app.session_state["analyst_tabs"] = "◉ Shot Map"
+            app.run(timeout=60)
+            app.session_state["analyst_tabs"] = "↗ Build-Up"
+            app.run(timeout=60)
+            self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+            self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
+            self.assertEqual(app.session_state["bu_selected_chain_idx"], 0)
+
+    def test_analysis_control_preservation_does_not_restore_button_states(self):
+        from streamlit.testing.v1 import AppTest
+        script = f'''
+import sys
+sys.path.insert(0, {str(ROOT / "app")!r})
+import streamlit as st
+from project_analysis import preserve_analysis_controls
+preserve_analysis_controls(("bu_", "vl_", "comp_"))
+if st.session_state.get("show_controls", True):
+    st.radio("Mode", ["Progressive", "Possession"], key="bu_mode_radio")
+    st.slider("Minimum", 2, 6, key="bu_min_chain")
+if st.button("Sequence", key="bu_chain_0"):
+    st.session_state["bu_selected_chain_idx"] = 0
+st.button("Watch", key="bu_watch_0")
+st.button("Cut", key="vl_cut")
+st.button("Generate", key="comp_p1_gen")
+st.download_button("Download", b"fixture", key="comp_p1_dl")
+'''
+        app = AppTest.from_string(script).run()
+        for key in ("bu_chain_0", "bu_watch_0", "vl_cut", "comp_p1_gen"):
+            app.button(key=key).click().run()
+            self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+            app.run()
+            self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+        self.assertEqual(app.session_state["bu_selected_chain_idx"], 0)
+        app.radio(key="bu_mode_radio").set_value("Possession").run()
+        app.slider(key="bu_min_chain").set_value(5).run()
+        app.run()
+        self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+        self.assertEqual(app.radio(key="bu_mode_radio").value, "Possession")
+        self.assertEqual(app.slider(key="bu_min_chain").value, 5)
+        app.session_state["show_controls"] = False
+        app.run()
+        app.session_state["show_controls"] = True
+        app.run()
+        self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+        self.assertEqual(app.radio(key="bu_mode_radio").value, "Possession")
+        self.assertEqual(app.slider(key="bu_min_chain").value, 5)

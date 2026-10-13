@@ -2644,7 +2644,9 @@ def render_build_up_tab():
         if not has_prog:
             st.info("No progressive action columns (prog_pass / prog_carry) found in the data.")
             return
-        min_chain = st.slider("Min actions per sequence", min_value=2, max_value=6, value=3,
+        if "bu_min_chain" not in st.session_state:
+            st.session_state["bu_min_chain"] = 3
+        min_chain = st.slider("Min actions per sequence", min_value=2, max_value=6,
                               key="bu_min_chain")
         all_chains   = detect_progressive_chains(df_all, min_chain_length=min_chain)
         team_chains  = [c for c in all_chains if c["team"] == team_sel]
