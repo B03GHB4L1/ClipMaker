@@ -129,6 +129,12 @@ class MatchStore:
     def _upsert(self, match: dict[str, Any]) -> dict[str, Any]:
         project_id = str(match.get("id") or "").strip()
         existing = self.get(project_id) if project_id else None
+        if existing and any(
+            key in match and match[key] != existing.get(key)
+            for key in ("markers", "csv_path", "video_path", "period_videos")
+        ):
+            # Edited clip windows belong to the source and alignment that built them.
+            match = {**match, "preview_windows": [], "preview_range": {}}
         match = {**(existing or {}), **match}
         clean = {
             "id": str(match.get("id") or "").strip(),
@@ -363,6 +369,19 @@ class JobManager:
 
     def _run(self, job_id: str, config: dict[str, Any], cancellation: threading.Event) -> None:
         try:
+            self._execute(job_id, config, cancellation)
+        except Exception as error:
+            self._append_log(job_id, f"Export worker stopped: {error}")
+            self._update(job_id, status="failed", files=[], finished_at=datetime.now(timezone.utc).isoformat())
+        finally:
+            self._cleanup_temporary_data(config)
+            if not config["dry_run"] and not config.get("individual_clips"):
+                output = str((Path(config["output_dir"]) / config["output_filename"]).resolve())
+                with self._lock:
+                    self._reserved_outputs.discard(output)
+
+    def _execute(self, job_id: str, config: dict[str, Any], cancellation: threading.Event) -> None:
+        try:
             from clipmaker_core import run_clip_maker
         except Exception as error:
             self._append_log(job_id, f"Could not start the ClipMaker engine: {error}")
@@ -371,7 +390,6 @@ class JobManager:
                 status="failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
-            self._cleanup_temporary_data(config)
             return
 
         logs: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -413,14 +431,19 @@ class JobManager:
         if terminal_status == "complete" and not config["dry_run"]:
             directory = Path(config["output_dir"])
             outputs = sorted(directory.glob("*")) if config.get("individual_clips") else [directory / config["output_filename"]]
-            files = [{"path": str(path), "name": path.name, "size": path.stat().st_size} for path in outputs if path.is_file() and path.suffix.lower() in {".mp4", ".mov", ".mkv"}]
+            files = [{"path": str(path), "name": path.name, "size": path.stat().st_size} for path in outputs if path.is_file() and path.stat().st_size > 0 and path.suffix.lower() in {".mp4", ".mov", ".mkv"}]
+            if not files:
+                terminal_status = "failed"
+                self._append_log(job_id, "The export finished without a readable output file.")
+        if terminal_status is None and not cancellation.is_set():
+            terminal_status = "failed"
+            self._append_log(job_id, "The engine stopped without reporting completion.")
         self._update(
             job_id,
-            status=terminal_status or ("cancelled" if cancellation.is_set() else "complete"),
+            status=terminal_status or "cancelled",
             finished_at=datetime.now(timezone.utc).isoformat(),
             files=files,
         )
-        self._cleanup_temporary_data(config)
 
     @staticmethod
     def _cleanup_temporary_data(config: dict[str, Any]) -> None:
@@ -1273,7 +1296,8 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     current = self.store.get(project_id)
                     if current.get("project_name") == "Untitled project":
                         scraped["project_name"] = f"{scraped['home_team']} vs {scraped['away_team']}"
-                    scraped = {**self.store.upsert({**scraped, "id": project_id, "status": "in_progress"}), "events": events}
+                    scraped = {**self.store.upsert({**scraped, "id": project_id, "status": "in_progress",
+                                                   "preview_windows": [], "preview_range": {}}), "events": events}
                 self.send_json(HTTPStatus.OK, {"match": scraped})
                 return
             if path == "/api/files/video":

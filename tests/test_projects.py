@@ -46,6 +46,27 @@ class ProjectStoreTests(unittest.TestCase):
         saved = self.store.upsert({"id": project["id"], "video_path": "match.mp4"})
         self.assertEqual(saved["filter_settings"], {"xt_min": .2})
 
+    def test_alignment_and_source_changes_invalidate_saved_clip_plan(self):
+        for field, original, changed in (
+            ("markers", {"1H": "00:01:00"}, {"1H": "00:02:00"}),
+            ("video_path", "first.mp4", "replacement.mp4"),
+            ("period_videos", {"2H": "second.mp4"}, {"2H": "replacement.mp4"}),
+            ("csv_path", "events.csv", "replacement.csv"),
+        ):
+            with self.subTest(field=field):
+                project = self.store.create()
+                self.store.upsert({"id": project["id"], field: original})
+                plan = [{"start": 10, "end": 20, "period": 1}]
+                self.store.upsert({"id": project["id"], "preview_windows": plan,
+                                   "preview_range": {"first": 1, "last": 1},
+                                   "filter_settings": {"filter_types": ["Goal"]}})
+                same = self.store.upsert({"id": project["id"], field: original})
+                self.assertEqual(same["preview_windows"], plan)
+                changed_project = self.store.upsert({"id": project["id"], field: changed})
+                self.assertEqual(changed_project["preview_windows"], [])
+                self.assertEqual(changed_project["preview_range"], {})
+                self.assertEqual(changed_project["filter_settings"], {"filter_types": ["Goal"]})
+
     def test_snapshots_survive_ports_restarts_and_delete_is_recoverable(self):
         self.store.update_snapshot("Goals", {"filter_types": ["Goal"]})
         restarted = MatchStore(self.root)
@@ -133,6 +154,29 @@ class ProjectStoreTests(unittest.TestCase):
                 self.assertEqual(manager.get(job["id"])["status"], "cancelled")
                 self.assertIn("finished_at", manager.get(job["id"]))
 
+    def test_export_cannot_succeed_without_completion_and_output(self):
+        for reports_done in (False, True):
+            with self.subTest(reports_done=reports_done):
+                def engine(config, logs, progress, cancellation):
+                    if reports_done:
+                        logs.put({"type": "done"})
+
+                manager = JobManager()
+                config = {"dry_run": False, "output_dir": str(self.root), "output_filename": "missing.mp4"}
+                with patch("clipmaker_core.run_clip_maker", side_effect=engine):
+                    job = manager.start(config)
+                    deadline = time.monotonic() + 5
+                    while not manager.get(job["id"]).get("finished_at") and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    result = manager.get(job["id"])
+                    self.assertEqual(result["status"], "failed", result)
+                    self.assertEqual(result["files"], [])
+                    self.assertTrue(result["logs"])
+                deadline = time.monotonic() + 2
+                while manager._reserved_outputs and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertEqual(manager._reserved_outputs, set())
+
 
 class ProjectApiTests(unittest.TestCase):
     def setUp(self):
@@ -181,6 +225,23 @@ class ProjectApiTests(unittest.TestCase):
             self.request("/api/projects", {}, {"Origin": "https://untrusted.test"})
         self.assertEqual(error.exception.code, 400)
         error.exception.close()
+
+    def test_rescrape_same_csv_clears_previous_clip_plan(self):
+        project = self.request("/api/projects", {})["project"]
+        csv_path = str(self.root / "events.csv")
+        self.request(f"/api/projects/{project['id']}", {
+            "csv_path": csv_path, "preview_windows": [{"start": 1, "end": 3, "period": 1}],
+            "preview_range": {"first": 1, "last": 1}, "filter_settings": {"filter_types": ["Goal"]},
+        })
+        result = {"csv_path": csv_path, "home_team": "Home", "away_team": "Away",
+                  "event_count": 2, "events": [{"type": "Goal"}]}
+        with patch("packaging.clipmaker_api_server.scrape_match", return_value=result):
+            scraped = self.request("/api/scrape", {"url": "https://www.whoscored.com/matches/1",
+                                                    "project_id": project["id"]})["match"]
+        self.assertEqual(scraped["preview_windows"], [])
+        self.assertEqual(scraped["preview_range"], {})
+        self.assertEqual(scraped["filter_settings"], {"filter_types": ["Goal"]})
+        self.assertEqual(scraped["events"], result["events"])
 
     def test_event_api_does_not_open_unregistered_files(self):
         path = self.root / "private.csv"

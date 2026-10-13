@@ -550,6 +550,9 @@ const loadMatch = async (matchId) => {
     previewComplete = true;
     renderPreviews();
     exportButton.disabled = !activeMatch.video_path;
+    document.querySelector("[data-summary-note]").textContent = activeMatch.video_path
+      ? `${previewWindows.length} clips ready to review.`
+      : "Plan ready. Add match footage in Intake before exporting.";
   }
   restoringProject = false;
 };
