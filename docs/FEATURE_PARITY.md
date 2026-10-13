@@ -150,3 +150,22 @@ but native installation and security behavior still need verification.
   analyst/tactical views. Cross-frame tab clicks remain limited by the browser
   automation tool; analytical AppTest coverage is not a substitute for native
   webview interaction acceptance. The release blockers above remain open.
+
+## Reference And Geist Mono Pass (2026-10-13)
+
+- Revisited Butter's homepage, menu, product composition, accordion behavior,
+  and narrow layout before implementation; findings are in DESIGN_ANALYSIS.md.
+- Added the shared design layer: lighter literal headings, neutral ruled
+  workspaces, compact floating controls, visible desktop workflow navigation,
+  tighter loaded-footage intake, and consistent control typography.
+- Bundled licensed Geist Mono for offline use in the shared HTML frontend,
+  analytical pages, and chart component. Plotly and ECharts labels use it too.
+- Browser inspection verified populated intake/filter screens at desktop and
+  390px widths without horizontal overflow, and loaded Analyst/Tactical views.
+  Fixed the narrow column cascade and selected analytical-tab contrast.
+- All 43 Python regression tests and the Node autosave test passed locally.
+  CI font checks were added but not dispatched. The current installer builds
+  were not tested; no packaged/native or complete feature acceptance is implied.
+- Analytical cross-frame tab clicks still fail in the browser automation tool.
+  The existing native interaction and release blockers above remain open.
+- Work remains local only, as requested. No code was pushed or published.

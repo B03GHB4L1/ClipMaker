@@ -209,7 +209,7 @@ def _annotate_plotly_export(fig, title="", subtitle="", note="", height=None, to
                 xanchor="left",
                 y=0.91,
                 yanchor="top",
-                font=dict(size=19, color=font, family="Space Grotesk, Inter, sans-serif"),
+                font=dict(size=19, color=font, family="Geist Mono, monospace"),
             )
         )
     bottom_margin = max(bottom, 116) if note else bottom
@@ -227,7 +227,7 @@ def _annotate_plotly_export(fig, title="", subtitle="", note="", height=None, to
             yanchor="top",
             showarrow=False,
             align="left",
-            font=dict(size=10, color=font, family="Inter, sans-serif"),
+            font=dict(size=10, color=font, family="Geist Mono, monospace"),
             bgcolor=note_bg,
             bordercolor=note_border,
             borderwidth=1,
@@ -253,7 +253,7 @@ def _brand_fig(fig, height=None, note="Values are calculated from the selected m
     fig.update_layout(
         paper_bgcolor=paper,
         plot_bgcolor=plot,
-        font=dict(color=font, family="Inter, sans-serif"),
+        font=dict(color=font, family="Geist Mono, monospace"),
         hoverlabel=dict(bgcolor=plot, bordercolor=line, font=dict(color=font)),
     )
     fig.update_xaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font), automargin=True)
@@ -274,7 +274,7 @@ def _pitch_layout(fig, title="", height=520):
         yaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=0.68),
         plot_bgcolor=pitch,
         paper_bgcolor=paper,
-        font=dict(color="#111111" if light else "#ecedf6", family="Inter, sans-serif"),
+        font=dict(color="#111111" if light else "#ecedf6", family="Geist Mono, monospace"),
         hoverlabel=dict(
             bgcolor="#f0ebe2" if light else "#10131a",
             bordercolor=line,

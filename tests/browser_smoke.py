@@ -23,6 +23,9 @@ def main():
                 page.goto(base)
                 page.locator('[data-project-name]').wait_for()
                 assert page.locator('[data-workflow-progress]').count() == 0
+                page.evaluate('document.fonts.load(\'400 13px "Geist Mono"\')')
+                assert page.evaluate('document.fonts.check(\'400 13px "Geist Mono"\')')
+                assert "Geist Mono" in page.locator('body').evaluate('(element) => getComputedStyle(element).fontFamily')
                 assert page.locator('#nav-drawer').get_attribute('inert') is not None
                 page.get_by_role("button", name="New project", exact=True).click()
                 page.locator('[data-toast]').filter(has_text="New local project created").wait_for()

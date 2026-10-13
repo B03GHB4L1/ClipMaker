@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import base64
+from functools import lru_cache
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -116,10 +119,23 @@ def sync_project_state():
     st.session_state["_project_revision"] = identity
 
 
+@lru_cache(maxsize=1)
+def analysis_font_css():
+    relative = Path("ui/assets/fonts/GeistMono-Variable.ttf")
+    roots = [Path(__file__).resolve().parent.parent, Path(__file__).resolve().parent]
+    if hasattr(sys, "_MEIPASS"):
+        roots.append(Path(sys._MEIPASS))
+    font = next((root / relative for root in roots if (root / relative).is_file()), None)
+    if font is None:
+        raise FileNotFoundError("Bundled Geist Mono font is missing.")
+    encoded = base64.b64encode(font.read_bytes()).decode("ascii")
+    return '<style>@font-face{font-family:"Geist Mono";src:url(data:font/ttf;base64,' + encoded + ') format("truetype");font-weight:100 900;font-display:swap;}</style>'
+
+
 def compact_analysis_style():
     import streamlit as st
 
-    st.markdown("""<style>
+    st.markdown(analysis_font_css() + """<style>
     :root {--cm-bg:#f4f4f0!important;--cm-surface:#fff!important;--cm-border:#d7d8d2!important;--cm-title:#151916!important;--cm-subtitle:#62655d!important;}
     html, body, body [class*='css'], body .block-container,
     body [data-testid='stApp'], body [data-testid='stAppViewContainer'],
@@ -154,6 +170,20 @@ def compact_analysis_style():
     .stApp .stTabs p {text-transform:none!important;}
     .stTabs [data-baseweb='tab-list'] {overflow-x:auto!important;flex-wrap:nowrap!important;}
     .stTabs [data-baseweb='tab'] {white-space:nowrap!important;flex-shrink:0!important;}
+    html, body, .stApp, body .block-container,
+    body [data-testid='stAppViewContainer'], body [data-testid='stAppViewBlockContainer'], body [data-testid='stMain'] {background:#f7f7f7!important;}
+    .stApp :is(h1,h2,h3,h4,p,label,button,input,textarea,code,small,strong),
+    .stApp [data-baseweb='select'] :is(div,span),
+    .stApp :is(.cm-stats-label,.cm-stats-home,.cm-stats-away,.cm-stats-share) {font-family:'Geist Mono',monospace!important;letter-spacing:0!important;}
+    .stApp h1.project-analysis-title {font-weight:450!important;font-size:26px!important;line-height:1.25!important;}
+    .stApp h2, .stApp h3 {font-weight:450!important;}
+    .stApp .stTabs [data-baseweb='tab-list'] {gap:4px!important;}
+    .stApp .stTabs [data-baseweb='tab'] {padding:8px 10px!important;border-radius:3px!important;}
+    .stApp .stTabs [aria-selected='true'] {background:#171817!important;color:#fff!important;}
+    .stApp .stTabs [aria-selected='true'] p {color:#fff!important;}
+    .stApp .stTabs [aria-selected='true']:hover {background:#303330!important;color:#fff!important;}
+    .stApp :is(.cm-stats-label,[data-testid='stWidgetLabel'] p) {font-size:11px!important;}
+    .stApp :is(.cm-stats-home,.cm-stats-away) {font-size:17px!important;font-weight:450!important;}
     </style>""", unsafe_allow_html=True)
 
 
