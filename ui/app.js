@@ -660,7 +660,8 @@ document.addEventListener("keydown", (event) => {
     target instanceof HTMLSelectElement ||
     target instanceof HTMLTextAreaElement ||
     target.isContentEditable;
-  if (isEditing || eventDialog.open) return;
+  const isControl = target.closest("button, a, summary, [role='tab'], dialog");
+  if (isEditing || isControl || eventDialog.open) return;
   if (event.code === "Space" && matchFrame.classList.contains("has-video")) {
     event.preventDefault();
     togglePlayback();

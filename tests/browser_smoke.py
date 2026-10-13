@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
+import imageio_ffmpeg
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
@@ -33,11 +35,23 @@ def main():
                 page.get_by_role("textbox", name="Project name").press("Tab")
                 page.get_by_role("status").filter(has_text="Saved locally").wait_for()
                 project_id = page.url.split("project=", 1)[1]
+                video = Path(directory) / "keyboard-fixture.mp4"
+                subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                                "testsrc2=size=320x180:rate=24", "-t", "8", "-c:v", "libx264",
+                                "-pix_fmt", "yuv420p", str(video)], check=True, capture_output=True)
                 request(base, f"/api/files/upload?project={project_id}", raw=fixture_csv(),
                         headers={"Content-Type": "application/octet-stream", "X-File-Name": "fixture.csv"})
-                request(base, f"/api/projects/{project_id}", {"markers": {"1H": "00:00:00", "2H": "00:00:00"}})
+                request(base, f"/api/projects/{project_id}", {"markers": {"1H": "00:00:00", "2H": "00:00:00"},
+                                                             "video_path": str(video), "video_name": video.name})
                 page.reload()
                 expect(page.get_by_role("textbox", name="Project name")).to_have_value("Browser test project")
+                page.get_by_role("button", name="Play preview", exact=True).wait_for()
+                menu = page.get_by_role("button", name="Open navigation", exact=True)
+                menu.press("Space")
+                expect(menu).to_have_attribute("aria-expanded", "true")
+                page.keyboard.press("Escape")
+                expect(menu).to_have_attribute("aria-expanded", "false")
+                assert page.locator('video[data-match-video]').evaluate('(video) => video.paused')
                 page.screenshot(path=str(evidence / "intake.png"))
                 assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "CM1.3•••"
                 page.get_by_role("button", name="Confirm & continue").click()
@@ -50,6 +64,7 @@ def main():
                 page.reload()
                 page.locator('[data-preview-count]').filter(has_text="1").wait_for()
                 assert page.locator('input[name="action"][value="Goal"]').is_checked()
+                expect(page.locator('[data-summary-note]')).to_have_text("1 clips ready to review.")
                 page.screenshot(path=str(evidence / "filters.png"))
                 page.goto(base + "/analysis.html?view=analyst&project=" + project_id)
                 frame = page.frame_locator('[data-analysis-frame]')

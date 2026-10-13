@@ -1,6 +1,6 @@
 # ClipMaker Desktop Feature And Verification Ledger
 
-Updated: 12 October 2026. This is a release checklist, not a declaration that every
+Updated: 13 October 2026. This is a release checklist, not a declaration that every
 platform and interaction has passed acceptance testing.
 
 ## Historical Baseline
@@ -185,3 +185,19 @@ but native installation and security behavior still need verification.
   Chelsea Build-Up list and repeated sequence selection with the detail chart.
   Direct cross-frame pointer automation remains unreliable; keyboard checks
   do not constitute full native-webview or packaged-app acceptance.
+
+## Broad Local Debug Pass (2026-10-13)
+
+- 48 Python regressions and the Node autosave test pass. Source and rebuilt
+  frozen Windows backend media smoke tests both pass, including decoded
+  combined/individual exports and correct extra-time source pixels.
+- Fixed stale saved clip plans after source/alignment changes and re-scraping,
+  false-success export status, output-name reservation cleanup, playback
+  shortcuts intercepting focused controls, and misleading reopened-plan status.
+- Browser verified import metadata, event search/dialog, filtered/edited
+  playable preview and export, persisted settings, correction arithmetic, and
+  filter snapshot restoration. Filter layouts checked at 1021/614/390px.
+- Detailed evidence and unresolved acceptance gates are recorded in
+  `DEBUG_SESSION_2026-10-13.md`. Updated CI browser assertions remain unrun.
+  Native installers, live providers, and outstanding chart/video acceptance
+  are not certified by the frozen-backend smoke test. No code was pushed.
