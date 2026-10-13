@@ -189,7 +189,24 @@ def compact_analysis_style():
 
 def preserve_analysis_controls(prefixes):
     import streamlit as st
-    # Streamlit normally discards widgets belonging to an inactive lazy tab.
+    control_keys = {
+        "smp_player_sel", "smp_pitch_zone_sel", "smp_shot_sel", "smp_pso_shot_sel",
+        "pm_player_sel", "pm_pitch_zone_sel", "pm_depth_zone_sel", "pm_pass_sel",
+        "dm_player_sel", "dm_pitch_zone_sel", "dm_depth_zone_sel", "dm_action_sel",
+        "dcm_player_sel", "dcm_pitch_zone_sel", "dcm_depth_zone_sel", "dcm_action_sel",
+        "gk_player_sel", "gk_pitch_zone_sel", "gk_depth_zone_sel", "gk_sf_sel",
+        "gk_dist_sel", "gk_action_sel", "bu_min_chain",
+        "comp_team1", "comp_team2", "comp_player1", "comp_player2", "comp_role1", "comp_role2",
+        "tl_multi_mode", "tl_selected_matches", "dt_match_scope", "at_match_scope",
+        "dt_seconds", "dt_events", "at_seconds", "at_events", "style_trend_dim",
+        "vl_playlist", "vl_before", "vl_after", "vl_reel_count",
+    }
+    # Preserve inactive-tab inputs, never ephemeral button or chart event state.
     for key in list(st.session_state):
-        if key.startswith(prefixes):
+        is_control = (
+            key in control_keys
+            or key.endswith(("_radio", "_clip_before", "_clip_after"))
+            or key.startswith(("bu_entry_select_", "vl_selected_moment_"))
+        )
+        if key.startswith(prefixes) and is_control:
             st.session_state[key] = st.session_state[key]

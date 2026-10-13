@@ -169,3 +169,19 @@ but native installation and security behavior still need verification.
 - Analytical cross-frame tab clicks still fail in the browser automation tool.
   The existing native interaction and release blockers above remain open.
 - Work remains local only, as requested. No code was pushed or published.
+
+## Analytical Redraw Fix (2026-10-13)
+
+- Reproduced the reported Build-Up crash: the inactive-tab preservation helper
+  reassigned transient button state, which Streamlit forbids on the next redraw.
+- Restricted preservation to input controls, excluding sequence/watch buttons,
+  download actions, and chart event payloads. Build-Up slider initialization
+  now uses one stable widget definition and a single session-state default.
+- Added a regression that fails with the old helper, covers sequence/watch/cut/
+  generation/download widgets, and verifies hidden inputs retain their values.
+  The real analytical page test now covers repeated sequence selections and
+  tab switches, checking both exceptions and caught error panels.
+- All 45 Python tests pass. Browser keyboard navigation verified the populated
+  Chelsea Build-Up list and repeated sequence selection with the detail chart.
+  Direct cross-frame pointer automation remains unreliable; keyboard checks
+  do not constitute full native-webview or packaged-app acceptance.
