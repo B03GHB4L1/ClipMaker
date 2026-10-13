@@ -7,6 +7,8 @@
     <title>ClipMaker - Match Intake</title>
     <link rel="stylesheet" href="styles.css?v=9" />
     <link rel="stylesheet" href="compact.css?v=7" />
+    <link rel="stylesheet" href="design.css?v=3" />
+    <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
     <script type="module" src="app.js?v=12"></script>
   </head>
@@ -25,6 +27,12 @@
         <span class="cm-logo" aria-hidden="true">CM<sup>1.3</sup></span
         ><span class="menu-dots" aria-hidden="true">•••</span>
       </button>
+      <nav class="intake-workflow" aria-label="Workflow">
+        <a href="#intake" aria-current="page">Intake</a>
+        <a href="/filters.html" data-project-navigation>Filter</a>
+        <a href="/analysis.html?view=analyst" data-project-navigation>Analyst</a>
+        <a href="/analysis.html?view=tactical" data-project-navigation>Tactical</a>
+      </nav>
       <div class="top-actions">
         <span class="engine-state" data-engine-state
           ><i aria-hidden="true"></i><span>Connecting engine</span></span
@@ -77,13 +85,11 @@
         <div class="eyebrow"><span>01</span> Match intake</div>
         <div class="intro-grid">
           <h1 id="page-title">
-            <span class="line"><span>Turn the full match</span></span
-            ><span class="line"><span>into the moments.</span></span>
+            <span class="line"><span>Match intake.</span></span>
           </h1>
           <div class="intro-copy">
             <p>
-              Bring in event data and match footage. ClipMaker aligns the
-              timeline before you shape the reel.
+              Event data. Match footage. One timeline.
             </p>
           </div>
         </div>

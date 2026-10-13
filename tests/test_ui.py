@@ -19,7 +19,7 @@ class SharedUiTests(unittest.TestCase):
             source = (UI / name).read_text(encoding="utf-8")
             self.assertIn('class="app-footer"', source)
             self.assertIn("Version 1.3.0", source)
-            versions.append(re.findall(r'href="((?:styles|compact)\.css\?v=\d+)"', source))
+            versions.append(re.findall(r'href="((?:styles|compact|design)\.css\?v=\d+)"', source))
         self.assertEqual(versions[0], versions[1])
         self.assertEqual(versions[0], versions[2])
 
@@ -27,6 +27,35 @@ class SharedUiTests(unittest.TestCase):
         source = (UI / "index.html").read_text(encoding="utf-8")
         self.assertEqual(re.findall(r'data-marker="([^"]+)"', source), ["00:00:00"] * 5)
         self.assertRegex(source, r'aria-hidden="true"\s+inert')
+
+    def test_geist_is_bundled_and_identical_in_chart_component(self):
+        font = (UI / "assets/fonts/GeistMono-Variable.ttf").read_bytes()
+        self.assertEqual(font[:4], b"\x00\x01\x00\x00")
+        chart = UI.parent / "app/smp_component/frontend"
+        self.assertEqual(font, (chart / "fonts/GeistMono-Variable.ttf").read_bytes())
+        self.assertIn("SIL OPEN FONT LICENSE", (UI / "assets/fonts/OFL-GeistMono.txt").read_text(encoding="utf-8"))
+        for name in ("index.html", "filters.html", "analysis.html"):
+            self.assertIn('href="design.css?', (UI / name).read_text(encoding="utf-8"))
+        self.assertNotIn("fonts.googleapis.com", (chart / "index.html").read_text(encoding="utf-8"))
+
+    def test_analytical_font_is_embedded_locally(self):
+        import base64
+        import sys
+        from unittest.mock import patch
+        with patch.object(sys, "path", [str(UI.parent / "app"), *sys.path]):
+            from project_analysis import analysis_font_css
+            css = analysis_font_css()
+        encoded = css.split("base64,", 1)[1].split(")", 1)[0]
+        self.assertEqual(base64.b64decode(encoded), (UI / "assets/fonts/GeistMono-Variable.ttf").read_bytes())
+
+    def test_analytical_chart_fonts_and_selected_tab_contrast(self):
+        for name in ("2_The_Analysts_Room.py", "3_Tactical_Lab.py"):
+            source = (UI.parent / "app/pages" / name).read_text(encoding="utf-8")
+            self.assertNotIn('family="Inter, sans-serif"', source)
+            self.assertNotIn('family="Space Grotesk, Inter, sans-serif"', source)
+            self.assertIn('family="Geist Mono, monospace"', source)
+        source = (UI.parent / "app/project_analysis.py").read_text(encoding="utf-8")
+        self.assertIn("[aria-selected='true'] p {color:#fff!important;}", source)
 
 
 if __name__ == "__main__":

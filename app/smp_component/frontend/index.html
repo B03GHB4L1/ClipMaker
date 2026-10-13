@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0e0e0e; overflow: hidden; font-family: Arial, Helvetica, sans-serif; color: #f0f0f0; }
+    @font-face { font-family: 'Geist Mono'; src: url('fonts/GeistMono-Variable.ttf') format('truetype'); font-weight: 100 900; font-display: swap; }
+    body { background: #0e0e0e; overflow: hidden; font-family: 'Geist Mono', monospace; color: #f0f0f0; }
   body.cm-light { background: #f5f0e8; color: #1a1a1a; }
   body.cm-light .modebar-btn svg,
   body.cm-light svg [fill="#DFFF00"],
@@ -27,7 +28,7 @@
       height: 28px;
       padding: 0 9px;
       border-radius: 5px;
-      font: 600 12px Arial, Helvetica, sans-serif;
+      font: 500 11px 'Geist Mono', monospace;
       cursor: pointer;
     }
     .cm-export-controls button:hover { border-color: rgba(142,255,113,0.72); }
@@ -38,7 +39,7 @@
       height: 28px;
       padding: 0 7px;
       border-radius: 5px;
-      font: 600 12px Arial, Helvetica, sans-serif;
+      font: 500 11px 'Geist Mono', monospace;
       cursor: pointer;
       outline: none;
     }
@@ -74,7 +75,7 @@
       height: 28px;
       padding: 0 7px;
       border-radius: 5px;
-      font: 600 12px Arial, Helvetica, sans-serif;
+      font: 500 11px 'Geist Mono', monospace;
       cursor: pointer;
       outline: none;
     }
@@ -241,7 +242,7 @@
       text: "ATTACK ->",
       x: 0.94, y: 0.94, xref: "paper", yref: "paper",
       xanchor: "right", yanchor: "bottom", showarrow: false,
-      font: { size: 12, color: _hud, family: "Arial, Helvetica, sans-serif" },
+      font: { size: 12, color: _hud, family: "Geist Mono, monospace" },
       bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(11,14,20,0.72)",
       bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(142,255,113,0.28)",
       borderwidth: 1, borderpad: 4,
@@ -561,7 +562,7 @@
         text: [titleLine, subtitleLine].filter(Boolean).join("<br>"),
         x: 0.012,
         xanchor: "left",
-        font: { size: 16, color: titleColor, family: "Arial, Helvetica, sans-serif" },
+        font: { size: 16, color: titleColor, family: "Geist Mono, monospace" },
         pad: { t: 8, b: 4 },
         automargin: true,
       };
@@ -585,7 +586,7 @@
         yanchor: "top",
         showarrow: false,
         align: "left",
-        font: { size: 10, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Arial, Helvetica, sans-serif" },
+        font: { size: 10, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Geist Mono, monospace" },
         bgcolor: ctx.isLight ? "rgba(245,240,232,0.94)" : "rgba(7,16,8,0.94)",
         bordercolor: ctx.isLight ? "rgba(80,60,30,0.24)" : "rgba(142,255,113,0.20)",
         borderwidth: 1,
@@ -601,13 +602,14 @@
       xanchor: "right",
       yanchor: "bottom",
       showarrow: false,
-      font: { size: 10, color: _exportBrandColor, family: "Arial, Helvetica, sans-serif" },
+      font: { size: 10, color: _exportBrandColor, family: "Geist Mono, monospace" },
     });
     branded.annotations = annotations;
     return branded;
   }
 
-  function ensureEChartsReady() {
+  async function ensureEChartsReady() {
+    await document.fonts.load('12px "Geist Mono"');
     if (typeof echarts !== "undefined") return Promise.resolve();
     return new Promise((resolve, reject) => {
       let tries = 0;
@@ -1127,7 +1129,7 @@
           style: {
             text: stripHtml(ann.text || ""),
             fill: ann.font && ann.font.color || layout.font && layout.font.color || "#f4f7f2",
-            font: `${ann.font && ann.font.size || 10}px Arial, Helvetica, sans-serif`,
+            font: `${ann.font && ann.font.size || 10}px "Geist Mono", monospace`,
             align: xanchor === "right" ? "right" : xanchor === "center" ? "center" : "left",
             verticalAlign: yanchor === "bottom" ? "bottom" : yanchor === "middle" ? "middle" : "top",
           },
@@ -1191,6 +1193,7 @@
     const legendData = legendDataFromTraces(sourceTraces);
     return {
       backgroundColor: branded.paper_bgcolor || branded.plot_bgcolor || (ctx.isLight ? "#f8f6f0" : "#071008"),
+      textStyle: { fontFamily: "Geist Mono, monospace" },
       animation: !exporting,
       animationDuration: exporting ? 0 : 450,
       animationEasing: "cubicOut",
@@ -1199,8 +1202,8 @@
         subtext: title.split("\n").slice(1).join("  "),
         left: 14,
         top: 8,
-        textStyle: { color: branded.font && branded.font.color || "#f4f7f2", fontSize: 16, fontFamily: "Iosevka Charon Mono, monospace", fontWeight: 800 },
-        subtextStyle: { color: ctx.isLight ? "#302a22" : "#d8dee2", fontSize: 11, fontFamily: "Iosevka Charon Mono, monospace" },
+        textStyle: { color: branded.font && branded.font.color || "#f4f7f2", fontSize: 16, fontFamily: "Geist Mono, monospace", fontWeight: 500 },
+        subtextStyle: { color: ctx.isLight ? "#302a22" : "#d8dee2", fontSize: 11, fontFamily: "Geist Mono, monospace" },
       } : undefined,
       grid: grids,
       xAxis: xAxes,
@@ -1630,6 +1633,7 @@
         _cmChart = echarts.init(plotEl, null, { renderer: ECHARTS_RENDERER });
       }
       const option = Object.assign({}, args.option || {});
+      option.textStyle = Object.assign({}, option.textStyle, { fontFamily: "Geist Mono, monospace" });
       fitNativePitchOption(option, plotEl, Number(args.height || 520) || 520);
       option.tooltip = Object.assign({
         trigger: "item",
@@ -2851,7 +2855,7 @@
         x: stepX, y: stepY, mode: isEntryMap ? "markers" : "markers+text",
         text: stepText,
         textposition: "middle center",
-        textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Arial, Helvetica, sans-serif" },
+        textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Geist Mono, monospace" },
         marker: {
           symbol: "circle", size: isEntryMap ? 7 : 20,
           color: isEntryMap ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.42 : 0.28, isLight) : rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight),

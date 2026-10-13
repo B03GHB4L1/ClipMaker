@@ -1,5 +1,77 @@
 # ClipMaker Design Reference Analysis
 
+## Reference Revisit - 13 October 2026
+
+Revisited https://www.butter.video/ in the in-app browser, including the opening
+composition, compressed navigation after scrolling, expanded menu, the product
+page, lower-page composition, the Remix/Describe accordion, and a 390px layout.
+This revisit is complete before implementing the following visual refinement.
+
+### Observations
+
+- The opening uses light, neutral grotesque display type: approximately 100px
+  at the inspected desktop size and 57px on the narrow layout. Small utility
+  labels remain subordinate. Typeface weight, not decoration, does much of the
+  work. ClipMaker will use the user-requested Geist Mono instead of Butter's
+  proprietary DieGrotesk and will reduce display sizes for a working app.
+- Navigation forms two light floating islands. The left island compresses on
+  scroll; an expanded menu appears directly beneath it over a dimmed page.
+  The menu uses divided rows, calm geometry, and generous targets.
+- Large media feels spatial: it overlaps the composition while text sits on
+  a deliberate grid. Saturated colors belong to media, not entire UI surfaces.
+  ClipMaker's own chrome football supplies this layer; no Butter imagery is used.
+- Sections alternate white/near-white fields and dark working media. Hairlines
+  and local alignment are more useful here than nested panels or many shadows.
+- The Describe accordion changes its expanded state and supporting text while
+  other headings become quieter. Mobile removes the complex side-by-side media
+  composition and lets the text stack. This is recomposition, not simple scaling.
+- Scroll reveals settle after movement; the menu and text transitions are
+  time-based while larger presentation layers respond to scroll. This revisit
+  did not instrument every animation's exact duration. Earlier measured values
+  below are retained as historical evidence, not new measurements.
+
+### Translation Into This App
+
+Use a neutral white/ink palette, thin rules, compact floating controls, lighter
+display weights, and consistent Geist Mono typography. Keep lime for primary
+actions and selection, with team/event colors retained as meaningful data.
+Reduce oversized instructional headings to literal workspace titles. Intake
+remains the representative screen; refine it in the browser before carrying
+the shared type/control system through filtering and analysis. Use native
+scrolling, short settling motion, and reduced-motion support. No scroll pinning,
+marketing sections, or cursor replacement on form controls will be added.
+
+Geist Mono will be bundled with its SIL Open Font License from the official
+Google Fonts repository. The frontend, local analytical views, and chart
+component must load that same font without making an internet request.
+
+The existing shared HTML/JavaScript frontend and local Python engine are kept;
+the React migration below remains a historical proposal, not this pass's work.
+Unsigned macOS installation behavior still needs real native verification;
+the historical Homebrew discussion below is not a guarantee about Gatekeeper.
+
+### Implemented Comparison And Refinement
+
+The representative intake screen was compared in the browser before refining
+the shared filtering and analysis surfaces. The large two-line slogan became
+the literal `Match intake.` heading, leaving the app's own chrome ball visible
+without increasing the workspace height. Source and footage share a ruled
+two-column band; a loaded footage chooser contracts to make room for metadata.
+Desktop workflow navigation remains visible outside the compact brand panel.
+
+Geist Mono is bundled locally for HTML, embedded analytical views, ECharts,
+and Plotly labels. Controls use the same family and zero letter spacing.
+Navigation and color hover transitions use 180ms settling; accordion icons use
+220ms. These are ClipMaker's chosen timings, not claimed copies of Butter's.
+Existing mask/reveal and reduced-motion behavior are retained.
+
+Browser checks at 1021px and 390px caught and corrected a stacked-layout
+cascade issue. Populated Analyst and Tactical views exposed a selected-tab
+contrast issue, corrected and verified after restarting the analysis process.
+The saved match, kickoff values, filters, and export settings remain unchanged.
+Cross-frame clicks remain blocked by the browser automation tool. Native
+webview acceptance and cross-OS package testing are not claimed by this pass.
+
 ## Purpose and boundaries
 
 Butter's public website was studied as a reference for visual rhythm, motion, interaction, and responsive composition. ClipMaker will not reproduce Butter's name, copy, proprietary typefaces, illustrations, 3D objects, imagery, or page structure. The goal is to translate its confident editorial motion into an original, task-focused football video workspace.
