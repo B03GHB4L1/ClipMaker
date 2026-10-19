@@ -53,7 +53,7 @@ def main():
                 expect(menu).to_have_attribute("aria-expanded", "false")
                 assert page.locator('video[data-match-video]').evaluate('(video) => video.paused')
                 page.screenshot(path=str(evidence / "intake.png"))
-                assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "CM1.3•••"
+                assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "VizorPlay•••"
                 page.get_by_role("button", name="Confirm & continue").click()
                 page.wait_for_url("**/filters.html?match=*")
                 page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()

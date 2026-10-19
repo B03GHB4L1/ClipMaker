@@ -1,7 +1,7 @@
 {
-  "name": "clipmaker-desktop",
+  "name": "vizorplay-desktop",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.0.0",
   "scripts": {
     "tauri": "tauri",
     "preview:ui": "python -m http.server 4173 -d ui",

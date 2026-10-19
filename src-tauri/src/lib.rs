@@ -59,14 +59,14 @@ pub fn run() {
             thread::spawn(move || {
                 if wait_for_backend(port) {
                     let url = Url::parse(&format!("http://127.0.0.1:{port}"))
-                        .expect("valid ClipMaker URL");
+                        .expect("valid VizorPlay URL");
                     let _ = window.navigate(url);
                 }
             });
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build ClipMaker");
+        .expect("failed to build VizorPlay");
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {

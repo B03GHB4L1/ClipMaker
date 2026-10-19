@@ -79,7 +79,7 @@ file dialogs, and dependency setup rather than different analytical algorithms.
 | Tactical Video Lab / playlists / moment and reel export | Original Tactical Lab | Render regression; real-video acceptance pending |
 | Multi-match Tactical Lab | Original multi-match loading, saved-project CSV list | Multi-match numerical and video-source acceptance pending |
 | Map PNG/GIF and chart exports | Original components and bundled chart libraries | Browser exports acceptance pending |
-| Compact brand / version footer | CM superscript 1.3 and menu; every shared screen | Intake geometry at widths 1021, 614, 390; desktop intake/filter/Analyst screenshots and narrow filter screenshot |
+| Compact brand / version footer | VizorPlay and menu; Version 1.0 footer on every shared screen | Rename regression, desktop intake and narrow filtering checks; see BRANDING.md |
 | Soft chrome football | Locally bundled GLB and PNG fallback | Prior browser/pixel checks; unchanged this pass |
 
 ## Platform And Release Gates

@@ -1,5 +1,6 @@
 """Source-level guards for shared UI regressions, alongside browser checks."""
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -7,6 +8,32 @@ UI = Path(__file__).resolve().parents[1] / "ui"
 
 
 class SharedUiTests(unittest.TestCase):
+    def test_vizorplay_brand_and_footer_version(self):
+        for name in ("index.html", "filters.html", "analysis.html"):
+            source = (UI / name).read_text(encoding="utf-8")
+            self.assertIn('<span class="cm-logo" aria-hidden="true">VizorPlay</span', source)
+            self.assertIn('<span>VizorPlay</span><span>Version 1.0</span>', source)
+            self.assertNotIn("ClipMaker", source)
+            self.assertNotIn("<sup>", source)
+            title = re.search(r"<title>(.*?)</title>", source).group(1)
+            self.assertIn("VizorPlay", title)
+            self.assertNotIn("1.0", title)
+        config = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text())
+        self.assertEqual(config["productName"], "VizorPlay")
+        self.assertEqual(config["version"], "1.0.0")
+        self.assertEqual(config["identifier"], "com.b4l1.clipmaker")
+        for name in ("package.json", "package-lock.json"):
+            package = json.loads((UI.parent / name).read_text())
+            self.assertEqual(package["name"], "vizorplay-desktop")
+            self.assertEqual(package["version"], "1.0.0")
+        asset = (UI / "assets/vizorplay-football.glb").read_bytes()
+        self.assertEqual(asset[:4], b"glTF")
+        scene = json.loads(asset[20:20 + int.from_bytes(asset[12:16], "little")])
+        nodes = [node.get("name", "") for node in scene["nodes"]]
+        self.assertIn("Emerald chrome VizorPlay", nodes)
+        self.assertNotIn("Emerald chrome 1.3", nodes)
+        self.assertTrue((UI / "assets/vizorplay-football.png").is_file())
+
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
             source = (UI / name).read_text(encoding="utf-8")
@@ -18,7 +45,7 @@ class SharedUiTests(unittest.TestCase):
         for name in ("index.html", "filters.html", "analysis.html"):
             source = (UI / name).read_text(encoding="utf-8")
             self.assertIn('class="app-footer"', source)
-            self.assertIn("Version 1.3.0", source)
+            self.assertIn("Version 1.0", source)
             versions.append(re.findall(r'href="((?:styles|compact|design)\.css\?v=\d+)"', source))
         self.assertEqual(versions[0], versions[1])
         self.assertEqual(versions[0], versions[2])

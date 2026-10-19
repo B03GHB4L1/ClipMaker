@@ -279,7 +279,7 @@ def choose_video_file() -> Path | None:
 def choose_output_folder(initial_dir: str = "") -> Path | None:
     if sys.platform == "darwin":
         import subprocess
-        selected = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose ClipMaker export folder")'], capture_output=True, text=True)
+        selected = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose VizorPlay export folder")'], capture_output=True, text=True)
         if selected.returncode:
             if "-128" in selected.stderr:
                 return None
@@ -384,7 +384,7 @@ class JobManager:
         try:
             from clipmaker_core import run_clip_maker
         except Exception as error:
-            self._append_log(job_id, f"Could not start the ClipMaker engine: {error}")
+            self._append_log(job_id, f"Could not start the VizorPlay engine: {error}")
             self._update(
                 job_id,
                 status="failed",
@@ -400,7 +400,7 @@ class JobManager:
             try:
                 run_clip_maker(config, logs, progress, cancellation)
             except Exception as error:
-                logs.put({"type": "error", "msg": f"ClipMaker engine stopped: {error}"})
+                logs.put({"type": "error", "msg": f"VizorPlay engine stopped: {error}"})
 
         engine = threading.Thread(
             target=execute_engine,
@@ -1038,7 +1038,7 @@ def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
 
 
 class ClipMakerHandler(SimpleHTTPRequestHandler):
-    server_version = "ClipMaker/1.3"
+    server_version = "VizorPlay/1.0"
 
     @property
     def store(self) -> MatchStore:
@@ -1085,7 +1085,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
     def validate_local_request(self) -> None:
         expected = f"127.0.0.1:{self.server.server_port}"
         if self.headers.get("Host") not in {expected, f"localhost:{self.server.server_port}"}:
-            raise ValueError("ClipMaker only accepts requests to its local address.")
+            raise ValueError("VizorPlay only accepts requests to its local address.")
         origin = self.headers.get("Origin")
         if origin and origin not in {f"http://{expected}", f"http://localhost:{self.server.server_port}"}:
             raise ValueError("Requests from other websites are not allowed.")
@@ -1210,7 +1210,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"snapshots": self.store.snapshots()})
             return
         if path == "/api/health":
-            self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.3.0"})
+            self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0"})
             return
         if path == "/api/matches":
             self.send_json(HTTPStatus.OK, {"matches": self.store.list()})
@@ -1472,7 +1472,7 @@ def main() -> int:
     if args.analysis_port:
         return run_analysis(ROOT, args.analysis_port)
     server = create_server(args.host, args.port, args.data_dir.resolve())
-    print(f"ClipMaker shared UI running at http://{args.host}:{args.port}")
+    print(f"VizorPlay shared UI running at http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

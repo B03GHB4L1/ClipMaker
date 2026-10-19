@@ -29,7 +29,7 @@ def _h(s):
     return _re.sub(r'\s{2,}', ' ', s.replace('\n', ' ')).strip()
 
 st.set_page_config(
-    page_title="The Analyst's Room — ClipMaker v1.3.0",
+    page_title="The Analyst's Room — VizorPlay",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -114,7 +114,7 @@ DEF_CLASS = {
 
 HOME_COLOR = "#7ab4ff"
 AWAY_COLOR = "#ff7351"
-PLOTLY_EXPORT_BRAND = "ClipMaker v1.3.0 · @B03GHB4L1"
+PLOTLY_EXPORT_BRAND = "VizorPlay · @B03GHB4L1"
 PLOTLY_EXPORT_CONFIG = {
     "displayModeBar": True,
     "displaylogo": False,

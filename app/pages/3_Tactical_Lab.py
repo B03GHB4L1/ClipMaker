@@ -25,7 +25,7 @@ except ImportError:
 
 
 st.set_page_config(
-    page_title="Tactical Lab - ClipMaker v1.3.0",
+    page_title="Tactical Lab - VizorPlay",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -645,7 +645,7 @@ def _get_ffmpeg():
             return FFMPEG_BINARY
     except Exception:
         pass
-    raise ValueError("FFmpeg not found. Install FFmpeg or run ClipMaker with bundled dependencies.")
+    raise ValueError("FFmpeg not found. Install FFmpeg or run VizorPlay with bundled dependencies.")
 
 
 def _period_starts():
