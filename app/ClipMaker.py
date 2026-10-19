@@ -23,7 +23,7 @@ import theme
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="ClipMaker v1.3.0 by B4L1",
+    page_title="VizorPlay",
     page_icon="ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -187,7 +187,7 @@ if "proxy_warmed" not in st.session_state:
 # HEADER
 # =============================================================================
 _logo_b64 = theme.load_logo_b64(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ClipMaker_logo.png"))
-st.markdown(theme.logo_header("CLIPMAKER v1.3.0", "Football highlight reel generator · by B4L1", _logo_b64 or None, uppercase_title=False), unsafe_allow_html=True)
+st.markdown(theme.logo_header("VizorPlay", "Football highlight reel generator · by B4L1", None, uppercase_title=False), unsafe_allow_html=True)
 
 # =============================================================================
 # STEP 1 — MATCH SCRAPER
@@ -210,7 +210,7 @@ with scrape_c2:
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
     scrape_btn = st.button("Scrape", use_container_width=True)
 
-st.caption("Paste one match URL per line. Scoresway links can come from any match tab; WhoScored links must be from the Match Centre tab. ClipMaker auto-detects the source.")
+st.caption("Paste one match URL per line. Scoresway links can come from any match tab; WhoScored links must be from the Match Centre tab. VizorPlay auto-detects the source.")
 st.caption("Note: Scoresway data is not identical to WhoScored data and may produce unexplained event tags or slight differences in the analysis tools.")
 
 # Scraper steps — shown during and after a run
@@ -812,7 +812,7 @@ with kickoff_tab:
             "First penalty kick timestamp",
             value=st.session_state.half5_time,
             placeholder="e.g. 0:20" if split_video else "e.g. 2:05:30",
-            help="Use the video timestamp where the first penalty taker strikes the ball. ClipMaker derives the 120:00 period anchor from the event data."
+            help="Use the video timestamp where the first penalty taker strikes the ball. VizorPlay derives the 120:00 period anchor from the event data."
         )
         if half5: st.session_state.half5_time = half5
     else:
@@ -939,7 +939,7 @@ if min_gap != st.session_state.get("min_gap"):
     st.session_state["min_gap"] = min_gap
 _capture_match_setup(st.session_state.get("active_setup_csv_path") or st.session_state.get("csv_path"))
 
-st.caption("These values are used when you run ClipMaker from the **Filtering/Output** page.")
+st.caption("These values are used when you run VizorPlay from the **Filtering/Output** page.")
 timing_color = theme.light_color("#DFFF00", "#3a5000")
 st.markdown(
     f"<div style='color:{timing_color};font-size:0.78rem;margin-top:-0.1rem;'>"

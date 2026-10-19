@@ -19,9 +19,11 @@ class Clipmaker < Formula
       exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
     SH
     (bin/"clipmaker").chmod 0755
+    bin.install_symlink "clipmaker" => "vizorplay"
   end
 
   test do
     assert_predicate bin/"clipmaker", :executable?
+    assert_predicate bin/"vizorplay", :executable?
   end
 end

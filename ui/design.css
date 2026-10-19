@@ -38,7 +38,7 @@ button:not(:disabled):active { translate: 0 1px; }
 .topbar { top: 16px; left: 24px; right: 24px; gap: 16px; align-items: center; }
 .brand, .top-actions, .filter-brand { height: 42px; border: 0; background: #fff; box-shadow: 0 2px 12px #00000004; border-radius: 6px; }
 .brand, .filter-brand { padding: 8px 12px; gap: 12px; }
-.cm-logo { width: auto !important; font-size: 25px; font-weight: 650; }
+.cm-logo { width: auto !important; font-size: 19px; font-weight: 650; white-space: nowrap; }
 .cm-logo sup { font-size: 10px; margin-left: 2px; }
 .menu-dots { font-size: 13px; line-height: 1; }
 .top-actions { gap: 14px; padding: 4px 4px 4px 12px; }
@@ -234,6 +234,7 @@ input[type=file]::file-selector-button { background: #e9ede4; font: inherit; fon
   .filter-topbar nav { background: transparent; padding: 0; gap: 0; }
   .filter-topbar nav a { padding: 5px 6px; font-size: 10px; }
   .filter-brand { padding: 8px; gap: 8px; }
+  .filter-brand .cm-logo { font-size: 13px; }
   .filter-summary h2 { font-size: 16px; }
   .summary-lines p { grid-template-columns: 58px minmax(0,1fr); font-size: 10px; }
   .analysis-main { padding: 4px 12px 0; }

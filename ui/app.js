@@ -866,7 +866,7 @@ const initializeBall = async () => {
     studio.dispose();
     generator.dispose();
     scene.environment = environment.texture;
-    const model = await new GLTFLoader().loadAsync("./assets/cm-chrome-football.glb");
+    const model = await new GLTFLoader().loadAsync("./assets/vizorplay-football.glb");
     const ball = model.scene;
     ball.traverse(object => {
       if (!object.isMesh) return;

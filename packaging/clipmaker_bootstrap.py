@@ -57,7 +57,7 @@ def main() -> int:
         venv.EnvBuilder(with_pip=True, clear=True).create(env_dir)
 
     if not stamp.exists() or stamp.read_text(encoding="utf-8").strip() != digest:
-        print("Preparing ClipMaker. This one-time step can take a few minutes...")
+        print("Preparing VizorPlay. This one-time step can take a few minutes...")
         subprocess.run(
             [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(requirements)],
             check=True,
@@ -76,7 +76,7 @@ def main() -> int:
     try:
         if not wait_until_ready(port):
             process.terminate()
-            raise RuntimeError("ClipMaker did not start within 90 seconds")
+            raise RuntimeError("VizorPlay did not start within 90 seconds")
         webbrowser.open(f"http://127.0.0.1:{port}")
         return process.wait()
     except KeyboardInterrupt:

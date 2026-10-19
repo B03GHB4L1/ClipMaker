@@ -1,12 +1,20 @@
 """Build the compact ClipMaker chrome football and its studio preview."""
 import math
+import argparse
+import sys
 from pathlib import Path
 
 import bpy
 import bmesh
 from mathutils import Vector
 
-OUT = Path(__file__).resolve().parent
+parser = argparse.ArgumentParser()
+parser.add_argument('--brand', default='CM')
+parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parent)
+args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
+OUT = args.output.resolve()
+OUT.mkdir(parents=True, exist_ok=True)
+asset_name = 'vizorplay-football' if args.brand == 'VizorPlay' else 'cm-chrome-football'
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 
@@ -136,11 +144,14 @@ def lettering(body, size, x, z):
     return obj
 
 
-lettering('CM', 1.02, -0.73, -0.27)
-lettering('1.3', 0.36, 0.29, 0.20)
+if args.brand == 'VizorPlay':
+    lettering('VizorPlay', 0.37, -0.78, -0.12)
+else:
+    lettering('CM', 1.02, -0.73, -0.27)
+    lettering('1.3', 0.36, 0.29, 0.20)
 
 asset_objects = [football, core] + [o for o in bpy.context.scene.objects if o.name.startswith('Emerald chrome')]
-root = bpy.data.objects.new('CM 1.3 chrome football', None)
+root = bpy.data.objects.new(args.brand + ' chrome football', None)
 bpy.context.collection.objects.link(root)
 for obj in asset_objects:
     obj.parent = root
@@ -189,14 +200,14 @@ scene.render.film_transparent = True
 scene.view_settings.view_transform = 'AgX'
 scene.render.image_settings.file_format = 'PNG'
 scene.render.image_settings.color_mode = 'RGBA'
-scene.render.filepath = str(OUT / 'chrome-football-preview.png')
+scene.render.filepath = str(OUT / ('vizorplay-football.png' if args.brand == 'VizorPlay' else 'chrome-football-preview.png'))
 
 for obj in bpy.context.selected_objects:
     obj.select_set(False)
 for obj in asset_objects:
     obj.select_set(True)
 root.select_set(True)
-bpy.ops.export_scene.gltf(filepath=str(OUT / 'cm-chrome-football.glb'),
+bpy.ops.export_scene.gltf(filepath=str(OUT / (asset_name + '.glb')),
     use_selection=True, export_format='GLB', export_yup=True)
 # Embedded font data keeps the editable studio file portable.
 bpy.ops.file.pack_all()
@@ -207,6 +218,7 @@ for screen in bpy.data.screens:
             area.spaces.active.region_3d.view_perspective = 'CAMERA'
             area.spaces.active.shading.type = 'MATERIAL'
 bpy.context.preferences.filepaths.save_version = 0
-bpy.ops.wm.save_as_mainfile(filepath=str(OUT / 'cm-chrome-football.blend'))
+if args.brand != 'VizorPlay':
+    bpy.ops.wm.save_as_mainfile(filepath=str(OUT / (asset_name + '.blend')))
 bpy.ops.render.render(write_still=True)
 print('CLIPMAKER_ASSET_COMPLETE', OUT)

@@ -1406,7 +1406,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarContent"]::before {{
     pointer-events: none;
 }}
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"]::after {{
-    content: "CLIPMAKER\\A v1.3.0 · B4L1";
+    content: "VizorPlay\\A Version 1.0";
     white-space: pre;
     position: absolute;
     top: 74px;
@@ -1639,10 +1639,10 @@ def render_support_footer(page_label: str = ""):
         st.markdown(
             f"""
             <div class="cm-support-panel">
-              <div class="cm-support-kicker">Support ClipMaker</div>
+              <div class="cm-support-kicker">Support VizorPlay</div>
               <div class="cm-support-title">Enjoying the app?</div>
               <div class="cm-support-copy">
-                If ClipMaker saves you time or helps your workflow, you can support future updates,
+                If VizorPlay saves you time or helps your workflow, you can support future updates,
                 maintenance, and new features on Ko-fi.
               </div>
               <a class="cm-support-btn" href="{kofi_url}" target="_blank" rel="noopener noreferrer">
@@ -1692,7 +1692,7 @@ def logo_header(title: str, subtitle: str, logo_b64: str = None, uppercase_title
             f'filter:drop-shadow(0 0 10px rgba(223,255,0,0.25))"/>'
         )
     else:
-        img = '<span style="font-size:18px;font-family:Inter,sans-serif;font-weight:800;letter-spacing:.12em;color:var(--cm-title,#111111)">CM</span>'
+        img = '<span style="font-size:18px;font-family:Inter,sans-serif;font-weight:800;color:var(--cm-title,#111111)">VizorPlay</span>'
     title_transform = "none" if not uppercase_title else "uppercase"
     return (
         f"<div style='display:flex;align-items:center;gap:16px;margin-bottom:10px;overflow:visible'>"
@@ -1721,9 +1721,9 @@ def sidebar_logo(logo_b64: str) -> str:
         f"    filter:drop-shadow(0 0 12px rgba(223,255,0,0.3))'/>"
         f"  <div style='font-family:Inter,sans-serif;font-size:9px;font-weight:900;"
         f"              color:#DFFF00;letter-spacing:0.25em;text-transform:uppercase;"
-        f"              margin-top:8px'>ClipMaker</div>"
+        f"              margin-top:8px'>VizorPlay</div>"
         f"  <div style='font-size:8px;color:#484847;font-weight:700;"
-        f"              letter-spacing:0.15em;text-transform:uppercase;margin-top:2px'>v1.2 · B4L1</div>"
+        f"              letter-spacing:0.15em;text-transform:uppercase;margin-top:2px'>B4L1</div>"
         f"</div>"
         f"<div style='height:1px;background:rgba(255,255,255,0.05);margin:0 16px 8px'></div>"
     )

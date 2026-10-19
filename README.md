@@ -3,13 +3,16 @@
 </p>
 
 <div align="center">
-  <h1>ClipMaker</h1>
+  <h1>VizorPlay</h1>
 
   **Football video clipping and analysis workstation built from match event data**
 
 Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
 
-Current version: **v1.3.0**
+Current version: **1.0** (displayed in the application footer).
+
+VizorPlay is the renamed ClipMaker desktop application. Existing project storage
+and internal package identifiers are retained for compatibility.
 </div>
 
 ---

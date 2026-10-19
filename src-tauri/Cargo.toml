@@ -1,6 +1,6 @@
 [package]
 name = "clipmaker"
-version = "1.3.0"
+version = "1.0.0"
 description = "Football video clipping and analysis workstation"
 authors = ["B4L1"]
 edition = "2021"

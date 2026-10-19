@@ -32,7 +32,7 @@ from clipmaker_core import (
 # PAGE CONFIG
 # =============================================================================
 st.set_page_config(
-    page_title="Filtering/Output — ClipMaker v1.3.0",
+    page_title="Filtering/Output — VizorPlay",
     page_icon="../ClipMaker_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -629,7 +629,7 @@ if csv_ok:
 # =============================================================================
 tab_manual, tab_ai = st.tabs([
     theme.ui("[FILTER] Manual Filters"),
-    theme.ui("[AI] ClipMaker AI"),
+    theme.ui("[AI] VizorPlay AI"),
 ])
 
 
@@ -1455,7 +1455,7 @@ with tab_manual:
     with btn1:
         preview_btn = st.button("Preview Clip List", use_container_width=True, icon=theme.icon_shortcode("[SEARCH]"))
     with btn2:
-        run_btn = st.button("Run ClipMaker", type="primary", use_container_width=True, icon=theme.icon_shortcode("[RUN]"), disabled=_run_is_active)
+        run_btn = st.button("Run VizorPlay", type="primary", use_container_width=True, icon=theme.icon_shortcode("[RUN]"), disabled=_run_is_active)
 
     progress_placeholder = st.empty()
     status_placeholder   = st.empty()

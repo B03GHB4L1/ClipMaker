@@ -1,4 +1,4 @@
-# ClipMaker Working Agreement
+# VizorPlay Working Agreement
 
 ## Product Scope
 - Maintain one shared frontend for Windows, Linux, and macOS.
@@ -8,7 +8,8 @@
 
 ## User Experience
 - Keep screens compact, navigable, responsive, and accessible. Use collapsible sections for detailed controls.
-- The compact brand panel contains only CM with superscript 1.3 and the menu icon.
+- The compact brand panel contains only VizorPlay and the menu icon, without a version number.
+- The displayed application version is 1.0, shown in the footer rather than the app name.
 - Display the application version at the bottom of every screen.
 - Each project is independent and saved locally, including source metadata, events, video references, period kickoff timing, filters, and export settings.
 - Do not erase or overwrite projects when starting a new project. Save before switching; expose loading and error states.
