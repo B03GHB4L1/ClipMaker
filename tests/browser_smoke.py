@@ -41,8 +41,10 @@ def main():
         with backend(command, Path(directory) / "data", evidence, startup_timeout=600 if args.launcher else 90) as base:
             stage("backend ready; launching Chromium")
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(timeout=60000)
-                context = browser.new_context(viewport={"width": 1280, "height": 800}, record_video_dir=str(evidence / "video"))
+                browser = playwright.chromium.launch(channel="chromium", timeout=60000)
+                context = browser.new_context(viewport={"width": 1280, "height": 800},
+                                              record_video_dir=str(evidence / "video"),
+                                              record_video_size={"width": 640, "height": 400})
                 context.tracing.start(screenshots=True, snapshots=True, sources=False)
                 page = context.new_page()
                 page.set_default_timeout(60000)
