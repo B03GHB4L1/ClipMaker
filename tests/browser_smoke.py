@@ -45,6 +45,8 @@ def main():
                 context = browser.new_context(viewport={"width": 1280, "height": 800}, record_video_dir=str(evidence / "video"))
                 context.tracing.start(screenshots=True, snapshots=True, sources=False)
                 page = context.new_page()
+                page.set_default_timeout(60000)
+                page.set_default_navigation_timeout(60000)
                 errors = []
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 def log_console(message):
@@ -105,6 +107,7 @@ def exercise(page, base, root, evidence, errors):
         page.get_by_role("tab", name=period, exact=True).click()
         page.get_by_role("textbox", name="Selected period kick-off time").fill("00:00:00")
         page.get_by_role("textbox", name="Selected period kick-off time").press("Tab")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
     page.reload()
     stage("verify saved intake and keyboard menu")
     expect(page.get_by_role("textbox", name="Project name")).to_have_value("Browser test project")
@@ -129,6 +132,10 @@ def exercise(page, base, root, evidence, errors):
     page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("0")
     page.get_by_role("button", name="Preview clip plan").click()
     page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    # Rendering the list precedes the awaited project write; hard refresh must
+    # wait for the same completion state a user sees after saving.
+    expect(page.locator('[data-summary-note]')).to_have_text("1 clips ready to review.", timeout=30000)
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
     page.reload()
     page.locator('[data-preview-count]').filter(has_text="1").wait_for()
     assert page.locator('input[name="action"][value="Goal"]').is_checked()
@@ -163,6 +170,7 @@ def exercise(page, base, root, evidence, errors):
     decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(exported),
                               "-f", "null", "-"], capture_output=True, timeout=60)
     assert decoded.returncode == 0, decoded.stderr
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
     page.reload()
     page.locator('[data-preview-count]').filter(has_text="1").wait_for()
     page.locator('.clip-preview summary').click()
