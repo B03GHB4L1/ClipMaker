@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import argparse
 import os
 import socket
 import subprocess
@@ -42,6 +43,11 @@ def wait_until_ready(port: int, timeout: float = 90.0) -> bool:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int)
+    parser.add_argument("--data-dir", type=Path)
+    parser.add_argument("--no-browser", action="store_true")
+    args = parser.parse_args()
     install_root = Path(__file__).resolve().parent
     requirements = install_root / "requirements.txt"
     server = install_root / "clipmaker_api_server.py"
@@ -68,8 +74,8 @@ def main() -> int:
         )
         stamp.write_text(digest, encoding="utf-8")
 
-    port = available_port()
-    data_dir = root / "data"
+    port = args.port if args.port is not None else available_port()
+    data_dir = args.data_dir.resolve() if args.data_dir else root / "data"
     process = subprocess.Popen(
         [str(python), str(server), "--port", str(port), "--data-dir", str(data_dir)]
     )
@@ -77,7 +83,8 @@ def main() -> int:
         if not wait_until_ready(port):
             process.terminate()
             raise RuntimeError("VizorPlay did not start within 90 seconds")
-        webbrowser.open(f"http://127.0.0.1:{port}")
+        if not args.no_browser:
+            webbrowser.open(f"http://127.0.0.1:{port}")
         return process.wait()
     except KeyboardInterrupt:
         process.terminate()

@@ -31,7 +31,9 @@ pub fn run() {
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;
-            let data_dir = app.path().app_local_data_dir()?;
+            let data_dir = std::env::var_os("VIZORPLAY_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or(app.path().app_local_data_dir()?);
             std::fs::create_dir_all(&data_dir)?;
             let executable = if cfg!(windows) {
                 "backend/clipmaker-server.exe"

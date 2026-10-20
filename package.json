@@ -3,6 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "test:e2e": "python tests/browser_smoke.py",
+    "test:media": "python packaging/smoke_test.py",
     "tauri": "tauri",
     "preview:ui": "python -m http.server 4173 -d ui",
     "dev:shared": "python packaging/clipmaker_api_server.py --port 4174 --data-dir build/shared-ui-data"

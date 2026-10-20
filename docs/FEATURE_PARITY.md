@@ -3,6 +3,12 @@
 Updated: 13 October 2026. This is a release checklist, not a declaration that every
 platform and interaction has passed acceptance testing.
 
+Automation update (20 October 2026): `E2E_TESTING.md` describes the new private,
+test-only all-platform workflow, installed NSIS/DEB native-window checks and macOS
+Homebrew acceptance path. Those hosted jobs remain unverified until their first
+run. Local real-media export cancellation now passes; native cancellation UI and
+the other outstanding acceptance gates below are not implied to be complete.
+
 ## Historical Baseline
 
 Read the Mac, Linux, and Windows launchers, README files, intake source,

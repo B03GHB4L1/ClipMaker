@@ -39,19 +39,21 @@ def finished_job(base, job):
 
 
 @contextmanager
-def backend(command, directory):
+def backend(command, directory, evidence=None, startup_timeout=90):
     directory.mkdir(parents=True, exist_ok=True)
-    log_path = directory / "backend-process.log"
+    if evidence:
+        evidence.mkdir(parents=True, exist_ok=True)
+    log_path = (evidence or directory) / "backend-process.log"
     stderr_log = log_path.open("w", encoding="utf-8")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     process = subprocess.Popen([*command, "--port", str(port), "--data-dir", str(directory)],
-        stdout=subprocess.DEVNULL, stderr=stderr_log,
+        stdout=stderr_log, stderr=subprocess.STDOUT,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     base = f"http://127.0.0.1:{port}"
     try:
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + startup_timeout
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError(log_path.read_text(encoding="utf-8", errors="replace"))
@@ -88,7 +90,7 @@ def run(base, root):
     assert imported["event_count"] == 2
     request(base, f"/api/projects/{project['id']}", {"video_path": str(video), "video_name": video.name,
         "markers": {"1H": "00:00:00", "2H": "00:00:00"}, "filter_settings": {"filter_types": ["Goal"]}})
-    for asset in ("/", "/filters.html", "/analysis.html", "/assets/cm-chrome-football.glb", "/vendor/loaders/GLTFLoader.js"):
+    for asset in ("/", "/filters.html", "/analysis.html", "/assets/vizorplay-football.glb", "/vendor/loaders/GLTFLoader.js"):
         with urlopen(base + asset, timeout=5) as response:
             assert response.status == 200 and len(response.read()) > 0, asset
     options = {"filter_types": ["Goal"], "before_buffer": 1, "after_buffer": 1, "min_gap": 0}
@@ -128,10 +130,30 @@ def run(base, root):
     pixel_frame = decoded.stdout
     assert len(pixel_frame) == 320 * 180 * 3
     assert sum(pixel_frame[0::3]) / (320 * 180) > 200 and sum(pixel_frame[1::3]) / (320 * 180) < 30, "Wrong period video exported"
+    cancel_job = request(base, "/api/jobs", {"match_id": project["id"], "options": {
+        **options, "dry_run": False, "individual_clips": True, "output_dir": str(root / "cancel-exports"),
+        "clip_windows": [{"start": 0, "end": 7, "period": 1, "label": f"Cancellation {i}"} for i in range(150)]}})["job"]
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        cancel_job = request(base, "/api/jobs/" + cancel_job["id"])["job"]
+        if (cancel_job.get("progress") or {}).get("current", 0) >= 1:
+            break
+        assert cancel_job["status"] not in {"complete", "failed", "cancelled"}, cancel_job
+        time.sleep(.1)
+    else:
+        raise AssertionError("Cancellation fixture never completed its first real clip")
+    request(base, "/api/jobs/" + cancel_job["id"] + "/cancel", {})
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        cancel_job = request(base, "/api/jobs/" + cancel_job["id"])["job"]
+        if cancel_job["status"] in {"complete", "failed", "cancelled"}:
+            break
+        time.sleep(.1)
+    assert cancel_job["status"] == "cancelled", cancel_job
     analysis = request(base, "/api/analysis", {"project_id": project["id"], "view": "analyst"})
     with urlopen(analysis["url"].split("/?", 1)[0] + "/_stcore/health", timeout=10) as response:
         assert response.status == 200
-    print("PASS: local projects, CSV, shared assets, real preview, seeking, decoded reel, repeat-export protection, individual extra-time source/pixels, downloads, analytical startup")
+    print("PASS: local projects, CSV, shared assets, real preview, seeking, decoded reel, repeat-export protection, individual extra-time source/pixels, downloads, real export cancellation, analytical startup")
 
 
 def main():
