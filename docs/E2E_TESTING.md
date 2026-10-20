@@ -8,22 +8,21 @@ not publish source, create a release, or update a package manager.
 
 ### Before The First Run
 
-1. Make the source repository private yourself. Open the repository's Settings,
-   then General, then Danger Zone, then Change repository visibility. Follow
-   GitHub's confirmation steps. The assistant must not change visibility.
-2. Once privacy is confirmed, authorize pushing the committed test changes to
-   that private repository. Work is currently local only. Do not push a release
-   tag or run the separate Desktop release workflow to test this suite.
+1. The user authorized pushing and running tests in the existing public repository
+   on 20 October 2026. The private-repository restriction has been removed. Test
+   artifacts and source are therefore public; only synthetic fixtures belong here.
+2. Push the test branch `codex/release-packaging`; this automatically starts the
+   full suite. Do not push a release tag or run Desktop release to test it.
 3. The workflow file must be present on the repository's default branch for
    GitHub's manual Run workflow button to appear. A later run can select a
    different branch containing the workflow.
-4. Check your GitHub Actions allowance and spending limit. Private-repository
-   runners have account-dependent usage limits; macOS/build jobs can consume
-   substantial minutes. This is why the full suite is manual by default.
+4. Check your GitHub Actions allowance and spending limit. Runner availability
+   and limits depend on repository/account settings. Full builds run automatically
+   only on the named test branch, or via manual dispatch.
 
 ### Each Test Run
 
-1. Open the private repository on GitHub, then select **Actions**.
+1. Open the repository on GitHub, then select **Actions**.
 2. Select **Full Desktop E2E**, then **Run workflow** and choose the branch.
 3. Optionally paste one current Scoresway match URL and/or one current WhoScored
    match URL. Leaving them blank deliberately skips live-provider testing.
@@ -77,8 +76,8 @@ the shipped macOS product uses that binary.
   and failure text. Build or install errors remain in the Actions step logs.
 - Evidence artifacts expire after seven days. Backend transfer archives expire
   after three days and preserve Linux executable permissions.
-- The workflow has read-only repository permissions. A privacy gate runs before
-  any checkout. It never changes repository visibility or publishes a release.
+- The workflow has read-only repository permissions. It never changes repository
+  visibility or publishes a release. Public-repository execution is authorized.
 
 ## Coverage Limits
 

@@ -4,7 +4,7 @@
 - Maintain one shared frontend for Windows, Linux, and macOS.
 - Treat the original applications in `older versions/` as the feature baseline. Record parity in a checklist before claiming completion.
 - Preserve the existing exclusion of AI filtering unless the user explicitly changes it.
-- Keep the source repository private. Never publish code or change repository visibility.
+- The user authorized pushing code and running tests in the existing public repository on 20 October 2026. Do not change repository visibility or publish releases without a separate request.
 
 ## User Experience
 - Keep screens compact, navigable, responsive, and accessible. Use collapsible sections for detailed controls.

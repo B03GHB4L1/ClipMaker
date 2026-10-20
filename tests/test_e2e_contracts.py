@@ -57,10 +57,10 @@ class AutomationContracts(unittest.TestCase):
             self.assertIn(selector, filters)
         self.assertIn('id="timing"', filters)
 
-    def test_full_workflow_is_read_only_private_and_covers_all_os(self):
+    def test_full_workflow_is_read_only_and_covers_all_os(self):
         # PyYAML is a CI-only dependency; source guards still run locally without it.
         source = (ROOT / ".github/workflows/e2e.yml").read_text()
-        self.assertIn("github.event.repository.private", source)
+        self.assertNotIn("github.event.repository.private", source)
         self.assertIn("contents: read", source)
         self.assertNotIn("contents: write", source)
         for runner in ("windows-latest", "ubuntu-22.04", "macos-latest"):
@@ -75,10 +75,11 @@ class AutomationContracts(unittest.TestCase):
             return
         parsed = yaml.safe_load(source)
         triggers = parsed.get("on", parsed.get(True))
-        self.assertEqual(set(triggers), {"workflow_dispatch"})
+        self.assertEqual(set(triggers), {"workflow_dispatch", "push"})
+        self.assertEqual(triggers["push"]["branches"], ["codex/release-packaging"])
         self.assertEqual(parsed["permissions"], {"contents": "read"})
         self.assertEqual(set(parsed["jobs"]["verdict"]["needs"]),
-                         {"privacy", "core", "installed-desktop", "homebrew", "live-providers"})
+                         {"core", "installed-desktop", "homebrew", "live-providers"})
 
 
 if __name__ == "__main__":
