@@ -10,10 +10,27 @@ import tempfile
 import time
 import traceback
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
 from smoke_test import fixture_csv, request
+
+
+def wait_for_driver(process, port, timeout=30):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError("tauri-driver exited; see driver.log")
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/status", timeout=1) as response:
+                status = json.load(response)
+            if status.get("value", {}).get("ready"):
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(.2)
+    raise TimeoutError("The native WebDriver did not report ready")
 
 
 def main():
@@ -54,17 +71,7 @@ def main():
             process = subprocess.Popen(["tauri-driver", "--port", str(port)], env=env,
                                        stdout=log, stderr=subprocess.STDOUT)
             try:
-                deadline = time.monotonic() + 30
-                while True:
-                    if process.poll() is not None:
-                        raise RuntimeError("tauri-driver exited; see driver.log")
-                    try:
-                        with socket.create_connection(("127.0.0.1", port), timeout=1):
-                            break
-                    except OSError:
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("tauri-driver did not start")
-                        time.sleep(.2)
+                wait_for_driver(process, port)
                 project_id = None
                 for launch in range(2):
                     driver = webdriver.Remote(command_executor=f"http://127.0.0.1:{port}", options=options)
@@ -101,7 +108,6 @@ def main():
                         element('[data-export-button]').click()
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-job-state]').text == "Export complete")
                         link = element('[data-export-files] a')
-                        from urllib.request import urlopen
                         output = evidence / "native-export.mp4"
                         with urlopen(link.get_attribute("href"), timeout=30) as response:
                             output.write_bytes(response.read())

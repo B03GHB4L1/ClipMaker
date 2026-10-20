@@ -1,5 +1,6 @@
 """Test automation wiring without invoking a GUI or touching real user projects."""
 import hashlib
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_native_driver_waits_for_protocol_readiness(self):
+        from tests.native_smoke import wait_for_driver
+        process = Mock()
+        process.poll.return_value = None
+        responses = [OSError("native driver is not listening yet"),
+                     io.BytesIO(b'{"value":{"ready":false}}'),
+                     io.BytesIO(b'{"value":{"ready":true}}')]
+        with patch("tests.native_smoke.urlopen", side_effect=responses) as query, \
+             patch("tests.native_smoke.time.sleep"):
+            wait_for_driver(process, 4444)
+        self.assertEqual(query.call_count, 3)
+
     def test_launcher_accepts_isolated_data_and_suppresses_browser(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
