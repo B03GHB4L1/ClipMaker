@@ -70,16 +70,6 @@ jobs:
       - name: Frozen browser journey
         timeout-minutes: 12
         run: python tests/browser_smoke.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" --evidence build/e2e/frozen
-      - name: Archive backend with executable permissions intact
-        if: runner.os != 'macOS'
-        run: tar -czf build/frozen-backend.tar.gz -C dist/clipmaker-server .
-      - uses: actions/upload-artifact@v4
-        if: success() && runner.os != 'macOS'
-        with:
-          name: frozen-${{ runner.os }}
-          path: build/frozen-backend.tar.gz
-          retention-days: 3
-          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -90,7 +80,6 @@ jobs:
 
   installed-desktop:
     name: Installed native window (${{ matrix.os }})
-    needs: core
     strategy:
       fail-fast: false
       matrix:
@@ -114,21 +103,19 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/download-artifact@v4
-        with:
-          name: frozen-${{ matrix.backend }}
-          path: build/backend-archive
-      - name: Extract backend
-        shell: bash
-        run: |
-          mkdir -p src-tauri/resources/backend
-          tar -xzf build/backend-archive/frozen-backend.tar.gz -C src-tauri/resources/backend
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11
       - run: python -m pip install -r requirements-e2e.txt
+      - name: Build the backend for this native installation test
+        shell: bash
+        run: |
+          PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+          mkdir -p src-tauri/resources/backend
+          cp -a dist/clipmaker-server/. src-tauri/resources/backend/
       - run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Match Edge WebDriver to installed Edge
         if: runner.os == 'Windows'

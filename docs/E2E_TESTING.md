@@ -74,8 +74,9 @@ the shipped macOS product uses that binary.
   directory. The short synthetic preview/export videos are also retained.
 - Native failures record driver logs, screenshot/HTML when a session exists,
   and failure text. Build or install errors remain in the Actions step logs.
-- Evidence artifacts expire after seven days. Backend transfer archives expire
-  after three days and preserve Linux executable permissions.
+- Evidence artifacts expire after seven days. Each native test builds its own
+  backend and runs independently of browser jobs, retaining executable permissions
+  when copying resources into its installation package.
 - The workflow has read-only repository permissions. It never changes repository
   visibility or publishes a release. Public-repository execution is authorized.
 
