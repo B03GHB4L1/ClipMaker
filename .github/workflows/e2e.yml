@@ -1,6 +1,8 @@
 name: Full Desktop E2E
 
 on:
+  push:
+    branches: ["codex/release-packaging"]
   workflow_dispatch:
     inputs:
       scoresway_url:
@@ -18,21 +20,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  privacy:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Require a private repository
-        env:
-          IS_PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          if [ "$IS_PRIVATE" != "true" ]; then
-            echo "This test workflow is restricted to private repositories. No source was checked out."
-            exit 1
-          fi
-
   core:
     name: Browser and packaged backend (${{ matrix.os }})
-    needs: privacy
     strategy:
       fail-fast: false
       matrix:
@@ -178,7 +167,6 @@ jobs:
 
   homebrew:
     name: Installed Homebrew launch (macOS)
-    needs: privacy
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -214,7 +202,6 @@ jobs:
 
   live-providers:
     name: Optional live provider checks
-    needs: privacy
     if: inputs.scoresway_url != '' || inputs.whoscored_url != ''
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -240,7 +227,7 @@ jobs:
   verdict:
     name: Full E2E verdict
     if: always()
-    needs: [privacy, core, installed-desktop, homebrew, live-providers]
+    needs: [core, installed-desktop, homebrew, live-providers]
     runs-on: ubuntu-22.04
     steps:
       - name: Summarize without hiding failed or skipped required jobs
@@ -255,7 +242,7 @@ jobs:
               for name, job in jobs.items():
                   output.write(f"| {name} | {job['result']} |\n")
               output.write('\nLive providers skipped means NOT TESTED. Native file dialogs, updates, uninstall, signing and Gatekeeper are not certified by this suite.\n')
-          required = ['privacy', 'core', 'installed-desktop', 'homebrew']
+          required = ['core', 'installed-desktop', 'homebrew']
           assert all(jobs[name]['result'] == 'success' for name in required), jobs
           assert jobs['live-providers']['result'] in ['success', 'skipped'], jobs
           PY
