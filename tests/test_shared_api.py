@@ -305,11 +305,11 @@ class SharedApiTests(unittest.TestCase):
         with patch(
             "packaging.clipmaker_api_server.choose_video_file",
             return_value=video_path,
-        ):
+        ), patch("packaging.clipmaker_api_server.sys.platform", "linux"):
             status, result = self.request("/api/files/video", method="POST", payload={})
 
         self.assertEqual(status, 200)
-        self.assertEqual(result["file"]["path"], str(video_path))
+        self.assertTrue(Path(result["file"]["path"]).samefile(video_path))
         request = Request(
             self.base_url + result["file"]["url"],
             headers={"Range": "bytes=2-5"},
@@ -318,6 +318,14 @@ class SharedApiTests(unittest.TestCase):
             self.assertEqual(response.status, 206)
             self.assertEqual(response.headers["Content-Range"], "bytes 2-5/10")
             self.assertEqual(response.read(), b"2345")
+
+    def test_macos_video_picker_requests_browser_upload(self):
+        with patch("packaging.clipmaker_api_server.sys.platform", "darwin"), \
+             patch("packaging.clipmaker_api_server.choose_video_file") as native_picker:
+            status, result = self.request("/api/files/video", method="POST", payload={})
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {"browser_picker": True})
+        native_picker.assert_not_called()
 
     def test_saved_video_can_be_reopened(self):
         video_path = Path(self.temporary.name) / "saved-match.mp4"
@@ -338,7 +346,7 @@ class SharedApiTests(unittest.TestCase):
             payload={"match_id": saved["match"]["id"]},
         )
         self.assertEqual(status, 200)
-        self.assertEqual(result["file"]["path"], str(video_path))
+        self.assertTrue(Path(result["file"]["path"]).samefile(video_path))
 
 
 if __name__ == "__main__":
