@@ -36,6 +36,7 @@ jobs:
       - run: python packaging/clipmaker_api_server.py --help
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_smoke.py
+        timeout-minutes: 12
       - uses: actions/upload-artifact@v4
         if: always()
         with:

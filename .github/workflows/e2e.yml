@@ -55,6 +55,7 @@ jobs:
           set -o pipefail
           python packaging/smoke_test.py 2>&1 | tee build/e2e/source-media.log
       - name: Source browser journey
+        timeout-minutes: 12
         run: python tests/browser_smoke.py --evidence build/e2e/source
       - name: Bundle scraper browser
         run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
@@ -67,6 +68,7 @@ jobs:
           set -o pipefail
           python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" 2>&1 | tee build/e2e/frozen-media.log
       - name: Frozen browser journey
+        timeout-minutes: 12
         run: python tests/browser_smoke.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" --evidence build/e2e/frozen
       - name: Archive backend with executable permissions intact
         if: runner.os != 'macOS'
@@ -189,9 +191,10 @@ jobs:
           brew install --build-from-source local/vizorplay/clipmaker
           brew test local/vizorplay/clipmaker
       - name: Exercise installed launcher and full browser journey
+        timeout-minutes: 22
         env:
           CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
-        run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --evidence build/homebrew-evidence
+        run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --timeout-seconds 1200 --evidence build/homebrew-evidence
       - uses: actions/upload-artifact@v4
         if: always()
         with:
