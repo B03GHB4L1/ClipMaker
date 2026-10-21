@@ -127,6 +127,14 @@ and the installed macOS Homebrew workflow, but failed the full verdict.
 
 These changes require a new hosted run before the full suite can be marked passed.
 
+The rerun `39624375234` confirmed Scoresway passes on GitHub (1,923 events),
+but WhoScored returns HTTP 403 from the hosted runner. This is an external
+provider restriction, not a missing Python dependency; it remains a failed live
+acceptance check. The app now reports the denial without suggesting an already
+installed dependency. No network-block bypass or fabricated provider success
+was added. The local 60-test regression suite, Node autosave test, and actionlint
+validation passed during this investigation.
+
 ## Developer Commands
 
 Install the separate test dependencies in a virtual environment:

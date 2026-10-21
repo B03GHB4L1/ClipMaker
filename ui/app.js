@@ -880,6 +880,7 @@ const initializeBall = async () => {
     });
     scene.add(ball);
     heroBall.appendChild(renderer.domElement);
+    let stillRendered = false;
     const resize = () => {
       const width = heroBall.clientWidth;
       const height = heroBall.clientHeight;
@@ -887,13 +888,13 @@ const initializeBall = async () => {
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
+      stillRendered = false;
     };
     resize();
     new ResizeObserver(resize).observe(heroBall);
     let visible = true;
     new IntersectionObserver(entries => visible = entries[0].isIntersecting).observe(heroBall);
     let lastFrame = -Infinity;
-    let stillRendered = false;
     renderer.setAnimationLoop(time => {
       if (!visible || document.hidden || time - lastFrame < 1000 / 30) return;
       if (reducedMotion.matches && stillRendered) return;

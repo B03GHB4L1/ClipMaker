@@ -534,7 +534,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
 
         response = session.get(url, timeout=30)
         if response.status_code == 403:
-            raise ValueError("WhoScored blocked the request (403). Install curl_cffi for Chrome TLS impersonation: pip install curl_cffi")
+            raise ValueError("WhoScored denied this request (HTTP 403). This network may be restricted by the provider. Try again later or import a previously saved match CSV.")
         if response.status_code != 200:
             raise ValueError(f"WhoScored returned status {response.status_code}.")
         html = response.text
