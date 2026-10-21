@@ -98,6 +98,35 @@ The first full hosted run remains necessary to validate runner dependencies,
 installer paths, WebDriver versions, selectors, and platform-specific timing.
 Until that run succeeds, treat these automation jobs as implemented but unverified.
 
+## Failure Investigation (21 October 2026)
+
+Run `39502791303` passed Linux/macOS source and frozen browser/media workflows
+and the installed macOS Homebrew workflow, but failed the full verdict.
+
+- Windows browser: CSV upload eventually returned HTTP 200 after about 144
+  seconds, while the browser timed out. Console evidence recorded GPU readback
+  stalls. The shared ball no longer preserves its drawing buffer, renders at
+  most 30 fps, and uses the existing still without starting WebGL when reduced
+  motion is requested. Browser acceptance requests reduced motion; this does not
+  certify animated rendering on every graphics driver.
+- Linux installed window: the app launched and reopened its seeded project.
+  The test waited for a transparent, off-screen reveal section without scrolling.
+  Native element lookup now scrolls into view before waiting for clickability.
+- Windows installed window: WebDriver session creation failed with
+  `DevToolsActivePort file doesn't exist`. Native CI is pinned to `windows-2022`
+  while the [reported runner regression](https://github.com/actions/runner-images/issues/14738)
+  is investigated upstream. The driver is downloaded for the installed WebView2
+  runtime, not the independently installed Edge browser. Browser/backend coverage
+  continues on `windows-latest`; this is not native acceptance of that image.
+- Scoresway completed in the hosted live check before WhoScored failed, but the
+  old harness discarded partial results and hid HTTP response bodies. It now
+  saves each result, checks both providers even after a failure, and retains
+  actual errors. WhoScored now includes its exception in the scraper error queue.
+  Both supplied URLs passed locally (1,923 Scoresway and 1,838 WhoScored events).
+  Local success is not proof that GitHub-hosted provider traffic will succeed.
+
+These changes require a new hosted run before the full suite can be marked passed.
+
 ## Developer Commands
 
 Install the separate test dependencies in a virtual environment:

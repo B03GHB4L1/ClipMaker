@@ -845,6 +845,8 @@ eventDialog.addEventListener("click", (event) => {
 const heroBall = document.querySelector("[data-hero-ball]");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const initializeBall = async () => {
+  // The supplied still is also the low-cost, accessible reduced-motion view.
+  if (reducedMotion.matches) return;
   let renderer;
   let environment;
   try {
@@ -855,7 +857,7 @@ const initializeBall = async () => {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
     camera.position.set(0, 0.04, 4.9);
-    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -890,11 +892,16 @@ const initializeBall = async () => {
     new ResizeObserver(resize).observe(heroBall);
     let visible = true;
     new IntersectionObserver(entries => visible = entries[0].isIntersecting).observe(heroBall);
+    let lastFrame = -Infinity;
+    let stillRendered = false;
     renderer.setAnimationLoop(time => {
-      if (!visible || document.hidden) return;
+      if (!visible || document.hidden || time - lastFrame < 1000 / 30) return;
+      if (reducedMotion.matches && stillRendered) return;
+      lastFrame = time;
       ball.rotation.y = reducedMotion.matches ? 0 : Math.sin(time * 0.00018) * 0.22;
       ball.rotation.x = reducedMotion.matches ? 0 : Math.sin(time * 0.00012) * 0.025;
       renderer.render(scene, camera);
+      stillRendered = reducedMotion.matches;
       heroBall.classList.add("model-ready");
     });
     renderer.domElement.addEventListener("webglcontextlost", () => {
