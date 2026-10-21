@@ -33,6 +33,15 @@ def wait_for_driver(process, port, timeout=30):
     raise TimeoutError("The native WebDriver did not report ready")
 
 
+def ready_element(driver, wait, selector):
+    target = wait.until(lambda current: current.find_element("css selector", selector))
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'instant'})", target)
+    def clickable(current):
+        target = current.find_element("css selector", selector)
+        return target if target.is_displayed() and target.is_enabled() else False
+    return wait.until(clickable)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True, type=Path)
@@ -47,7 +56,6 @@ def main():
     from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.common.options import ArgOptions
     from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
     import imageio_ffmpeg
 
     evidence = args.evidence.resolve()
@@ -77,7 +85,7 @@ def main():
                     driver = webdriver.Remote(command_executor=f"http://127.0.0.1:{port}", options=options)
                     wait = WebDriverWait(driver, 120)
                     def element(selector):
-                        return wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                        return ready_element(driver, wait, selector)
                     wait.until(lambda current: current.current_url.startswith("http://127.0.0.1:"))
                     parsed = urlparse(driver.current_url)
                     base = f"{parsed.scheme}://{parsed.netloc}"

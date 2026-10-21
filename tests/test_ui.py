@@ -8,6 +8,13 @@ UI = Path(__file__).resolve().parents[1] / "ui"
 
 
 class SharedUiTests(unittest.TestCase):
+    def test_ball_respects_reduced_motion_and_limits_rendering_cost(self):
+        source = (UI / "app.js").read_text(encoding="utf-8")
+        self.assertIn('if (reducedMotion.matches) return;', source)
+        self.assertNotIn('preserveDrawingBuffer: true', source)
+        self.assertIn('time - lastFrame < 1000 / 30', source)
+        self.assertIn('if (reducedMotion.matches && stillRendered) return;', source)
+
     def test_vizorplay_brand_and_footer_version(self):
         for name in ("index.html", "filters.html", "analysis.html"):
             source = (UI / name).read_text(encoding="utf-8")

@@ -887,4 +887,4 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
         log_queue.put({"type": "done"})
     except Exception as exc:
         log_queue.put({"type": "log", "msg": f"ERROR: {exc}"})
-        log_queue.put({"type": "error"})
+        log_queue.put({"type": "error", "msg": str(exc)})

@@ -43,6 +43,7 @@ def main():
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(channel="chromium", timeout=60000)
                 context = browser.new_context(viewport={"width": 1280, "height": 800},
+                                              reduced_motion="reduce",
                                               record_video_dir=str(evidence / "video"),
                                               record_video_size={"width": 640, "height": 400})
                 context.tracing.start(screenshots=True, snapshots=True, sources=False)

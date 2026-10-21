@@ -84,7 +84,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # windows-latest has a WebView2 automation regression (runner-images#14738).
+          - os: windows-2022
             backend: Windows
             bundles: nsis
           - os: ubuntu-22.04
@@ -117,12 +118,23 @@ jobs:
           mkdir -p src-tauri/resources/backend
           cp -a dist/clipmaker-server/. src-tauri/resources/backend/
       - run: cargo install tauri-driver --version 2.1.0 --locked
-      - name: Match Edge WebDriver to installed Edge
+      - name: Match Edge WebDriver to installed WebView2 runtime
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $driver = python -c "from selenium.webdriver.common.selenium_manager import SeleniumManager; print(SeleniumManager().binary_paths(['--browser', 'edge'])['driver_path'])"
-          Split-Path $driver | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $ErrorActionPreference = 'Stop'
+          $runtime = Get-ChildItem "${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application/*/msedgewebview2.exe" |
+            Sort-Object { [version]$_.VersionInfo.ProductVersion } -Descending | Select-Object -First 1
+          if (-not $runtime) { throw 'WebView2 runtime not found' }
+          $version = $runtime.VersionInfo.ProductVersion
+          Write-Host "WebView2 runtime: $version"
+          $archive = Join-Path $env:RUNNER_TEMP 'edgedriver.zip'
+          $directory = Join-Path $env:RUNNER_TEMP 'webview-driver'
+          Invoke-WebRequest "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory
+          & "$directory/msedgedriver.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'WebView2 driver could not start' }
+          $directory | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: npm ci
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - name: Install Windows package and exercise the installed window
