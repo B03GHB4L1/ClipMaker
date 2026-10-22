@@ -1,5 +1,6 @@
 """CI-only installed Tauri window test; Windows/Linux, never a browser substitute."""
 import argparse
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,21 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
 from smoke_test import fixture_csv, request
+
+
+def export_finished(driver):
+    # WebDriver .text applies CSS text-transform; textContent is the actual label.
+    label = driver.find_element("css selector", "[data-job-state]").get_attribute("textContent").strip()
+    if label in {"Export failed", "Job cancelled", "Could not build plan", "Setup needs attention"}:
+        logs = driver.find_element("css selector", "[data-job-logs]").get_attribute("textContent")
+        raise AssertionError(f"{label}: {logs}")
+    return label == "Export complete"
+
+
+def stage(evidence, message):
+    print(f"Native E2E: {message}", flush=True)
+    with (evidence / "stages.log").open("a", encoding="utf-8") as output:
+        output.write(f"{time.time():.3f} {message}\n")
 
 
 def wait_for_driver(process, port, timeout=30):
@@ -55,11 +71,14 @@ def main():
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.common.options import ArgOptions
+    from selenium.webdriver.remote.client_config import ClientConfig
+    from selenium.webdriver.remote.remote_connection import RemoteConnection
     from selenium.webdriver.support.ui import WebDriverWait
     import imageio_ffmpeg
 
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
+    faulthandler.dump_traceback_later(600, exit=True)
     options = ArgOptions()
     options.set_capability("browserName", "wry")
     options.set_capability("tauri:options", {"application": str(args.app.resolve())})
@@ -82,7 +101,12 @@ def main():
                 wait_for_driver(process, port)
                 project_id = None
                 for launch in range(2):
-                    driver = webdriver.Remote(command_executor=f"http://127.0.0.1:{port}", options=options)
+                    stage(evidence, f"launch {launch + 1}: create native session")
+                    address = f"http://127.0.0.1:{port}"
+                    connection = RemoteConnection(client_config=ClientConfig(remote_server_addr=address, timeout=45))
+                    driver = webdriver.Remote(command_executor=connection, options=options)
+                    driver.set_page_load_timeout(45)
+                    driver.set_script_timeout(30)
                     wait = WebDriverWait(driver, 120)
                     def element(selector):
                         return ready_element(driver, wait, selector)
@@ -93,6 +117,7 @@ def main():
                     assert driver.find_element(By.CSS_SELECTOR, '.cm-logo').text == "VizorPlay"
                     assert "Version 1.0" in driver.find_element(By.CSS_SELECTOR, 'footer').text
                     if launch == 0:
+                        stage(evidence, "create and seed isolated project")
                         previous_url = driver.current_url
                         element('[data-new-project]').click()
                         wait.until(lambda current: current.current_url != previous_url and "project=" in current.current_url)
@@ -103,6 +128,12 @@ def main():
                         request(base, f"/api/projects/{project_id}", {"video_path": str(video), "video_name": video.name,
                                 "markers": {"1H": "00:00:00", "2H": "00:00:00"}})
                         driver.refresh()
+                        stage(evidence, "verify installed webview decodes and plays footage")
+                        element('.play-button').click()
+                        wait.until(lambda current: current.execute_script(
+                            "const v=document.querySelector('[data-match-video]'); return v.videoWidth > 0 && v.currentTime > 0"))
+                        element('.play-button').click()
+                        stage(evidence, "open filters and build clip plan")
                         element('[data-continue]').click()
                         element('#actions summary').click()
                         checkbox = driver.find_element(By.CSS_SELECTOR, 'input[name="action"][value="Goal"]')
@@ -113,8 +144,16 @@ def main():
                         endpoint = element('.clip-editor label:nth-child(2) input')
                         endpoint.send_keys(Keys.CONTROL, "a")
                         endpoint.send_keys("3.5", Keys.TAB)
+                        stage(evidence, "render edited preview in the installed webview")
+                        element('.clip-editor > button:first-of-type').click()
+                        wait.until(lambda current: current.execute_script(
+                            "const v=document.querySelector('.clip-preview video'); return v && !v.hidden && v.videoWidth > 0"))
+                        duration = driver.execute_script("return document.querySelector('.clip-preview video').duration")
+                        assert 3.3 <= duration <= 3.7, duration
+                        stage(evidence, "export edited clip")
                         element('[data-export-button]').click()
-                        wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-job-state]').text == "Export complete")
+                        wait.until(export_finished)
+                        stage(evidence, "export complete: download and decode")
                         link = element('[data-export-files] a')
                         output = evidence / "native-export.mp4"
                         with urlopen(link.get_attribute("href"), timeout=30) as response:
@@ -123,28 +162,35 @@ def main():
                         subprocess.run([ffmpeg, "-v", "error", "-i", str(output), "-f", "null", "-"],
                                        check=True, capture_output=True, timeout=60)
                     else:
+                        stage(evidence, "verify project survived native shutdown and relaunch")
                         saved = request(base, f"/api/projects/{project_id}")["project"]
                         assert saved["preview_windows"] and saved["filter_settings"]["filter_types"] == ["Goal"]
                         assert saved["preview_windows"][0]["end"] == 3.5
                         driver.get(f"{base}/filters.html?match={project_id}")
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
+                    stage(evidence, f"launch {launch + 1}: capture evidence and close")
                     driver.save_screenshot(str(evidence / f"native-launch-{launch + 1}.png"))
                     driver.quit()
                     driver = None
                 (evidence / "result.json").write_text(json.dumps({"status": "passed", "native_launches": 2}), encoding="utf-8")
             except BaseException:
+                print(traceback.format_exc(), flush=True)
                 (evidence / "failure.txt").write_text(traceback.format_exc(), encoding="utf-8")
                 if driver:
                     try:
-                        driver.save_screenshot(str(evidence / "failure.png"))
+                        stage(evidence, "capture failure HTML before screenshot")
                         (evidence / "failure.html").write_text(driver.page_source, encoding="utf-8")
+                        driver.save_screenshot(str(evidence / "failure.png"))
                     except Exception:
-                        pass
+                        (evidence / "diagnostics-failure.txt").write_text(traceback.format_exc(), encoding="utf-8")
                 raise
             finally:
                 try:
                     if driver:
-                        driver.quit()
+                        try:
+                            driver.quit()
+                        except Exception:
+                            (evidence / "cleanup-failure.txt").write_text(traceback.format_exc(), encoding="utf-8")
                 finally:
                     process.terminate()
                     try:
@@ -152,6 +198,7 @@ def main():
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait(timeout=5)
+    faulthandler.cancel_dump_traceback_later()
 
 
 if __name__ == "__main__":

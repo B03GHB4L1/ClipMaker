@@ -137,6 +137,29 @@ validation passed during this investigation.
 
 ## Developer Commands
 
+### Native Completion Fix (22 October 2026)
+
+Run `39625014429` completed every browser/frozen-backend and Homebrew job, but
+both native runs stopped at the export completion assertion. The Windows
+failure screenshot shows the actual saved export and EXPORT COMPLETE. Selenium
+`.text` reflects CSS uppercase transformation; it was incorrectly compared with
+mixed-case `Export complete`. The native check now reads the DOM label via
+`textContent`, still fails on real terminal errors, downloads the rendered file,
+decodes it, then verifies persistence after closing/relaunching the installed app.
+
+The Linux traceback shows the same assertion failed before diagnostic collection
+hung. Each WebDriver request now has a 45-second transport deadline; page/script
+timeouts, a 600-second process watchdog, persistent stage logs, and 12-minute
+native acceptance steps prevent a silent hour-long diagnostic hang. Xvfb now
+starts before the D-Bus session so activation inherits DISPLAY.
+
+Native coverage now also plays the H.264 fixture and checks the edited preview's
+decoded dimensions/duration inside the installed webview. Debian dependencies
+include GStreamer's MP4/decoder support. These new hosted checks must pass before
+native playback can be certified. Local regression: 62 Python tests plus the
+Node autosave test passed; actionlint validated both workflows. Release builds
+reuse the full acceptance workflow and cannot proceed when required jobs fail.
+
 Install the separate test dependencies in a virtual environment:
 
 ```powershell
