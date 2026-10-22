@@ -33,6 +33,28 @@ def stage(evidence, message):
         output.write(f"{time.time():.3f} {message}\n")
 
 
+def package_lifecycle(app, package, uninstall=False):
+    if sys.platform == "win32":
+        if uninstall:
+            candidates = list(app.parent.glob("*ninstall*.exe"))
+            if len(candidates) != 1:
+                raise RuntimeError("Expected exactly one installed NSIS uninstaller")
+            command = [str(candidates[0]), "/S"]
+        else:
+            command = [str(package), "/S", f"/D={app.parent}"]
+    else:
+        if uninstall:
+            name = subprocess.run(["dpkg-deb", "--field", str(package), "Package"],
+                                  check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+            if not name or name[0] not in "abcdefghijklmnopqrstuvwxyz0123456789" or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789+-." for char in name):
+                raise RuntimeError("Invalid Debian package name")
+            command = ["sudo", "apt-get", "remove", "-y", name]
+        else:
+            command = ["sudo", "apt-get", "install", "--reinstall", "-y", str(package)]
+    subprocess.run(command, check=True, timeout=120,
+                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+
+
 def wait_for_driver(process, port, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -61,12 +83,20 @@ def ready_element(driver, wait, selector):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True, type=Path)
+    parser.add_argument("--package", type=Path, help="CI-only NSIS/DEB reinstall and uninstall acceptance")
     parser.add_argument("--evidence", type=Path, default=ROOT / "build/native-evidence")
     args = parser.parse_args()
     if sys.platform not in {"win32", "linux"}:
         parser.error("This native Tauri driver test supports only Windows/Linux; macOS uses the Homebrew browser workflow")
     if not args.app.is_file():
         parser.error("Installed application executable not found")
+    if args.package:
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            parser.error("Package lifecycle testing is restricted to disposable GitHub runners")
+        args.package = args.package.resolve()
+        if not args.package.is_file() or args.package.suffix != (".exe" if sys.platform == "win32" else ".deb"):
+            parser.error("Expected an existing package for this platform")
+    args.app = args.app.resolve()
     from selenium import webdriver
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
@@ -100,6 +130,7 @@ def main():
             try:
                 wait_for_driver(process, port)
                 project_id = None
+                project_path = None
                 for launch in range(2):
                     stage(evidence, f"launch {launch + 1}: create native session")
                     address = f"http://127.0.0.1:{port}"
@@ -168,11 +199,29 @@ def main():
                         assert saved["preview_windows"][0]["end"] == 3.5
                         driver.get(f"{base}/filters.html?match={project_id}")
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
+                    wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-project-status]').get_attribute("textContent") == "Saved locally")
+                    project_path = Path(request(base, "/api/projects")["directory"]) / project_id / "project.json"
+                    assert project_path.resolve().is_relative_to(root.resolve()), project_path
                     stage(evidence, f"launch {launch + 1}: capture evidence and close")
                     driver.save_screenshot(str(evidence / f"native-launch-{launch + 1}.png"))
                     driver.quit()
                     driver = None
-                (evidence / "result.json").write_text(json.dumps({"status": "passed", "native_launches": 2}), encoding="utf-8")
+                    if launch == 0 and args.package:
+                        stage(evidence, "reinstall same-version package before relaunch")
+                        preserved = project_path.read_bytes()
+                        package_lifecycle(args.app, args.package)
+                        assert project_path.read_bytes() == preserved, "Reinstall changed saved project data"
+                if args.package:
+                    stage(evidence, "uninstall package and verify saved project data remains")
+                    preserved = project_path.read_bytes()
+                    package_lifecycle(args.app, args.package, uninstall=True)
+                    deadline = time.monotonic() + 30
+                    while args.app.exists() and time.monotonic() < deadline:
+                        time.sleep(.2)
+                    assert not args.app.exists(), "Uninstall did not remove the application"
+                    assert project_path.read_bytes() == preserved, "Uninstall removed or changed saved project data"
+                (evidence / "result.json").write_text(json.dumps({"status": "passed", "native_launches": 2,
+                    "reinstall_and_uninstall": bool(args.package)}), encoding="utf-8")
             except BaseException:
                 print(traceback.format_exc(), flush=True)
                 (evidence / "failure.txt").write_text(traceback.format_exc(), encoding="utf-8")

@@ -17,6 +17,36 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_windows_package_lifecycle_uses_silent_installer_and_installed_uninstaller(self):
+        from tests.native_smoke import package_lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "clipmaker.exe"
+            uninstaller = root / "uninstall.exe"
+            uninstaller.touch()
+            with patch("tests.native_smoke.sys.platform", "win32"), \
+                 patch("tests.native_smoke.subprocess.CREATE_NO_WINDOW", 0x08000000, create=True), \
+                 patch("tests.native_smoke.subprocess.run") as run:
+                package_lifecycle(app, root / "setup.exe")
+                self.assertEqual(run.call_args.args[0], [str(root / "setup.exe"), "/S", f"/D={root}"])
+                package_lifecycle(app, root / "setup.exe", uninstall=True)
+                self.assertEqual(run.call_args.args[0], [str(uninstaller), "/S"])
+                self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_linux_package_lifecycle_uses_package_metadata_and_checked_commands(self):
+        from tests.native_smoke import package_lifecycle
+        with patch("tests.native_smoke.sys.platform", "linux"), \
+             patch("tests.native_smoke.subprocess.run") as run:
+            run.return_value.stdout = "vizorplay\n"
+            package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"))
+            self.assertEqual(run.call_args.args[0], ["sudo", "apt-get", "install", "--reinstall", "-y", str(Path("/tmp/app.deb"))])
+            package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"), uninstall=True)
+            self.assertEqual(run.call_args.args[0], ["sudo", "apt-get", "remove", "-y", "vizorplay"])
+            self.assertEqual(run.call_args.kwargs["timeout"], 120)
+            run.return_value.stdout = "--unsafe"
+            with self.assertRaises(RuntimeError):
+                package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"), uninstall=True)
+
     def test_native_export_reads_dom_label_not_css_transformed_text(self):
         from tests.native_smoke import export_finished
         driver = Mock()

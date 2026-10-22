@@ -23,6 +23,11 @@ journey also checks real footage playback and edited-preview decoding, not only
 export. Debian now declares its GStreamer playback dependencies. Hosted results
 for these changes are still required.
 
+Native package acceptance also reinstalls the same package before relaunch and
+uninstalls afterward, checking the isolated saved project is unchanged. These
+checks are authored, not yet passed on hosted runners. They do not certify
+different-version migrations, RPM installation, or distribution-channel upgrades.
+
 Release builds now reuse the full acceptance workflow on their exact commit
 before building release artifacts. This gate is not a substitute for the open
 historical-feature and distribution checks below. Release readiness remains

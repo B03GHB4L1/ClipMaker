@@ -160,6 +160,17 @@ native playback can be certified. Local regression: 62 Python tests plus the
 Node autosave test passed; actionlint validated both workflows. Release builds
 reuse the full acceptance workflow and cannot proceed when required jobs fail.
 
+When CI passes `--package`, native acceptance reinstalls the same NSIS/DEB before
+the second launch and checks project JSON is unchanged. It then uninstalls the
+application, verifies the executable is removed and the isolated project JSON
+remains intact. This mode is restricted to disposable GitHub runners and never
+runs against the owner's normal data. It checks same-version reinstall and
+uninstall preservation, not migrations between different app versions. Version
+upgrades/downgrades, RPM and outstanding historical-feature acceptance remain
+open. Package lifecycle commands have focused Windows/Linux regression coverage.
+After adding lifecycle coverage, all 64 local Python tests passed. Hosted package
+installation, playback, reinstall, uninstall and relaunch results remain pending.
+
 Install the separate test dependencies in a virtual environment:
 
 ```powershell
