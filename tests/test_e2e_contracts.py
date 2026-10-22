@@ -17,6 +17,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_native_export_reads_dom_label_not_css_transformed_text(self):
+        from tests.native_smoke import export_finished
+        driver = Mock()
+        label = driver.find_element.return_value
+        label.text = "EXPORT COMPLETE"
+        label.get_attribute.return_value = "Export complete"
+        self.assertTrue(export_finished(driver))
+        label.get_attribute.assert_called_with("textContent")
+        label.get_attribute.return_value = "Exporting reel"
+        self.assertFalse(export_finished(driver))
+        for failure in ("Export failed", "Job cancelled", "Could not build plan", "Setup needs attention"):
+            label.get_attribute.return_value = failure
+            with self.subTest(failure=failure), self.assertRaises(AssertionError):
+                export_finished(driver)
+
     def test_native_lookup_scrolls_before_testing_reveal_visibility(self):
         from tests.native_smoke import ready_element
         driver = Mock()
@@ -120,6 +135,12 @@ class AutomationContracts(unittest.TestCase):
             self.assertIn(selector, filters)
         self.assertIn('id="timing"', filters)
 
+    def test_debian_package_declares_playback_codecs(self):
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text())
+        dependencies = config["bundle"]["linux"]["deb"]["depends"]
+        self.assertIn("gstreamer1.0-plugins-good", dependencies)
+        self.assertIn("gstreamer1.0-libav", dependencies)
+
     def test_full_workflow_is_read_only_and_covers_all_os(self):
         # PyYAML is a CI-only dependency; source guards still run locally without it.
         source = (ROOT / ".github/workflows/e2e.yml").read_text()
@@ -138,11 +159,14 @@ class AutomationContracts(unittest.TestCase):
             return
         parsed = yaml.safe_load(source)
         triggers = parsed.get("on", parsed.get(True))
-        self.assertEqual(set(triggers), {"workflow_dispatch", "push"})
+        self.assertEqual(set(triggers), {"workflow_dispatch", "workflow_call", "push"})
         self.assertEqual(triggers["push"]["branches"], ["codex/release-packaging"])
         self.assertEqual(parsed["permissions"], {"contents": "read"})
         self.assertEqual(set(parsed["jobs"]["verdict"]["needs"]),
                          {"core", "installed-desktop", "homebrew", "live-providers"})
+        release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        self.assertEqual(release["jobs"]["acceptance"]["uses"], "./.github/workflows/e2e.yml")
+        self.assertEqual(release["jobs"]["build"]["needs"], "acceptance")
 
 
 if __name__ == "__main__":

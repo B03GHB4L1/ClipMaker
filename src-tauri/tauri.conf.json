@@ -29,6 +29,11 @@
     "resources": {
       "resources/backend/": "backend/"
     },
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-plugins-good", "gstreamer1.0-libav"]
+      }
+    },
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "windows": {
       "nsis": {

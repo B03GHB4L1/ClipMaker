@@ -1,15 +1,22 @@
 # Desktop release process
 
-ClipMaker uses the shared frontend in `ui/`, its local API in `packaging/`, and
+VizorPlay uses the shared frontend in `ui/`, its local API in `packaging/`, and
 the existing clipping and analytical implementations in `app/`.
 
 Release readiness is tracked in `docs/FEATURE_PARITY.md`. Do not treat a
 successful build as proof that installation, native interactions, or upgrades
-have passed. New remote builds are currently on hold at the user's request.
+have passed. Public test runs are authorized; publishing a release still requires
+the owner's separate instruction. No release has been published by these tests.
+
+The release workflow first calls Full Desktop E2E against the same commit. A
+failed required browser, frozen-backend, installed Windows/Linux, or Homebrew
+job prevents release builds from proceeding. Optional live-provider URLs are not
+set by the release workflow: skipped means not tested, not provider certification.
+The feature-parity ledger still records the manual acceptance gates.
 
 ## Windows and Linux
 
-Pushing a version tag such as `v1.3.0` starts `.github/workflows/release.yml`.
+Pushing a version tag such as `v1.0.0` starts `.github/workflows/release.yml`.
 GitHub's hosted runners build the Windows NSIS installer plus Linux `.deb` and
 `.rpm` packages, then attach the files to the GitHub release.
 
@@ -19,7 +26,7 @@ install with `winget install --id B4L1.ClipMaker -e` and receive later versions
 with `winget upgrade --id B4L1.ClipMaker -e`.
 
 The desktop shell starts the packaged shared-UI backend on an available local
-port and displays it inside the ClipMaker window. Analytical workspaces start
+port and displays it inside the VizorPlay window. Analytical workspaces start
 a second local server on demand. The user does not need Python,
 FFmpeg, Playwright, Chromium, Node.js, or Rust.
 
@@ -29,7 +36,8 @@ macOS uses a Homebrew formula rather than an unsigned application bundle. The
 formula installs the shared source and a `clipmaker` launcher. On its first run,
 the launcher creates a private Python environment under the user's Library,
 installs the pinned dependencies and Playwright headless browser, then opens the
-local ClipMaker interface in the default browser.
+local VizorPlay interface in the default browser. The primary launcher is
+`vizorplay`; `clipmaker` remains a compatibility alias.
 The formula includes the analytical-server adapter. Video and CSV selection use
 browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
@@ -43,7 +51,7 @@ The tagged release automatically includes a rendered `clipmaker.rb` formula
 with the correct source SHA-256. To render it locally when troubleshooting, run:
 
 ```text
-python packaging/render_homebrew_formula.py --version 1.3.0 --sha256 HASH --output Formula/clipmaker.rb
+python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/clipmaker.rb
 ```
 
 The resulting formula belongs in the separate `homebrew-clipmaker` tap.
@@ -60,17 +68,19 @@ brew upgrade clipmaker
 Ubuntu, Debian, and Linux Mint users install a downloaded package with:
 
 ```text
-sudo apt install ./ClipMaker_1.3.0_amd64.deb
+sudo apt install ./VizorPlay_1.0.0_amd64.deb
 ```
 
 Fedora and RHEL-family users install a downloaded package with:
 
 ```text
-sudo dnf install ./ClipMaker-1.3.0-1.x86_64.rpm
+sudo dnf install ./VizorPlay-1.0.0-1.x86_64.rpm
 ```
 
 Installing a newer package with the same command upgrades the existing app and
-keeps ClipMaker's per-user runtime data.
+keeps VizorPlay's per-user runtime data. Debian packages declare GStreamer
+playback dependencies; codec and distro coverage outside the tested Ubuntu DEB
+path, including RPM installation, is not yet certified.
 
 ## Verification
 

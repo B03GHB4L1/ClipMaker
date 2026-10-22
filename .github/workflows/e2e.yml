@@ -11,6 +11,16 @@ on:
       whoscored_url:
         description: Optional real WhoScored match URL (blank means not tested)
         type: string
+  workflow_call:
+    inputs:
+      scoresway_url:
+        description: Optional real Scoresway match URL
+        type: string
+        default: ''
+      whoscored_url:
+        description: Optional real WhoScored match URL
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -138,6 +148,7 @@ jobs:
       - run: npm ci
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - name: Install Windows package and exercise the installed window
+        timeout-minutes: 12
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -152,12 +163,13 @@ jobs:
           python tests/native_smoke.py --app $app[0].FullName
           if ($LASTEXITCODE -ne 0) { throw 'Native acceptance failed' }
       - name: Install Linux package and exercise the installed window
+        timeout-minutes: 12
         if: runner.os == 'Linux'
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
         run: |
           sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
-          dbus-run-session -- xvfb-run -a python tests/native_smoke.py --app /usr/bin/clipmaker
+          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker
       - uses: actions/upload-artifact@v4
         if: always()
         with:

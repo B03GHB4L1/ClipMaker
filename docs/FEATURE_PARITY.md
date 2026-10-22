@@ -1,7 +1,32 @@
-# ClipMaker Desktop Feature And Verification Ledger
+# VizorPlay Desktop Feature And Verification Ledger
 
-Updated: 13 October 2026. This is a release checklist, not a declaration that every
+Updated: 22 October 2026. This is a release checklist, not a declaration that every
 platform and interaction has passed acceptance testing.
+
+## Current Acceptance Status (22 October 2026)
+
+The user authorized public pushes and Actions runs on 20 October. Dated local-only
+notes below are historical, not current restrictions. No release publication has
+been authorized or performed.
+
+Run `39625014429` passed source/frozen browser and media acceptance on Windows,
+Linux and macOS, and installed Homebrew acceptance on macOS. Scoresway passed
+with 1,923 events; WhoScored denied the hosted runner with HTTP 403, while both
+providers passed locally. This provider restriction remains visible, not waived.
+
+Both native tests falsely waited for mixed-case rendered text even though the
+UI uppercases export status. Windows evidence shows EXPORT COMPLETE and a saved
+file. Linux recorded the same assertion failure, then hung during diagnostics.
+The new regression checks DOM text, retains real export failures, and bounds
+WebDriver commands, diagnostics, cleanup and total test duration. The native
+journey also checks real footage playback and edited-preview decoding, not only
+export. Debian now declares its GStreamer playback dependencies. Hosted results
+for these changes are still required.
+
+Release builds now reuse the full acceptance workflow on their exact commit
+before building release artifacts. This gate is not a substitute for the open
+historical-feature and distribution checks below. Release readiness remains
+unconfirmed until the required checks have passed.
 
 Automation update (20 October 2026): `E2E_TESTING.md` describes the new private,
 test-only all-platform workflow, installed NSIS/DEB native-window checks and macOS
@@ -117,14 +142,12 @@ builds run tests and a frozen-backend smoke test before bundling installers.
 These checks do not prove a native installer, Gatekeeper, or package-manager
 upgrade works on a user's physical machine.
 
-GitHub reports the existing source repository is public. The user subsequently
-requested keeping all new work local. Do not push, dispatch Actions, publish a
-release, or alter repository visibility until the user changes that instruction.
-No new CI result may be claimed until those workflows actually run.
+GitHub reports the existing source repository is public. Public pushes and test
+runs are authorized; changing visibility and publishing a release are not.
 
 Remaining release blockers:
 
-1. Run the prepared CI matrix once remote execution is authorized.
+1. Pass installed Windows/Linux acceptance on the corrected current commit.
 2. Validate installation, launch, shutdown, project persistence, and upgrades
    using actual Windows/Linux packages and the Homebrew formula.
 3. Complete the pending feature acceptance checks above with representative
@@ -132,8 +155,8 @@ Remaining release blockers:
 4. Validate visual density and chart interactions in each native desktop
    webview. Analytical pages retain their original embedded frontend, with
    compact styling, and have not been fully restyled in HTML/JS.
-5. Resolve the source-privacy/distribution plan before publishing. A private
-   source archive cannot be installed anonymously from a public Homebrew tap.
+5. Confirm distribution/upgrade acceptance and explicitly authorize publication.
+   RPM installation and package-manager version upgrades remain unverified.
 
 No guarantee is made that unsigned macOS software bypasses Gatekeeper. The
 Homebrew approach uses a source/CLI launcher rather than an unsigned app bundle,
