@@ -1,0 +1,1 @@
+"""ClipMaker test suite."""

@@ -1,0 +1,263 @@
+name: Full Desktop E2E
+
+on:
+  push:
+    branches: ["codex/release-packaging"]
+  workflow_dispatch:
+    inputs:
+      scoresway_url:
+        description: Optional real Scoresway match URL (blank means not tested)
+        type: string
+      whoscored_url:
+        description: Optional real WhoScored match URL (blank means not tested)
+        type: string
+  workflow_call:
+    inputs:
+      scoresway_url:
+        description: Optional real Scoresway match URL
+        type: string
+        default: ''
+      whoscored_url:
+        description: Optional real WhoScored match URL
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  core:
+    name: Browser and packaged backend (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python -m pip install -r requirements-e2e.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Regression tests
+        run: |
+          mkdir -p build/e2e
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee build/e2e/unit.log
+          node --test tests/projects.test.mjs 2>&1 | tee build/e2e/autosave.log
+      - name: Source media and real cancellation
+        run: |
+          set -o pipefail
+          python packaging/smoke_test.py 2>&1 | tee build/e2e/source-media.log
+      - name: Source browser journey
+        timeout-minutes: 12
+        run: python tests/browser_smoke.py --evidence build/e2e/source
+      - name: Bundle scraper browser
+        run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
+      - name: Freeze backend
+        run: |
+          set -o pipefail
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec 2>&1 | tee build/e2e/build.log
+      - name: Frozen media and real cancellation
+        run: |
+          set -o pipefail
+          python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" 2>&1 | tee build/e2e/frozen-media.log
+      - name: Frozen browser journey
+        timeout-minutes: 12
+        run: python tests/browser_smoke.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" --evidence build/e2e/frozen
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-${{ runner.os }}
+          path: build/e2e/
+          retention-days: 7
+          if-no-files-found: warn
+
+  installed-desktop:
+    name: Installed native window (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # windows-latest has a WebView2 automation regression (runner-images#14738).
+          - os: windows-2022
+            backend: Windows
+            bundles: nsis
+          - os: ubuntu-22.04
+            backend: Linux
+            bundles: deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11
+      - run: python -m pip install -r requirements-e2e.txt
+      - name: Build the backend for this native installation test
+        shell: bash
+        run: |
+          PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+          mkdir -p src-tauri/resources/backend
+          cp -a dist/clipmaker-server/. src-tauri/resources/backend/
+      - run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Match Edge WebDriver to installed WebView2 runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = Get-ChildItem "${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application/*/msedgewebview2.exe" |
+            Sort-Object { [version]$_.VersionInfo.ProductVersion } -Descending | Select-Object -First 1
+          if (-not $runtime) { throw 'WebView2 runtime not found' }
+          $version = $runtime.VersionInfo.ProductVersion
+          Write-Host "WebView2 runtime: $version"
+          $archive = Join-Path $env:RUNNER_TEMP 'edgedriver.zip'
+          $directory = Join-Path $env:RUNNER_TEMP 'webview-driver'
+          Invoke-WebRequest "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $directory
+          & "$directory/msedgedriver.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'WebView2 driver could not start' }
+          $directory | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - run: npm ci
+      - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Install Windows package and exercise the installed window
+        timeout-minutes: 12
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          $destination = Join-Path $env:RUNNER_TEMP 'VizorPlay-installed'
+          $process = Start-Process -FilePath $installer[0].FullName -ArgumentList '/S', "/D=$destination" -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          $app = @(Get-ChildItem -LiteralPath $destination -Filter clipmaker.exe -Recurse)
+          if ($app.Count -ne 1) { throw 'Installed executable not found' }
+          python tests/native_smoke.py --app $app[0].FullName --package $installer[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Native acceptance failed' }
+      - name: Install Linux package and exercise the installed window
+        timeout-minutes: 12
+        if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        run: |
+          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
+          package="$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)"
+          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker --package "$package"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-${{ runner.os }}
+          path: build/native-evidence/
+          retention-days: 7
+          if-no-files-found: warn
+
+  homebrew:
+    name: Installed Homebrew launch (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-e2e.txt
+      - run: python -m playwright install chromium
+      - name: Install a local formula from this exact commit
+        run: |
+          git archive --format=tar.gz --prefix=vizorplay/ --output="$RUNNER_TEMP/vizorplay.tar.gz" HEAD
+          sha256="$(shasum -a 256 "$RUNNER_TEMP/vizorplay.tar.gz" | cut -d ' ' -f 1)"
+          brew tap-new local/vizorplay
+          formula="$(brew --repository local/vizorplay)/Formula/clipmaker.rb"
+          python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 "$sha256" --source-url "file://$RUNNER_TEMP/vizorplay.tar.gz" --output "$formula"
+          brew install --build-from-source local/vizorplay/clipmaker
+          brew test local/vizorplay/clipmaker
+      - name: Exercise installed launcher and full browser journey
+        timeout-minutes: 22
+        env:
+          CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
+        run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --timeout-seconds 1200 --evidence build/homebrew-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: homebrew-macOS
+          path: build/homebrew-evidence/
+          retention-days: 7
+          if-no-files-found: warn
+
+  live-providers:
+    name: Optional live provider checks
+    if: inputs.scoresway_url != '' || inputs.whoscored_url != ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium-headless-shell
+      - run: python tests/live_scrape.py
+        env:
+          SCORESWAY_URL: ${{ inputs.scoresway_url }}
+          WHOSCORED_URL: ${{ inputs.whoscored_url }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-provider-evidence
+          path: build/live-evidence/
+          retention-days: 7
+
+  verdict:
+    name: Full E2E verdict
+    if: always()
+    needs: [core, installed-desktop, homebrew, live-providers]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Summarize without hiding failed or skipped required jobs
+        env:
+          JOBS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          jobs = json.loads(os.environ['JOBS'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write('| Test layer | Result |\n| --- | --- |\n')
+              for name, job in jobs.items():
+                  output.write(f"| {name} | {job['result']} |\n")
+              output.write('\nLive providers skipped means NOT TESTED. Native file dialogs, updates, uninstall, signing and Gatekeeper are not certified by this suite.\n')
+          required = ['core', 'installed-desktop', 'homebrew']
+          assert all(jobs[name]['result'] == 'success' for name in required), jobs
+          assert jobs['live-providers']['result'] in ['success', 'skipped'], jobs
+          PY
