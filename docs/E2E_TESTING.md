@@ -12,7 +12,8 @@ not publish source, create a release, or update a package manager.
    on 20 October 2026. The private-repository restriction has been removed. Test
    artifacts and source are therefore public; only synthetic fixtures belong here.
 2. Push the test branch `codex/release-packaging`; this automatically starts the
-   full suite. Do not push a release tag or run Desktop release to test it.
+   full suite. Do not push a release tag to test it. Manual **Desktop release**
+   dispatch on a branch prepares an unpublished candidate after acceptance.
 3. The workflow file must be present on the repository's default branch for
    GitHub's manual Run workflow button to appear. A later run can select a
    different branch containing the workflow.
@@ -44,11 +45,11 @@ behavior on a user's downloaded app.
 | Layer | Platforms | What Is Actually Exercised |
 | --- | --- | --- |
 | Regression | All three | Unit/API/project/analytical regressions and autosave test |
-| Source browser | All three | Real UI CSV/video uploads, kickoff inputs, keyboard menu, filters, edited preview and download, real export/download/decode, saved-plan reload, analysis/tactical tab entry, narrow layouts |
+| Source browser | All three | Real UI CSV/video uploads, kickoff inputs, keyboard menu, event search/full table, snapshots, filters, edited preview/download, export/download/decode, saved-plan reload, chart PNG/GIF and selection, tactical tab entry, narrow layouts |
 | Source media | All three | FFmpeg combined/individual exports, extra-time source pixels, range requests, overwrite protection, real export cancellation after a completed clip |
 | Frozen backend | All three | PyInstaller build followed by the same media and browser journeys, not merely successful compilation |
-| Installed native app | Windows and Linux | Build NSIS/DEB, install into runner, launch installed Tauri window via native WebDriver, filter/edit/export/decode, close and launch again, verify saved plan |
-| Homebrew installation | macOS | Archive exact checked-out commit, install a local test formula, build private Python runtime, start installed command, exercise browser journey against that installed server |
+| Installed native app | Windows and Linux | Install controlled 0.9.0 NSIS/DEB, native window filter/edit/export/decode, upgrade to 1.0.0 and verify saved plan/preview/export, same-version reinstall/relaunch, uninstall with project preserved, verified process exit |
+| Homebrew installation | macOS | Archive exact commit, install local 0.9.0 formula, build private runtime, save project, upgrade to 1.0.0, reopen project/plan, full browser journey against installed launcher |
 | Live providers (optional) | Linux | Real scraper -> saved project -> nonempty events; no fabricated success or substitute fixtures |
 
 The native-window journey deliberately seeds source metadata and video references
@@ -77,6 +78,10 @@ the shipped macOS product uses that binary.
 - Evidence artifacts expire after seven days. Each native test builds its own
   backend and runs independently of browser jobs, retaining executable permissions
   when copying resources into its installation package.
+- Successfully tested release payloads and their SHA-256/commit receipts are
+  retained as `tested-package-Windows`, `tested-package-Linux`, and
+  `tested-package-macOS` for 30 days. Desktop release assembles these same bytes
+  into `VizorPlay-1.0.0-candidate`, without rebuilding or publishing on a branch.
 - The workflow has read-only repository permissions. It never changes repository
   visibility or publishes a release. Public-repository execution is authorized.
 
@@ -84,9 +89,9 @@ the shipped macOS product uses that binary.
 
 This suite is a reproducible main-workflow acceptance test, not proof that every
 historical feature or every filter combination is bug-free. Outstanding ledger
-items still include exhaustive chart gestures and PNG/GIF exports, every qualifier
-combination, live multi-match/batch sources, real-match shootouts/ET2, native file
-dialogs, RPM installation, upgrades/downgrades, uninstall, signing, Gatekeeper,
+items still include exhaustive chart gestures, every qualifier combination,
+live multi-match/batch sources, real-match shootouts/ET2, native file
+dialogs, RPM installation, historical-version migrations/downgrades, signing, Gatekeeper,
 distribution downloads, and hardware/codec-specific behavior. New bug fixes should
 add focused cases here as well as unit regressions.
 

@@ -1,6 +1,7 @@
 """CI-only browser regression for the shared desktop UI."""
 import json
 import argparse
+import struct
 from pathlib import Path
 import sys
 import tempfile
@@ -18,6 +19,178 @@ from playwright.sync_api import sync_playwright, expect
 
 def stage(message):
     print(f"E2E: {message}", flush=True)
+
+
+def validate_chart_download(download, destination, image_format):
+    """Accept a real browser download, including decoding when Pillow is installed."""
+    assert download.failure() is None, f"{image_format} download failed"
+    assert Path(download.suggested_filename).suffix.lower() == "." + image_format.lower(), download.suggested_filename
+    download.save_as(str(destination))
+    data = destination.read_bytes()
+    assert len(data) > 1024, f"{destination.name}: suspiciously small ({len(data)} bytes)"
+    if image_format == "PNG":
+        assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{destination.name}: invalid PNG signature"
+        assert data[12:16] == b"IHDR", f"{destination.name}: missing PNG header"
+        assert data.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"), f"{destination.name}: incomplete PNG"
+        dimensions = struct.unpack(">II", data[16:24])
+    else:
+        assert image_format == "GIF", image_format
+        assert data[:6] in (b"GIF87a", b"GIF89a"), f"{destination.name}: invalid GIF signature"
+        assert data.endswith(b";"), f"{destination.name}: incomplete GIF"
+        dimensions = struct.unpack("<HH", data[6:10])
+    assert min(dimensions) >= 200, f"{destination.name}: unexpected chart dimensions {dimensions}"
+    result = {"filename": download.suggested_filename, "bytes": len(data), "dimensions": dimensions,
+              "format": image_format, "pillow_decoded": False}
+    try:
+        from PIL import Image
+    except ImportError:
+        stage(f"{destination.name}: signature/size/dimensions passed; Pillow unavailable for decoding")
+    else:
+        with Image.open(destination) as image:
+            assert image.format == image_format and image.size == dimensions, destination.name
+            image.verify()
+        # Reopen after verify(), then force every frame to decode, not just its header.
+        with Image.open(destination) as image:
+            frames = getattr(image, "n_frames", 1)
+            if image_format == "GIF":
+                assert frames >= 2, f"{destination.name}: expected a multi-frame GIF, got {frames}"
+            for index in range(frames):
+                image.seek(index)
+                image.load()
+            assert any(low < high for low, high in image.convert("RGB").getextrema()), f"{destination.name}: blank chart"
+        result.update(pillow_decoded=True, frames=frames)
+    return result
+
+
+def exercise_event_tables(page):
+    stage("search intake events and filter the full event dialog by period")
+    page.locator('.event-browser summary').click()
+    rows = page.locator('[data-event-body] tr:visible')
+    expect(rows).to_have_count(2)
+    page.locator('[data-event-search]').fill("  gOaL  ")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_contain_text("One")
+    page.locator('[data-period-filter]').select_option("2")
+    expect(rows).to_have_count(0)
+    page.locator('[data-period-filter]').select_option("1")
+    expect(rows).to_have_count(1)
+    page.locator('[data-event-search]').fill("")
+    page.locator('[data-period-filter]').select_option("all")
+    expect(rows).to_have_count(2)
+
+    page.locator('[data-open-table]').click()
+    dialog = page.locator('[data-event-dialog]')
+    expect(dialog).to_be_visible()
+    expect(dialog.locator('[data-table-title]')).to_have_text("Home vs Away")
+    full_rows = dialog.locator('[data-full-event-body] tr:visible')
+    count = dialog.locator('[data-full-row-count]')
+    expect(count).to_have_text("2 rows shown", timeout=30000)
+    expect(full_rows).to_have_count(2)
+    dialog.locator('[data-full-event-search]').fill("  tWo  ")
+    expect(full_rows).to_have_count(1)
+    expect(full_rows.first).to_contain_text("Pass")
+    expect(count).to_have_text("1 rows shown")
+    dialog.locator('[data-full-period-filter]').select_option("2")
+    expect(full_rows).to_have_count(0)
+    expect(count).to_have_text("0 rows shown")
+    dialog.locator('[data-full-period-filter]').select_option("1")
+    expect(full_rows).to_have_count(1)
+    dialog.locator('[data-full-event-search]').fill("no matching fixture event")
+    expect(count).to_have_text("0 rows shown")
+    expect(full_rows).to_have_count(0)
+    dialog.locator('[data-full-event-search]').fill("")
+    dialog.locator('[data-full-period-filter]').select_option("all")
+    expect(full_rows).to_have_count(2)
+    expect(count).to_have_text("2 rows shown")
+    page.keyboard.press("Escape")
+    expect(dialog).not_to_be_visible()
+    page.locator('[data-open-table]').click()
+    expect(count).to_have_text("2 rows shown")
+    expect(full_rows).to_have_count(2)
+    dialog.get_by_role("button", name="Done", exact=True).click()
+    expect(dialog).not_to_be_visible()
+    page.locator('.event-browser summary').click()
+
+
+def exercise_snapshot_restore(page):
+    stage("save filter snapshot, change selection/timing, and restore after reload")
+    snapshot_name = "Browser goal timing"
+    page.locator('#snapshots summary').click()
+    page.locator('[data-snapshot-name]').fill(snapshot_name)
+    page.locator('[data-save-snapshot]').click()
+    expect(page.locator('[data-toast]')).to_have_text("Saved snapshot: " + snapshot_name)
+    expect(page.locator('[data-snapshot-select]')).to_have_value(snapshot_name)
+    page.locator('input[name="action"][value="Goal"]').uncheck()
+    page.locator('input[name="action"][value="Pass"]').check()
+    page.get_by_role("spinbutton", name="Seconds before", exact=True).fill("4")
+    page.get_by_role("spinbutton", name="Seconds after", exact=True).fill("2")
+    page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("2")
+    expect(page.locator('[data-summary-actions]')).to_have_text("Pass")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    # Wait for project restoration as well as the snapshot library before using it.
+    expect(page.locator('[data-summary-actions]')).to_have_text("Pass")
+    expect(page.locator('input[name="action"][value="Pass"]')).to_be_checked()
+    page.locator('#snapshots summary').click()
+    page.locator('[data-snapshot-select]').select_option(snapshot_name)
+    expect(page.locator('[data-load-snapshot]')).to_be_enabled()
+    page.locator('[data-load-snapshot]').click()
+    expect(page.locator('[data-toast]')).to_have_text("Loaded snapshot: " + snapshot_name)
+    expect(page.locator('input[name="action"][value="Goal"]')).to_be_checked()
+    expect(page.locator('input[name="action"][value="Pass"]')).not_to_be_checked()
+    # Reload collapses the detailed controls; assert their saved values directly.
+    expect(page.locator('[data-before-buffer]')).to_have_value("1")
+    expect(page.locator('[data-after-buffer]')).to_have_value("1")
+    expect(page.locator('[data-min-gap]')).to_have_value("0")
+    expect(page.locator('[data-summary-actions]')).to_have_text("Goal")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.locator('#snapshots summary').click()
+
+
+def exercise_analyst_chart(page, frame, evidence):
+    stage("download and validate real Analyst chart PNG and multi-frame GIF")
+    shots = frame.get_by_role("tabpanel", name="◉ Shot Map", exact=True)
+    chart = shots.frame_locator('iframe[title="smp_component.analyst_room"]')
+    plot = chart.locator('#plot')
+    expect(plot.locator('canvas')).not_to_have_count(0, timeout=60000)
+    png_button = chart.locator('[data-export="png"]')
+    expect(png_button).to_be_visible(timeout=60000)
+    results = []
+    with page.expect_download(timeout=30000) as downloaded:
+        png_button.click()
+    results.append(validate_chart_download(downloaded.value, evidence / "analyst-shot-map.png", "PNG"))
+    # Build exercises the worker encoder and frame capture through the actual UI.
+    chart.locator('[data-export-animation]').select_option("build")
+    gif_button = chart.locator('[data-export="gif"]')
+    with page.expect_download(timeout=90000) as downloaded:
+        gif_button.click()
+    results.append(validate_chart_download(downloaded.value, evidence / "analyst-shot-map.gif", "GIF"))
+    expect(gif_button).to_be_enabled()
+    expect(gif_button).to_have_text("GIF")
+    (evidence / "analyst-downloads.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+    stage("click the plotted fixture goal and clear the Analyst selection")
+    # Read ECharts' public coordinate API, then send a real mouse click. Do not
+    # dispatch a synthetic chart action or inject Streamlit selection messages.
+    position = plot.evaluate("""element => {
+        const chart = window.echarts.getInstanceByDom(element);
+        for (const [seriesIndex, series] of chart.getOption().series.entries()) {
+            const point = (series.data || []).find(point => point && point.customdata === 0);
+            if (point) {
+                const [x, y] = chart.convertToPixel({seriesIndex}, point.value);
+                return {x, y};
+            }
+        }
+        throw new Error('Fixture goal missing from the rendered shot map');
+    }""")
+    plot.click(position=position)
+    clear = shots.get_by_role("button", name="Clear selection", exact=True)
+    expect(clear).to_be_visible(timeout=30000)
+    expect(shots.locator('.cm-shot-panel')).to_contain_text("One")
+    expect(shots.locator('.cm-shot-panel')).to_contain_text("Home")
+    clear.click()
+    expect(clear).not_to_be_visible(timeout=30000)
+    expect(shots.locator('.cm-shot-panel')).to_have_count(0)
 
 
 def main():
@@ -121,6 +294,7 @@ def exercise(page, base, root, evidence, errors):
     page.keyboard.press("Escape")
     expect(menu).to_have_attribute("aria-expanded", "false")
     assert page.locator('video[data-match-video]').evaluate('(video) => video.paused')
+    exercise_event_tables(page)
     page.screenshot(path=str(evidence / "intake.png"))
     assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "VizorPlay•••"
     page.get_by_role("button", name="Confirm & continue").click()
@@ -133,6 +307,7 @@ def exercise(page, base, root, evidence, errors):
     page.get_by_role("spinbutton", name="Seconds before", exact=True).fill("1")
     page.get_by_role("spinbutton", name="Seconds after", exact=True).fill("1")
     page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("0")
+    exercise_snapshot_restore(page)
     page.get_by_role("button", name="Preview clip plan").click()
     page.locator('[data-preview-count]').filter(has_text="1").wait_for()
     # Rendering the list precedes the awaited project write; hard refresh must
@@ -183,6 +358,7 @@ def exercise(page, base, root, evidence, errors):
     page.goto(base + "/analysis.html?view=analyst&project=" + project_id)
     frame = page.frame_locator('[data-analysis-frame]')
     frame.get_by_role("tab", name="◉ Shot Map").wait_for(timeout=60000)
+    exercise_analyst_chart(page, frame, evidence)
     frame.get_by_role("tab", name="⇄ Comparison").click()
     page.screenshot(path=str(evidence / "analysis.png"))
     stage("open tactical workspace")

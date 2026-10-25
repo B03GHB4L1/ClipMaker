@@ -420,6 +420,7 @@ def _load_matches():
                 frame = _load_csv(path).copy()
                 frame["match_id"] = idx
                 frame["match_label"] = _match_label(path)
+                frame["source_csv"] = os.path.realpath(os.path.abspath(path))
                 frames.append(frame)
                 labels.append(_match_label(path))
             merged = _prepare_df(pd.concat(frames, ignore_index=True))
@@ -429,6 +430,7 @@ def _load_matches():
         df = _load_csv(session_path).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(session_path)
+        df["source_csv"] = os.path.realpath(os.path.abspath(session_path))
         return _prepare_df(df), [_match_label(session_path)]
 
     if options:
@@ -436,17 +438,20 @@ def _load_matches():
         df = _load_csv(choice).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(choice)
+        df["source_csv"] = os.path.realpath(os.path.abspath(choice))
         return _prepare_df(df), [_match_label(choice)]
 
     return None, []
 
 
 def _team_names(df):
-    home = str(df["homeTeam"].dropna().iloc[0]) if "homeTeam" in df.columns and not df["homeTeam"].dropna().empty else ""
-    away = str(df["awayTeam"].dropna().iloc[0]) if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty else ""
-    teams = [t for t in [home, away] if t]
-    if len(teams) < 2 and "team" in df.columns:
-        teams = sorted(df["team"].dropna().astype(str).unique().tolist())[:2]
+    teams = []
+    for column in ("homeTeam", "awayTeam", "team"):
+        if column in df.columns:
+            for value in df[column].dropna().astype(str):
+                name = value.strip()
+                if name and name not in teams:
+                    teams.append(name)
     return teams
 
 
@@ -475,8 +480,8 @@ def _danger_mask(df):
 
 def _progression_mask(df):
     return (
-        _bool_series(df, "prog_pass")
-        | _bool_series(df, "prog_carry")
+        _num(df, "prog_pass").gt(0) | _bool_series(df, "prog_pass")
+        | _num(df, "prog_carry").gt(0) | _bool_series(df, "prog_carry")
         | _bool_series(df, "is_final_third_entry_pass")
         | _bool_series(df, "is_final_third_entry_carry")
         | _bool_series(df, "is_box_entry_pass")
@@ -512,6 +517,7 @@ def detect_defensive_transitions(df, team, window_seconds=8, max_events=8):
             "event_id": loss["event_id"],
             "match_id": loss.get("match_id", None),
             "match_label": loss.get("match_label", ""),
+            "source_csv": loss.get("source_csv", ""),
             "team": team,
             "playerName": loss.get("playerName", ""),
             "type": loss.get("type", ""),
@@ -559,6 +565,7 @@ def detect_attacking_transitions(df, team, window_seconds=10, max_events=8):
             "event_id": win["event_id"],
             "match_id": win.get("match_id", None),
             "match_label": win.get("match_label", ""),
+            "source_csv": win.get("source_csv", ""),
             "team": team,
             "playerName": win.get("playerName", ""),
             "type": win.get("type", ""),
@@ -613,26 +620,53 @@ def _period_label(period_value):
     }.get(str(period_value), "")
 
 
-def _video_state():
-    return {
-        "video_path": st.session_state.get("video_path", ""),
-        "video2_path": st.session_state.get("video2_path", ""),
-        "split_video": bool(st.session_state.get("split_video", False)),
-        "half1_time": st.session_state.get("half1_time", ""),
-        "half2_time": st.session_state.get("half2_time", ""),
-        "half3_time": st.session_state.get("half3_time", ""),
-        "half4_time": st.session_state.get("half4_time", ""),
-        "half5_time": st.session_state.get("half5_time", ""),
+def _video_state(row=None):
+    setup = st.session_state
+    source_csv = ""
+    if row is not None:
+        source_csv = row.get("source_csv", "")
+        if pd.isna(source_csv) or not str(source_csv).strip():
+            raise ValueError("This moment has no source CSV. Reload the selected matches before exporting.")
+        source_csv = os.path.realpath(os.path.abspath(str(source_csv)))
+        identity = os.path.normcase(source_csv)
+        setups = st.session_state.get("match_setup_by_csv", {}) or {}
+        setup = next((value for path, value in setups.items()
+                      if os.path.normcase(os.path.realpath(os.path.abspath(path))) == identity), None)
+        active_csv = st.session_state.get("csv_path") or st.session_state.get("scraped_csv_path") or ""
+        if setup is None and active_csv and identity == os.path.normcase(os.path.realpath(os.path.abspath(active_csv))):
+            # Legacy standalone sessions have no project map. Their video is
+            # safe only for the exact active CSV, never another selected match.
+            setup = dict(st.session_state)
+        if not isinstance(setup, dict):
+            raise ValueError(
+                f"No saved video setup for {os.path.basename(source_csv)}. "
+                "Open its project on Home, save its video and kick-off times, then reload Tactical Lab."
+            )
+    state = {
+        "source_csv": source_csv,
+        "video_path": setup.get("video_path", ""),
+        "split_video": bool(setup.get("split_video", False)),
+        "timeline_corrections": setup.get("timeline_corrections", []),
     }
+    for period in range(1, 6):
+        state[f"half{period}_time"] = setup.get(f"half{period}_time", "")
+        if period > 1:
+            state[f"video{period}_path"] = setup.get(f"video{period}_path", "")
+    return state
 
 
-def _video_ready():
-    state = _video_state()
-    if not (state["video_path"] and os.path.exists(state["video_path"])):
+def _video_ready(row=None, raise_errors=False):
+    try:
+        source = _source_video(row) if row is not None else _video_state()["video_path"]
+        if not source or not os.path.isfile(source):
+            raise ValueError("No video file loaded for this match and period. Save its video on Home first.")
+        if row is not None:
+            _video_timestamp(row)
+        return True
+    except (ValueError, OSError):
+        if raise_errors:
+            raise
         return False
-    if state["split_video"] and not (state["video2_path"] and os.path.exists(state["video2_path"])):
-        return False
-    return True
 
 
 def _get_ffmpeg():
@@ -648,8 +682,8 @@ def _get_ffmpeg():
     raise ValueError("FFmpeg not found. Install FFmpeg or run VizorPlay with bundled dependencies.")
 
 
-def _period_starts():
-    state = _video_state()
+def _period_starts(row=None):
+    state = _video_state(row)
     values = {
         1: state["half1_time"],
         2: state["half2_time"],
@@ -661,22 +695,33 @@ def _period_starts():
     for period, value in values.items():
         if value:
             starts[period] = to_seconds(value)
-    return resolve_period_starts_for_video(globals().get("df"), starts)
+    # A saved shootout marker identifies the first kick in the ORIGINAL CSV,
+    # even when the displayed playlist contains only a later kick.
+    if 5 in starts and row is not None and _period_int(row.get("period")) == 5:
+        source_csv = state["source_csv"]
+        if not os.path.isfile(source_csv):
+            raise ValueError(f"Source CSV not found: {os.path.basename(source_csv)}. Restore it before exporting shootout moments.")
+        try:
+            anchor_frame = read_csv_safe(source_csv)
+        except Exception as exc:
+            raise ValueError(f"Could not read source CSV {os.path.basename(source_csv)} for shootout timing: {exc}") from exc
+        return resolve_period_starts_for_video(anchor_frame, starts)
+    return starts
 
 
 def _match_seconds(row):
     return int(row.get("minute", 0) or 0) * 60 + int(row.get("second", 0) or 0)
 
 
-def _timeline_corrections():
+def _timeline_corrections(row=None):
     return normalise_timeline_corrections({
-        "timeline_corrections": st.session_state.get("timeline_corrections", [])
+        "timeline_corrections": _video_state(row)["timeline_corrections"]
     })
 
 
 def _video_timestamp(row):
     period = _period_int(row.get("period", "FirstHalf"))
-    starts = _period_starts()
+    starts = _period_starts(row)
     if period not in starts:
         raise ValueError(f"No kick-off video time set for period {period}.")
     offsets = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
@@ -691,29 +736,28 @@ def _video_timestamp(row):
         base_ts,
         _match_seconds(row),
         period,
-        _timeline_corrections(),
+        _timeline_corrections(row),
     )
 
 
 def _source_video(row):
-    state = _video_state()
+    state = _video_state(row)
     period = _period_int(row.get("period", "FirstHalf"))
     if state["split_video"] and period >= 2:
-        if not state["video2_path"]:
+        source = state.get(f"video{period}_path") or state["video2_path"]
+        if not source:
             raise ValueError("2nd half video file is required for this second-half clip.")
-        return st.session_state.get(f"video{period}_path") or state["video2_path"]
+        return source
     return state["video_path"]
 
 
 def _cut_tactical_clip(row, before=8, after=12):
-    if not _video_ready():
-        raise ValueError("No video file loaded. Set the match video on Home first.")
     src = _source_video(row)
-    if not src or not os.path.exists(src):
-        raise ValueError("The selected source video file could not be found.")
+    if not src or not os.path.isfile(src):
+        raise ValueError("No video file loaded for this match and period. Save its video on Home first.")
     video_ts = _video_timestamp(row)
     start_ts = max(0.0, video_ts - int(before))
-    duration = max(1.0, int(before) + int(after))
+    duration = max(1.0, video_ts + int(after) - start_ts)
     tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     out = tmp.name
     tmp.close()
@@ -906,10 +950,10 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
         return pd.DataFrame()
     out = pd.DataFrame(rows)
     event_lookup = df.set_index("event_id")
-    for col in ["event_seconds", "period_order", "endX", "endY"]:
+    for col in ["event_seconds", "period_order", "endX", "endY", "source_csv"]:
         if col in event_lookup.columns:
             mapped = out["event_id"].map(event_lookup[col])
-            if col not in out.columns:
+            if col == "source_csv" or col not in out.columns:
                 out[col] = mapped
             else:
                 out[col] = out[col].where(out[col].notna(), mapped)
@@ -921,6 +965,8 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
         + " | " + out["type"].fillna("").astype(str)
         + " | " + out["why"].fillna("").astype(str)
     )
+    if "match_label" in out.columns:
+        out["moment"] = out["match_label"].fillna("").astype(str) + " | " + out["moment"]
     return out.sort_values(["playlist", "score"], ascending=[True, False]).reset_index(drop=True)
 
 
@@ -988,9 +1034,41 @@ def render_video_lab(df, team):
         return
 
     current = current.sort_values("score", ascending=False).head(40).reset_index(drop=True)
-    selected_label = st.selectbox("Moment", current["moment"].tolist(), key=f"vl_selected_moment_{playlist}")
-    selected = current[current["moment"].eq(selected_label)].iloc[0].to_dict()
-    clip_key = f"{team}|{playlist}|{int(selected.get('event_id', -1))}|{before}|{after}"
+    selected_id = st.selectbox(
+        "Moment", current["event_id"].tolist(),
+        format_func=lambda event_id: current.loc[current["event_id"].eq(event_id), "moment"].iloc[0],
+        key=f"vl_selected_moment_{playlist}",
+    )
+    selected = current[current["event_id"].eq(selected_id)].iloc[0].to_dict()
+    reel_rows = current.head(reel_count)
+
+    def _video_identity(moment):
+        try:
+            setup = _video_state(moment)
+        except ValueError:
+            setup = None
+        return repr((moment.get("source_csv", ""), moment.get("event_id"),
+                     moment.get("period"), moment.get("minute"), moment.get("second"), setup))
+
+    # Session caches must change with the CSV, video mapping, markers and saved
+    # corrections, including when selection order reuses the same event IDs.
+    clip_key = f"{team}|{playlist}|{before}|{after}|{_video_identity(selected)}"
+    reel_key = f"{team}|{playlist}|{before}|{after}|{reel_count}|" + repr([
+        _video_identity(moment) for moment in reel_rows.to_dict("records")
+    ])
+    readiness_errors = []
+
+    def _ready(moment):
+        try:
+            return _video_ready(moment, raise_errors=True)
+        except (ValueError, OSError) as exc:
+            message = str(exc)
+            if message not in readiness_errors:
+                readiness_errors.append(message)
+            return False
+
+    clip_ready = _ready(selected)
+    reel_ready = all([_ready(moment) for moment in reel_rows.to_dict("records")])
 
     detail, trace = st.columns([1, 1.35], gap="large")
     with detail:
@@ -1020,7 +1098,7 @@ def render_video_lab(df, team):
     cached_key = st.session_state.get("vl_clip_key")
     b1, b2, b3 = st.columns([1, 1, 2])
     with b1:
-        disabled = not _video_ready()
+        disabled = not clip_ready
         if st.button("Cut Moment", key="vl_cut", width="stretch", disabled=disabled):
             with st.spinner("Cutting tactical clip..."):
                 try:
@@ -1029,39 +1107,38 @@ def render_video_lab(df, team):
                     st.session_state["vl_clip_key"] = clip_key
                     st.session_state["vl_clip_error"] = None
                 except Exception as exc:
+                    st.session_state.pop("vl_clip_path", None)
                     st.session_state["vl_clip_error"] = str(exc)
                     st.session_state["vl_clip_key"] = clip_key
             st.rerun()
     with b2:
-        reel_key = f"{team}|{playlist}|{before}|{after}|{reel_count}|" + ",".join(current.head(reel_count)["event_id"].astype(str))
-        if st.button("Build Reel", key="vl_reel", width="stretch", disabled=not _video_ready()):
+        if st.button("Build Reel", key="vl_reel", width="stretch", disabled=not reel_ready):
             made = []
             with st.spinner("Building tactical reel..."):
                 try:
-                    for _, row in current.head(reel_count).iterrows():
+                    for _, row in reel_rows.iterrows():
                         made.append(_cut_tactical_clip(row.to_dict(), before=before, after=after))
                     st.session_state["vl_reel_path"] = _concat_tactical_clips(made)
                     st.session_state["vl_reel_key"] = reel_key
                     st.session_state["vl_reel_error"] = None
                 except Exception as exc:
+                    st.session_state.pop("vl_reel_path", None)
                     st.session_state["vl_reel_error"] = str(exc)
                     st.session_state["vl_reel_key"] = reel_key
             st.rerun()
     with b3:
-        if not _video_ready():
-            st.caption("Load a match video on Home to cut moments and reels.")
+        for message in readiness_errors:
+            st.caption(message)
 
-    if cached_key == clip_key and clip_path and os.path.exists(clip_path):
+    if clip_ready and cached_key == clip_key and clip_path and os.path.exists(clip_path):
         st.video(clip_path)
     elif clip_error and cached_key == clip_key:
         st.error(f"Could not cut moment: {clip_error}")
 
     reel_path = st.session_state.get("vl_reel_path")
     reel_error = st.session_state.get("vl_reel_error")
-    if st.session_state.get("vl_reel_key") == (
-        f"{team}|{playlist}|{before}|{after}|{reel_count}|" + ",".join(current.head(reel_count)["event_id"].astype(str))
-    ):
-        if reel_path and os.path.exists(reel_path):
+    if st.session_state.get("vl_reel_key") == reel_key:
+        if reel_ready and reel_path and os.path.exists(reel_path):
             st.markdown("##### Playlist Reel")
             st.video(reel_path)
             with open(reel_path, "rb") as file:

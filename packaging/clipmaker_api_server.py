@@ -535,6 +535,9 @@ def compute_clip_windows(config: dict[str, Any]) -> list[dict[str, Any]]:
         config.get("fallback_row"),
     )
     anchor_frame = frame.copy()
+    if config.get("_timeline_data_file", config["data_file"]) != config["data_file"]:
+        anchor_frame = assign_periods(read_csv_safe(config["_timeline_data_file"]),
+                                     config.get("period_column") or None, config.get("fallback_row"))
     half_filter = config.get("half_filter", "Both halves")
     if half_filter == "1st half only":
         frame = frame[frame["resolved_period"] == 1]
@@ -826,6 +829,9 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         config[flag] = bool(options.get(flag, False))
     if not config["dry_run"] and not Path(config["video_file"]).is_file():
         raise ValueError("A native video path is required before rendering clips.")
+    # Team/player subsets must not redefine the first shootout kick's clock.
+    # Keep the original source solely for timing anchors in preview and export.
+    config["_timeline_data_file"] = csv_path
     config["data_file"], config["_temporary_data_file"] = prepare_filtered_data(
         csv_path, str(match.get("id") or "match"), options, data_dir,
     )

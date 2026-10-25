@@ -3,13 +3,18 @@
 Updated: 25 October 2026. This is a release checklist, not a declaration that every
 platform and interaction has passed acceptance testing.
 
-Latest investigation: run `40189444554` passed installed Windows and Linux
-acceptance, including shutdown/cleanup, plus Windows/Linux browser and packaged
-backend journeys and macOS Homebrew acceptance. The remaining failed job was
-macOS regression: its PID-existence waiter could mistake an exited, unreaped
-child for a running process. A macOS-native kqueue exit waiter and dedicated
-regressions are now implemented; their hosted result remains pending. See
-E2E_TESTING.md for evidence and verification details.
+Current baseline: Full Desktop E2E `40201098220` and Checks `40201103145`
+passed on commit `3be71cc`, including installed Windows/Linux, clean shutdown,
+same-version reinstall/uninstall, source/frozen browser/media on all three OS,
+and installed Homebrew launch. Optional live providers were skipped.
+
+Release-candidate work after that baseline adds all 64 qualifier acceptance
+cases, mixed ANY/ALL filters, real synthetic ET2/shootout preview and exports,
+chart PNG/GIF and event-table/snapshot browser checks, and controlled different-
+version upgrades. It fixes overlapping-scope ALL selection and shootout timing
+shifting after team/player filtering. Hosted verification of these additions is
+pending. `RELEASE_1_0_CHECKLIST.md` is the current release gate; dated notes below
+are retained investigation history, not current CI status.
 
 ## Current Acceptance Status (22 October 2026)
 
@@ -158,7 +163,7 @@ upgrade works on a user's physical machine.
 GitHub reports the existing source repository is public. Public pushes and test
 runs are authorized; changing visibility and publishing a release are not.
 
-Remaining release blockers:
+Historical release blockers (see RELEASE_1_0_CHECKLIST.md for current status):
 
 1. Pass installed Windows/Linux acceptance on the corrected current commit.
 2. Validate installation, launch, shutdown, project persistence, and upgrades

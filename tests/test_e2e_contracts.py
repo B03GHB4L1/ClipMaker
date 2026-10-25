@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 from urllib.error import HTTPError
 
 from packaging import clipmaker_bootstrap as bootstrap
@@ -17,6 +17,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_homebrew_upgrade_uses_stable_launcher_not_predecessor_cellar_path(self):
+        from tests.homebrew_upgrade import launcher_command
+        launcher = Mock()
+        launcher.absolute.return_value = Path("stable/bin/vizorplay")
+        launcher.resolve.return_value = Path("Cellar/clipmaker/0.9.0/bin/clipmaker")
+        self.assertEqual(launcher_command(launcher), [str(Path("stable/bin/vizorplay")), "--no-browser"])
+        launcher.resolve.assert_not_called()
+
     def test_windows_package_lifecycle_uses_silent_installer_and_installed_uninstaller(self):
         from tests.native_smoke import package_lifecycle
         with tempfile.TemporaryDirectory() as directory:
@@ -196,7 +204,34 @@ class AutomationContracts(unittest.TestCase):
                          {"core", "installed-desktop", "homebrew", "live-providers"})
         release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         self.assertEqual(release["jobs"]["acceptance"]["uses"], "./.github/workflows/e2e.yml")
-        self.assertEqual(release["jobs"]["build"]["needs"], "acceptance")
+        self.assertEqual(release["jobs"]["candidate"]["needs"], "acceptance")
+        self.assertNotIn("build", release["jobs"], "Never rebuild installers after acceptance")
+        self.assertEqual(release["jobs"]["publish"]["needs"], "candidate")
+        self.assertEqual(release["jobs"]["publish"]["if"], "github.ref == 'refs/tags/v1.0.0'")
+        self.assertIn("tested-package-*", json.dumps(release["jobs"]["candidate"]))
+        self.assertIn("--upgrade-from 0.9.0", source)
+        self.assertIn("tests/homebrew_upgrade.py", source)
+
+    def test_installed_linux_version_comes_from_package_database(self):
+        from tests.native_smoke import installed_version
+        with patch("tests.native_smoke.sys.platform", "linux"), \
+             patch("tests.native_smoke.subprocess.run") as run:
+            run.side_effect = [Mock(stdout="vizorplay\n"), Mock(stdout="1.0.0")]
+            self.assertEqual(installed_version(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb")), "1.0.0")
+            self.assertEqual(run.call_args.args[0], ["dpkg-query", "--show", "--showformat=${Version}", "vizorplay"])
+
+    def test_installed_windows_version_accepts_quoted_nsis_install_location(self):
+        from tests.native_smoke import installed_version
+        registry = MagicMock()
+        registry.KEY_READ = 1
+        registry.KEY_WOW64_64KEY = 2
+        registry.KEY_WOW64_32KEY = 4
+        registry.QueryInfoKey.return_value = (1, 0, 0)
+        app = Path("installed/clipmaker.exe").resolve()
+        values = {"DisplayName": "VizorPlay", "InstallLocation": f'"{app.parent}"', "DisplayVersion": "0.9.0"}
+        registry.QueryValueEx.side_effect = lambda key, name: (values[name], 1)
+        with patch.dict(sys.modules, {"winreg": registry}), patch("tests.native_smoke.sys.platform", "win32"):
+            self.assertEqual(installed_version(app, Path("candidate.exe")), "0.9.0")
 
 
 if __name__ == "__main__":
