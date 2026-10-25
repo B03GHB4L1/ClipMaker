@@ -137,6 +137,28 @@ validation passed during this investigation.
 
 ## Developer Commands
 
+### macOS Exit Detection Fix (25 October 2026)
+
+Run `40189444554` passed both installed Windows/Linux package journeys, their
+shutdown/cleanup checks, Windows/Linux browser and frozen-backend journeys,
+and the installed macOS Homebrew journey. The macOS regression matrix failed
+while waiting for an exited backend child to disappear from the process table.
+
+The old macOS fallback used `kill(pid, 0)`, which can still succeed for an exited
+child until its parent reaps it. The regression's parent deliberately waits for
+exit detection before reaping, so PID existence was the wrong signal. macOS now
+uses kqueue's `KQ_FILTER_PROC`/`KQ_NOTE_EXIT`, handling an already-gone PID without
+treating permission failures as success. Real timeouts still return false.
+See [Python's native event API](https://docs.python.org/3.12/library/select.html#kqueue-objects)
+and [Apple's process event documentation](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/kqueue.2.html).
+
+Mocked macOS adapter regressions run on every OS. A real unreaped-child case
+runs on macOS, complementing the existing Linux pidfd case. The owner callback
+now requires a confirmed exit. Local Windows verification passed 74 tests;
+the two real macOS/Linux-specific cases run on their respective CI runners.
+The Windows source media and forced-owner shutdown smoke passed. A new hosted
+macOS result is required before this failure can be marked resolved.
+
 ### Windows Shutdown Ownership (25 October 2026)
 
 Run `39797304190` passed Linux installed package acceptance and all browser,
