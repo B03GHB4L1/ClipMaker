@@ -365,10 +365,17 @@ def exercise(page, base, root, evidence, errors):
     frame.get_by_role("tab", name="◉ Shot Map").wait_for(timeout=60000)
     exercise_analyst_chart(page, frame, evidence)
     frame.get_by_role("tab", name="⇄ Comparison").click()
+    frame.get_by_role("heading", name="Player Comparison", exact=True).wait_for(timeout=60000)
+    frame.get_by_role("heading", name="Top 5 Moments", exact=True).wait_for(timeout=60000)
+    assert frame.get_by_test_id("stException").count() == 0
     page.screenshot(path=str(evidence / "analysis.png"))
     stage("open tactical workspace")
     page.goto(base + "/analysis.html?view=tactical&project=" + project_id)
-    page.frame_locator('[data-analysis-frame]').get_by_role("tab", name="Style Profile").wait_for(timeout=60000)
+    tactical = page.frame_locator('[data-analysis-frame]')
+    tactical.get_by_role("tab", name="Style Profile").click(timeout=60000)
+    tactical.get_by_role("heading", name="Strength Signals", exact=True).wait_for(timeout=60000)
+    tactical.get_by_test_id("stPlotlyChart").first.wait_for(timeout=60000)
+    assert tactical.get_by_test_id("stException").count() == 0
     page.screenshot(path=str(evidence / "tactical.png"))
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):

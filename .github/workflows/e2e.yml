@@ -98,9 +98,11 @@ jobs:
           - os: windows-2022
             backend: Windows
             bundles: nsis
+            package_ext: exe
           - os: ubuntu-22.04
             backend: Linux
             bundles: deb
+            package_ext: deb
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -152,7 +154,7 @@ jobs:
           printf '{"version":"0.9.0"}\n' > build/upgrade-config.json
           npm run tauri build -- --config "$PWD/build/upgrade-config.json" --bundles ${{ matrix.bundles }}
           mkdir -p build/upgrade-baseline
-          cp src-tauri/target/release/bundle/${{ matrix.bundles }}/* build/upgrade-baseline/
+          cp src-tauri/target/release/bundle/${{ matrix.bundles }}/*.${{ matrix.package_ext }} build/upgrade-baseline/
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - name: Install Windows package and exercise the installed window
         timeout-minutes: 12
