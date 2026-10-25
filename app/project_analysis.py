@@ -38,6 +38,7 @@ def project_session(project: dict) -> dict:
     videos = project.get("period_videos") or {}
     settings = project.get("filter_settings") or {}
     state = {
+        "project_name": project.get("project_name", ""),
         "csv_path": project.get("csv_path", ""),
         "scraped_csv_path": project.get("csv_path", ""),
         "video_path": project.get("video_path", ""),

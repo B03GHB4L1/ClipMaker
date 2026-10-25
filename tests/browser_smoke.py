@@ -375,6 +375,7 @@ def exercise(page, base, root, evidence, errors):
     tactical.get_by_role("tab", name="Style Profile").click(timeout=60000)
     tactical.get_by_role("heading", name="Strength Signals", exact=True).wait_for(timeout=60000)
     tactical.get_by_test_id("stPlotlyChart").first.wait_for(timeout=60000)
+    expect(tactical.get_by_text("Loaded:", exact=False)).to_contain_text("Home vs Away")
     assert tactical.get_by_test_id("stException").count() == 0
     page.screenshot(path=str(evidence / "tactical.png"))
     stage("check responsive layouts")

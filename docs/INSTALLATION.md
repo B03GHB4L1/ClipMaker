@@ -71,7 +71,9 @@ preparation instructions, not an announcement that the package is available.
 Projects save locally, including match events, kickoff markers, filter settings
 and export settings. Video references may point to files elsewhere on your
 computer: keep those video files in place. Browser-imported video is copied into
-the project. Closing a window waits for active work to stop.
+the project. Closing the Windows/Linux desktop window stops its engine and
+active work. On macOS, stop the launcher with Control-C in its terminal;
+closing the browser tab alone leaves the launcher running.
 
 Use the local-project picker to see the data-directory location. Before moving
 to another computer or making a backup, close the app and copy the data directory

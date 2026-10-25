@@ -119,8 +119,13 @@ jobs:
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11
+          # Avoid an observed stalled WebKit download from the runner's Azure
+          # mirror. Ubuntu's official archive retains normal signature checks.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf 'https://archive.ubuntu.com/ubuntu\n' | sudo tee /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb dbus-x11
       - run: python -m pip install -r requirements-e2e.txt
       - name: Build the backend for this native installation test
         shell: bash
@@ -186,7 +191,7 @@ jobs:
       - name: Retain the exact package that passed native acceptance
         shell: bash
         run: |
-          package="$(find src-tauri/target/release/bundle/${{ matrix.bundles }} -name '*1.0.0*' -type f -print -quit)"
+          package="$(find src-tauri/target/release/bundle/${{ matrix.bundles }} -maxdepth 1 -name '*1.0.0*.${{ matrix.package_ext }}' -type f -print -quit)"
           python packaging/release_candidate.py receipt --platform "${{ runner.os }}" --payload "$package" --evidence build/native-evidence/result.json --output build/release-packages
       - uses: actions/upload-artifact@v4
         with:
