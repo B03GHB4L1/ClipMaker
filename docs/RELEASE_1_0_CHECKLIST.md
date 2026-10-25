@@ -16,7 +16,7 @@ This checklist records evidence, not a guarantee that software has no bugs.
 | Homebrew upgrade and project reopen | Controlled local formula 0.9.0 → 1.0.0; hosted run pending |
 | Exact tested release artifacts | Receipt/checksum assembly implemented; first candidate run pending |
 | Live Scoresway/WhoScored | Earlier local checks passed; Scoresway passed hosted, WhoScored hosted HTTP 403. Retest at release; distinguish external denial |
-| Batch scrape / partial failures | Real-provider browser test added; hosted acceptance pending |
+| Batch scrape / partial failures | Real Scoresway browser batch passed in run 40212549960, with invalid URL report and prior-project preservation |
 | Advanced Tactical Video Lab and multi-match moments/reels | Focused numerical/media acceptance passes locally, including multi-project video mapping, saved corrections, shootout anchors and cache invalidation; hosted/browser-native acceptance pending |
 | Native chart controls and OS file dialogs | Browser/chart checks do not certify every native-webview interaction; focused physical-device acceptance remains open |
 | Public Mac install/update | Prepared formula still needs release asset plus authorized tap publication; tap currently private/empty |
@@ -39,3 +39,10 @@ two OS-specific tests were skipped on Windows. The Node autosave test, workflow
 lint and source real-media/cancellation/owner-exit smoke passed. The new hosted
 candidate, installer upgrades, live batch and chart download journeys remain
 pending until their Actions results exist.
+
+First expanded hosted run 40212549960 exposed fixture assertions comparing
+equivalent Windows short/long and macOS symlink paths, a snapshot selection/name
+reset, and a Homebrew assertion that rejected retained older kegs. The fixture
+paths are now canonicalized, snapshot loading preserves its selection, and the
+Homebrew check verifies the actual linked launcher version. Follow-up CI is
+required; the earlier run is not a passed candidate.
