@@ -385,6 +385,17 @@ def _load_csv(path):
 
 
 def _match_label(path):
+    identity = os.path.normcase(os.path.realpath(os.path.abspath(path)))
+    setups = st.session_state.get("match_setup_by_csv", {}) or {}
+    setup = next((value for source, value in setups.items()
+                  if os.path.normcase(os.path.realpath(os.path.abspath(source))) == identity), {})
+    home = str(setup.get("scraper_home_team") or "").strip()
+    away = str(setup.get("scraper_away_team") or "").strip()
+    if home and away:
+        return f"{home} vs {away}"
+    name = str(setup.get("project_name") or "").strip()
+    if name:
+        return name
     return _clean_match_label(path)
 
 
@@ -407,7 +418,7 @@ def _load_matches():
             selected = st.multiselect(
                 "Select matches (1-20)",
                 options=options,
-                format_func=os.path.basename,
+                format_func=_match_label,
                 max_selections=20,
                 key="tl_selected_matches",
             )
@@ -434,7 +445,7 @@ def _load_matches():
         return _prepare_df(df), [_match_label(session_path)]
 
     if options:
-        choice = st.selectbox("Sample match", options, format_func=os.path.basename)
+        choice = st.selectbox("Sample match", options, format_func=_match_label)
         df = _load_csv(choice).copy()
         df["match_id"] = 0
         df["match_label"] = _match_label(choice)

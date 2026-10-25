@@ -157,6 +157,18 @@ class TacticalNumericalAcceptance(unittest.TestCase):
             self.assertEqual(merged.match_id.tolist(), [0, 0, 1])
             self.assertEqual(merged.source_csv.tolist(), [paths[0], paths[0], paths[1]])
 
+    def test_match_labels_use_saved_metadata_instead_of_storage_identifiers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / ("a" * 32 + ".csv"))
+            setup = dict(scraper_home_team="Home", scraper_away_team="Away", project_name="My review")
+            state = {"match_setup_by_csv": {path: setup}}
+            fake = SimpleNamespace(session_state=state)
+            with patch.dict(self.lab._match_label.__globals__, st=fake):
+                self.assertEqual(self.lab._match_label(path), "Home vs Away")
+                setup["scraper_away_team"] = ""
+                self.assertEqual(self.lab._match_label(path), "My review")
+                self.assertEqual(self.lab._match_label("whoscored_Alpha_all_events.csv"), "Alpha")
+
     def test_pooled_style_metrics_use_relevant_matches_and_weighted_counts(self):
         # Ledger: four passes (.2, -.1, .4, 0), one carry, one corner,
         # two shots (one from corner), two box entries, one third entry.

@@ -34,7 +34,7 @@ Do not mark remaining gates passed based only on unit tests or a successful
 build. Link the final candidate run/commit and record any owner-accepted scope
 decisions here before claiming full 1.0 readiness.
 
-Local verification for this preparation: 185 Python tests ran, 183 passed and
+Local verification for this preparation: 187 Python tests ran, 185 passed and
 two OS-specific tests were skipped on Windows. The Node autosave test, workflow
 lint and source real-media/cancellation/owner-exit smoke passed. The new hosted
 candidate, installer upgrades, live batch and chart download journeys remain
@@ -46,3 +46,17 @@ reset, and a Homebrew assertion that rejected retained older kegs. The fixture
 paths are now canonicalized, snapshot loading preserves its selection, and the
 Homebrew check verifies the actual linked launcher version. Follow-up CI is
 required; the earlier run is not a passed candidate.
+
+Checks 40214541214 passed all three platforms at 690f6fc. The corresponding
+candidate run passed all source/frozen browser/media layers, installed Homebrew
+upgrade/reopen, and the real Scoresway/batch checks. Native Windows/Linux package
+lifecycle and candidate assembly were still running. A subsequent visual review
+also replaces generated CSV identifiers with saved match/project names. The
+Linux runner's stalled Azure WebKit download is addressed by using Ubuntu's
+official archive with bounded network retries; required dependencies remain
+mandatory.
+
+The published v1.2 Windows ZIP was inspected: it contains source/launcher files,
+not an EXE/MSI installer. GitHub lists v1.0, v1.1 and v1.2, with no published
+1.3 release. A 1.3 → 1.0 installed-package reset is therefore a precaution for
+unreleased test installs, rather than a demonstrated public update channel.
