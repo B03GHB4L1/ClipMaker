@@ -17,6 +17,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_homebrew_upgrade_checks_linked_keg_even_if_old_version_is_retained(self):
+        from tests.homebrew_upgrade import assert_active_version
+        launcher = Mock()
+        launcher.resolve.return_value = Path("Cellar/clipmaker/1.0.0/bin/clipmaker")
+        with patch("tests.homebrew_upgrade.brew_version", return_value=["0.9.0", "1.0.0"]):
+            assert_active_version(launcher, "1.0.0")
+            launcher.resolve.return_value = Path("Cellar/clipmaker/0.9.0/bin/clipmaker")
+            with self.assertRaises(AssertionError):
+                assert_active_version(launcher, "1.0.0")
+
     def test_homebrew_upgrade_uses_stable_launcher_not_predecessor_cellar_path(self):
         from tests.homebrew_upgrade import launcher_command
         launcher = Mock()

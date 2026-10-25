@@ -25,6 +25,15 @@ def launcher_command(launcher):
     return [str(launcher.absolute()), "--no-browser"]
 
 
+def assert_active_version(launcher, expected):
+    # Homebrew may retain older kegs after a successful upgrade. Verify the
+    # stable command points to the expected keg, not that only one is present.
+    installed = brew_version()
+    assert expected in installed, installed
+    target = launcher.resolve()
+    assert target.parent.parent.name == expected and target.parent.parent.parent.name == "clipmaker", target
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--formula", required=True, type=Path)
@@ -44,7 +53,7 @@ def main():
     output = evidence / "result.json"
     output.write_text(json.dumps(result), encoding="utf-8")
     try:
-        assert brew_version() == ["0.9.0"], brew_version()
+        assert_active_version(args.launcher, "0.9.0")
         with tempfile.TemporaryDirectory() as directory:
             data = Path(directory) / "data"
             command = launcher_command(args.launcher)
@@ -63,7 +72,7 @@ def main():
             shutil.copyfile(args.candidate.resolve(), formula)
             subprocess.run(["brew", "upgrade", "--build-from-source", "local/vizorplay/clipmaker"],
                            check=True, timeout=600)
-            assert brew_version() == ["1.0.0"], brew_version()
+            assert_active_version(args.launcher, "1.0.0")
             assert project_path.read_bytes() == preserved, "Homebrew upgrade changed the project"
             with backend(command, data, evidence / "after", startup_timeout=180) as base:
                 reopened = request(base, f"/api/projects/{project_id}")["project"]

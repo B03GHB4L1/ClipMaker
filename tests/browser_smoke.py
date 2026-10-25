@@ -136,6 +136,9 @@ def exercise_snapshot_restore(page):
     expect(page.locator('[data-load-snapshot]')).to_be_enabled()
     page.locator('[data-load-snapshot]').click()
     expect(page.locator('[data-toast]')).to_have_text("Loaded snapshot: " + snapshot_name)
+    expect(page.locator('[data-snapshot-select]')).to_have_value(snapshot_name)
+    expect(page.locator('[data-load-snapshot]')).to_be_enabled()
+    expect(page.locator('[data-delete-snapshot]')).to_be_enabled()
     expect(page.locator('input[name="action"][value="Goal"]')).to_be_checked()
     expect(page.locator('input[name="action"][value="Pass"]')).not_to_be_checked()
     # Reload collapses the detailed controls; assert their saved values directly.

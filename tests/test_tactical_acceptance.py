@@ -142,7 +142,7 @@ class TacticalNumericalAcceptance(unittest.TestCase):
                                ("scoresway_Beta_all_events.csv", [event("c", 60)])):
                 path = Path(directory) / name
                 pd.DataFrame(rows).to_csv(path, index=False)
-                paths.append(str(path))
+                paths.append(str(path.resolve()))
             state = dict(tl_multi_mode=True, tl_selected_matches=paths,
                          multi_scraped_csv_paths=paths)
             fake = SimpleNamespace(session_state=state,
@@ -404,7 +404,7 @@ class TacticalMediaAcceptance(unittest.TestCase):
         self.assert_video(path, 3, [(.5, 2)])
 
     def load_project_matches(self, penalties=False):
-        paths = [str(self.root / "project-a.csv"), str(self.root / "project-b.csv")]
+        paths = [str((self.root / "project-a.csv").resolve()), str((self.root / "project-b.csv").resolve())]
         for index, path in enumerate(paths):
             if penalties:
                 # Different ORIGINAL first-kick anchors for each project. The

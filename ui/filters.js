@@ -704,10 +704,14 @@ snapshotSelect.addEventListener("change", () => {
 });
 
 document.querySelector("[data-load-snapshot]").addEventListener("click", () => {
-  const snapshot = getSnapshots()[snapshotSelect.value];
+  const name = snapshotSelect.value;
+  const snapshot = getSnapshots()[name];
   if (!snapshot) return;
   applyOptions(snapshot);
-  showToast(`Loaded snapshot: ${snapshotSelect.value}`);
+  // applyOptions resets the form, including this library selection.
+  snapshotSelect.value = name;
+  snapshotSelect.dispatchEvent(new Event("change"));
+  showToast(`Loaded snapshot: ${name}`);
 });
 
 document
