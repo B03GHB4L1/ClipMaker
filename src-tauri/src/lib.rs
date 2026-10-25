@@ -1,5 +1,5 @@
 use std::net::{TcpListener, TcpStream};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -48,6 +48,7 @@ pub fn run() {
                 command.creation_flags(0x08000000);
             }
             let child = command.args(["--port", &port.to_string()])
+                .env("VIZORPLAY_OWNER_PID", std::process::id().to_string())
                 .current_dir(data_dir)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -79,9 +80,11 @@ pub fn run() {
                         Duration::from_secs(1),
                     ) {
                         let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                         let _ = write!(stream, "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+                        let _ = stream.take(4096).read_to_end(&mut Vec::new());
                     }
-                    let deadline = Instant::now() + Duration::from_secs(3);
+                    let deadline = Instant::now() + Duration::from_secs(20);
                     while Instant::now() < deadline {
                         if matches!(child.try_wait(), Ok(Some(_))) { break; }
                         thread::sleep(Duration::from_millis(50));

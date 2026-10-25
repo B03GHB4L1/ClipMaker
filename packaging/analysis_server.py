@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import errno
 import socket
 import subprocess
 import sys
@@ -9,6 +10,72 @@ import threading
 import time
 from pathlib import Path
 from urllib.request import urlopen
+
+
+def wait_for_process_exit(pid: int, timeout: float | None = None) -> bool:
+    if pid <= 0:
+        raise ValueError("Owner PID must be positive")
+    if timeout is not None and timeout < 0:
+        raise ValueError("Timeout must not be negative")
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x00100000, False, pid)
+        if not handle:
+            if ctypes.get_last_error() == 87:  # PID no longer exists.
+                return True
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            result = kernel.WaitForSingleObject(handle, 0xFFFFFFFF if timeout is None else int(timeout * 1000))
+            if result == 0xFFFFFFFF:
+                raise ctypes.WinError(ctypes.get_last_error())
+            return result == 0
+        finally:
+            kernel.CloseHandle(handle)
+    if sys.platform == "linux" and hasattr(os, "pidfd_open"):
+        import select
+        try:
+            descriptor = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return True
+        except OSError as error:
+            if error.errno not in {errno.ENOSYS, errno.EINVAL}:
+                raise
+        else:
+            try:
+                poller = select.poll()
+                poller.register(descriptor, select.POLLIN)
+                return bool(poller.poll(None if timeout is None else int(timeout * 1000)))
+            finally:
+                os.close(descriptor)
+    is_parent = os.getppid() == pid
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        if is_parent and os.getppid() != pid:
+            return True
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        time.sleep(.05)
+
+
+def watch_process_owner(pid: int, on_exit) -> threading.Thread:
+    def watch():
+        wait_for_process_exit(pid)
+        on_exit()
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    return thread
 
 
 class AnalysisServer:
@@ -63,31 +130,12 @@ def run_analysis(root: Path, port: int) -> int:
     from streamlit.web import cli
     parent_pid = os.getppid()
 
-    def watch_parent(parent_pid):
-        # A forced desktop-shell exit skips Python's atexit hooks.
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-            kernel.OpenProcess.restype = wintypes.HANDLE
-            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-            kernel.WaitForSingleObject.restype = wintypes.DWORD
-            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-            handle = kernel.OpenProcess(0x00100000, False, parent_pid)
-            if handle:
-                result = kernel.WaitForSingleObject(handle, 0xFFFFFFFF)
-                kernel.CloseHandle(handle)
-                if result == 0:
-                    os._exit(0)
-        else:
-            while os.getppid() == parent_pid:
-                time.sleep(1)
-            os._exit(0)
-
     owners = {parent_pid, int(os.environ.get("CLIPMAKER_OWNER_PID", parent_pid))}
+    if os.environ.get("VIZORPLAY_OWNER_PID"):
+        owners.add(int(os.environ["VIZORPLAY_OWNER_PID"]))
     for owner in owners:
-        threading.Thread(target=watch_parent, args=(owner,), daemon=True).start()
+        # A forced desktop-shell exit skips Python's atexit hooks.
+        watch_process_owner(owner, lambda: os._exit(0))
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     sys.argv = ["streamlit", "run", str(root / "app" / "analysis_entry.py"),
                 "--server.address=127.0.0.1", f"--server.port={port}", "--server.headless=true",

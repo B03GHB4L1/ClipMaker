@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -39,7 +40,7 @@ def finished_job(base, job):
 
 
 @contextmanager
-def backend(command, directory, evidence=None, startup_timeout=90):
+def backend(command, directory, evidence=None, startup_timeout=90, *, env=None, cwd=None):
     directory.mkdir(parents=True, exist_ok=True)
     if evidence:
         evidence.mkdir(parents=True, exist_ok=True)
@@ -50,6 +51,7 @@ def backend(command, directory, evidence=None, startup_timeout=90):
         port = listener.getsockname()[1]
     process = subprocess.Popen([*command, "--port", str(port), "--data-dir", str(directory)],
         stdout=stderr_log, stderr=subprocess.STDOUT,
+        env=env, cwd=cwd,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     base = f"http://127.0.0.1:{port}"
     try:
@@ -156,6 +158,61 @@ def run(base, root):
     print("PASS: local projects, CSV, shared assets, real preview, seeking, decoded reel, repeat-export protection, individual extra-time source/pixels, downloads, real export cancellation, analytical startup")
 
 
+def owner_shutdown_smoke(command, root):
+    if __package__:
+        from .analysis_server import wait_for_process_exit
+    else:
+        from analysis_server import wait_for_process_exit
+    owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    try:
+        data = root / "owned-backend"
+        environment = {**os.environ, "VIZORPLAY_OWNER_PID": str(owner.pid)}
+        with backend(command, data, env=environment, cwd=data) as base:
+            project = request(base, "/api/projects", {})["project"]
+            request(base, f"/api/files/upload?project={project['id']}", raw=fixture_csv(),
+                    headers={"Content-Type": "application/octet-stream", "X-File-Name": "fixture.csv"})
+            request(base, f"/api/projects/{project['id']}", {"video_path": str(root / "fixture.mp4"),
+                    "video_name": "fixture.mp4", "markers": {"1H": "00:00:00", "2H": "00:00:00"}})
+            analysis = request(base, "/api/analysis", {"project_id": project["id"], "view": "analyst"})
+            job = request(base, "/api/jobs", {"match_id": project["id"], "options": {
+                "dry_run": False, "individual_clips": True,
+                "clip_windows": [{"start": 0, "end": 7, "period": 1, "label": "Shutdown"} for _ in range(150)]}})["job"]
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                job = request(base, "/api/jobs/" + job["id"])["job"]
+                assert job["status"] not in {"failed", "complete", "cancelled"}, job
+                if (job.get("progress") or {}).get("current", 0) >= 1:
+                    break
+                time.sleep(.1)
+            else:
+                raise AssertionError("Shutdown export fixture did not begin rendering")
+            health = request(base, "/api/health")
+            assert health["desktop_owner_pid"] == owner.pid, health
+            owner.terminate()
+            owner.wait(timeout=5)
+            assert wait_for_process_exit(health["pid"], timeout=25), "Backend survived desktop owner exit"
+            if health["parent_pid"] != os.getpid():
+                assert wait_for_process_exit(health["parent_pid"], timeout=25), "Backend launcher survived desktop owner exit"
+            analysis_health = analysis["url"].split("/?", 1)[0] + "/_stcore/health"
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    with urlopen(analysis_health, timeout=1):
+                        pass
+                except OSError:
+                    break
+                assert time.monotonic() < deadline, "Analytical process survived desktop owner exit"
+                time.sleep(.1)
+        assert "Export workers did not finish" not in (data / "backend-process.log").read_text(encoding="utf-8", errors="replace")
+        data.rename(root / "released-owned-backend")
+        print("PASS: forced desktop owner exit cancels active export, stops backend/analytics, and releases working directory")
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=5)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", type=Path)
@@ -165,6 +222,7 @@ def main():
         root = Path(directory)
         with backend(command, root / "data") as base:
             run(base, root)
+        owner_shutdown_smoke(command, root)
 
 
 if __name__ == "__main__":
