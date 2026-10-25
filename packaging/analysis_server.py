@@ -12,6 +12,29 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
+def _wait_for_kqueue_exit(pid: int, timeout: float | None) -> bool:
+    import select
+    queue = select.kqueue()
+    try:
+        event = select.kevent(pid, filter=select.KQ_FILTER_PROC,
+                              flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                              fflags=select.KQ_NOTE_EXIT)
+        try:
+            events = queue.control([event], 1, timeout)
+        except ProcessLookupError:
+            return True
+        if not events:
+            return False
+        event = events[0]
+        if event.flags & select.KQ_EV_ERROR:
+            if event.data == errno.ESRCH:
+                return True
+            raise OSError(event.data, os.strerror(event.data))
+        return bool(event.fflags & select.KQ_NOTE_EXIT)
+    finally:
+        queue.close()
+
+
 def wait_for_process_exit(pid: int, timeout: float | None = None) -> bool:
     if pid <= 0:
         raise ValueError("Owner PID must be positive")
@@ -39,6 +62,8 @@ def wait_for_process_exit(pid: int, timeout: float | None = None) -> bool:
             return result == 0
         finally:
             kernel.CloseHandle(handle)
+    if sys.platform == "darwin":
+        return _wait_for_kqueue_exit(pid, timeout)
     if sys.platform == "linux" and hasattr(os, "pidfd_open"):
         import select
         try:
@@ -71,8 +96,8 @@ def wait_for_process_exit(pid: int, timeout: float | None = None) -> bool:
 
 def watch_process_owner(pid: int, on_exit) -> threading.Thread:
     def watch():
-        wait_for_process_exit(pid)
-        on_exit()
+        if wait_for_process_exit(pid):
+            on_exit()
     thread = threading.Thread(target=watch, daemon=True)
     thread.start()
     return thread
