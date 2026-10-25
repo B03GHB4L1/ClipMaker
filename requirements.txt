@@ -1,0 +1,9 @@
+curl-cffi==0.14.0
+imageio==2.37.2
+imageio-ffmpeg==0.6.0
+moviepy==2.2.1
+numpy==2.4.3
+pandas==2.3.3
+playwright==1.58.0
+plotly==6.6.0
+streamlit==1.55.0

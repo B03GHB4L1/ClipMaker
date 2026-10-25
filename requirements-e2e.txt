@@ -1,0 +1,3 @@
+-r requirements-build.txt
+selenium==4.34.0
+PyYAML==6.0.3

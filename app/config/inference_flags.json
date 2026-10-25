@@ -1,0 +1,271 @@
+{
+  "version": "1.0",
+  "flags": [
+    {
+      "flag": "is_switch_of_play",
+      "status": "implemented",
+      "definition": "A long pass that starts on one lateral side of the pitch (wing or half-space) and ends on the opposite side.",
+      "heuristic": "Pass where is_long_ball == true AND start_zone in {Left Wing, Left Half Space} with end_zone in {Right Wing, Right Half Space} (or reverse). Zone derived from y coordinate via _pitch_zone().",
+      "required_columns": [
+        "y",
+        "endY",
+        "is_long_ball"
+      ],
+      "include_rules": [
+        "is_long_ball == true",
+        "start lateral zone is left side (Left Wing or Left Half Space) and end lateral zone is right side (Right Wing or Right Half Space), or vice versa"
+      ],
+      "exclude_rules": [
+        "short passes (is_long_ball == false)",
+        "passes that stay on the same side of the pitch",
+        "passes through the centre (neither side qualifies as wing/half-space)"
+      ],
+      "false_positives": [],
+      "false_negatives": [
+        "short switches through the lines \u00e2\u20ac\u201d missed because gated on is_long_ball"
+      ],
+      "confidence": "high",
+      "notes": "Already implemented in whoscored_scraper._is_switch_of_play() and clipmaker_core fallback. UI wiring complete (filtering, pass maps, badge labels, NLP intent). Heuristic is intentionally strict \u00e2\u20ac\u201d gated on is_long_ball to avoid counting short cross-pitch passes."
+    },
+    {
+      "flag": "is_cutback",
+      "status": "skipped",
+      "definition": "A pass played backwards or square from a wide/byline position into the penalty area for a runner arriving late.",
+      "heuristic": "Pass ending inside the box where end_x < start_x (backward component) and start_x >= 88 (near byline), with start_y in wide channel (outside central 18-yard zone).",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "end_x",
+        "end_y",
+        "pass_end_x",
+        "pass_end_y"
+      ],
+      "include_rules": [
+        "event type is Pass",
+        "start position near or at byline (x >= 88)",
+        "start position in wide channel (y <= 18 or y >= 62)",
+        "end position inside the box (end_x >= 88, end_y between 18 and 62)",
+        "pass has backward or square direction (end_x <= start_x)"
+      ],
+      "exclude_rules": [
+        "corners",
+        "free kicks",
+        "passes that end outside the box",
+        "forward passes from the byline (not cutbacks)"
+      ],
+      "confidence": "high"
+    },
+    {
+      "flag": "is_diagonal_long_ball",
+      "status": "implemented",
+      "definition": "A long aerial or driven ball played diagonally across the pitch, typically to switch play or exploit space behind a defensive line.",
+      "heuristic": "Pass with distance >= 32m and lateral displacement (|end_y - start_y|) >= 20m, excluding crosses and set pieces.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "end_x",
+        "end_y",
+        "length",
+        "pass_height",
+        "pass_type"
+      ],
+      "include_rules": [
+        "event type is Pass",
+        "pass length >= 32m",
+        "lateral displacement (|end_y - start_y|) >= 20m",
+        "pass height is High or Medium (aerial component)",
+        "significant forward or horizontal direction"
+      ],
+      "exclude_rules": [
+        "crosses (pass_type = Cross)",
+        "corners",
+        "free kicks",
+        "passes where lateral displacement is less than 20m (not diagonal enough)",
+        "short passes mislabeled as long"
+      ],
+      "confidence": "high"
+    },
+    {
+      "flag": "is_box_entry_pass",
+      "status": "implemented",
+      "definition": "Any pass \u00e2\u20ac\u201d including crosses \u00e2\u20ac\u201d that starts outside the penalty area and ends inside it during open play.",
+      "heuristic": "Pass where start is outside the box and end_x >= 88, 18 <= end_y <= 62, excluding set pieces.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "end_x",
+        "end_y",
+        "pass_type"
+      ],
+      "include_rules": [
+        "event type is Pass",
+        "start position is outside the box",
+        "end position is inside the box (end_x >= 88, 18 <= end_y <= 62)",
+        "includes crosses that land inside the box",
+        "includes ground, driven, and lofted passes"
+      ],
+      "exclude_rules": [
+        "corners",
+        "free kicks",
+        "kick offs",
+        "goal kicks",
+        "passes that already start inside the box"
+      ],
+      "false_positives": [
+        "deflected passes that accidentally enter the box"
+      ],
+      "false_negatives": [
+        "passes to feet of a player standing just outside the line who immediately enters"
+      ],
+      "confidence": "high"
+    },
+    {
+      "flag": "is_deep_completion",
+      "status": "implemented",
+      "definition": "A non-cross pass successfully completed within ~20m of the opponent's goal. Measures deliberate, structured final-third penetration \u00e2\u20ac\u201d captures passes into the central corridor just outside and inside the box.",
+      "heuristic": "Completed pass where end_x >= 97 (approx 20m from goal on StatsBomb 120-unit pitch), excluding crosses and set pieces.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "end_x",
+        "end_y",
+        "pass_type",
+        "pass_outcome"
+      ],
+      "include_rules": [
+        "event type is Pass",
+        "pass is complete (pass_outcome == null or 'Complete' depending on provider)",
+        "end_x >= 97",
+        "includes ground passes, driven passes, layoffs, cut-ins into central zone",
+        "includes passes to the box edge"
+      ],
+      "exclude_rules": [
+        "crosses (pass_type == 'Cross')",
+        "corners",
+        "free kicks",
+        "kick offs",
+        "goal kicks",
+        "incomplete passes"
+      ],
+      "false_positives": [
+        "passes to a wide channel at x >= 97 that are not centrally meaningful \u00e2\u20ac\u201d mitigated by reviewing end_y if needed"
+      ],
+      "false_negatives": [
+        "brilliant passes intercepted just before the recipient \u00e2\u20ac\u201d excluded by design since incompleteness is a valid qualifier"
+      ],
+      "confidence": "high",
+      "notes": "Threshold: StatsBomb pitch = 120 units ~ 105m. 20m from goal => x >= 120 - (20/105 * 120) ~ 97. Direction is always toward opponent goal so keeper backpass false positive is geometrically impossible."
+    },
+    {
+      "flag": "is_box_entry_carry",
+      "status": "implemented",
+      "definition": "A carry where the player starts outside the penalty area and ends inside it during open play.",
+      "heuristic": "Carry where start is outside the box and carry_end_x >= 88, 18 <= carry_end_y <= 62.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "carry_end_x",
+        "carry_end_y"
+      ],
+      "include_rules": [
+        "event type is Carry",
+        "start position is outside the box",
+        "end position is inside the box (carry_end_x >= 88, 18 <= carry_end_y <= 62)"
+      ],
+      "exclude_rules": [
+        "carries that start and end outside the box",
+        "carries that already start inside the box"
+      ],
+      "false_positives": [
+        "carry that crosses the box line but player is immediately dispossessed \u00e2\u20ac\u201d geometrically qualifies but tactically irrelevant, hard to filter without carry outcome data"
+      ],
+      "false_negatives": [
+        "player carries to the exact box line and shoots or passes from there \u00e2\u20ac\u201d carry ends at edge, not inside (threshold sensitivity of ~1 unit)"
+      ],
+      "confidence": "high",
+      "notes": "No set-piece exclusion needed \u00e2\u20ac\u201d carries do not occur from set pieces."
+    },
+    {
+      "flag": "is_final_third_entry_pass",
+      "status": "implemented",
+      "definition": "A pass that starts outside the final third and ends inside it during open play.",
+      "heuristic": "Pass where x < 80 and end_x >= 80, excluding set pieces. Threshold aligns with app's existing depth_zone logic: x >= 67 on WhoScored 0-100 scale = x >= 80 on StatsBomb 120-unit pitch.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "end_x",
+        "end_y",
+        "pass_type"
+      ],
+      "include_rules": [
+        "event type is Pass",
+        "start position outside final third (x < 80)",
+        "end position inside final third (end_x >= 80)",
+        "includes long balls from defence landing in final third",
+        "includes switches ending in final third on far side"
+      ],
+      "exclude_rules": [
+        "corners",
+        "free kicks",
+        "kick offs",
+        "goal kicks",
+        "passes that already start in the final third"
+      ],
+      "false_positives": [
+        "sideways pass on the exact x=80 boundary \u00e2\u20ac\u201d practically negligible given pass tracking precision"
+      ],
+      "false_negatives": [
+        "pass to a player just shy of x=80 who enters the third in their next action"
+      ],
+      "confidence": "high",
+      "notes": "Overlaps with is_deep_completion intentionally \u00e2\u20ac\u201d every deep completion (end_x >= 97) is also a final third entry (end_x >= 80), but not vice versa. Different granularities of the same concept."
+    },
+    {
+      "flag": "is_final_third_entry_carry",
+      "status": "implemented",
+      "definition": "A carry that starts outside the final third and ends inside it during open play.",
+      "heuristic": "Carry where x < 80 and carry_end_x >= 80. No set-piece exclusion needed.",
+      "required_columns": [
+        "type",
+        "x",
+        "y",
+        "carry_end_x",
+        "carry_end_y"
+      ],
+      "include_rules": [
+        "event type is Carry",
+        "start position outside final third (x < 80)",
+        "end position inside final third (carry_end_x >= 80)"
+      ],
+      "exclude_rules": [
+        "carries that start and end outside the final third",
+        "carries that already start in the final third"
+      ],
+      "false_positives": [
+        "carry that crosses x=80 but player is immediately dispossessed \u00e2\u20ac\u201d geometrically qualifies, tactically irrelevant"
+      ],
+      "false_negatives": [
+        "player carries to exactly x=80 and plays a pass \u00e2\u20ac\u201d carry ends on the boundary, not inside (threshold sensitivity of ~1 unit)"
+      ],
+      "confidence": "high",
+      "notes": "Mirror of is_final_third_entry_pass for carries. Threshold x >= 80 matches app depth_zone logic (WhoScored x >= 67 = StatsBomb x >= 80)."
+    },
+    {
+      "flag": "is_weak_side_switch",
+      "status": "skipped",
+      "definition": "A pass moving the ball from the strong side (ball side, defence concentrated) to the weak side (far side, space available).",
+      "heuristic": "Requires either StatsBomb 360 freeze frame data or sequence-based inference (tracking prior event locations). Not reliably derivable from a single event row.",
+      "required_columns": [],
+      "include_rules": [],
+      "exclude_rules": [],
+      "confidence": "experimental",
+      "notes": "Skipped \u00e2\u20ac\u201d weak side cannot be reliably inferred from standard event data alone. Revisit if 360 data becomes available or sequence-based heuristics are implemented."
+    }
+  ]
+}
