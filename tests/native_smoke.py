@@ -67,6 +67,29 @@ def package_lifecycle(app, package, uninstall=False):
                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
 
 
+def installed_version(app, package):
+    """Read installed metadata, rather than trusting an installer's filename."""
+    if sys.platform != "win32":
+        name = subprocess.run(["dpkg-deb", "--field", str(package), "Package"],
+                              check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+        return subprocess.run(["dpkg-query", "--show", "--showformat=${Version}", name],
+                              check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+    import winreg
+    prefix = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, prefix, 0, winreg.KEY_READ | view) as root:
+            for index in range(winreg.QueryInfoKey(root)[0]):
+                with winreg.OpenKey(root, winreg.EnumKey(root, index)) as item:
+                    try:
+                        name = winreg.QueryValueEx(item, "DisplayName")[0]
+                        location = winreg.QueryValueEx(item, "InstallLocation")[0]
+                        if name == "VizorPlay" and Path(location.strip('"')).resolve() == app.parent.resolve():
+                            return winreg.QueryValueEx(item, "DisplayVersion")[0]
+                    except FileNotFoundError:
+                        continue
+    raise AssertionError("Installed VizorPlay version was not registered")
+
+
 def wait_for_driver(process, port, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -96,6 +119,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--package", type=Path, help="CI-only NSIS/DEB reinstall and uninstall acceptance")
+    parser.add_argument("--upgrade-from", help="Expected installed predecessor version; upgrade to --package between launches")
     parser.add_argument("--evidence", type=Path, default=ROOT / "build/native-evidence")
     args = parser.parse_args()
     if sys.platform not in {"win32", "linux"}:
@@ -109,6 +133,8 @@ def main():
         if not args.package.is_file() or args.package.suffix != (".exe" if sys.platform == "win32" else ".deb"):
             parser.error("Expected an existing package for this platform")
     args.app = args.app.resolve()
+    if args.upgrade_from and not args.package:
+        parser.error("--upgrade-from requires --package")
     from selenium import webdriver
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
@@ -144,7 +170,14 @@ def main():
                 wait_for_driver(process, port)
                 project_id = None
                 project_path = None
-                for launch in range(2):
+                launches = 3 if args.upgrade_from else 2
+                versions = []
+                for launch in range(launches):
+                    if args.package:
+                        version = installed_version(args.app, args.package)
+                        expected_version = args.upgrade_from if launch == 0 and args.upgrade_from else "1.0.0"
+                        assert version == expected_version, (version, expected_version)
+                        versions.append(version)
                     stage(evidence, f"launch {launch + 1}: create native session")
                     address = f"http://127.0.0.1:{port}"
                     connection = RemoteConnection(client_config=ClientConfig(remote_server_addr=address, timeout=45))
@@ -212,6 +245,19 @@ def main():
                         assert saved["preview_windows"][0]["end"] == 3.5
                         driver.get(f"{base}/filters.html?match={project_id}")
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
+                        stage(evidence, "verify upgraded/reinstalled candidate renders and exports saved plan")
+                        element('.clip-preview summary').click()
+                        element('.clip-editor > button:first-of-type').click()
+                        wait.until(lambda current: current.execute_script(
+                            "const v=document.querySelector('.clip-preview video'); return v && !v.hidden && v.videoWidth > 0"))
+                        element('[data-export-button]').click()
+                        wait.until(export_finished)
+                        link = element('[data-export-files] a')
+                        output = evidence / f"candidate-export-{launch}.mp4"
+                        with urlopen(link.get_attribute("href"), timeout=30) as response:
+                            output.write_bytes(response.read())
+                        subprocess.run([ffmpeg, "-v", "error", "-i", str(output), "-f", "null", "-"],
+                                       check=True, capture_output=True, timeout=60)
                     wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-project-status]').get_attribute("textContent") == "Saved locally")
                     project_path = Path(request(base, "/api/projects")["directory"]) / project_id / "project.json"
                     assert project_path.resolve().is_relative_to(root.resolve()), project_path
@@ -222,8 +268,9 @@ def main():
                     driver = None
                     stage(evidence, f"launch {launch + 1}: wait for shell and backend exit")
                     verify_shutdown(health, evidence, launch + 1)
-                    if launch == 0 and args.package:
-                        stage(evidence, "reinstall same-version package before relaunch")
+                    if launch < launches - 1 and args.package:
+                        stage(evidence, "upgrade predecessor to candidate" if launch == 0 and args.upgrade_from
+                              else "reinstall same-version package before relaunch")
                         preserved = project_path.read_bytes()
                         package_lifecycle(args.app, args.package)
                         assert project_path.read_bytes() == preserved, "Reinstall changed saved project data"
@@ -236,8 +283,10 @@ def main():
                         time.sleep(.2)
                     assert not args.app.exists(), "Uninstall did not remove the application"
                     assert project_path.read_bytes() == preserved, "Uninstall removed or changed saved project data"
-                result = {"status": "passed", "native_launches": 2,
-                    "reinstall_and_uninstall": bool(args.package), "shutdown_verified": True}
+                result = {"status": "passed", "native_launches": launches,
+                    "reinstall_and_uninstall": bool(args.package), "shutdown_verified": True,
+                    "installed_versions": versions, "upgrade_from": args.upgrade_from,
+                    "upgrade_fixture": "same-source predecessor package" if args.upgrade_from else None}
             except BaseException:
                 print(traceback.format_exc(), flush=True)
                 (evidence / "result.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")

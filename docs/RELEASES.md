@@ -8,17 +8,28 @@ successful build as proof that installation, native interactions, or upgrades
 have passed. Public test runs are authorized; publishing a release still requires
 the owner's separate instruction. No release has been published by these tests.
 
-The release workflow first calls Full Desktop E2E against the same commit. A
-failed required browser, frozen-backend, installed Windows/Linux, or Homebrew
-job prevents release builds from proceeding. Optional live-provider URLs are not
-set by the release workflow: skipped means not tested, not provider certification.
-The feature-parity ledger still records the manual acceptance gates.
+The release workflow first calls Full Desktop E2E against the same commit. It
+then assembles the exact NSIS/DEB installer bytes and Homebrew source archive
+retained by successful acceptance jobs; it never rebuilds after acceptance.
+SHA-256 receipts bind every payload to that commit and its passing evidence.
+Missing receipts, changed files, mismatched commits or failed jobs block the
+candidate. Optional live-provider URLs are not set by this workflow: skipped
+means not tested, not provider certification. The current release gates are in
+`RELEASE_1_0_CHECKLIST.md`.
+
+Manually dispatch **Desktop release** on `codex/release-packaging` to prepare a
+candidate without publishing. Download `VizorPlay-1.0.0-candidate` from that
+run's artifacts: it includes installers, the exact tested source archive,
+Homebrew formula, WinGet manifests, acceptance receipts, a candidate manifest
+and SHA256SUMS. Artifacts expire after 30 days. Verify checksums before use.
 
 ## Windows and Linux
 
-Pushing a version tag such as `v1.0.0` starts `.github/workflows/release.yml`.
-GitHub's hosted runners build the Windows NSIS installer plus Linux `.deb` and
-`.rpm` packages, then attach the files to the GitHub release.
+Only after separate owner authorization, pushing `v1.0.0` starts acceptance and
+attaches its exact tested candidate to the GitHub release. No tag should be
+created merely to test the workflow. Windows NSIS and Ubuntu 22.04 `.deb` are
+the supported native paths. Untested RPM packages are excluded from this
+candidate rather than being advertised as verified installers.
 
 The release also includes a three-file WinGet manifest set. After the first
 version is accepted into the WinGet community repository, Windows users can
@@ -43,12 +54,14 @@ browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
 installed or promised.
 
-The formula currently downloads a tagged source archive. It is not a way to
-distribute an anonymously installable application while concealing that source;
-resolve the private-source distribution plan before publishing it.
+The prepared formula downloads the exact source archive attached to the release,
+using the checksum of the archive installed during acceptance. The source repo
+is public by the owner's instruction. The separate tap remains private and
+empty until an authorized publication step; `brew tap` is not yet a public
+installation path.
 
-The tagged release automatically includes a rendered `clipmaker.rb` formula
-with the correct source SHA-256. To render it locally when troubleshooting, run:
+The candidate includes a rendered `clipmaker.rb` formula with its source SHA-256.
+To render a tag-archive formula locally when troubleshooting, run:
 
 ```text
 python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/clipmaker.rb
@@ -71,16 +84,18 @@ Ubuntu, Debian, and Linux Mint users install a downloaded package with:
 sudo apt install ./VizorPlay_1.0.0_amd64.deb
 ```
 
-Fedora and RHEL-family users install a downloaded package with:
-
-```text
-sudo dnf install ./VizorPlay-1.0.0-1.x86_64.rpm
-```
-
 Installing a newer package with the same command upgrades the existing app and
 keeps VizorPlay's per-user runtime data. Debian packages declare GStreamer
-playback dependencies; codec and distro coverage outside the tested Ubuntu DEB
-path, including RPM installation, is not yet certified.
+playback dependencies. There is no apt/dnf repository or in-app automatic updater
+yet: Linux updates currently require downloading the newer DEB. Fedora/RPM and
+other distributions remain outside the verified 1.0 candidate scope.
+
+Acceptance installs a controlled 0.9.0 predecessor built from the same source,
+saves project data, upgrades to 1.0.0, relaunches and renders/exports, reinstalls,
+then uninstalls while preserving the isolated project. macOS likewise upgrades
+a local test formula from 0.9.0 to 1.0.0 and reopens the project. These checks
+exercise different-version package lifecycle; they do not certify migration
+from every historical ClipMaker binary/schema or the public package channels.
 
 ## Verification
 

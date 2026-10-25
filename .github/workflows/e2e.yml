@@ -146,6 +146,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WebView2 driver could not start' }
           $directory | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: npm ci
+      - name: Build controlled predecessor for different-version upgrade acceptance
+        shell: bash
+        run: |
+          printf '{"version":"0.9.0"}\n' > build/upgrade-config.json
+          npm run tauri build -- --config "$PWD/build/upgrade-config.json" --bundles ${{ matrix.bundles }}
+          mkdir -p build/upgrade-baseline
+          cp src-tauri/target/release/bundle/${{ matrix.bundles }}/* build/upgrade-baseline/
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - name: Install Windows package and exercise the installed window
         timeout-minutes: 12
@@ -153,14 +160,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          $installer = @(Get-ChildItem build/upgrade-baseline/*-setup.exe)
           if ($installer.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          $candidate = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*1.0.0*-setup.exe)
+          if ($candidate.Count -ne 1) { throw 'Expected exactly one 1.0.0 NSIS candidate' }
           $destination = Join-Path $env:RUNNER_TEMP 'VizorPlay-installed'
           $process = Start-Process -FilePath $installer[0].FullName -ArgumentList '/S', "/D=$destination" -Wait -PassThru -WindowStyle Hidden
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           $app = @(Get-ChildItem -LiteralPath $destination -Filter clipmaker.exe -Recurse)
           if ($app.Count -ne 1) { throw 'Installed executable not found' }
-          python tests/native_smoke.py --app $app[0].FullName --package $installer[0].FullName
+          python tests/native_smoke.py --app $app[0].FullName --package $candidate[0].FullName --upgrade-from 0.9.0
           if ($LASTEXITCODE -ne 0) { throw 'Native acceptance failed' }
       - name: Install Linux package and exercise the installed window
         timeout-minutes: 12
@@ -168,9 +177,21 @@ jobs:
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
         run: |
-          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
-          package="$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)"
-          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker --package "$package"
+          sudo apt-get install -y ./build/upgrade-baseline/*.deb
+          package="$(find src-tauri/target/release/bundle/deb -name '*1.0.0*.deb' -print -quit)"
+          test -n "$package"
+          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker --package "$package" --upgrade-from 0.9.0
+      - name: Retain the exact package that passed native acceptance
+        shell: bash
+        run: |
+          package="$(find src-tauri/target/release/bundle/${{ matrix.bundles }} -name '*1.0.0*' -type f -print -quit)"
+          python packaging/release_candidate.py receipt --platform "${{ runner.os }}" --payload "$package" --evidence build/native-evidence/result.json --output build/release-packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-package-${{ runner.os }}
+          path: build/release-packages/
+          retention-days: 30
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -195,23 +216,41 @@ jobs:
       - run: python -m playwright install chromium
       - name: Install a local formula from this exact commit
         run: |
-          git archive --format=tar.gz --prefix=vizorplay/ --output="$RUNNER_TEMP/vizorplay.tar.gz" HEAD
-          sha256="$(shasum -a 256 "$RUNNER_TEMP/vizorplay.tar.gz" | cut -d ' ' -f 1)"
+          mkdir -p build/homebrew-candidate
+          archive="$PWD/build/homebrew-candidate/vizorplay-1.0.0-source.tar.gz"
+          git archive --format=tar.gz --prefix=vizorplay/ --output="$archive" HEAD
+          sha256="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
           brew tap-new local/vizorplay
           formula="$(brew --repository local/vizorplay)/Formula/clipmaker.rb"
-          python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 "$sha256" --source-url "file://$RUNNER_TEMP/vizorplay.tar.gz" --output "$formula"
+          python packaging/render_homebrew_formula.py --version 0.9.0 --sha256 "$sha256" --source-url "file://$archive" --output "$formula"
           brew install --build-from-source local/vizorplay/clipmaker
           brew test local/vizorplay/clipmaker
+          python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 "$sha256" --source-url "file://$archive" --output build/homebrew-candidate/upgrade.rb
+      - name: Upgrade installed Homebrew formula and preserve local project
+        timeout-minutes: 22
+        env:
+          CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
+        run: python tests/homebrew_upgrade.py --formula "$(brew --repository local/vizorplay)/Formula/clipmaker.rb" --candidate build/homebrew-candidate/upgrade.rb --launcher "$(brew --prefix)/bin/vizorplay"
       - name: Exercise installed launcher and full browser journey
         timeout-minutes: 22
         env:
           CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
         run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --timeout-seconds 1200 --evidence build/homebrew-evidence
+      - name: Retain the exact source archive tested by Homebrew
+        run: python packaging/release_candidate.py receipt --platform macOS --payload build/homebrew-candidate/vizorplay-1.0.0-source.tar.gz --evidence build/homebrew-evidence/result.json --evidence build/homebrew-upgrade/result.json --output build/release-packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-package-macOS
+          path: build/release-packages/
+          retention-days: 30
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: homebrew-macOS
-          path: build/homebrew-evidence/
+          path: |
+            build/homebrew-evidence/
+            build/homebrew-upgrade/
           retention-days: 7
           if-no-files-found: warn
 
@@ -226,9 +265,14 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements-e2e.txt
       - run: python -m playwright install --with-deps chromium-headless-shell
       - run: python tests/live_scrape.py
+        env:
+          SCORESWAY_URL: ${{ inputs.scoresway_url }}
+          WHOSCORED_URL: ${{ inputs.whoscored_url }}
+      - name: Real batch scrape with partial failure and preserved project
+        run: python tests/live_batch_smoke.py
         env:
           SCORESWAY_URL: ${{ inputs.scoresway_url }}
           WHOSCORED_URL: ${{ inputs.whoscored_url }}
@@ -256,7 +300,7 @@ jobs:
               output.write('| Test layer | Result |\n| --- | --- |\n')
               for name, job in jobs.items():
                   output.write(f"| {name} | {job['result']} |\n")
-              output.write('\nLive providers skipped means NOT TESTED. Native file dialogs, updates, uninstall, signing and Gatekeeper are not certified by this suite.\n')
+              output.write('\nLive providers skipped means NOT TESTED. Controlled predecessor upgrades, same-version reinstall and uninstall preserve isolated projects. Historical-version migrations, RPM, public distribution channels, native file dialogs, signing and Gatekeeper are not certified.\n')
           required = ['core', 'installed-desktop', 'homebrew']
           assert all(jobs[name]['result'] == 'success' for name in required), jobs
           assert jobs['live-providers']['result'] in ['success', 'skipped'], jobs

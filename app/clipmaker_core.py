@@ -681,33 +681,26 @@ def apply_filters(df, config, log=None):
         qualifier_logic = str(config.get("qualifier_logic", "any") or "any").strip().lower()
         if qualifier_logic not in {"any", "all"}:
             qualifier_logic = "any"
-        grouped = {}
-        for _flag, col, label, scope_types in active_scoped:
-            grouped.setdefault(frozenset(scope_types), []).append((col, label))
-
-        scoped_mask = pd.Series(False, index=df.index)
+        scoped_mask = pd.Series(qualifier_logic == "all", index=df.index)
         active_scope_types = set()
-        for scope_key, rules in grouped.items():
-            scope_types = set(scope_key)
+        for _flag, col, _label, scope_types in active_scoped:
             active_scope_types.update(scope_types)
             scope_mask = type_series.isin(scope_types)
-            if not scope_mask.any():
-                continue
-            combined_rules = pd.Series(qualifier_logic == "all", index=df.index)
-            for col, _label in rules:
-                col_mask = df[col].fillna(False).astype(bool)
-                if qualifier_logic == "any":
-                    combined_rules |= col_mask
-                else:
-                    combined_rules &= col_mask
-            qualifier_mask = scope_mask & combined_rules
-            scoped_mask |= qualifier_mask
+            col_mask = df[col].fillna(False).astype(bool)
+            if qualifier_logic == "any":
+                scoped_mask |= scope_mask & col_mask
+            else:
+                # Each event must satisfy every rule applicable to its type,
+                # including overlapping scopes such as Goal and all shots.
+                scoped_mask &= ~scope_mask | col_mask
 
         if selected_types:
             # In mixed selections, scoped qualifiers only narrow their own
             # action family. Example: [Pass] Key passes should not remove
             # TakeOns selected alongside Passes.
             scoped_mask |= ~type_series.isin(active_scope_types)
+        else:
+            scoped_mask &= type_series.isin(active_scope_types)
 
         if log and scoped_mask.sum() == 0 and before_scoped > 0:
             labels = [label for _flag, _col, label, _scope in active_scoped]
@@ -898,7 +891,10 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
         fallback = config["fallback_row"]
         period_col = config["period_column"] or None
         df = assign_periods(df, period_col, fallback)
-        period_start = resolve_period_starts_for_video(df, period_start, log=log)
+        anchor_frame = df
+        if config.get("_timeline_data_file", config["data_file"]) != config["data_file"]:
+            anchor_frame = assign_periods(read_csv_safe(config["_timeline_data_file"]), period_col, fallback)
+        period_start = resolve_period_starts_for_video(anchor_frame, period_start, log=log)
 
         if half_filter == "1st half only":
             df = df[df["resolved_period"] == 1]
