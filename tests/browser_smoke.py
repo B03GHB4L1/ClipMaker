@@ -36,7 +36,9 @@ def validate_chart_download(download, destination, image_format):
     else:
         assert image_format == "GIF", image_format
         assert data[:6] in (b"GIF87a", b"GIF89a"), f"{destination.name}: invalid GIF signature"
-        assert data.endswith(b";"), f"{destination.name}: incomplete GIF"
+        # gif.js emits a final fixed-size byte page with NUL padding after the
+        # trailer. Accept that padding; Pillow below still decodes every frame.
+        assert data.rstrip(b"\0").endswith(b";"), f"{destination.name}: incomplete GIF"
         dimensions = struct.unpack("<HH", data[6:10])
     assert min(dimensions) >= 200, f"{destination.name}: unexpected chart dimensions {dimensions}"
     result = {"filename": download.suggested_filename, "bytes": len(data), "dimensions": dimensions,
