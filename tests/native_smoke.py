@@ -16,6 +16,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
 from smoke_test import fixture_csv, request
+from analysis_server import wait_for_process_exit
 
 
 def export_finished(driver):
@@ -31,6 +32,17 @@ def stage(evidence, message):
     print(f"Native E2E: {message}", flush=True)
     with (evidence / "stages.log").open("a", encoding="utf-8") as output:
         output.write(f"{time.time():.3f} {message}\n")
+
+
+def verify_shutdown(health, evidence, launch):
+    result = {}
+    for key in ("desktop_owner_pid", "pid", "parent_pid"):
+        pid = health.get(key)
+        if not isinstance(pid, int) or pid <= 0:
+            raise AssertionError(f"Missing native process identity: {key}")
+        result[key] = {"pid": pid, "exited": wait_for_process_exit(pid, timeout=30)}
+        (evidence / f"shutdown-{launch}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        assert result[key]["exited"], f"Native process still running after window close: {result}"
 
 
 def package_lifecycle(app, package, uninstall=False):
@@ -108,6 +120,7 @@ def main():
 
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / "result.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
     faulthandler.dump_traceback_later(600, exit=True)
     options = ArgOptions()
     options.set_capability("browserName", "wry")
@@ -204,8 +217,11 @@ def main():
                     assert project_path.resolve().is_relative_to(root.resolve()), project_path
                     stage(evidence, f"launch {launch + 1}: capture evidence and close")
                     driver.save_screenshot(str(evidence / f"native-launch-{launch + 1}.png"))
+                    health = request(base, "/api/health")
                     driver.quit()
                     driver = None
+                    stage(evidence, f"launch {launch + 1}: wait for shell and backend exit")
+                    verify_shutdown(health, evidence, launch + 1)
                     if launch == 0 and args.package:
                         stage(evidence, "reinstall same-version package before relaunch")
                         preserved = project_path.read_bytes()
@@ -220,10 +236,11 @@ def main():
                         time.sleep(.2)
                     assert not args.app.exists(), "Uninstall did not remove the application"
                     assert project_path.read_bytes() == preserved, "Uninstall removed or changed saved project data"
-                (evidence / "result.json").write_text(json.dumps({"status": "passed", "native_launches": 2,
-                    "reinstall_and_uninstall": bool(args.package)}), encoding="utf-8")
+                result = {"status": "passed", "native_launches": 2,
+                    "reinstall_and_uninstall": bool(args.package), "shutdown_verified": True}
             except BaseException:
                 print(traceback.format_exc(), flush=True)
+                (evidence / "result.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")
                 (evidence / "failure.txt").write_text(traceback.format_exc(), encoding="utf-8")
                 if driver:
                     try:
@@ -248,6 +265,7 @@ def main():
                         process.kill()
                         process.wait(timeout=5)
     faulthandler.cancel_dump_traceback_later()
+    (evidence / "result.json").write_text(json.dumps(result), encoding="utf-8")
 
 
 if __name__ == "__main__":

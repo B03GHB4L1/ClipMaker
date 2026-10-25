@@ -1,7 +1,15 @@
 # VizorPlay Desktop Feature And Verification Ledger
 
-Updated: 22 October 2026. This is a release checklist, not a declaration that every
+Updated: 25 October 2026. This is a release checklist, not a declaration that every
 platform and interaction has passed acceptance testing.
+
+Latest investigation: run `39797304190` passed installed Linux acceptance and
+all browser/frozen/Homebrew jobs. Windows finished its functional/lifecycle
+checks but temporary-directory cleanup failed on an in-use project CWD. The
+25 October fix adds explicit desktop-owner monitoring, bounded worker shutdown,
+and actual shell/backend exit verification before fixture cleanup. Native
+success is now recorded only after cleanup. The new Windows package result
+remains pending; see E2E_TESTING.md for evidence and verification details.
 
 ## Current Acceptance Status (22 October 2026)
 

@@ -43,9 +43,9 @@ UI_DIR = ROOT / "ui"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 if __package__:
-    from .analysis_server import AnalysisServer, run_analysis
+    from .analysis_server import AnalysisServer, run_analysis, watch_process_owner
 else:
-    from analysis_server import AnalysisServer, run_analysis
+    from analysis_server import AnalysisServer, run_analysis, watch_process_owner
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -306,6 +306,8 @@ class JobManager:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._cancellations: dict[str, threading.Event] = {}
         self._reserved_outputs: set[str] = set()
+        self._workers: dict[str, threading.Thread] = {}
+        self._closing = False
         self._lock = threading.Lock()
 
     def start(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -331,15 +333,28 @@ class JobManager:
             "output_filename": config["output_filename"],
         }
         cancellation = threading.Event()
+        worker = threading.Thread(target=self._run, args=(job_id, config, cancellation), daemon=True)
         with self._lock:
+            if self._closing:
+                if not config["dry_run"] and not config.get("individual_clips"):
+                    self._reserved_outputs.discard(str((Path(config["output_dir"]) / config["output_filename"]).resolve()))
+                raise ValueError("The local engine is shutting down")
             self._jobs[job_id] = job
             self._cancellations[job_id] = cancellation
-        threading.Thread(
-            target=self._run,
-            args=(job_id, config, cancellation),
-            daemon=True,
-        ).start()
+            worker.start()
+            self._workers[job_id] = worker
         return dict(job)
+
+    def close(self, timeout: float = 8) -> bool:
+        with self._lock:
+            self._closing = True
+            for cancellation in self._cancellations.values():
+                cancellation.set()
+            workers = list(self._workers.values())
+        deadline = time.monotonic() + timeout
+        for worker in workers:
+            worker.join(max(0, deadline - time.monotonic()))
+        return all(not worker.is_alive() for worker in workers)
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1210,7 +1225,8 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"snapshots": self.store.snapshots()})
             return
         if path == "/api/health":
-            self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0"})
+            self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0", "pid": os.getpid(), "parent_pid": os.getppid(),
+                "desktop_owner_pid": getattr(self.server, "desktop_owner_pid", None)})
             return
         if path == "/api/matches":
             self.send_json(HTTPStatus.OK, {"matches": self.store.list()})
@@ -1471,13 +1487,22 @@ def main() -> int:
     args = parser.parse_args()
     if args.analysis_port:
         return run_analysis(ROOT, args.analysis_port)
+    owner = os.environ.get("VIZORPLAY_OWNER_PID")
+    owner_pid = int(owner) if owner else None
+    if owner_pid is not None and (owner_pid <= 0 or owner_pid == os.getpid()):
+        raise ValueError("Desktop owner must identify another live process")
     server = create_server(args.host, args.port, args.data_dir.resolve())
+    server.desktop_owner_pid = owner_pid
+    if owner_pid is not None:
+        watch_process_owner(owner_pid, server.shutdown)
     print(f"VizorPlay shared UI running at http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if not server.jobs.close():
+            print("Export workers did not finish within the shutdown deadline", file=sys.stderr)
         server.analysis.close()
         server.server_close()
     return 0

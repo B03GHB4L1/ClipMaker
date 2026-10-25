@@ -137,6 +137,47 @@ validation passed during this investigation.
 
 ## Developer Commands
 
+### Windows Shutdown Ownership (25 October 2026)
+
+Run `39797304190` passed Linux installed package acceptance and all browser,
+frozen-backend and Homebrew jobs. Windows also finished playback, preview,
+export, relaunch, reinstall and uninstall, but failed deleting its temporary
+project working directory immediately after closing the window. Its premature
+`result.json` said passed before that cleanup failed. The later runner cleanup
+listed no surviving backend; this points to an exit/cleanup race, not proof of
+a permanently leaked process.
+
+The Tauri shell now identifies itself to its backend with `VIZORPLAY_OWNER_PID`.
+The backend monitors that owner and gracefully shuts down even when WebDriver
+or another caller ends the shell without running its Rust exit handler.
+Analytical processes also monitor the explicit owner. Shutdown cancels and joins
+export workers before closing analytics; Rust consumes the shutdown HTTP reply
+and allows bounded time for this cleanup.
+
+Native acceptance records the shell and backend PIDs from health, waits for
+those processes and the backend parent/launcher to exit after each window close,
+and fails if any is
+still running. It does not kill them to manufacture a pass. Shutdown evidence
+is retained per launch, and success is written only after temporary-directory
+cleanup succeeds. Source and frozen media smoke also exercise forced owner loss
+with an active export and analytical server and verify release of the working directory.
+
+The local Windows regression reproduced the same working-directory lock while
+the backend was running. Waiting only for the Python PID was insufficient:
+its launcher wrapper could still hold the directory. Waiting for that parent
+as well allowed the empty working directory to be removed inside the test,
+before its logging context was closed. This is now tested explicitly.
+
+The 70 local Python regressions, Node autosave regression, and source plus freshly
+rebuilt frozen Windows media/owner-exit smoke passed during this investigation.
+Hosted native results are still required before claiming the Windows installed
+package failure is resolved. No cleanup error is ignored, no external process
+is killed to manufacture a passing shutdown check, and no release was published.
+The expanded run contains 71 tests: 70 pass locally on Windows and one Linux-only
+unreaped-process regression is skipped locally and runs in Linux CI. Linux uses
+process descriptors where available to distinguish exit from PID existence;
+see the [pidfd manual](https://www.man7.org/linux/man-pages/man2/pidfd_open.2.html).
+
 ### Native Completion Fix (22 October 2026)
 
 Run `39625014429` completed every browser/frozen-backend and Homebrew job, but
