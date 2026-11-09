@@ -48,6 +48,10 @@ def page_functions(path):
                  "match_clock_to_video_time", "normalise_timeline_corrections",
                  "apply_timeline_corrections"):
         namespace[name] = getattr(core, name)
+    # Shared constants and loaders moved out of the pages into analysis_core.
+    import analysis_core
+    for name in ("SHOT_TYPES", "PERIOD_MAP", "DEF_ACTIONS", "GK_ACTIONS", "defensive_actions_df"):
+        namespace[name] = getattr(analysis_core, name)
     names = {"SHOT_TYPES", "DEF_WIN_TYPES", "PPDA_DEFENSIVE_ACTION_TYPES",
              "LOSS_TYPES", "IN_POSSESSION_ACTION_TYPES", "PITCH_ZONE_ORDER",
              "DEPTH_ZONE_ORDER", "PPDA_PRESS_ZONE_MIN_X", "PPDA_SCORE_CEILING",

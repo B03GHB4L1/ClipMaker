@@ -40,6 +40,8 @@ def resource_root() -> Path:
 ROOT = resource_root()
 APP_DIR = ROOT / "app"
 UI_DIR = ROOT / "ui"
+COMPONENT_DIR = APP_DIR / "smp_component" / "frontend"
+COMPONENT_PREFIX = "/analysis-component/"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 if __package__:
@@ -60,6 +62,63 @@ def atomic_json(path: Path, value: Any) -> None:
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+ANALYSIS_STATE_LIMIT = 20_000
+_STATE_KEY = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _clean_control_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:200]
+    if isinstance(value, list):
+        return [_clean_control_value(item) for item in value[:50] if not isinstance(item, (list, dict))]
+    raise ValueError("Analysis controls must be text, numbers, booleans or short lists.")
+
+
+def clean_analysis_state(state: Any) -> dict[str, Any]:
+    """Validate the native workspace's saved tab and control state per view."""
+    if not state:
+        return {}
+    if not isinstance(state, dict):
+        raise ValueError("Analysis state must be an object.")
+    clean: dict[str, Any] = {}
+    for view, entry in state.items():
+        if view not in {"analyst", "tactical"} or not isinstance(entry, dict):
+            raise ValueError("Unknown analytical view in saved state.")
+        tab = str(entry.get("tab") or "")
+        if tab and not _STATE_KEY.match(tab):
+            raise ValueError("Invalid analytical tab in saved state.")
+        controls = entry.get("controls") or {}
+        if not isinstance(controls, dict):
+            raise ValueError("Analysis controls must be an object.")
+        tabs = {}
+        for tab_name, values in controls.items():
+            if not _STATE_KEY.match(str(tab_name)) or not isinstance(values, dict):
+                raise ValueError("Invalid analysis controls in saved state.")
+            tabs[str(tab_name)] = {str(key): _clean_control_value(value) for key, value in values.items()
+                                   if _STATE_KEY.match(str(key))}
+        clean[view] = {"tab": tab, "controls": tabs}
+    if len(json.dumps(clean)) > ANALYSIS_STATE_LIMIT:
+        raise ValueError("Saved analysis state is too large.")
+    return clean
+
+
+def analysis_ui_modes() -> dict[str, str]:
+    """Workspace per view: VIZORPLAY_ANALYSIS_UI=native, or analyst=native,tactical=classic."""
+    modes = {"analyst": "classic", "tactical": "classic"}
+    setting = os.environ.get("VIZORPLAY_ANALYSIS_UI", "").strip().lower()
+    for part in filter(None, (item.strip() for item in setting.split(","))):
+        view, _, mode = part.rpartition("=")
+        mode = {"streamlit": "classic"}.get(mode, mode)
+        if mode not in {"classic", "native"}:
+            continue
+        for name in ([view] if view else list(modes)):
+            if name in modes:
+                modes[name] = mode
+    return modes
 
 
 class MatchStore:
@@ -162,6 +221,7 @@ class MatchStore:
             "had_penalties": bool(match.get("had_penalties") or (match.get("markers") or {}).get("PEN")),
             "filter_snapshots": match.get("filter_snapshots") if isinstance(match.get("filter_snapshots"), dict) else {},
             "export_history": match.get("export_history") if isinstance(match.get("export_history"), list) else [],
+            "analysis_state": clean_analysis_state(match.get("analysis_state")),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if not clean["id"]:
@@ -1079,6 +1139,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path: str) -> str:
         parsed = urlparse(path).path
+        if parsed.startswith(COMPONENT_PREFIX):
+            # Map component assets only; never other app files.
+            candidate = (COMPONENT_DIR / unquote(parsed[len(COMPONENT_PREFIX):] or "index.html")).resolve()
+            if COMPONENT_DIR.resolve() in candidate.parents and candidate.is_file():
+                return str(candidate)
+            return str(COMPONENT_DIR / "__missing__")
         relative = parsed.lstrip("/") or "index.html"
         candidate = (UI_DIR / relative).resolve()
         if UI_DIR.resolve() not in candidate.parents and candidate != UI_DIR.resolve():
@@ -1148,6 +1214,16 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.wfile.write(encoded)
             return
         self.send_json(status, {"error": message})
+
+    def analysis_project(self, project_id: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
+            raise ValueError("Open a project before using the analytical workspace.")
+        project = self.store.get(project_id)
+        if not project:
+            raise ValueError("Project not found")
+        if not project.get("csv_path") or not Path(project["csv_path"]).is_file():
+            raise ValueError("Scrape or import a match before opening an analytical workspace.")
+        return project
 
     def validate_local_request(self) -> None:
         expected = f"127.0.0.1:{self.server.server_port}"
@@ -1277,6 +1353,18 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/snapshots":
             self.send_json(HTTPStatus.OK, {"snapshots": self.store.snapshots()})
             return
+        if path == "/api/analysis/config":
+            from analysis_core import TABS, VIEWS
+            modes = analysis_ui_modes()
+            self.send_json(HTTPStatus.OK, {"views": {view: {"label": label, "mode": modes[view], "tabs": TABS[view]}
+                                                     for view, label in VIEWS.items()}})
+            return
+        if path == "/api/analysis/summary":
+            project = self.analysis_project(parse_qs(urlparse(self.path).query).get("project", [""])[0])
+            frames = self.server.analysis_frames.get(project["csv_path"])  # type: ignore[attr-defined]
+            self.send_json(HTTPStatus.OK, {"summary": frames.summary(),
+                                           "analysis_state": project.get("analysis_state", {})})
+            return
         if path == "/api/health":
             self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0", "pid": os.getpid(), "parent_pid": os.getppid(),
                 "desktop_owner_pid": getattr(self.server, "desktop_owner_pid", None)})
@@ -1333,6 +1421,18 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path == "/api/projects":
                 self.send_json(HTTPStatus.CREATED, {"project": self.store.create(str(body.get("name") or "Untitled project"))})
                 return
+            if path.startswith("/api/analysis/"):
+                from analysis_core import validate_tab
+                parts = path.split("/")
+                if len(parts) != 5:
+                    raise ValueError("Unknown analytical tab")
+                entry = validate_tab(parts[3], parts[4])
+                self.analysis_project(str(body.get("project_id") or ""))
+                if not entry["native"]:
+                    self.send_json(HTTPStatus.NOT_IMPLEMENTED,
+                                   {"error": "This tab still runs in the classic workspace.", "classic": True})
+                    return
+                raise ValueError("Unknown analytical tab")  # Phase 2 registers native handlers here.
             if path == "/api/analysis":
                 project = self.store.get(str(body.get("project_id") or ""))
                 if not project or not project.get("csv_path") or not Path(project["csv_path"]).is_file():
@@ -1340,8 +1440,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 view = str(body.get("view") or "analyst")
                 if view not in {"analyst", "tactical"}:
                     raise ValueError("Unknown analytical view")
+                from analysis_core import TABS
+                tab = str(body.get("tab") or "")
+                tab_query = f"&tab={tab}" if any(item["slug"] == tab for item in TABS[view]) else ""
                 port = self.server.analysis.start()
-                self.send_json(HTTPStatus.OK, {"url": f"http://127.0.0.1:{port}/?project={project['id']}&view={view}&embed=true"})
+                self.send_json(HTTPStatus.OK, {"url": f"http://127.0.0.1:{port}/?project={project['id']}&view={view}&embed=true{tab_query}"})
                 return
             if path.startswith("/api/projects/"):
                 project_id = path.rsplit("/", 1)[-1]
@@ -1521,6 +1624,21 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         print(f"[clipmaker] {self.address_string()} {message % args}")
 
 
+class LazyFrameCache:
+    """Defers importing pandas until an analysis request arrives."""
+
+    def __init__(self):
+        self._cache = None
+        self._lock = threading.Lock()
+
+    def get(self, csv_path: str):
+        with self._lock:
+            if self._cache is None:
+                from analysis_core import FrameCache
+                self._cache = FrameCache()
+        return self._cache.get(csv_path)
+
+
 def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), ClipMakerHandler)
     server.match_store = MatchStore(data_dir)  # type: ignore[attr-defined]
@@ -1528,6 +1646,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.jobs = JobManager()  # type: ignore[attr-defined]
     server.media_files = {}  # type: ignore[attr-defined]
     server.analysis = AnalysisServer(ROOT, data_dir)  # type: ignore[attr-defined]
+    server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     atexit.register(server.analysis.close)
     return server
 

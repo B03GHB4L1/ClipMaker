@@ -9,6 +9,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import theme
 from project_analysis import analysis_frame, session_video, preserve_analysis_controls
+from analysis_core import (
+    SHOT_TYPES, PERIOD_MAP, DEF_ACTIONS, GK_ACTIONS, defensive_actions_df, build_analyst_frames,
+)
 from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map, pressing_map
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
@@ -47,20 +50,7 @@ theme.render_top_nav("analyst")
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost",
-              "BlockedShot", "AttemptSaved", "Attempt"}
-
-PERIOD_MAP = {
-    "FirstHalf": 1, "SecondHalf": 2,
-    "FirstPeriodOfExtraTime": 3, "SecondPeriodOfExtraTime": 4,
-    "PenaltyShootout": 5,
-    1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
-}
-
-DEF_ACTIONS = {"Tackle", "Interception", "Clearance", "Aerial", "Block",
-               "Challenge", "Dispossessed", "Error"}
-
-GK_ACTIONS = {"Punch", "Claim", "KeeperSweeper", "KeeperPickup", "PenaltyFaced"}
+# SHOT_TYPES, PERIOD_MAP, DEF_ACTIONS and GK_ACTIONS live in analysis_core.
 
 # Tier base scores for "Top 5 Moments" — xT adds up to ~20 pts on top
 _MOMENT_TIERS = {
@@ -218,21 +208,6 @@ def brand_plotly_export(fig, light: bool = False):
     return fig
 
 
-def defensive_actions_df(source_df):
-    defensive = source_df[source_df["type"].isin(DEF_ACTIONS)].copy()
-    if defensive.empty:
-        return defensive.reset_index(drop=True)
-
-    type_series = defensive["type"].astype(str)
-    if "depth_zone" in defensive.columns:
-        depth_series = defensive["depth_zone"].astype(str)
-    else:
-        depth_series = pd.Series("", index=defensive.index)
-
-    # Final-third aerials are usually attacking headed shots/passes, not defensive actions.
-    attacking_header_actions = type_series.eq("Aerial") & depth_series.eq("Attacking Third")
-    return defensive[~attacking_header_actions].copy().reset_index(drop=True)
-
 # =============================================================================
 # SESSION STATE
 # =============================================================================
@@ -324,24 +299,6 @@ def _choose_active_match_csv(page_key, current_path):
         _restore_match_setup(selected)
         st.rerun()
     return selected
-
-
-def _resolve_event_team_names(df):
-    if "team" not in df.columns:
-        return "", ""
-    event_teams = [str(team) for team in df["team"].dropna().astype(str).unique().tolist() if str(team)]
-    if len(event_teams) < 2:
-        return (event_teams + ["", ""])[:2]
-
-    home_label = ""
-    away_label = ""
-    if "homeTeam" in df.columns and not df["homeTeam"].dropna().empty:
-        home_label = str(df["homeTeam"].dropna().iloc[0])
-    if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty:
-        away_label = str(df["awayTeam"].dropna().iloc[0])
-
-    from team_names import resolve_home_away
-    return resolve_home_away(home_label, away_label, event_teams)
 
 
 def _first_nonempty(df, columns):
@@ -512,31 +469,15 @@ gk_df            = None
 
 if data_loaded:
     try:
-        df_all           = analysis_frame(read_csv_safe(csv_path))
-        # The selected CSV is the source of truth; use event team names for filters/maps.
-        home_team, away_team = _resolve_event_team_names(df_all)
-        pso_shots_df     = df_all[df_all["period"] == "PenaltyShootout"].copy() if "period" in df_all.columns else pd.DataFrame()
-        pso_shots_df     = pso_shots_df[pso_shots_df["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
-        if "period" in df_all.columns:
-            df_all = df_all[df_all["period"] != "PenaltyShootout"].copy()
-        shots_df         = df_all[df_all["type"].isin(SHOT_TYPES)].copy().reset_index(drop=True)
-        passes_df        = df_all[df_all["type"] == "Pass"].copy().reset_index(drop=True)
-        def_df           = defensive_actions_df(df_all)
-        dribble_carry_df = df_all[df_all["type"].isin({"TakeOn", "Carry"})].copy().reset_index(drop=True)
-        gk_df            = df_all[df_all["type"].isin(GK_ACTIONS)].copy().reset_index(drop=True)
-        # Re-attribute own goals to the benefiting team so all filtering/display is correct
-        if "is_own_goal" in shots_df.columns and home_team and away_team:
-            og = shots_df["is_own_goal"].astype(str).str.lower().isin(["true", "1", "yes"])
-            home_og = og & (shots_df["team"] == home_team)
-            away_og = og & (shots_df["team"] == away_team)
-            shots_df.loc[home_og, "team"] = away_team
-            shots_df.loc[away_og, "team"] = home_team
-        if "is_own_goal" in pso_shots_df.columns and home_team and away_team:
-            og = pso_shots_df["is_own_goal"].astype(str).str.lower().isin(["true", "1", "yes"])
-            home_og = og & (pso_shots_df["team"] == home_team)
-            away_og = og & (pso_shots_df["team"] == away_team)
-            pso_shots_df.loc[home_og, "team"] = away_team
-            pso_shots_df.loc[away_og, "team"] = home_team
+        _frames          = build_analyst_frames(read_csv_safe(csv_path), source=csv_path)
+        df_all           = _frames.df_all
+        home_team, away_team = _frames.home_team, _frames.away_team
+        pso_shots_df     = _frames.pso_shots_df
+        shots_df         = _frames.shots_df
+        passes_df        = _frames.passes_df
+        def_df           = _frames.def_df
+        dribble_carry_df = _frames.dribble_carry_df
+        gk_df            = _frames.gk_df
     except Exception as e:
         st.error(f"Could not load match data: {e}")
 

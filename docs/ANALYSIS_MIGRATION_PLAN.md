@@ -1,7 +1,8 @@
 # Analysis Workspace Migration Plan: Streamlit to Shared HTML/JS
 
-Status: Phase 0 complete locally (Windows) on 9 November 2026; CI on Linux
-and macOS pending. Phase 1 not started.
+Status: Phase 0 complete and green on Windows, Linux and macOS CI
+(9 November 2026). Phase 1 complete locally on Windows; CI pending.
+Phase 2 not started.
 
 ## Goal
 
@@ -165,6 +166,48 @@ Findings left for later phases:
   loading/error/empty states, footer version, URL and project state.
 - Feature flag; Streamlit path still default.
 - Test: shim click-to-select and export in a browser; endpoint validation.
+
+#### Phase 1 results (9 November 2026)
+
+Built:
+- `app/analysis_core/`: Streamlit-free package. `frames.py` holds the Analyst
+  Room data loading, moved unchanged (the page now imports it; the golden
+  snapshot still matches). `FrameCache` keys on CSV path, size and mtime, so
+  saving UI state never reloads data but re-importing a CSV does.
+  `registry.py` lists views and tabs with a `native` flag per tab.
+- API (`packaging/clipmaker_api_server.py`):
+  - `GET /api/analysis/config`: views, tabs and mode per view.
+  - `GET /api/analysis/summary?project=`: teams, counts, periods, saved state.
+  - `POST /api/analysis/<view>/<tab>`: validates names and project; returns
+    501 with `classic: true` until a tab's native handler exists.
+  - `/analysis-component/*`: serves only the map component's folder.
+  - Projects store `analysis_state` (tab and controls per view), validated
+    and capped at 20 KB.
+- Feature flag `VIZORPLAY_ANALYSIS_UI` (`native`, or `analyst=native,
+  tactical=classic`); default classic. `?ui=native|classic` overrides per page.
+- `ui/analysis/component-host.js`: hosts the unchanged map component in an
+  iframe and speaks its three-message protocol, accepting messages only from
+  its own frame.
+- `ui/analysis/native.js` + `native.css`: tab bar with arrow/Home/End keys,
+  loading, error (with retry) and empty states, match summary, URL `?tab=`
+  and per-project saved tab. Unmigrated tabs link to the classic workspace,
+  which now opens on the same tab (`?tab=` honoured once per session).
+
+Tests: `tests/test_analysis_core.py` (12: no Streamlit import, frames,
+cache reuse/invalidation/eviction, registry, saved-state validation, mode
+parsing, API config/summary/validation, component path containment, state
+round trip, classic deep link) and a native stage in `tests/browser_smoke.py`
+(tabs, keyboard, URL, saved state across reload, classic fallback on the same
+tab, a recorded Shot Map rendered through the host with a real click returning
+the selected shot, PNG export from the hosted map, 390 px layout with the active tab visible, error state, no
+console errors).
+
+Fixed while building: tab saves were debounced, so leaving within 300 ms lost
+the choice outside the unload guard; saves are now immediate and queued.
+
+The browser stage also downloads and validates a PNG export from the hosted
+map. Not in Phase 1: collapsible control sections arrive with the first tab
+that has controls (Phase 2).
 
 ### Phase 2: Pilot tab (Shot Map)
 
