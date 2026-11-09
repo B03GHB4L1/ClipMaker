@@ -23,13 +23,23 @@ document.querySelectorAll("[data-view]").forEach((link) => {
   if (link.dataset.view === view) link.setAttribute("aria-current", "page");
   link.href = `/analysis.html?view=${link.dataset.view}&project=${encodeURIComponent(projectId || "")}`;
 });
+const requestedUi = params.get("ui");
 const connect = async () => {
   try {
     if (!projectId) throw new Error("Open a project in Intake first.");
     const { project } = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
     rememberProject(project);
     document.querySelector("[data-analysis-project]").textContent = project.project_name || `${project.home_team} vs ${project.away_team}`;
-    const result = await projectRequest("/api/analysis", { project_id: projectId, view });
+    const config = await projectRequest("/api/analysis/config");
+    const mode = ["native", "classic"].includes(requestedUi) ? requestedUi : config.views[view].mode;
+    if (mode === "native") {
+      const root = document.querySelector("[data-native-workspace]");
+      root.hidden = false;
+      const { startNativeWorkspace } = await import("./analysis/native.js");
+      await startNativeWorkspace({ projectId, view, config, root, status: document.querySelector("[data-analysis-status]") });
+      return;
+    }
+    const result = await projectRequest("/api/analysis", { project_id: projectId, view, tab: params.get("tab") || "" });
     const frame = document.querySelector("[data-analysis-frame]");
     frame.src = result.url;
     frame.hidden = false;

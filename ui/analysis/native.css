@@ -1,0 +1,21 @@
+/* Native analysis workspace (Phase 1 shell). Uses the shared design tokens. */
+.native-workspace { display: grid; grid-template-rows: auto auto 1fr; align-content: start; gap: 8px; padding-bottom: 12px; height: calc(100vh - 119px); overflow: auto; font-family: var(--cm-font); }
+.native-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 12px; color: var(--cm-muted); }
+.native-summary strong { color: var(--cm-ink); font-size: 14px; }
+.native-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cm-rule); scrollbar-width: thin; }
+.native-tabs [role=tab] { flex: none; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--cm-muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.native-tabs [role=tab]:hover { color: var(--cm-ink); }
+.native-tabs [role=tab][aria-selected=true] { color: var(--cm-ink); border-bottom-color: var(--cm-ink); }
+.native-tabs [role=tab]:focus-visible, .native-panel:focus-visible, .native-retry:focus-visible, .native-classic-link:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
+.native-panel { min-height: 240px; }
+.native-panel[aria-busy=true] { opacity: .6; transition: opacity .2s var(--cm-settle); }
+.native-message { max-width: 560px; padding: 28px 4px; }
+.native-message h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--cm-ink); }
+.native-message p { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--cm-muted); }
+.native-error h2 { color: #ac302e; }
+.native-loading p::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 8px; border: 2px solid var(--cm-rule); border-top-color: var(--cm-ink); border-radius: 50%; vertical-align: -1px; animation: native-spin .8s linear infinite; }
+.native-retry, .native-classic-link { display: inline-block; padding: 7px 12px; border: 1px solid var(--cm-ink); background: var(--cm-ink); color: var(--cm-paper); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.analysis-component { display: block; width: 100%; border: 0; }
+@keyframes native-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .native-loading p::after { animation: none; } }
+@media (max-width: 560px) { .native-workspace { height: auto; min-height: calc(100vh - 119px); } .native-tabs [role=tab] { padding: 8px; font-size: 11px; } }

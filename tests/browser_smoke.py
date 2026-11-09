@@ -198,6 +198,124 @@ def exercise_analyst_chart(page, frame, evidence):
     expect(shots.locator('.cm-shot-panel')).to_have_count(0)
 
 
+def golden_shot_map_args():
+    """A real Shot Map payload recorded from the classic workspace."""
+    import gzip
+    with gzip.open(ROOT / "tests" / "golden" / "analysis" / "fixture.json.gz", "rb") as handle:
+        golden = json.loads(handle.read().decode("utf-8"))
+    for record in golden["views"]["analyst"]["◉ Shot Map"]:
+        for element in record["elements"]:
+            if element["kind"] == "component" and element["args"].get("component_type") == "shot_map":
+                return element["args"]
+    raise AssertionError("No Shot Map payload in the golden snapshot")
+
+
+def exercise_native_workspace(page, base, project_id, evidence, errors):
+    stage("open native analysis workspace shell")
+    console_errors = []
+    listener = lambda message: console_errors.append(message.text) if message.type == "error" else None
+    page.on("console", listener)
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    tabs = page.get_by_role("tablist", name="Analyst Room").get_by_role("tab")
+    expect(tabs).to_have_count(8)
+    expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
+    expect(page.locator(".native-summary")).to_contain_text("Home vs Away")
+    expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
+    assert page.locator("[data-analysis-frame]").is_hidden()
+
+    stage("keyboard tab navigation updates URL and saved project state")
+    page.get_by_role("tab", name="Shot Map").focus()
+    page.keyboard.press("ArrowRight")
+    expect(page.get_by_role("tab", name="Pass Map")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_role("tab", name="Pass Map")).to_be_focused()
+    assert "tab=pass-map" in page.url
+    page.keyboard.press("End")
+    expect(page.get_by_role("tab", name="Comparison")).to_have_attribute("aria-selected", "true")
+    page.keyboard.press("ArrowRight")
+    expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
+    page.keyboard.press("ArrowLeft")
+    expect(page.get_by_role("tab", name="Comparison")).to_have_attribute("aria-selected", "true")
+    page.get_by_role("tab", name="Goalkeeper").click()
+    # The save starts on click (no debounce), so "Saved locally" means it landed.
+    expect(page.locator("[data-project-status]")).to_have_text("Saved locally", timeout=30000)
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    saved = request(base, f"/api/projects/{project_id}")["project"]["analysis_state"]
+    assert saved["analyst"]["tab"] == "goalkeeper", saved
+    expect(page.get_by_role("tab", name="Goalkeeper")).to_have_attribute("aria-selected", "true")
+
+    stage("unmigrated tab falls back to the classic workspace on the same tab")
+    link = page.get_by_role("link", name="Open in classic workspace")
+    assert "ui=classic" in link.get_attribute("href") and "tab=goalkeeper" in link.get_attribute("href")
+    link.click()
+    frame = page.frame_locator("[data-analysis-frame]")
+    expect(frame.get_by_role("tab", name="⊞ Goalkeeper")).to_have_attribute("aria-selected", "true", timeout=60000)
+
+    stage("component host renders a recorded Shot Map and reports a real click")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native&tab=shot-map")
+    expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
+    args = golden_shot_map_args()
+    target = args["shots"][0]["df_idx"]
+    page.evaluate("""async (args) => {
+        const { ComponentHost } = await import("/analysis/component-host.js");
+        const holder = document.createElement("div");
+        holder.id = "host-test";
+        document.querySelector(".native-panel").replaceChildren(holder);
+        window.__hostValues = [];
+        window.__host = new ComponentHost(holder, { onValue: (value) => window.__hostValues.push(value) });
+        await window.__host.render(args);
+    }""", args)
+    component = page.frame_locator(".analysis-component")
+    plot = component.locator("#plot")
+    expect(plot.locator("canvas")).not_to_have_count(0, timeout=60000)
+    page.wait_for_function("parseInt(document.querySelector('.analysis-component').style.height) > 200")
+    position = plot.evaluate("""(element, target) => {
+        const chart = window.echarts.getInstanceByDom(element);
+        for (const [seriesIndex, series] of chart.getOption().series.entries()) {
+            const point = (series.data || []).find(point => point && point.customdata === target);
+            if (point) {
+                const [x, y] = chart.convertToPixel({seriesIndex}, point.value);
+                return {x, y};
+            }
+        }
+        throw new Error('Recorded shot missing from the hosted map');
+    }""", target)
+    plot.click(position=position)
+    page.wait_for_function("window.__hostValues.length > 0", timeout=30000)
+    value = page.evaluate("window.__hostValues.at(-1)")
+    assert (value[0] if isinstance(value, list) else value) == target, value
+    with page.expect_download(timeout=30000) as downloaded:
+        component.locator('[data-export="png"]').click()
+    validate_chart_download(downloaded.value, evidence / "native-host-shot-map.png", "PNG")
+    page.screenshot(path=str(evidence / "native-host.png"))
+
+    stage("native workspace at narrow width")
+    page.set_viewport_size({"width": 390, "height": 700})
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    expect(page.get_by_role("tab", name="Goalkeeper")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_role("tab", name="Goalkeeper")).to_be_in_viewport()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert page.locator(".app-footer").is_visible()
+    page.screenshot(path=str(evidence / "native-390.png"))
+    page.set_viewport_size({"width": 1280, "height": 800})
+
+    assert not console_errors, console_errors
+    stage("native workspace error state")
+    empty_id = page.evaluate("""async () => {
+        const response = await fetch("/api/projects", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+        return (await response.json()).project.id;
+    }""")
+    page.goto(base + f"/analysis.html?view=tactical&project={empty_id}&ui=native")
+    alert = page.locator(".native-error")
+    expect(alert).to_contain_text("Scrape or import a match")
+    expect(alert.get_by_role("button", name="Try again")).to_be_visible()
+    expect(page.locator("[data-analysis-status]")).to_have_text("Setup needs attention")
+    page.remove_listener("console", listener)
+    # Only the deliberate 400 from the summary of a project without match data.
+    unexpected = [text for text in console_errors if "status of 400" not in text]
+    assert not unexpected, unexpected
+    assert not errors, errors
+
+
 def main():
     parser = argparse.ArgumentParser()
     choice = parser.add_mutually_exclusive_group()
@@ -378,6 +496,7 @@ def exercise(page, base, root, evidence, errors):
     expect(tactical.get_by_text("Loaded:", exact=False)).to_contain_text("Home vs Away")
     assert tactical.get_by_test_id("stException").count() == 0
     page.screenshot(path=str(evidence / "tactical.png"))
+    exercise_native_workspace(page, base, project_id, evidence, errors)
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):
         page.set_viewport_size({"width": width, "height": height})
