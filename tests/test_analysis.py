@@ -82,6 +82,25 @@ class AnalysisViewsTests(unittest.TestCase):
                         self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
                         self.assertEqual(app.radio(key=key).value, choice)
 
+    def test_goalkeeper_distribution_without_passes_shows_empty_state(self):
+        from streamlit.testing.v1 import AppTest
+        csv = self.root / "events.csv"
+        frame = pd.read_csv(csv)
+        frame.loc[frame["type"].isin(["Claim", "KeeperPickup"]) & frame["team"].eq("Home"), "playerName"] = "Home Keeper"
+        frame.to_csv(csv, index=False)
+        with patch.dict(os.environ, {"CLIPMAKER_ANALYSIS_MODE": "1", "CLIPMAKER_DATA_DIR": str(self.root)}):
+            app = AppTest.from_file(str(ROOT / "app" / "analysis_entry.py"))
+            app.query_params.update({"project": self.project["id"], "view": "analyst"})
+            app.run(timeout=60)
+            for key, value in (("gk_team_radio", "Home"), ("gk_mode_radio", "Distribution"),
+                               ("gk_player_sel", "Home Keeper")):
+                app.session_state["analyst_tabs"] = "⊞ Goalkeeper"
+                app.session_state[key] = value
+                app.run(timeout=60)
+            self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
+            self.assertEqual(len(app.error), 0, [entry.value for entry in app.error])
+            self.assertIn("No distribution passes", " ".join(str(entry.value) for entry in app.info))
+
     def test_build_up_sequence_selection_survives_reruns_and_tab_switches(self):
         from streamlit.testing.v1 import AppTest
         csv = self.root / "events.csv"
