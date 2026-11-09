@@ -937,7 +937,7 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
                 "why": row.get("outcome", ""),
             })
     team_df = df[df["team"].astype(str).eq(team)].copy()
-    threat = team_df[team_df["type"].isin(["Pass", "Carry"]) & (team_df["xT"] > 0)].sort_values("xT", ascending=False).head(30)
+    threat = team_df[team_df["type"].isin(["Pass", "Carry"]) & (team_df["xT"] > 0)].sort_values("xT", ascending=False, kind="stable").head(30)
     for _, row in threat.iterrows():
         rows.append({
             **row.to_dict(),
@@ -948,7 +948,7 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
     box_entries = team_df[_box_entry_mask(team_df)].copy()
     if not box_entries.empty:
         box_entries["entry_score"] = box_entries["xT"].clip(lower=0) + box_entries["type"].isin(SHOT_TYPES).astype(int)
-        for _, row in box_entries.sort_values("entry_score", ascending=False).head(30).iterrows():
+        for _, row in box_entries.sort_values("entry_score", ascending=False, kind="stable").head(30).iterrows():
             rows.append({
                 **row.to_dict(),
                 "playlist": "Box Entries",
@@ -957,7 +957,7 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
             })
     restarts = team_df[_set_piece_mask(team_df)].copy()
     if not restarts.empty:
-        for _, row in restarts.sort_values("xT", ascending=False).head(30).iterrows():
+        for _, row in restarts.sort_values("xT", ascending=False, kind="stable").head(30).iterrows():
             rows.append({
                 **row.to_dict(),
                 "playlist": "Restarts",
@@ -985,7 +985,7 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
     )
     if "match_label" in out.columns:
         out["moment"] = out["match_label"].fillna("").astype(str) + " | " + out["moment"]
-    return out.sort_values(["playlist", "score"], ascending=[True, False]).reset_index(drop=True)
+    return out.sort_values(["playlist", "score"], ascending=[True, False], kind="stable").reset_index(drop=True)
 
 
 def _moment_list_html(rows):
@@ -1051,7 +1051,8 @@ def render_video_lab(df, team):
         st.info("No moments found for this playlist.")
         return
 
-    current = current.sort_values("score", ascending=False).head(40).reset_index(drop=True)
+    # Stable: tied moments keep chronological order on every platform.
+    current = current.sort_values("score", ascending=False, kind="stable").head(40).reset_index(drop=True)
     selected_id = st.selectbox(
         "Moment", current["event_id"].tolist(),
         format_func=lambda event_id: current.loc[current["event_id"].eq(event_id), "moment"].iloc[0],
