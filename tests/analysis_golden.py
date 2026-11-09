@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import gzip
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -63,7 +64,9 @@ class Normalizer:
             value = value.replace(path, "<DATA>").replace(path.replace("\\", "\\\\"), "<DATA>")
         for index, project_id in enumerate(self.ids):
             value = value.replace(project_id, f"<PROJECT{index}>")
-        return value
+        # Paths inside the data root use the OS separator; record them POSIX-style.
+        return re.sub(r"<DATA>[^\s'\"<>|,;)]*",
+                      lambda match: re.sub(r"\\+", "/", match.group(0)), value)
 
     def data(self, value):
         if isinstance(value, str):
@@ -330,34 +333,31 @@ def load(path: Path):
         return json.loads(handle.read().decode("utf-8"))
 
 
-def first_difference(expected, actual, path="$"):
+def differences(expected, actual, path="$"):
+    """Yield human-readable differences between two snapshots."""
     if type(expected) is not type(actual):
-        return f"{path}: type {type(expected).__name__} != {type(actual).__name__}"
-    if isinstance(expected, dict):
+        yield f"{path}: type {type(expected).__name__} != {type(actual).__name__}"
+    elif isinstance(expected, dict):
         for key in sorted(set(expected) | set(actual)):
             if key not in expected or key not in actual:
-                return f"{path}.{key}: present only in {'actual' if key not in expected else 'expected'}"
-            found = first_difference(expected[key], actual[key], f"{path}.{key}")
-            if found:
-                return found
-        return None
-    if isinstance(expected, list):
+                yield f"{path}.{key}: present only in {'actual' if key not in expected else 'expected'}"
+            else:
+                yield from differences(expected[key], actual[key], f"{path}.{key}")
+    elif isinstance(expected, list):
         if len(expected) != len(actual):
-            return f"{path}: length {len(expected)} != {len(actual)}"
-        for index, (left, right) in enumerate(zip(expected, actual)):
-            found = first_difference(left, right, f"{path}[{index}]")
-            if found:
-                return found
-        return None
-    return None if expected == actual else f"{path}: {str(expected)[:120]!r} != {str(actual)[:120]!r}"
+            yield f"{path}: length {len(expected)} != {len(actual)}"
+        else:
+            for index, (left, right) in enumerate(zip(expected, actual)):
+                yield from differences(left, right, f"{path}[{index}]")
+    elif expected != actual:
+        yield f"{path}: {str(expected)[:120]!r} != {str(actual)[:120]!r}"
 
 
-def compare(expected, actual):
-    """Return human-readable differences, ignoring timings."""
+def compare(expected, actual, limit=20):
+    """Return up to ``limit`` human-readable differences, ignoring timings."""
     expected = {k: v for k, v in expected.items() if k != "timings"}
     actual = {k: v for k, v in actual.items() if k != "timings"}
-    found = first_difference(expected, actual)
-    return [found] if found else []
+    return list(itertools.islice(differences(expected, actual), limit))
 
 
 @contextlib.contextmanager
