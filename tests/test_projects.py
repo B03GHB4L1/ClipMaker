@@ -226,6 +226,16 @@ class ProjectApiTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 400)
         error.exception.close()
 
+    def test_rejected_request_with_unread_body_still_gets_error_reply(self):
+        # A large unread body used to make the server's close reset the
+        # connection, so clients saw "connection aborted" instead of the 400.
+        for attempt in range(5):
+            with self.subTest(attempt=attempt), self.assertRaises(HTTPError) as error:
+                self.request("/api/projects", {"padding": "x" * 500_000}, {"Origin": "https://untrusted.test"})
+            self.assertEqual(error.exception.code, 400)
+            self.assertIn("other websites", json.loads(error.exception.read())["error"])
+            error.exception.close()
+
     def test_rescrape_same_csv_clears_previous_clip_plan(self):
         project = self.request("/api/projects", {})["project"]
         csv_path = str(self.root / "events.csv")
