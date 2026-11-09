@@ -146,7 +146,9 @@ Findings left for later phases:
   and the default team can differ between sessions.
 - `test_projects.test_cross_origin_request_is_rejected` failed once in a full
   local run with `WinError 10053` (server closed the connection before the
-  client read the 4xx) and passed alone. Pre-existing timing flake; untouched.
+  client read the 4xx) and passed alone. Cause: POST errors were answered
+  without reading the request body. Fixed by draining small rejected bodies
+  (`test_rejected_request_with_unread_body_still_gets_error_reply`).
 - In AppTest a stale Video Lab moment selection breaks `format_func`; the
   browser sends an index instead, so this is not confirmed as a user bug.
 - `app/ClipMaker.py`, `app/pages/1_Filtering_Output.py` and

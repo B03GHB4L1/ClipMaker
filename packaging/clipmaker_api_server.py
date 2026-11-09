@@ -1098,10 +1098,56 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 1_000_000:
             raise ValueError("A JSON request body is required")
-        value = json.loads(self.rfile.read(length).decode("utf-8"))
+        raw = self.rfile.read(length)
+        self._body_read = getattr(self, "_body_read", 0) + len(raw)
+        value = json.loads(raw.decode("utf-8"))
         if not isinstance(value, dict):
             raise ValueError("The request body must be a JSON object")
         return value
+
+    DRAIN_LIMIT = 1_000_000
+
+    def discard_unread_body(self) -> None:
+        """Consume the rest of a rejected request before replying.
+
+        Closing a socket with unread data makes Windows reset the connection,
+        so the client sees "connection aborted" instead of the error reply.
+        Small bodies are drained; larger ones get ``Connection: close``.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        remaining = length - getattr(self, "_body_read", 0)
+        if remaining <= 0:
+            return
+        if remaining > self.DRAIN_LIMIT:
+            self.close_connection = True
+            return
+        try:
+            self.connection.settimeout(2)
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                self._body_read = getattr(self, "_body_read", 0) + len(chunk)
+        except OSError:
+            self.close_connection = True
+
+    def send_post_error(self, status: HTTPStatus, message: str) -> None:
+        self.discard_unread_body()
+        if self.close_connection:
+            self.send_response(status)
+            encoded = json.dumps({"error": message}).encode("utf-8")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+        self.send_json(status, {"error": message})
 
     def validate_local_request(self) -> None:
         expected = f"127.0.0.1:{self.server.server_port}"
@@ -1138,6 +1184,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                         raise ValueError("File import was interrupted; no partial file was saved.")
                     output.write(chunk)
                     remaining -= len(chunk)
+                    self._body_read = getattr(self, "_body_read", 0) + len(chunk)
             if is_csv:
                 import pandas as pd
                 from clipmaker_core import read_csv_safe
@@ -1266,6 +1313,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        self._body_read = 0
         try:
             self.validate_local_request()
             if path == "/api/files/upload":
@@ -1465,9 +1513,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown API endpoint"})
         except (ValueError, json.JSONDecodeError) as error:
-            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            self.send_post_error(HTTPStatus.BAD_REQUEST, str(error))
         except Exception as error:
-            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            self.send_post_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
 
     def log_message(self, message: str, *args: Any) -> None:
         print(f"[clipmaker] {self.address_string()} {message % args}")
