@@ -456,14 +456,21 @@ def _load_matches():
 
 
 def _team_names(df):
-    teams = []
-    for column in ("homeTeam", "awayTeam", "team"):
-        if column in df.columns:
-            for value in df[column].dropna().astype(str):
-                name = value.strip()
-                if name and name not in teams:
-                    teams.append(name)
-    return teams
+    from team_names import team_options
+
+    def first(frame, column):
+        if column not in frame.columns:
+            return ""
+        values = frame[column].dropna().astype(str).str.strip()
+        values = values[values != ""]
+        return values.iloc[0] if not values.empty else ""
+
+    groups = df.groupby("match_id", sort=True) if "match_id" in df.columns else [(0, df)]
+    matches = []
+    for _, frame in groups:
+        event_teams = frame["team"].dropna().astype(str).unique().tolist() if "team" in frame.columns else []
+        matches.append((first(frame, "homeTeam"), first(frame, "awayTeam"), event_teams))
+    return team_options(matches)
 
 
 def _loss_mask(df, team):

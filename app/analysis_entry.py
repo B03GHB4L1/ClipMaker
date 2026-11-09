@@ -1,6 +1,12 @@
 """Retain the original analytical views behind the compact project shell."""
 import streamlit as st
+from streamlit import config as _st_config
 from project_analysis import sync_project_state, compact_analysis_style
+
+# preserve_analysis_controls deliberately re-assigns widget state on every rerun
+# so inactive-tab filters survive; without this, Streamlit shows users a
+# one-off "created with a default value" developer warning.
+_st_config.set_option("global.disableWidgetStateDuplicationWarning", True)
 
 st.set_page_config(layout="wide", initial_sidebar_state="collapsed")
 try:

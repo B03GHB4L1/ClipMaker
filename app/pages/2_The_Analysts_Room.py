@@ -340,33 +340,8 @@ def _resolve_event_team_names(df):
     if "awayTeam" in df.columns and not df["awayTeam"].dropna().empty:
         away_label = str(df["awayTeam"].dropna().iloc[0])
 
-    def match_label(label, used):
-        label_norm = label.casefold().strip()
-        if not label_norm:
-            return ""
-        for team in event_teams:
-            if team not in used and team.casefold() == label_norm:
-                return team
-        for team in event_teams:
-            team_norm = team.casefold()
-            if team not in used and (label_norm in team_norm or team_norm in label_norm):
-                return team
-        return ""
-
-    used = set()
-    home = match_label(home_label, used)
-    if home:
-        used.add(home)
-    away = match_label(away_label, used)
-    if away:
-        used.add(away)
-
-    remaining = [team for team in event_teams if team not in used]
-    if not home and remaining:
-        home = remaining.pop(0)
-    if not away and remaining:
-        away = remaining.pop(0)
-    return home, away
+    from team_names import resolve_home_away
+    return resolve_home_away(home_label, away_label, event_teams)
 
 
 def _first_nonempty(df, columns):
@@ -2155,7 +2130,8 @@ def render_gk_tab():
             (passes_df["playerName"] == gk_player_sel)
         ].copy()
         avail_dist = [c for c in DIST_COLS if c in dist_passes.columns]
-        if avail_dist:
+        # A row-wise apply on an empty frame yields a DataFrame, not a mask.
+        if avail_dist and not dist_passes.empty:
             mask = dist_passes[avail_dist].apply(
                 lambda r: r.map(safe_bool).any(), axis=1
             )

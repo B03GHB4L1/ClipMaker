@@ -12,6 +12,7 @@ hiddenimports = [
     "scoresway_scraper",
     "whoscored_scraper",
     "theme",
+    "team_names",
     "smp_component",
     "project_analysis",
     "analysis_server",
