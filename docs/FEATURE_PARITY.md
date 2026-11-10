@@ -71,12 +71,14 @@ file dialogs, and dependency setup rather than different analytical algorithms.
 
 - One shared HTML/JS intake, filtering, project manager, and analytical shell.
 - One local Python API and the existing clipping/scraping engine.
-- Preserve the complete original Analyst Room and Tactical Lab implementations
-  in an embedded, local Streamlit workspace. These are retained implementations,
-  not rewrites in the new HTML design system.
+- The Analyst Room and Tactical Lab run inside the shared frontend
+  (`ui/analysis/`), served by the same local API (`/api/analysis/...`) from
+  `app/analysis_core/`. Their algorithms were moved, not rewritten, from the
+  original pages, and a committed snapshot of what the retired Streamlit pages
+  showed is the parity oracle (docs/ANALYSIS_MIGRATION_PLAN.md). Streamlit and
+  its second analytical server were removed on 10 November 2026 (Phase 5).
 - A project adapter supplies saved CSV paths, footage, all period markers,
-  separate period videos, and corrections to those workspaces.
-- The analytical subprocess is started on demand and stopped with its owner.
+  separate period videos, and corrections to the analysis tabs.
 - Windows/Linux use the packaged backend and Tauri shell. macOS uses the
   Homebrew launcher and the same shared frontend in the browser.
 - AI filtering remains excluded, as requested previously.

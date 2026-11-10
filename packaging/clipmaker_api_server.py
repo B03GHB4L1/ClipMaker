@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import atexit
 import json
 import mimetypes
 import os
@@ -45,9 +44,9 @@ COMPONENT_PREFIX = "/analysis-component/"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 if __package__:
-    from .analysis_server import AnalysisServer, run_analysis, watch_process_owner
+    from .process_owner import watch_process_owner
 else:
-    from analysis_server import AnalysisServer, run_analysis, watch_process_owner
+    from process_owner import watch_process_owner
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -154,22 +153,40 @@ class _LazyTabs(dict):
 NATIVE_TABS = _LazyTabs()
 
 
-def analysis_ui_modes() -> dict[str, str]:
-    """Workspace per view: VIZORPLAY_ANALYSIS_UI=classic, or analyst=classic,tactical=native.
-
-    Both views default to native since every tab passed parity (Phases 3 and 4);
-    the classic workspace stays reachable until Phase 5 removes it."""
-    modes = {"analyst": "native", "tactical": "native"}
-    setting = os.environ.get("VIZORPLAY_ANALYSIS_UI", "").strip().lower()
-    for part in filter(None, (item.strip() for item in setting.split(","))):
-        view, _, mode = part.rpartition("=")
-        mode = {"streamlit": "classic"}.get(mode, mode)
-        if mode not in {"classic", "native"}:
-            continue
-        for name in ([view] if view else list(modes)):
-            if name in modes:
-                modes[name] = mode
-    return modes
+def analysis_reel(project, frames, events, kickoffs, corrections, before, after, folder) -> Path:
+    """Cut each moment and join them in order, like the classic Top 5 Moments reel."""
+    import shutil
+    import subprocess
+    from analysis_core.video import clip_window
+    parts: list[Path] = []
+    try:
+        for event in events[:5]:
+            period, start, duration = clip_window(frames.df_all, kickoffs, corrections, event["minute"],
+                                                  event["second"], event["period"], before, after)
+            parts.append(render_preview_clip(video_for_period(project, period), start, start + duration,
+                                             folder, 23, "ultrafast", "128k"))
+        if len(parts) == 1:
+            return parts.pop()
+        listing = folder / f"reel-{uuid.uuid4().hex[:12]}.txt"
+        listing.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
+        output = folder / f"reel-{uuid.uuid4().hex[:12]}.mp4"
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        try:
+            result = subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                                     "-i", str(listing), "-c", "copy", str(output)],
+                                    capture_output=True, text=True, timeout=300)
+        finally:
+            listing.unlink(missing_ok=True)
+        if result.returncode != 0:
+            output.unlink(missing_ok=True)
+            raise ValueError(f"Could not join the reel: {(result.stderr or '')[-400:]}")
+        return output
+    finally:
+        for part in parts:
+            part.unlink(missing_ok=True)
 
 
 class MatchStore:
@@ -1277,7 +1294,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         kickoffs, corrections = kickoff_times_from_project(project), settings.get("timeline_corrections", [])
         folder = self.store.data_dir / "analysis-clips"
         if event.get("reel"):
-            clip = self.analysis_reel(project, frames, event["reel"], kickoffs, corrections, before, after, folder)
+            clip = analysis_reel(project, frames, event["reel"], kickoffs, corrections, before, after, folder)
             return self.publish_clip(clip, f"{event['player']}.mp4", before, after, folder)
         period, start, duration = clip_window(frames.df_all, kickoffs, corrections,
                                               event["minute"], event["second"], event["period"], before, after)
@@ -1299,41 +1316,6 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         self.media_files[token] = clip
         return {"name": re.sub(r"[^\w\-.]", "_", name), "size": clip.stat().st_size,
                 "url": f"/api/media/{token}", "before": before, "after": after}
-
-    def analysis_reel(self, project, frames, events, kickoffs, corrections, before, after, folder) -> Path:
-        """Cut each moment and join them in order, like the classic Top 5 Moments reel."""
-        import shutil
-        import subprocess
-        from analysis_core.video import clip_window
-        parts: list[Path] = []
-        try:
-            for event in events[:5]:
-                period, start, duration = clip_window(frames.df_all, kickoffs, corrections, event["minute"],
-                                                      event["second"], event["period"], before, after)
-                parts.append(render_preview_clip(video_for_period(project, period), start, start + duration,
-                                                 folder, 23, "ultrafast", "128k"))
-            if len(parts) == 1:
-                return parts.pop()
-            listing = folder / f"reel-{uuid.uuid4().hex[:12]}.txt"
-            listing.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
-            output = folder / f"reel-{uuid.uuid4().hex[:12]}.mp4"
-            ffmpeg = shutil.which("ffmpeg")
-            if not ffmpeg:
-                import imageio_ffmpeg
-                ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-            try:
-                result = subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-                                         "-i", str(listing), "-c", "copy", str(output)],
-                                        capture_output=True, text=True, timeout=300)
-            finally:
-                listing.unlink(missing_ok=True)
-            if result.returncode != 0:
-                output.unlink(missing_ok=True)
-                raise ValueError(f"Could not join the reel: {(result.stderr or '')[-400:]}")
-            return output
-        finally:
-            for part in parts:
-                part.unlink(missing_ok=True)
 
     def tactical_request(self, tab, project, controls, body, is_clip) -> dict[str, Any]:
         """Tactical Lab tabs run the classic tab code against a recorder."""
@@ -1492,8 +1474,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/analysis/config":
             from analysis_core import TABS, VIEWS
-            modes = analysis_ui_modes()
-            self.send_json(HTTPStatus.OK, {"views": {view: {"label": label, "mode": modes[view], "tabs": TABS[view]}
+            self.send_json(HTTPStatus.OK, {"views": {view: {"label": label, "tabs": TABS[view]}
                                                      for view, label in VIEWS.items()}})
             return
         if path == "/api/analysis/summary":
@@ -1563,13 +1544,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 parts = path.split("/")
                 if len(parts) not in {5, 6} or (len(parts) == 6 and parts[5] != "clip"):
                     raise ValueError("Unknown analytical tab")
-                entry = validate_tab(parts[3], parts[4])
+                validate_tab(parts[3], parts[4])
                 project = self.analysis_project(str(body.get("project_id") or ""))
                 handler = NATIVE_TABS.get((parts[3], parts[4]))
-                if not entry["native"] or handler is None:
-                    self.send_json(HTTPStatus.NOT_IMPLEMENTED,
-                                   {"error": "This tab still runs in the classic workspace.", "classic": True})
-                    return
+                if handler is None:
+                    raise ValueError("Unknown analytical tab")
                 controls = body.get("controls") if isinstance(body.get("controls"), dict) else {}
                 if handler.get("tactical"):
                     self.send_json(HTTPStatus.OK, self.tactical_request(parts[4], project, controls, body, len(parts) == 6))
@@ -1584,19 +1563,6 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                                          "after": clamp_buffer(settings.get("after_buffer", 8))}
                 view["has_video"] = bool(str(project.get("video_path") or "").strip())
                 self.send_json(HTTPStatus.OK, {"view": view})
-                return
-            if path == "/api/analysis":
-                project = self.store.get(str(body.get("project_id") or ""))
-                if not project or not project.get("csv_path") or not Path(project["csv_path"]).is_file():
-                    raise ValueError("Scrape or import a match before opening an analytical workspace.")
-                view = str(body.get("view") or "analyst")
-                if view not in {"analyst", "tactical"}:
-                    raise ValueError("Unknown analytical view")
-                from analysis_core import TABS
-                tab = str(body.get("tab") or "")
-                tab_query = f"&tab={tab}" if any(item["slug"] == tab for item in TABS[view]) else ""
-                port = self.server.analysis.start()
-                self.send_json(HTTPStatus.OK, {"url": f"http://127.0.0.1:{port}/?project={project['id']}&view={view}&embed=true{tab_query}"})
                 return
             if path.startswith("/api/projects/"):
                 project_id = path.rsplit("/", 1)[-1]
@@ -1797,9 +1763,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.match_data_dir = data_dir / "match-data"  # type: ignore[attr-defined]
     server.jobs = JobManager()  # type: ignore[attr-defined]
     server.media_files = {}  # type: ignore[attr-defined]
-    server.analysis = AnalysisServer(ROOT, data_dir)  # type: ignore[attr-defined]
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
-    atexit.register(server.analysis.close)
     return server
 
 
@@ -1808,10 +1772,7 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8502)
     parser.add_argument("--data-dir", type=Path, default=Path.cwd() / ".clipmaker-data")
-    parser.add_argument("--analysis-port", type=int)
     args = parser.parse_args()
-    if args.analysis_port:
-        return run_analysis(ROOT, args.analysis_port)
     owner = os.environ.get("VIZORPLAY_OWNER_PID")
     owner_pid = int(owner) if owner else None
     if owner_pid is not None and (owner_pid <= 0 or owner_pid == os.getpid()):
@@ -1828,7 +1789,6 @@ def main() -> int:
     finally:
         if not server.jobs.close():
             print("Export workers did not finish within the shutdown deadline", file=sys.stderr)
-        server.analysis.close()
         server.server_close()
     return 0
 

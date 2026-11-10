@@ -1,15 +1,15 @@
-"""Lifecycle of the local analytical server, owned by the desktop backend."""
+"""Watch the process that owns the backend (the desktop shell) and react when it exits.
+
+Moved from the retired analysis_server module, which also launched the
+classic Streamlit workspace.
+"""
 from __future__ import annotations
 
-import os
 import errno
-import socket
-import subprocess
+import os
 import sys
 import threading
 import time
-from pathlib import Path
-from urllib.request import urlopen
 
 
 def _wait_for_kqueue_exit(pid: int, timeout: float | None) -> bool:
@@ -101,69 +101,3 @@ def watch_process_owner(pid: int, on_exit) -> threading.Thread:
     thread = threading.Thread(target=watch, daemon=True)
     thread.start()
     return thread
-
-
-class AnalysisServer:
-    def __init__(self, root: Path, data_dir: Path):
-        self.root = root
-        self.data_dir = data_dir
-        self.process = None
-        self.port = None
-        self._lock = threading.Lock()
-
-    def start(self) -> int:
-        with self._lock:
-            if self.process is not None and self.process.poll() is None:
-                return self.port
-            with socket.socket() as listener:
-                listener.bind(("127.0.0.1", 0))
-                self.port = listener.getsockname()[1]
-            environment = {**os.environ, "CLIPMAKER_ANALYSIS_MODE": "1", "CLIPMAKER_DATA_DIR": str(self.data_dir), "CLIPMAKER_OWNER_PID": str(os.getpid())}
-            if getattr(sys, "frozen", False):
-                command = [sys.executable, "--analysis-port", str(self.port)]
-            else:
-                entry = self.root / "packaging" / "clipmaker_api_server.py"
-                if not entry.is_file():
-                    entry = self.root / "clipmaker_api_server.py"
-                command = [sys.executable, str(entry), "--analysis-port", str(self.port)]
-            self.data_dir.mkdir(parents=True, exist_ok=True)
-            with (self.data_dir / "analysis.log").open("ab") as log:
-                self.process = subprocess.Popen(command, env=environment, stdout=log, stderr=log,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-            deadline = time.monotonic() + 45
-            while time.monotonic() < deadline and self.process.poll() is None:
-                try:
-                    with urlopen(f"http://127.0.0.1:{self.port}/_stcore/health", timeout=1) as response:
-                        if response.status == 200:
-                            return self.port
-                except OSError:
-                    time.sleep(.2)
-            self.close()
-            raise RuntimeError("Analytical workspace did not start. Check analysis.log in the local data directory.")
-
-    def close(self):
-        if self.process is not None and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
-
-
-def run_analysis(root: Path, port: int) -> int:
-    from streamlit.web import cli
-    parent_pid = os.getppid()
-
-    owners = {parent_pid, int(os.environ.get("CLIPMAKER_OWNER_PID", parent_pid))}
-    if os.environ.get("VIZORPLAY_OWNER_PID"):
-        owners.add(int(os.environ["VIZORPLAY_OWNER_PID"]))
-    for owner in owners:
-        # A forced desktop-shell exit skips Python's atexit hooks.
-        watch_process_owner(owner, lambda: os._exit(0))
-    os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
-    sys.argv = ["streamlit", "run", str(root / "app" / "analysis_entry.py"),
-                "--server.address=127.0.0.1", f"--server.port={port}", "--server.headless=true",
-                "--browser.gatherUsageStats=false", "--server.fileWatcherType=none",
-                "--global.developmentMode=false", "--theme.base=light"]
-    return int(cli.main() or 0)

@@ -8,7 +8,6 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -18,15 +17,18 @@ sys.path.insert(0, str(ROOT))
 
 from analysis_core import FrameCache, build_analyst_frames, validate_tab  # noqa: E402
 from packaging.clipmaker_api_server import (  # noqa: E402
-    MatchStore, analysis_ui_modes, clean_analysis_state, create_server,
+    MatchStore, NATIVE_TABS, clean_analysis_state, create_server,
 )
 from tests.analysis_fixture import build_fixture, write_fixture  # noqa: E402
 
 
 class AnalysisCoreTests(unittest.TestCase):
     def test_package_never_imports_streamlit(self):
+        # Covers the whole backend: Phase 5 removed Streamlit from the app.
         code = ("import sys; sys.path.insert(0, 'app'); import analysis_core, analysis_core.frames, "
-                "analysis_core.registry; assert 'streamlit' not in sys.modules, 'streamlit imported'")
+                "analysis_core.registry, analysis_core.tactical, analysis_core.comparison, "
+                "packaging.clipmaker_api_server as s; s._native_tabs(); "
+                "assert 'streamlit' not in sys.modules, 'streamlit imported'")
         result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -93,14 +95,12 @@ class AnalysisCoreTests(unittest.TestCase):
             with self.subTest(bad=str(bad)[:60]), self.assertRaises(ValueError):
                 clean_analysis_state(bad)
 
-    def test_ui_mode_setting(self):
-        cases = {"": ("native", "native"), "native": ("native", "native"), "classic": ("classic", "classic"),
-                 "analyst=classic": ("classic", "native"), "tactical=classic": ("native", "classic"),
-                 "analyst=native,tactical=streamlit": ("native", "classic"), "bogus": ("native", "native")}
-        for setting, expected in cases.items():
-            with self.subTest(setting=setting), patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": setting}):
-                modes = analysis_ui_modes()
-                self.assertEqual((modes["analyst"], modes["tactical"]), expected)
+    def test_every_registered_tab_has_a_native_handler(self):
+        from analysis_core import TABS
+        for view, tabs in TABS.items():
+            for tab in tabs:
+                with self.subTest(view=view, tab=tab["slug"]):
+                    self.assertIsNotNone(NATIVE_TABS.get((view, tab["slug"])))
 
 
 class AnalysisApiTests(unittest.TestCase):
@@ -121,7 +121,6 @@ class AnalysisApiTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
-        self.server.analysis.close()
         self.thread.join(timeout=2)
         self.temporary.cleanup()
 
@@ -138,15 +137,12 @@ class AnalysisApiTests(unittest.TestCase):
         caught.exception.close()
         return caught.exception.code, payload
 
-    def test_config_lists_views_tabs_and_modes(self):
+    def test_config_lists_views_and_tabs(self):
         _, body = self.request("/api/analysis/config")
         views = json.loads(body)["views"]
         self.assertEqual([tab["slug"] for tab in views["analyst"]["tabs"]][:2], ["shot-map", "pass-map"])
         self.assertEqual(len(views["tactical"]["tabs"]), 5)
-        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("native", "native"))
-        with patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": "analyst=classic"}):
-            views = json.loads(self.request("/api/analysis/config")[1])["views"]
-        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("classic", "native"))
+        self.assertNotIn("mode", views["analyst"])  # One workspace since Phase 5.
 
     def test_summary_loads_once_and_reports_match(self):
         started = time.monotonic()
@@ -169,12 +165,6 @@ class AnalysisApiTests(unittest.TestCase):
         for path in ("/api/analysis/other/shot-map", "/api/analysis/analyst/unknown", "/api/analysis/analyst/shot-map/x"):
             with self.subTest(path=path):
                 self.assertEqual(self.error(path, {"project_id": self.project["id"]})[0], 400)
-        # Every tab is native now; a tab marked classic still answers 501.
-        from analysis_core import TABS
-        entry = next(tab for tab in TABS["tactical"] if tab["slug"] == "style-profile")
-        with patch.dict(entry, {"native": False}):
-            code, payload = self.error("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
-        self.assertEqual((code, payload.get("classic")), (501, True))
         _, body = self.request("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
         view = json.loads(body)["view"]
         self.assertEqual((view["team"], view["scope"]["multi"]), ("Northbridge", False))
@@ -254,13 +244,15 @@ class AnalysisApiTests(unittest.TestCase):
         seconds = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
         self.assertAlmostEqual(seconds, 7.0, delta=0.6)
 
-    def test_classic_workspace_url_carries_known_tab_only(self):
-        with patch.object(self.server.analysis, "start", return_value=9999):
-            _, body = self.request("/api/analysis", {"project_id": self.project["id"], "view": "analyst", "tab": "goalkeeper"})
-            self.assertTrue(json.loads(body)["url"].endswith("&tab=goalkeeper"))
-            _, body = self.request("/api/analysis", {"project_id": self.project["id"], "view": "analyst", "tab": "x&y=1"})
-            self.assertNotIn("tab=", json.loads(body)["url"])
-
+    def test_classic_workspace_is_gone(self):
+        # Phase 5: no Streamlit server to start, no endpoint that would start one.
+        self.assertFalse(hasattr(self.server, "analysis"))
+        code, _ = self.error("/api/analysis", {"project_id": self.project["id"], "view": "analyst"})
+        self.assertGreaterEqual(code, 400)
+        result = subprocess.run([sys.executable, str(ROOT / "packaging" / "clipmaker_api_server.py"), "--analysis-port", "1"],
+                                cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--analysis-port", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

@@ -152,52 +152,6 @@ def exercise_snapshot_restore(page):
     page.locator('#snapshots summary').click()
 
 
-def exercise_analyst_chart(page, frame, evidence):
-    stage("download and validate real Analyst chart PNG and multi-frame GIF")
-    shots = frame.get_by_role("tabpanel", name="◉ Shot Map", exact=True)
-    chart = shots.frame_locator('iframe[title="smp_component.analyst_room"]')
-    plot = chart.locator('#plot')
-    expect(plot.locator('canvas')).not_to_have_count(0, timeout=60000)
-    png_button = chart.locator('[data-export="png"]')
-    expect(png_button).to_be_visible(timeout=60000)
-    results = []
-    with page.expect_download(timeout=30000) as downloaded:
-        png_button.click()
-    results.append(validate_chart_download(downloaded.value, evidence / "analyst-shot-map.png", "PNG"))
-    # Build exercises the worker encoder and frame capture through the actual UI.
-    chart.locator('[data-export-animation]').select_option("build")
-    gif_button = chart.locator('[data-export="gif"]')
-    with page.expect_download(timeout=90000) as downloaded:
-        gif_button.click()
-    results.append(validate_chart_download(downloaded.value, evidence / "analyst-shot-map.gif", "GIF"))
-    expect(gif_button).to_be_enabled()
-    expect(gif_button).to_have_text("GIF")
-    (evidence / "analyst-downloads.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-
-    stage("click the plotted fixture goal and clear the Analyst selection")
-    # Read ECharts' public coordinate API, then send a real mouse click. Do not
-    # dispatch a synthetic chart action or inject Streamlit selection messages.
-    position = plot.evaluate("""element => {
-        const chart = window.echarts.getInstanceByDom(element);
-        for (const [seriesIndex, series] of chart.getOption().series.entries()) {
-            const point = (series.data || []).find(point => point && point.customdata === 0);
-            if (point) {
-                const [x, y] = chart.convertToPixel({seriesIndex}, point.value);
-                return {x, y};
-            }
-        }
-        throw new Error('Fixture goal missing from the rendered shot map');
-    }""")
-    plot.click(position=position)
-    clear = shots.get_by_role("button", name="Clear selection", exact=True)
-    expect(clear).to_be_visible(timeout=30000)
-    expect(shots.locator('.cm-shot-panel')).to_contain_text("One")
-    expect(shots.locator('.cm-shot-panel')).to_contain_text("Home")
-    clear.click()
-    expect(clear).not_to_be_visible(timeout=30000)
-    expect(shots.locator('.cm-shot-panel')).to_have_count(0)
-
-
 def exercise_native_workspace(page, base, project_id, evidence, errors):
     stage("open native analysis workspace shell (now the Analyst Room default)")
     console_errors = []
@@ -209,7 +163,7 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
     expect(page.locator(".native-summary")).to_contain_text("Home vs Away")
     expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
-    assert page.locator("[data-analysis-frame]").is_hidden()
+    assert page.locator("iframe[data-analysis-frame]").count() == 0  # No classic workspace since Phase 5.
 
     stage("keyboard tab navigation updates URL and saved project state")
     page.get_by_role("tab", name="Shot Map").focus()
@@ -226,24 +180,22 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.get_by_role("tab", name="Build-Up").click()
     # The save starts on click (no debounce), so "Saved locally" means it landed.
     expect(page.locator("[data-project-status]")).to_have_text("Saved locally", timeout=30000)
-    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
     saved = request(base, f"/api/projects/{project_id}")["project"]["analysis_state"]
     assert saved["analyst"]["tab"] == "build-up", saved
     expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
 
-    stage("native Tactical Lab is the default; the classic link opens the same tab")
+    stage("Tactical Lab Style Profile draws its charts")
     page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=style-profile")
     expect(page.get_by_role("tab", name="Style Profile")).to_have_attribute("aria-selected", "true")
     expect(page.locator(".native-tactical")).to_contain_text("Style Profile")
+    expect(page.locator(".native-tactical")).to_contain_text("Strength Signals")
     page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 1", timeout=60000)
-    link = page.get_by_role("link", name="Classic workspace")
-    assert "ui=classic" in link.get_attribute("href") and "tab=style-profile" in link.get_attribute("href")
-    link.click()
-    frame = page.frame_locator("[data-analysis-frame]")
-    expect(frame.get_by_role("tab", name="Style Profile")).to_have_attribute("aria-selected", "true", timeout=60000)
+    expect(page.get_by_role("link", name="Classic workspace")).to_have_count(0)
+    page.screenshot(path=str(evidence / "tactical.png"))
 
     stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
-    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native&tab=shot-map")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=shot-map")
     expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
     panel = page.locator(".native-panel")
     expect(panel.get_by_role("radiogroup", name="Team")).to_be_visible()
@@ -276,7 +228,16 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     expect(page.get_by_role("link", name="Download clip")).to_have_attribute("download", "One_0.mp4")
     with page.expect_download(timeout=30000) as downloaded:
         component.locator('[data-export="png"]').click()
-    validate_chart_download(downloaded.value, evidence / "native-shot-map.png", "PNG")
+    downloads = [validate_chart_download(downloaded.value, evidence / "native-shot-map.png", "PNG")]
+    # Build exercises the worker encoder and frame capture through the actual UI.
+    component.locator('[data-export-animation]').select_option("build")
+    gif_button = component.locator('[data-export="gif"]')
+    with page.expect_download(timeout=90000) as downloaded:
+        gif_button.click()
+    downloads.append(validate_chart_download(downloaded.value, evidence / "native-shot-map.gif", "GIF"))
+    expect(gif_button).to_be_enabled()
+    expect(gif_button).to_have_text("GIF")
+    (evidence / "analyst-downloads.json").write_text(json.dumps(downloads, indent=2), encoding="utf-8")
     page.screenshot(path=str(evidence / "native-shot-map.png"))
     page.get_by_role("button", name="Clear selection").click()
     expect(detail).to_be_hidden()
@@ -290,7 +251,7 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
 
     stage("native workspace at narrow width")
     page.set_viewport_size({"width": 390, "height": 700})
-    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
     expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
     expect(page.get_by_role("tab", name="Build-Up")).to_be_in_viewport()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
@@ -304,7 +265,7 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
         const response = await fetch("/api/projects", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
         return (await response.json()).project.id;
     }""")
-    page.goto(base + f"/analysis.html?view=tactical&project={empty_id}&ui=native")
+    page.goto(base + f"/analysis.html?view=tactical&project={empty_id}")
     alert = page.locator(".native-error")
     expect(alert).to_contain_text("Scrape or import a match")
     expect(alert.get_by_role("button", name="Try again")).to_be_visible()
@@ -477,25 +438,6 @@ def exercise(page, base, root, evidence, errors):
     page.locator('.clip-preview summary').click()
     expect(page.get_by_role("spinbutton", name="End (video seconds)", exact=True)).to_have_value("3.5")
     page.screenshot(path=str(evidence / "filters.png"))
-    stage("open analyst workspace")
-    page.goto(base + "/analysis.html?view=analyst&ui=classic&project=" + project_id)
-    frame = page.frame_locator('[data-analysis-frame]')
-    frame.get_by_role("tab", name="◉ Shot Map").wait_for(timeout=60000)
-    exercise_analyst_chart(page, frame, evidence)
-    frame.get_by_role("tab", name="⇄ Comparison").click()
-    frame.get_by_role("heading", name="Player Comparison", exact=True).wait_for(timeout=60000)
-    frame.get_by_role("heading", name="Top 5 Moments", exact=True).wait_for(timeout=60000)
-    assert frame.get_by_test_id("stException").count() == 0
-    page.screenshot(path=str(evidence / "analysis.png"))
-    stage("open tactical workspace")
-    page.goto(base + "/analysis.html?view=tactical&ui=classic&project=" + project_id)
-    tactical = page.frame_locator('[data-analysis-frame]')
-    tactical.get_by_role("tab", name="Style Profile").click(timeout=60000)
-    tactical.get_by_role("heading", name="Strength Signals", exact=True).wait_for(timeout=60000)
-    tactical.get_by_test_id("stPlotlyChart").first.wait_for(timeout=60000)
-    expect(tactical.get_by_text("Loaded:", exact=False)).to_contain_text("Home vs Away")
-    assert tactical.get_by_test_id("stException").count() == 0
-    page.screenshot(path=str(evidence / "tactical.png"))
     exercise_native_workspace(page, base, project_id, evidence, errors)
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):

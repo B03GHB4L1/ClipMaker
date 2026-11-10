@@ -152,17 +152,27 @@ def run(base, root):
             break
         time.sleep(.1)
     assert cancel_job["status"] == "cancelled", cancel_job
-    analysis = request(base, "/api/analysis", {"project_id": project["id"], "view": "analyst"})
-    with urlopen(analysis["url"].split("/?", 1)[0] + "/_stcore/health", timeout=10) as response:
-        assert response.status == 200
+    analysis_smoke(base, project["id"])
     print("PASS: local projects, CSV, shared assets, real preview, seeking, decoded reel, repeat-export protection, individual extra-time source/pixels, downloads, real export cancellation, analytical startup")
+
+
+def analysis_smoke(base, project_id):
+    """Both analysis views render in-process (no second server since Phase 5)."""
+    summary = request(base, f"/api/analysis/summary?project={project_id}")["summary"]
+    assert summary["event_count"] == 2, summary
+    config = request(base, "/api/analysis/config")["views"]
+    assert {tab["slug"] for tab in config["analyst"]["tabs"]} >= {"shot-map", "comparison"}, config
+    shot_map = request(base, "/api/analysis/analyst/shot-map", {"project_id": project_id})["view"]
+    assert shot_map["has_video"] is True, shot_map
+    tactical = request(base, "/api/analysis/tactical/defensive-transitions", {"project_id": project_id})["view"]
+    assert tactical["teams"] and tactical["elements"], tactical
 
 
 def owner_shutdown_smoke(command, root):
     if __package__:
-        from .analysis_server import wait_for_process_exit
+        from .process_owner import wait_for_process_exit
     else:
-        from analysis_server import wait_for_process_exit
+        from process_owner import wait_for_process_exit
     owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     try:
@@ -174,7 +184,7 @@ def owner_shutdown_smoke(command, root):
                     headers={"Content-Type": "application/octet-stream", "X-File-Name": "fixture.csv"})
             request(base, f"/api/projects/{project['id']}", {"video_path": str(root / "fixture.mp4"),
                     "video_name": "fixture.mp4", "markers": {"1H": "00:00:00", "2H": "00:00:00"}})
-            analysis = request(base, "/api/analysis", {"project_id": project["id"], "view": "analyst"})
+            analysis_smoke(base, project["id"])
             job = request(base, "/api/jobs", {"match_id": project["id"], "options": {
                 "dry_run": False, "individual_clips": True,
                 "clip_windows": [{"start": 0, "end": 7, "period": 1, "label": "Shutdown"} for _ in range(150)]}})["job"]
@@ -194,19 +204,9 @@ def owner_shutdown_smoke(command, root):
             assert wait_for_process_exit(health["pid"], timeout=25), "Backend survived desktop owner exit"
             if health["parent_pid"] != os.getpid():
                 assert wait_for_process_exit(health["parent_pid"], timeout=25), "Backend launcher survived desktop owner exit"
-            analysis_health = analysis["url"].split("/?", 1)[0] + "/_stcore/health"
-            deadline = time.monotonic() + 10
-            while True:
-                try:
-                    with urlopen(analysis_health, timeout=1):
-                        pass
-                except OSError:
-                    break
-                assert time.monotonic() < deadline, "Analytical process survived desktop owner exit"
-                time.sleep(.1)
         assert "Export workers did not finish" not in (data / "backend-process.log").read_text(encoding="utf-8", errors="replace")
         data.rename(root / "released-owned-backend")
-        print("PASS: forced desktop owner exit cancels active export, stops backend/analytics, and releases working directory")
+        print("PASS: forced desktop owner exit cancels active export, stops the backend, and releases working directory")
     finally:
         if owner.poll() is None:
             owner.kill()

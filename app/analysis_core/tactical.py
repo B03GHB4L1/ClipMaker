@@ -50,8 +50,8 @@ def _load_prepared(csv_path):
 
 
 def _session(project, projects):
-    """The classic session the project shell would sync (project_analysis.sync_project_state)."""
-    from project_analysis import project_session
+    """The session the classic project shell synced for this project and its siblings."""
+    from .project import project_session
     state = project_session(project)
     state["match_setup_by_csv"] = {item["csv_path"]: project_session(item) for item in projects if item.get("csv_path")}
     state["multi_scraped_csv_paths"] = list(dict.fromkeys(

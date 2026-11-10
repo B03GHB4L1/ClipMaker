@@ -20,7 +20,7 @@ from clipmaker_core import (
     read_csv_safe, to_seconds, resolve_period_starts_for_video, match_clock_to_video_time,
     normalise_timeline_corrections, apply_timeline_corrections,
 )
-from project_analysis import analysis_frame
+from .project import analysis_frame
 from .st_shim import Recorder as _Recorder
 
 _PLOTLY_AVAILABLE = True

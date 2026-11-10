@@ -1,5 +1,4 @@
-// Native analysis workspace shell (docs/ANALYSIS_MIGRATION_PLAN.md, Phase 1).
-// Tabs whose native view is not built yet link to the classic workspace.
+// Analysis workspace shell: tab strip, saved tab state and per-tab renderers.
 import { projectRequest, saveProject } from "../projects.js";
 import { renderers } from "./tabs/index.js";
 
@@ -21,7 +20,6 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
   let state = {};
 
   const setStatus = (text) => { status.textContent = text; };
-  const classicUrl = (tab) => `/analysis.html?view=${view}&project=${encodeURIComponent(projectId)}&ui=classic${tab ? `&tab=${tab}` : ""}`;
 
   const showMessage = (kind, heading, text, action) => {
     root.replaceChildren(element("div", { class: `native-message native-${kind}`, role: kind === "error" ? "alert" : "status" },
@@ -66,10 +64,7 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
 
     const heading = element("div", { class: "native-summary" },
       element("strong", { text: `${summary.home_team || "Home"} vs ${summary.away_team || "Away"}` }),
-      element("span", { text: `${Number(summary.event_count || 0).toLocaleString()} events` }),
-      // Transitional escape hatch until the classic workspace is retired (Phase 5).
-      element("a", { class: "native-classic-switch", href: classicUrl(""), text: "Classic workspace" }));
-    const classicSwitch = heading.querySelector(".native-classic-switch");
+      element("span", { text: `${Number(summary.event_count || 0).toLocaleString()} events` }));
     const tablist = element("div", { class: "native-tabs", role: "tablist", "aria-label": config.views[view].label });
     const panel = element("section", { class: "native-panel", role: "tabpanel", tabindex: "0" });
     const buttons = tabs.map((tab) => element("button", {
@@ -101,18 +96,15 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
         if (selected) tablist.scrollLeft = Math.max(0, button.offsetLeft - tablist.offsetLeft - 12);
       });
       panel.setAttribute("aria-labelledby", `tab-${slug}`);
-      classicSwitch.href = classicUrl(slug);
       const url = new URL(location.href);
       url.searchParams.set("tab", slug);
       history.replaceState(null, "", url);
       if (userAction) persist(slug);
       const tab = tabs.find((item) => item.slug === slug);
-      const renderer = tab.native && renderers[slug];
+      const renderer = renderers[slug];
       if (!renderer) {
-        panel.replaceChildren(element("div", { class: "native-message native-empty", role: "status" },
-          element("h2", { text: tab.label }),
-          element("p", { text: "This view has not moved to the fast workspace yet." }),
-          element("a", { class: "native-classic-link", href: classicUrl(slug), text: "Open in classic workspace" })));
+        panel.replaceChildren(element("div", { class: "native-message native-error", role: "alert" },
+          element("h2", { text: tab.label }), element("p", { text: "This view is not available." })));
         return;
       }
       panel.setAttribute("aria-busy", "true");

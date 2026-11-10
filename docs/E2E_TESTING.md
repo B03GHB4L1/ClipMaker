@@ -177,9 +177,10 @@ a permanently leaked process.
 The Tauri shell now identifies itself to its backend with `VIZORPLAY_OWNER_PID`.
 The backend monitors that owner and gracefully shuts down even when WebDriver
 or another caller ends the shell without running its Rust exit handler.
-Analytical processes also monitor the explicit owner. Shutdown cancels and joins
-export workers before closing analytics; Rust consumes the shutdown HTTP reply
-and allows bounded time for this cleanup.
+Analysis runs inside the backend process (no separate analytical server since
+Phase 5 of docs/ANALYSIS_MIGRATION_PLAN.md). Shutdown cancels and joins export
+workers; Rust consumes the shutdown HTTP reply and allows bounded time for this
+cleanup.
 
 Native acceptance records the shell and backend PIDs from health, waits for
 those processes and the backend parent/launcher to exit after each window close,
@@ -187,7 +188,7 @@ and fails if any is
 still running. It does not kill them to manufacture a pass. Shutdown evidence
 is retained per launch, and success is written only after temporary-directory
 cleanup succeeds. Source and frozen media smoke also exercise forced owner loss
-with an active export and analytical server and verify release of the working directory.
+with an active export after rendering both analysis views, and verify release of the working directory.
 
 The local Windows regression reproduced the same working-directory lock while
 the backend was running. Waiting only for the Python PID was insufficient:

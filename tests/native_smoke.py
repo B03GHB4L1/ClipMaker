@@ -16,7 +16,7 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
 from smoke_test import fixture_csv, request
-from analysis_server import wait_for_process_exit
+from process_owner import wait_for_process_exit
 
 
 def export_finished(driver):

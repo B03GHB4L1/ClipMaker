@@ -2938,38 +2938,6 @@ Return ONLY valid JSON with these keys (no markdown):
     return result
 
 
-def render_stats_panel(df):
-    import streamlit as st
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total Events", len(df))
-    if "period" in df.columns:
-        m2.metric("1st Half", len(df[df["period"] == "FirstHalf"]))
-        m3.metric("2nd Half", len(df[df["period"] == "SecondHalf"]))
-    st.divider()
-    ca, cb = st.columns(2)
-    with ca:
-        if "type" in df.columns:
-            st.markdown("**Events by Type**")
-            tc = df["type"].value_counts().reset_index()
-            tc.columns = ["Type", "Count"]
-            st.dataframe(tc, use_container_width=True, hide_index=True)
-    with cb:
-        if "playerName" in df.columns:
-            st.markdown("**Events by Player**")
-            pc = df["playerName"].value_counts().reset_index()
-            pc.columns = ["Player", "Count"]
-            st.dataframe(pc, use_container_width=True, hide_index=True)
-    if "xT" in df.columns:
-        xt_df = df.copy()
-        xt_df["xT"] = pd.to_numeric(xt_df["xT"], errors="coerce")
-        xt_df = xt_df.dropna(subset=["xT"])
-        if len(xt_df) > 0:
-            st.divider()
-            st.markdown("**Top 10 by xT**")
-            st.dataframe(xt_df.nlargest(10, "xT")[["minute","second","type","playerName","period","xT"]],
-                         use_container_width=True, hide_index=True)
-
-
 # =============================================================================
 # C2 â€” FILTER SNAPSHOTS
 # =============================================================================
