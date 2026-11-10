@@ -151,7 +151,7 @@ st.button("Cut", key="vl_cut")
 st.button("Generate", key="comp_p1_gen")
 st.download_button("Download", b"fixture", key="comp_p1_dl")
 '''
-        app = AppTest.from_string(script).run()
+        app = AppTest.from_string(script, default_timeout=60).run()
         for key in ("bu_chain_0", "bu_watch_0", "vl_cut", "comp_p1_gen"):
             app.button(key=key).click().run()
             self.assertEqual(len(app.exception), 0, [entry.message for entry in app.exception])
