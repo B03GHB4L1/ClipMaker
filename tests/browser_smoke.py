@@ -198,18 +198,6 @@ def exercise_analyst_chart(page, frame, evidence):
     expect(shots.locator('.cm-shot-panel')).to_have_count(0)
 
 
-def golden_shot_map_args():
-    """A real Shot Map payload recorded from the classic workspace."""
-    import gzip
-    with gzip.open(ROOT / "tests" / "golden" / "analysis" / "fixture.json.gz", "rb") as handle:
-        golden = json.loads(handle.read().decode("utf-8"))
-    for record in golden["views"]["analyst"]["◉ Shot Map"]:
-        for element in record["elements"]:
-            if element["kind"] == "component" and element["args"].get("component_type") == "shot_map":
-                return element["args"]
-    raise AssertionError("No Shot Map payload in the golden snapshot")
-
-
 def exercise_native_workspace(page, base, project_id, evidence, errors):
     stage("open native analysis workspace shell")
     console_errors = []
@@ -250,43 +238,44 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     frame = page.frame_locator("[data-analysis-frame]")
     expect(frame.get_by_role("tab", name="⊞ Goalkeeper")).to_have_attribute("aria-selected", "true", timeout=60000)
 
-    stage("component host renders a recorded Shot Map and reports a real click")
+    stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native&tab=shot-map")
     expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
-    args = golden_shot_map_args()
-    target = args["shots"][0]["df_idx"]
-    page.evaluate("""async (args) => {
-        const { ComponentHost } = await import("/analysis/component-host.js");
-        const holder = document.createElement("div");
-        holder.id = "host-test";
-        document.querySelector(".native-panel").replaceChildren(holder);
-        window.__hostValues = [];
-        window.__host = new ComponentHost(holder, { onValue: (value) => window.__hostValues.push(value) });
-        await window.__host.render(args);
-    }""", args)
-    component = page.frame_locator(".analysis-component")
+    panel = page.locator(".native-panel")
+    expect(panel.get_by_role("radiogroup", name="Team")).to_be_visible()
+    expect(page.locator(".native-stats")).to_contain_text("Goals")
+    component = page.frame_locator(".native-map iframe")
     plot = component.locator("#plot")
     expect(plot.locator("canvas")).not_to_have_count(0, timeout=60000)
-    page.wait_for_function("parseInt(document.querySelector('.analysis-component').style.height) > 200")
-    position = plot.evaluate("""(element, target) => {
+    page.wait_for_function("parseInt(document.querySelector('.native-map iframe').style.height) > 200")
+    position = plot.evaluate("""element => {
         const chart = window.echarts.getInstanceByDom(element);
         for (const [seriesIndex, series] of chart.getOption().series.entries()) {
-            const point = (series.data || []).find(point => point && point.customdata === target);
+            const point = (series.data || []).find(point => point && point.customdata === 0);
             if (point) {
                 const [x, y] = chart.convertToPixel({seriesIndex}, point.value);
                 return {x, y};
             }
         }
-        throw new Error('Recorded shot missing from the hosted map');
-    }""", target)
+        throw new Error('Fixture goal missing from the native shot map');
+    }""")
     plot.click(position=position)
-    page.wait_for_function("window.__hostValues.length > 0", timeout=30000)
-    value = page.evaluate("window.__hostValues.at(-1)")
-    assert (value[0] if isinstance(value, list) else value) == target, value
+    detail = page.locator(".native-detail")
+    expect(detail).to_contain_text("One")
+    expect(detail).to_contain_text("GOAL")
+    expect(page.locator(".native-goalframe")).to_be_visible()
+    expect(page.locator(".native-watch input[type=range]").first).to_have_value("1")
+    page.get_by_role("button", name="Watch", exact=True).click()
+    page.wait_for_function("document.querySelector('.native-watch video')?.duration > 0", timeout=120000)
+    duration = page.evaluate("document.querySelector('.native-watch video').duration")
+    assert 1.5 <= duration <= 2.6, duration  # 1 s before + 1 s after the 0'02" goal
+    expect(page.get_by_role("link", name="Download clip")).to_have_attribute("download", "One_0.mp4")
     with page.expect_download(timeout=30000) as downloaded:
         component.locator('[data-export="png"]').click()
-    validate_chart_download(downloaded.value, evidence / "native-host-shot-map.png", "PNG")
-    page.screenshot(path=str(evidence / "native-host.png"))
+    validate_chart_download(downloaded.value, evidence / "native-shot-map.png", "PNG")
+    page.screenshot(path=str(evidence / "native-shot-map.png"))
+    page.get_by_role("button", name="Clear selection").click()
+    expect(detail).to_be_hidden()
 
     stage("native workspace at narrow width")
     page.set_viewport_size({"width": 390, "height": 700})

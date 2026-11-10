@@ -96,6 +96,59 @@ def measure(base, project_id, rounds, teams):
     return results
 
 
+# Counts map redraws: the component posts setFrameHeight after every render.
+REDRAW_PROBE = """
+window.__redraws = 0;
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "streamlit:setFrameHeight") window.__redraws += 1;
+});
+"""
+
+
+def native_step(page, results, name, action, timeout=60_000):
+    """Time an action until the analysis request finishes and the map redraws."""
+    before = page.evaluate("window.__redraws")
+    started = time.monotonic()
+    action()
+    page.wait_for_function(f"window.__redraws > {before} && !document.querySelector('.native-panel[aria-busy]')",
+                           timeout=timeout)
+    seconds = time.monotonic() - started
+    results.append({"step": name, "seconds": round(seconds, 3), "bytes": 0})
+    print(f"  {name:<44} {seconds:6.2f} s", flush=True)
+
+
+def measure_native(base, project_id, rounds, teams):
+    from playwright.sync_api import sync_playwright
+    results = []
+    home, away = teams
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.add_init_script(REDRAW_PROBE)
+        for round_index in range(rounds):
+            url = f"{base}/analysis.html?view=analyst&project={project_id}&ui=native&tab=shot-map"
+            started = time.monotonic()
+            page.goto(url)
+            page.wait_for_function("window.__redraws > 0 && !document.querySelector('.native-panel[aria-busy]')",
+                                   timeout=120_000)
+            seconds = time.monotonic() - started
+            results.append({"step": "native: open workspace on Shot Map", "round": round_index + 1,
+                            "seconds": round(seconds, 3), "bytes": 0})
+            print(f"  native r{round_index + 1} open workspace on Shot Map{'':<14} {seconds:6.2f} s", flush=True)
+            team = lambda name: page.locator(".native-panel [role=radiogroup][aria-label=Team] label").filter(has_text=name).first
+            native_step(page, results, "native: change Shot Map team", lambda: team(away).click())
+            native_step(page, results, "native: change Shot Map team back", lambda: team(home).click())
+            picker = page.locator(".native-picker select")
+            native_step(page, results, "native: select a shot",
+                        lambda: picker.select_option(picker.locator("option").nth(1).get_attribute("value")))
+            native_step(page, results, "native: clear selection",
+                        lambda: page.get_by_role("button", name="Clear selection").click())
+            if round_index == 0:
+                page.screenshot(path=str(ROOT / "build" / "timing-native-shot-map.png"))
+        browser.close()
+    return results
+
+
 def summarize(results):
     groups = {}
     for item in results:
@@ -116,6 +169,8 @@ def main(argv=None):
     parser.add_argument("--backend", nargs="+", default=[sys.executable, str(ROOT / "packaging" / "clipmaker_api_server.py")],
                         help="backend command (default: source server)")
     parser.add_argument("--json", type=Path, help="write raw results and summary here")
+    parser.add_argument("--native", action="store_true", help="also time the native Shot Map")
+    parser.add_argument("--native-only", action="store_true", help="time only the native Shot Map")
     args = parser.parse_args(argv)
     (ROOT / "build").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="vizorplay-timing-") as name:
@@ -135,7 +190,9 @@ def main(argv=None):
             from team_names import resolve_home_away
             event_teams = pd.read_csv(csv, usecols=["team"], low_memory=False)["team"].dropna().astype(str).unique().tolist()
             teams = resolve_home_away(str(match["home_team"]), str(match["away_team"]), event_teams)
-            results = measure(base, project["id"], args.rounds, teams)
+            results = [] if args.native_only else measure(base, project["id"], args.rounds, teams)
+            if args.native or args.native_only:
+                results += measure_native(base, project["id"], args.rounds, teams)
     summary = summarize(results)
     print("\nMedian over rounds:")
     for item in summary:

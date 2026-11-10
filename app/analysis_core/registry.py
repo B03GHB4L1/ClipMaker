@@ -13,7 +13,7 @@ VIEWS = {
 # Order and labels match the classic workspaces.
 TABS = {
     "analyst": [
-        {"slug": "shot-map", "label": "Shot Map", "classic": "◉ Shot Map", "native": False},
+        {"slug": "shot-map", "label": "Shot Map", "classic": "◉ Shot Map", "native": True},
         {"slug": "pass-map", "label": "Pass Map", "classic": "◎ Pass Map", "native": False},
         {"slug": "defensive-actions", "label": "Defensive Actions", "classic": "■ Defensive Actions", "native": False},
         {"slug": "dribbles-carries", "label": "Dribbles & Carries", "classic": "◈ Dribbles & Carries", "native": False},

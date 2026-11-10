@@ -1,9 +1,7 @@
 // Native analysis workspace shell (docs/ANALYSIS_MIGRATION_PLAN.md, Phase 1).
 // Tabs whose native view is not built yet link to the classic workspace.
 import { projectRequest, saveProject } from "../projects.js";
-
-// Phase 2+ registers per-tab renderers here: slug -> async (panel, context) => {}.
-export const renderers = {};
+import { renderers } from "./tabs/index.js";
 
 const element = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -48,6 +46,12 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
     }
   };
 
+  const persistControls = (slug, controls) => {
+    const current = state[view] || {};
+    state = { ...state, [view]: { ...current, tab: current.tab || slug, controls: { ...(current.controls || {}), [slug]: controls } } };
+    saveProject(projectId, { analysis_state: state }).catch(() => {});
+  };
+
   const persist = (tab) => {
     state = { ...state, [view]: { ...(state[view] || {}), tab, controls: state[view]?.controls || {} } };
     // Save at once: the shared queue keeps writes ordered and its unload guard
@@ -82,8 +86,10 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
       select(target.dataset.tab, true);
     });
 
+    let cleanup = null;
     const select = async (slug, userAction = false) => {
       active = slug;
+      if (cleanup) { cleanup(); cleanup = null; }
       buttons.forEach((button) => {
         const selected = button.dataset.tab === slug;
         button.setAttribute("aria-selected", String(selected));
@@ -107,7 +113,12 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
       }
       panel.setAttribute("aria-busy", "true");
       try {
-        await renderer(panel, { projectId, view, summary, state: state[view]?.controls?.[slug] || {} });
+        const result = await renderer(panel, {
+          projectId, view, summary, state: state[view]?.controls?.[slug] || {},
+          save: (controls) => persistControls(slug, controls),
+        });
+        if (active === slug) cleanup = typeof result === "function" ? result : null;
+        else if (typeof result === "function") result(); // The user moved on while it loaded.
       } catch (error) {
         panel.replaceChildren(element("div", { class: "native-message native-error", role: "alert" },
           element("h2", { text: `${tab.label} could not load` }), element("p", { text: error.message })));
