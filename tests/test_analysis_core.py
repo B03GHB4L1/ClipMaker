@@ -94,9 +94,9 @@ class AnalysisCoreTests(unittest.TestCase):
                 clean_analysis_state(bad)
 
     def test_ui_mode_setting(self):
-        cases = {"": ("native", "classic"), "native": ("native", "native"), "classic": ("classic", "classic"),
-                 "analyst=classic": ("classic", "classic"), "tactical=native": ("native", "native"),
-                 "analyst=native,tactical=streamlit": ("native", "classic"), "bogus": ("native", "classic")}
+        cases = {"": ("native", "native"), "native": ("native", "native"), "classic": ("classic", "classic"),
+                 "analyst=classic": ("classic", "native"), "tactical=classic": ("native", "classic"),
+                 "analyst=native,tactical=streamlit": ("native", "classic"), "bogus": ("native", "native")}
         for setting, expected in cases.items():
             with self.subTest(setting=setting), patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": setting}):
                 modes = analysis_ui_modes()
@@ -143,10 +143,10 @@ class AnalysisApiTests(unittest.TestCase):
         views = json.loads(body)["views"]
         self.assertEqual([tab["slug"] for tab in views["analyst"]["tabs"]][:2], ["shot-map", "pass-map"])
         self.assertEqual(len(views["tactical"]["tabs"]), 5)
-        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("native", "classic"))
+        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("native", "native"))
         with patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": "analyst=classic"}):
             views = json.loads(self.request("/api/analysis/config")[1])["views"]
-        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("classic", "classic"))
+        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("classic", "native"))
 
     def test_summary_loads_once_and_reports_match(self):
         started = time.monotonic()
@@ -169,8 +169,16 @@ class AnalysisApiTests(unittest.TestCase):
         for path in ("/api/analysis/other/shot-map", "/api/analysis/analyst/unknown", "/api/analysis/analyst/shot-map/x"):
             with self.subTest(path=path):
                 self.assertEqual(self.error(path, {"project_id": self.project["id"]})[0], 400)
-        code, payload = self.error("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
+        # Every tab is native now; a tab marked classic still answers 501.
+        from analysis_core import TABS
+        entry = next(tab for tab in TABS["tactical"] if tab["slug"] == "style-profile")
+        with patch.dict(entry, {"native": False}):
+            code, payload = self.error("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
         self.assertEqual((code, payload.get("classic")), (501, True))
+        _, body = self.request("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
+        view = json.loads(body)["view"]
+        self.assertEqual((view["team"], view["scope"]["multi"]), ("Northbridge", False))
+        self.assertTrue(any(element["kind"] == "plotly" for element in view["elements"]))
         self.assertEqual(self.error("/api/analysis/analyst/shot-map", {"project_id": "nope"})[0], 400)
 
     def test_component_assets_are_served_without_escaping_their_folder(self):
@@ -212,7 +220,9 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertEqual(code, 400)
                 self.assertIn(message, payload["error"])
         self.assertEqual(self.error("/api/analysis/analyst/shot-map/other", {"project_id": project_id})[0], 400)
-        self.assertEqual(self.error("/api/analysis/tactical/style-profile/clip", {"project_id": project_id})[0], 501)
+        code, payload = self.error("/api/analysis/tactical/style-profile/clip", {"project_id": project_id})
+        self.assertEqual(code, 400)
+        self.assertIn("Video Lab", payload["error"])
 
     def test_shot_map_clip_uses_classic_timing(self):
         import subprocess

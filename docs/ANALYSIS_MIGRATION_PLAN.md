@@ -2,7 +2,9 @@
 
 Status: Phases 0-2 complete and green on Windows, Linux and macOS CI
 (9-10 November 2026; Phase 2 passed its decision gate). Phase 3 (all Analyst Room tabs
-native, now the default) complete locally on 10 November 2026; CI pending.
+native, now the default) complete and green on CI on 10 November 2026.
+Phase 4 (Tactical Lab native, now the default) complete locally on
+10 November 2026; CI pending. Phase 5 not started.
 
 ## Goal
 
@@ -364,6 +366,60 @@ and charts have drawn, so the comparison favours classic.
 
 Team selector, multi-match mode, then the five tabs (see checklist).
 
+#### Phase 4 results (10 November 2026, locally verified, CI pending)
+
+Approach: the Tactical tab functions mix calculation and drawing, and read
+page globals and the Streamlit session, so porting them by hand was the
+riskiest option. Instead:
+- `analysis_core/tactical_page.py` is the page's constants and functions
+  copied verbatim by script (page startup code excluded; no Streamlit import).
+- `analysis_core/st_shim.py` is a small stand-in for the Streamlit calls
+  those functions make. It records subheaders, captions, markdown, messages,
+  metrics, Plotly figures, tables and controls (key, label, options or range,
+  validated value) in call order instead of drawing them.
+- `analysis_core/tactical.py` rebuilds the classic session from the saved
+  projects (videos, kick-offs, corrections, per-match setups), loads the
+  match or the selected matches as the classic page does (multi-match by
+  project id), runs the tab under a lock (the code uses module globals) and
+  returns the recording. Only classic widget keys may reach the session.
+- Video Lab clips run the classic tab with "Cut Moment" or "Build Reel"
+  reported as pressed, so the classic code cuts and joins with its own
+  readiness checks and per-match video lookup.
+- `analysis_core/plotly_theme.py`: Plotly Express figures took their colours
+  from Streamlit's placeholder template, swapped for its light palette in the
+  browser; native figures use a template with that palette.
+- `ui/analysis/tabs/tactical.js` draws the recording (classic HTML through an
+  allow-list sanitizer), turns recorded controls into inputs and shares
+  Tactical controls across its tabs like the classic session.
+
+Verified: `tests/test_tactical_native.py` compares every recorded single- and
+multi-match scenario element by element (figures with placeholder colours
+mapped to the palette); a one-line caption change fails 15 scenarios. Real
+matches (Rennes vs PSG, Lyon vs Fenerbahce): all five tabs, slider changes,
+22 s moment and 110 s five-moment reel at 8 s / 14 s, multi-match with four
+correctly named teams, state restored after reload, 390 px, no console
+errors. Both views now default to native.
+
+Speed-up: profiling showed most Tactical time in the transition detectors,
+which filtered the whole match and re-parsed string flags for every loss or
+recovery. `analysis_core/tactical_fast.py` computes row flags once and slices
+windows by position (valid because prepared frames are sorted with event ids
+in order), and is installed over the copied functions; the copy itself stays
+verbatim. `test_fast_detectors_match_the_originals` requires identical tables
+for both teams on single, merged and scoped frames across window settings.
+
+Timing, real match (Rennes vs PSG), 3 rounds, medians (max). Classic stops
+when Streamlit finishes its script; native waits for charts to draw.
+
+| Step | Classic | Native |
+|---|---|---|
+| Open the Tactical Lab | 1.62 s (2.30) | 0.26 s (0.64) |
+| Attacking Transitions | 1.25 s | 0.17 s |
+| Style Profile | 2.52 s | 0.42 s |
+| Set Pieces | 0.65 s (0.91) | 0.43 s |
+| Video Lab | 1.98 s | 0.26 s |
+| Defensive Transitions | 1.46 s | 0.18 s |
+
 ### Phase 5: Remove Streamlit
 
 - Delete `analysis_server.py` subprocess launch, `analysis_entry.py`,
@@ -413,12 +469,12 @@ and browser-only behaviour still need browser tests), `native` (built),
 
 | Tab | Behaviour to preserve | Status |
 |---|---|---|
-| Match scope | Single match, multi-match toggle and multiselect, unique event IDs, saved labels, later opponents in team list | golden (data views) |
-| Defensive Transitions | Reaction window and event cap sliders; period isolation; chart | golden (data views) |
-| Attacking Transitions | Attack window and event cap; includes win, caps all events; chart | golden (data views) |
-| Style Profile | Radar with info, pooled weighted metrics, strengths/weaknesses, zone heatmaps, per-match trends with dimension picker | golden (data views) |
-| Set Pieces | Restart classification, retained/box entry/shot/xT, charts and 16-row table | golden (data views) |
-| Video Lab | Playlists, before/after/reel-count sliders, moment list, sequence trace, cut moment, build and download reel, correct source time and order across projects | golden (data views) |
+| Match scope | Single match, multi-match toggle and multiselect, unique event IDs, saved labels, later opponents in team list | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Defensive Transitions | Reaction window and event cap sliders; period isolation; chart | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Attacking Transitions | Attack window and event cap; includes win, caps all events; chart | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Style Profile | Radar with info, pooled weighted metrics, strengths/weaknesses, zone heatmaps, per-match trends with dimension picker | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Set Pieces | Restart classification, retained/box entry/shot/xT, charts and 16-row table | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Video Lab | Playlists, before/after/reel-count sliders, moment list, sequence trace, cut moment, build and download reel, correct source time and order across projects | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
 
 ## Tests to add
 

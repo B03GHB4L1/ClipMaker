@@ -117,9 +117,11 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
       }
       panel.setAttribute("aria-busy", "true");
       try {
+        // Tactical controls are shared across its tabs, like the classic session.
+        const stateKey = view === "tactical" ? "shared" : slug;
         const result = await renderer(panel, {
-          projectId, view, summary, state: state[view]?.controls?.[slug] || {},
-          save: (controls) => persistControls(slug, controls),
+          projectId, view, slug, summary, state: state[view]?.controls?.[stateKey] || {},
+          save: (controls) => persistControls(stateKey, controls),
         });
         if (active === slug) cleanup = typeof result === "function" ? result : null;
         else if (typeof result === "function") result(); // The user moved on while it loaded.

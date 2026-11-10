@@ -37,6 +37,7 @@ jobs:
       - run: node --check ui/analysis/tabs/index.js
       - run: node --check ui/analysis/tabs/event-tab.js
       - run: node --check ui/analysis/tabs/comparison.js
+      - run: node --check ui/analysis/tabs/tactical.js
       - run: node --test tests/projects.test.mjs
       - run: python packaging/clipmaker_api_server.py --help
       - run: python -m playwright install --with-deps chromium
