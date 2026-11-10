@@ -231,10 +231,12 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     assert saved["analyst"]["tab"] == "build-up", saved
     expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
 
-    stage("unmigrated tab falls back to the classic workspace on the same tab")
-    # Every Analyst tab is native now; the Tactical Lab still falls back.
-    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&ui=native&tab=style-profile")
-    link = page.get_by_role("link", name="Open in classic workspace")
+    stage("native Tactical Lab is the default; the classic link opens the same tab")
+    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=style-profile")
+    expect(page.get_by_role("tab", name="Style Profile")).to_have_attribute("aria-selected", "true")
+    expect(page.locator(".native-tactical")).to_contain_text("Style Profile")
+    page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 1", timeout=60000)
+    link = page.get_by_role("link", name="Classic workspace")
     assert "ui=classic" in link.get_attribute("href") and "tab=style-profile" in link.get_attribute("href")
     link.click()
     frame = page.frame_locator("[data-analysis-frame]")
@@ -486,7 +488,7 @@ def exercise(page, base, root, evidence, errors):
     assert frame.get_by_test_id("stException").count() == 0
     page.screenshot(path=str(evidence / "analysis.png"))
     stage("open tactical workspace")
-    page.goto(base + "/analysis.html?view=tactical&project=" + project_id)
+    page.goto(base + "/analysis.html?view=tactical&ui=classic&project=" + project_id)
     tactical = page.frame_locator('[data-analysis-frame]')
     tactical.get_by_role("tab", name="Style Profile").click(timeout=60000)
     tactical.get_by_role("heading", name="Strength Signals", exact=True).wait_for(timeout=60000)

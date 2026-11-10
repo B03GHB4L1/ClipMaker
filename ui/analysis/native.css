@@ -94,3 +94,17 @@
 @media (max-width: 720px) { .native-figure-pair, .native-moments { grid-template-columns: 1fr; } }
 .native-classic-switch { margin-left: auto; font-size: 11px; color: var(--cm-muted); }
 .native-classic-switch:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
+
+/* Tactical Lab (Phase 4) */
+.native-tactical { display: grid; gap: 10px; align-content: start; }
+.native-section-title { margin: 6px 0 0; font-size: 15px; font-weight: 600; }
+.native-metrics { gap: 8px 28px; }
+.native-metrics .native-stat-values b { font-size: 16px; }
+.native-tab-controls { padding: 4px 0; }
+.native-check { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.native-match-list { display: grid; gap: 4px; margin: 0; padding: 6px 8px; border: 1px solid var(--cm-rule); max-height: 180px; overflow: auto; }
+.native-info { padding: 8px 10px; border: 1px solid var(--cm-rule); }
+.native-html { font-size: 12px; overflow-x: auto; }
+.native-markdown p, .native-markdown h4 { margin: 0 0 6px; font-size: 12px; }
+.native-tactical-media { display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
+.native-tactical-media h4 { margin: 0; font-size: 13px; }

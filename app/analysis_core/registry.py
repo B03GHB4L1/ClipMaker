@@ -23,11 +23,11 @@ TABS = {
         {"slug": "comparison", "label": "Comparison", "classic": "⇄ Comparison", "native": True},
     ],
     "tactical": [
-        {"slug": "defensive-transitions", "label": "Defensive Transitions", "classic": "Defensive Transitions", "native": False},
-        {"slug": "attacking-transitions", "label": "Attacking Transitions", "classic": "Attacking Transitions", "native": False},
-        {"slug": "style-profile", "label": "Style Profile", "classic": "Style Profile", "native": False},
-        {"slug": "set-pieces", "label": "Set Pieces", "classic": "Set Pieces", "native": False},
-        {"slug": "video-lab", "label": "Video Lab", "classic": "Video Lab", "native": False},
+        {"slug": "defensive-transitions", "label": "Defensive Transitions", "classic": "Defensive Transitions", "native": True},
+        {"slug": "attacking-transitions", "label": "Attacking Transitions", "classic": "Attacking Transitions", "native": True},
+        {"slug": "style-profile", "label": "Style Profile", "classic": "Style Profile", "native": True},
+        {"slug": "set-pieces", "label": "Set Pieces", "classic": "Set Pieces", "native": True},
+        {"slug": "video-lab", "label": "Video Lab", "classic": "Video Lab", "native": True},
     ],
 }
 

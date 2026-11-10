@@ -163,6 +163,16 @@ def measure_native(base, project_id, rounds, teams):
             for tab in ["Pass Map", "Defensive Actions", "Dribbles & Carries", "Goalkeeper", "Build-Up",
                         "Pressing", "Comparison", "Shot Map"]:
                 native_tab_switch(page, results, tab)
+            started = time.monotonic()
+            page.goto(f"{base}/analysis.html?view=tactical&project={project_id}&ui=native&tab=defensive-transitions")
+            page.wait_for_function("""() => { const p = document.querySelector('.native-panel');
+                return p && !p.hasAttribute('aria-busy') && document.querySelector('.native-figure .main-svg'); }""",
+                                   timeout=120_000)
+            seconds = time.monotonic() - started
+            results.append({"step": "native: open Tactical Lab", "round": round_index + 1, "seconds": round(seconds, 3), "bytes": 0})
+            print(f"  native r{round_index + 1} open Tactical Lab{'':<27} {seconds:6.2f} s", flush=True)
+            for tab in ["Attacking Transitions", "Style Profile", "Set Pieces", "Video Lab", "Defensive Transitions"]:
+                native_tab_switch(page, results, tab)
             if round_index == 0:
                 page.screenshot(path=str(ROOT / "build" / "timing-native-shot-map.png"))
         browser.close()

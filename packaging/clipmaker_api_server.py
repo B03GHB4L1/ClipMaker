@@ -66,6 +66,9 @@ def atomic_json(path: Path, value: Any) -> None:
 
 ANALYSIS_STATE_LIMIT = 20_000
 _STATE_KEY = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+# Control keys mirror classic widget keys, some of which contain spaces
+# (e.g. "vl_selected_moment_Defensive Transition").
+_CONTROL_KEY = re.compile(r"^[A-Za-z0-9_. -]{1,64}$")
 
 
 def _clean_control_value(value: Any) -> Any:
@@ -99,7 +102,7 @@ def clean_analysis_state(state: Any) -> dict[str, Any]:
             if not _STATE_KEY.match(str(tab_name)) or not isinstance(values, dict):
                 raise ValueError("Invalid analysis controls in saved state.")
             tabs[str(tab_name)] = {str(key): _clean_control_value(value) for key, value in values.items()
-                                   if _STATE_KEY.match(str(key))}
+                                   if _CONTROL_KEY.match(str(key))}
         clean[view] = {"tab": tab, "controls": tabs}
     if len(json.dumps(clean)) > ANALYSIS_STATE_LIMIT:
         raise ValueError("Saved analysis state is too large.")
@@ -133,6 +136,8 @@ def _native_tabs():
     from analysis_core import build_up, comparison, pressing
     tabs[("analyst", "pressing")] = {"view": pressing.build_view, "clip_event": pressing.clip}
     tabs[("analyst", "comparison")] = {"view": comparison.build_view, "clip_event": comparison.clip}
+    for slug in ("defensive-transitions", "attacking-transitions", "style-profile", "set-pieces", "video-lab"):
+        tabs[("tactical", slug)] = {"tactical": True}
     tabs[("analyst", "build-up")] = {"view": build_up.build_view, "clip_event": build_up.clip}
     return tabs
 
@@ -150,11 +155,11 @@ NATIVE_TABS = _LazyTabs()
 
 
 def analysis_ui_modes() -> dict[str, str]:
-    """Workspace per view: VIZORPLAY_ANALYSIS_UI=native, or analyst=classic,tactical=native.
+    """Workspace per view: VIZORPLAY_ANALYSIS_UI=classic, or analyst=classic,tactical=native.
 
-    The Analyst Room defaults to native since every tab passed parity (Phase 3);
-    the Tactical Lab stays classic until Phase 4."""
-    modes = {"analyst": "native", "tactical": "classic"}
+    Both views default to native since every tab passed parity (Phases 3 and 4);
+    the classic workspace stays reachable until Phase 5 removes it."""
+    modes = {"analyst": "native", "tactical": "native"}
     setting = os.environ.get("VIZORPLAY_ANALYSIS_UI", "").strip().lower()
     for part in filter(None, (item.strip() for item in setting.split(","))):
         view, _, mode = part.rpartition("=")
@@ -1330,6 +1335,23 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             for part in parts:
                 part.unlink(missing_ok=True)
 
+    def tactical_request(self, tab, project, controls, body, is_clip) -> dict[str, Any]:
+        """Tactical Lab tabs run the classic tab code against a recorder."""
+        import shutil
+        from analysis_core import tactical
+        projects = self.store.list()
+        if is_clip:
+            action = str(body.get("action") or "")
+            source, name = tactical.clip(tab, controls, project, projects, action)
+            folder = self.store.data_dir / "analysis-clips"
+            folder.mkdir(parents=True, exist_ok=True)
+            clip = folder / f"tactical-{uuid.uuid4().hex[:12]}.mp4"
+            shutil.move(source, clip)
+            return {"file": self.publish_clip(clip, name, 0, 0, folder)}
+        view, _ = tactical.render(tab, controls, project, projects)
+        view["has_video"] = bool(str(project.get("video_path") or "").strip())
+        return {"view": view}
+
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
             raise ValueError("Open a project before using the analytical workspace.")
@@ -1548,8 +1570,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     self.send_json(HTTPStatus.NOT_IMPLEMENTED,
                                    {"error": "This tab still runs in the classic workspace.", "classic": True})
                     return
-                frames = self.server.analysis_frames.get(project["csv_path"])  # type: ignore[attr-defined]
                 controls = body.get("controls") if isinstance(body.get("controls"), dict) else {}
+                if handler.get("tactical"):
+                    self.send_json(HTTPStatus.OK, self.tactical_request(parts[4], project, controls, body, len(parts) == 6))
+                    return
+                frames = self.server.analysis_frames.get(project["csv_path"])  # type: ignore[attr-defined]
                 if len(parts) == 6:
                     self.send_json(HTTPStatus.OK, {"file": self.analysis_clip(project, frames, handler, controls, body)})
                     return
