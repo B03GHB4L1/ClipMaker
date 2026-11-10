@@ -199,11 +199,11 @@ def exercise_analyst_chart(page, frame, evidence):
 
 
 def exercise_native_workspace(page, base, project_id, evidence, errors):
-    stage("open native analysis workspace shell")
+    stage("open native analysis workspace shell (now the Analyst Room default)")
     console_errors = []
     listener = lambda message: console_errors.append(message.text) if message.type == "error" else None
     page.on("console", listener)
-    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
     tabs = page.get_by_role("tablist", name="Analyst Room").get_by_role("tab")
     expect(tabs).to_have_count(8)
     expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
@@ -223,20 +223,22 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
     page.keyboard.press("ArrowLeft")
     expect(page.get_by_role("tab", name="Comparison")).to_have_attribute("aria-selected", "true")
-    page.get_by_role("tab", name="Goalkeeper").click()
+    page.get_by_role("tab", name="Build-Up").click()
     # The save starts on click (no debounce), so "Saved locally" means it landed.
     expect(page.locator("[data-project-status]")).to_have_text("Saved locally", timeout=30000)
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
     saved = request(base, f"/api/projects/{project_id}")["project"]["analysis_state"]
-    assert saved["analyst"]["tab"] == "goalkeeper", saved
-    expect(page.get_by_role("tab", name="Goalkeeper")).to_have_attribute("aria-selected", "true")
+    assert saved["analyst"]["tab"] == "build-up", saved
+    expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
 
     stage("unmigrated tab falls back to the classic workspace on the same tab")
+    # Every Analyst tab is native now; the Tactical Lab still falls back.
+    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&ui=native&tab=style-profile")
     link = page.get_by_role("link", name="Open in classic workspace")
-    assert "ui=classic" in link.get_attribute("href") and "tab=goalkeeper" in link.get_attribute("href")
+    assert "ui=classic" in link.get_attribute("href") and "tab=style-profile" in link.get_attribute("href")
     link.click()
     frame = page.frame_locator("[data-analysis-frame]")
-    expect(frame.get_by_role("tab", name="⊞ Goalkeeper")).to_have_attribute("aria-selected", "true", timeout=60000)
+    expect(frame.get_by_role("tab", name="Style Profile")).to_have_attribute("aria-selected", "true", timeout=60000)
 
     stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native&tab=shot-map")
@@ -244,10 +246,10 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     panel = page.locator(".native-panel")
     expect(panel.get_by_role("radiogroup", name="Team")).to_be_visible()
     expect(page.locator(".native-stats")).to_contain_text("Goals")
-    component = page.frame_locator(".native-map iframe")
+    component = page.frame_locator(".native-map-box iframe")
     plot = component.locator("#plot")
     expect(plot.locator("canvas")).not_to_have_count(0, timeout=60000)
-    page.wait_for_function("parseInt(document.querySelector('.native-map iframe').style.height) > 200")
+    page.wait_for_function("parseInt(document.querySelector('.native-map-box iframe').style.height) > 200")
     position = plot.evaluate("""element => {
         const chart = window.echarts.getInstanceByDom(element);
         for (const [seriesIndex, series] of chart.getOption().series.entries()) {
@@ -263,7 +265,7 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     detail = page.locator(".native-detail")
     expect(detail).to_contain_text("One")
     expect(detail).to_contain_text("GOAL")
-    expect(page.locator(".native-goalframe")).to_be_visible()
+    expect(page.locator(".native-aux-box iframe")).to_be_visible()
     expect(page.locator(".native-watch input[type=range]").first).to_have_value("1")
     page.get_by_role("button", name="Watch", exact=True).click()
     page.wait_for_function("document.querySelector('.native-watch video')?.duration > 0", timeout=120000)
@@ -277,11 +279,18 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.get_by_role("button", name="Clear selection").click()
     expect(detail).to_be_hidden()
 
+    stage("native Comparison draws its Plotly charts and Top 5 tables")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=comparison")
+    page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 3", timeout=60000)
+    expect(page.locator(".native-table").first).to_be_visible()
+    expect(page.get_by_role("button", name="Show top moments").first).to_be_visible()
+    page.screenshot(path=str(evidence / "native-comparison.png"))
+
     stage("native workspace at narrow width")
     page.set_viewport_size({"width": 390, "height": 700})
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&ui=native")
-    expect(page.get_by_role("tab", name="Goalkeeper")).to_have_attribute("aria-selected", "true")
-    expect(page.get_by_role("tab", name="Goalkeeper")).to_be_in_viewport()
+    expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_role("tab", name="Build-Up")).to_be_in_viewport()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     assert page.locator(".app-footer").is_visible()
     page.screenshot(path=str(evidence / "native-390.png"))
@@ -467,7 +476,7 @@ def exercise(page, base, root, evidence, errors):
     expect(page.get_by_role("spinbutton", name="End (video seconds)", exact=True)).to_have_value("3.5")
     page.screenshot(path=str(evidence / "filters.png"))
     stage("open analyst workspace")
-    page.goto(base + "/analysis.html?view=analyst&project=" + project_id)
+    page.goto(base + "/analysis.html?view=analyst&ui=classic&project=" + project_id)
     frame = page.frame_locator('[data-analysis-frame]')
     frame.get_by_role("tab", name="◉ Shot Map").wait_for(timeout=60000)
     exercise_analyst_chart(page, frame, evidence)

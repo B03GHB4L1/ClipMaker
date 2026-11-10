@@ -63,6 +63,21 @@ class AnalysisCoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cache.get(str(Path(name) / "missing.csv"))
 
+    def test_pressing_markers_carry_their_event_ids(self):
+        # Without ids, clicks on the pressing map could never select a win.
+        from analysis_core.pressing import pressing_option
+        wins = [{"idx": 7, "press_zone": "High", "x": 80, "y": 40, "type": "Tackle", "minute": 3, "second": 4,
+                 "period": "FirstHalf", "playerName": "A"},
+                {"idx": 12, "press_zone": "Mid", "x": 60, "y": 20, "type": "BallRecovery", "minute": 9, "second": 0,
+                 "period": "SecondHalf", "playerName": "B"}]
+        markers = [point for series in pressing_option(wins, selected_idx=12)["series"] if series.get("name")
+                   for point in series["data"]]
+        self.assertEqual(sorted(point["customdata"] for point in markers), [7, 12])
+        self.assertEqual(next(p for p in markers if p["customdata"] == 12)["symbolSize"], 22)
+        frontend = (ROOT / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
+        start = frontend.index("function renderEchartsOption")
+        self.assertIn("Streamlit.setValue([id, Date.now()])", frontend[start:frontend.index("function cmNewPlot", start)])
+
     def test_registry_rejects_unknown_names(self):
         self.assertEqual(validate_tab("analyst", "shot-map")["label"], "Shot Map")
         for view, tab in (("analyst", "../x"), ("other", "shot-map"), ("tactical", "shot-map")):
@@ -79,8 +94,9 @@ class AnalysisCoreTests(unittest.TestCase):
                 clean_analysis_state(bad)
 
     def test_ui_mode_setting(self):
-        cases = {"": ("classic", "classic"), "native": ("native", "native"), "analyst=native": ("native", "classic"),
-                 "analyst=native,tactical=streamlit": ("native", "classic"), "bogus": ("classic", "classic")}
+        cases = {"": ("native", "classic"), "native": ("native", "native"), "classic": ("classic", "classic"),
+                 "analyst=classic": ("classic", "classic"), "tactical=native": ("native", "native"),
+                 "analyst=native,tactical=streamlit": ("native", "classic"), "bogus": ("native", "classic")}
         for setting, expected in cases.items():
             with self.subTest(setting=setting), patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": setting}):
                 modes = analysis_ui_modes()
@@ -127,10 +143,10 @@ class AnalysisApiTests(unittest.TestCase):
         views = json.loads(body)["views"]
         self.assertEqual([tab["slug"] for tab in views["analyst"]["tabs"]][:2], ["shot-map", "pass-map"])
         self.assertEqual(len(views["tactical"]["tabs"]), 5)
-        self.assertEqual(views["analyst"]["mode"], "classic")
-        with patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": "analyst=native"}):
-            views = json.loads(self.request("/api/analysis/config")[1])["views"]
         self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("native", "classic"))
+        with patch.dict(os.environ, {"VIZORPLAY_ANALYSIS_UI": "analyst=classic"}):
+            views = json.loads(self.request("/api/analysis/config")[1])["views"]
+        self.assertEqual((views["analyst"]["mode"], views["tactical"]["mode"]), ("classic", "classic"))
 
     def test_summary_loads_once_and_reports_match(self):
         started = time.monotonic()
@@ -153,7 +169,7 @@ class AnalysisApiTests(unittest.TestCase):
         for path in ("/api/analysis/other/shot-map", "/api/analysis/analyst/unknown", "/api/analysis/analyst/shot-map/x"):
             with self.subTest(path=path):
                 self.assertEqual(self.error(path, {"project_id": self.project["id"]})[0], 400)
-        code, payload = self.error("/api/analysis/analyst/pass-map", {"project_id": self.project["id"]})
+        code, payload = self.error("/api/analysis/tactical/style-profile", {"project_id": self.project["id"]})
         self.assertEqual((code, payload.get("classic")), (501, True))
         self.assertEqual(self.error("/api/analysis/analyst/shot-map", {"project_id": "nope"})[0], 400)
 
@@ -182,9 +198,9 @@ class AnalysisApiTests(unittest.TestCase):
         _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": project_id, "controls": {"team": "Southport"}})
         view = json.loads(body)["view"]
         self.assertEqual(view["controls"]["team"], "Southport")
-        self.assertEqual(view["map"]["component_type"], "shot_map")
+        self.assertEqual(view["components"][-1]["args"]["component_type"], "shot_map")
         self.assertEqual(view["clip_defaults"], {"before": 5, "after": 8})
-        selected = view["shots"][0]["id"]
+        selected = view["picker"]["items"][0]["id"]
         clip = "/api/analysis/analyst/shot-map/clip"
         bad = [({"controls": {"selected": selected}, "before": 61, "after": 8}, "between 0 and 60"),
                ({"controls": {"selected": selected}, "before": "x", "after": 8}, "between 0 and 60"),
@@ -196,7 +212,7 @@ class AnalysisApiTests(unittest.TestCase):
                 self.assertEqual(code, 400)
                 self.assertIn(message, payload["error"])
         self.assertEqual(self.error("/api/analysis/analyst/shot-map/other", {"project_id": project_id})[0], 400)
-        self.assertEqual(self.error("/api/analysis/analyst/pass-map/clip", {"project_id": project_id})[0], 501)
+        self.assertEqual(self.error("/api/analysis/tactical/style-profile/clip", {"project_id": project_id})[0], 501)
 
     def test_shot_map_clip_uses_classic_timing(self):
         import subprocess
@@ -210,11 +226,11 @@ class AnalysisApiTests(unittest.TestCase):
                                       "markers": {"1H": "00:00:30", "2H": "00:00:30"}})
         _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": self.project["id"], "controls": {}})
         # A first-half shot well inside the 25-minute test video.
-        shot = next({"id": item["df_idx"]} for item in json.loads(body)["view"]["map"]["shots"]
+        shot = next({"id": item["df_idx"]} for item in json.loads(body)["view"]["components"][-1]["args"]["shots"]
                     if item["period"] == "FirstHalf" and 1 <= item["minute"] < 20)
         code, payload = self.error("/api/analysis/analyst/shot-map/clip",
                                    {"project_id": self.project["id"], "controls": {"selected": None}, "before": 3, "after": 4})
-        self.assertIn("Select a shot", payload["error"])
+        self.assertIn("Select an event", payload["error"])
         _, body = self.request("/api/analysis/analyst/shot-map/clip",
                                {"project_id": self.project["id"], "controls": {"selected": shot["id"]}, "before": 3, "after": 4})
         file = json.loads(body)["file"]

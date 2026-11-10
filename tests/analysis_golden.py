@@ -174,7 +174,9 @@ class Explorer:
             return
         snapshot = _snapshot(self.app, self.norm)
         controls = {k: v[1] for k, v in _controls(self.app).items()}
-        identity = json.dumps(controls, sort_keys=True, default=str)
+        # Clicks change what is shown without changing any control value.
+        clicks = sorted(key for key, value in scenario.items() if value == "click")
+        identity = json.dumps([controls, clicks], sort_keys=True, default=str)
         if identity in self.seen:
             return
         self.seen.add(identity)
@@ -219,7 +221,30 @@ class Explorer:
                 self.run()
                 self.record({button.key: "click"})
                 break
+        self._keeper_comparisons(base)
         return self.records
+
+    def _keeper_comparisons(self, base):
+        """Comparison: keeper vs outfield (role warning) and keeper vs keeper (GK axes)."""
+        controls = _controls(self.app)
+        if "comp_player1" not in controls or "comp_team2" not in controls:
+            return
+        keeper = lambda key: next((o for o in self.app.selectbox(key=key).options if "Keeper" in str(o)), None)
+        first = keeper("comp_player1")
+        if not first:
+            return
+        self.set("selectbox", "comp_player1", first)
+        self.record({"comp_player1": first})
+        team1 = self.app.radio(key="comp_team1").value
+        other = [team for team in self.app.radio(key="comp_team2").options if team != team1]
+        if other:
+            self.set("radio", "comp_team2", other[0])
+            second = keeper("comp_player2")
+            if second:
+                self.set("selectbox", "comp_player2", second)
+                self.record({"comp_player1": first, "comp_team2": other[0], "comp_player2": second})
+            self.set("radio", "comp_team2", base["comp_team2"][1])
+        self.set("selectbox", "comp_player1", base["comp_player1"][1])
 
     def _explore_selects(self, scenario, exclude, limit=2, depth=2):
         """Try the first real options of each select; follow selects they reveal."""

@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 from .common import (
-    AWAY_COLOR, HOME_COLOR, OUTCOME_CLASS, OUTCOME_ICON, OUTCOME_LABEL, PITCH_ZONE_OPTIONS,
-    filter_by_pitch_zone, fmt_time, map_context, reclassify_shot, safe_bool, safe_float, scope_line,
+    OUTCOME_ICON, OUTCOME_LABEL, PITCH_ZONE_OPTIONS,
+    filter_by_pitch_zone, map_context, reclassify_shot, safe_bool, safe_float, scope_line,
+)
+from .views import (
+    as_index, badge, choice, picker, pitch_zone_filter, segmented, select, selected_panel, view,
+    clip_event as views_clip_event,
 )
 
 SHOT_PLACEHOLDER = "— Select a shot to inspect —"
@@ -124,29 +128,16 @@ def penalty_map_args(frames, selected_idx, light_mode):
 
 def shot_detail(frames, idx, row, penalty=False):
     s_type = reclassify_shot(row)
-    team = row.get("team", "")
-    return {
-        "id": int(idx),
-        "player": str(row.get("playerName", "Unknown")),
-        "team": str(team),
-        "is_home": team == frames.home_team,
-        "accent": HOME_COLOR if team == frames.home_team else AWAY_COLOR,
-        "time": fmt_time(row.get("minute", 0), row.get("second", 0), row.get("period", "")),
-        "type": s_type,
-        "badge": OUTCOME_LABEL.get(s_type, "[ERR] MISSED"),
-        "badge_class": OUTCOME_CLASS.get(s_type, "badge badge-missed"),
-        "qualifiers": qualifiers(row, PENALTY_QUALIFIERS if penalty else SHOT_QUALIFIERS),
-        "event": {"minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
-                  "period": str(row.get("period", "FirstHalf"))},
-    }
+    return selected_panel(
+        frames, idx, row,
+        badges=[badge(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"), "good" if s_type == "Goal" else
+                      "info" if s_type in {"SavedShot", "ShotOnPost"} else "bad")],
+        fields=[{"label": "Qualifier",
+                 "value": " · ".join(qualifiers(row, PENALTY_QUALIFIERS if penalty else SHOT_QUALIFIERS)) or "—"}],
+    )
 
 
-def _as_index(value, index):
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number in index else None
+MODES = {"Normal": "normal", "Penalty Shootout": "penalties"}
 
 
 def build_view(frames, controls, light_mode=True):
@@ -154,57 +145,55 @@ def build_view(frames, controls, light_mode=True):
     controls = controls if isinstance(controls, dict) else {}
     shots_df = frames.shots_df
     if shots_df is None or shots_df.empty:
-        return {"empty": "No shot data found in the loaded CSV."}
+        return view(empty="No shot data found in the loaded CSV.")
     has_pso = frames.pso_shots_df is not None and not frames.pso_shots_df.empty
     mode = "penalties" if has_pso and controls.get("mode") == "penalties" else "normal"
-    view = {"has_pso": has_pso, "mode": mode, "empty": None}
+    filters = [{"key": "mode", "label": "Mode", "type": "segmented", "value": mode,
+                "options": [{"value": value, "label": label} for label, value in MODES.items()]}] if has_pso else []
 
     if mode == "penalties":
         shots = frames.pso_shots_df
-        selected = _as_index(controls.get("selected"), shots.index)
-        view.update({
-            "map": penalty_map_args(frames, selected, light_mode),
-            "goalframe": None,
-            "legend": "● Scored  ◯ Saved / Post  ✕ Missed · Click a player circle to inspect their penalty",
-            "placeholder": PENALTY_PLACEHOLDER,
-            "shots": [{"id": int(idx), "label": shot_label(row)} for idx, row in shots.iterrows()],
-            "selected": shot_detail(frames, selected, shots.loc[selected].to_dict(), penalty=True)
+        selected = as_index(controls.get("selected"), shots.index)
+        return view(
+            filters=filters, controls={"mode": mode, "selected": selected},
+            components=[{"role": "map", "args": penalty_map_args(frames, selected, light_mode)}],
+            legend="● Scored  ◯ Saved / Post  ✕ Missed · Click a player circle to inspect their penalty",
+            picker=picker("Select a penalty", PENALTY_PLACEHOLDER, shots, shot_label),
+            selected=shot_detail(frames, selected, shots.loc[selected].to_dict(), penalty=True)
             if selected is not None else None,
-        })
-        return view
+        )
 
     teams = team_options(shots_df, frames.home_team, frames.away_team)
-    team = controls.get("team") if controls.get("team") in teams else teams[0]
-    players = team_players(shots_df, team)
-    player = controls.get("player") if controls.get("player") in players else "All players"
-    zone = controls.get("zone") if controls.get("zone") in PITCH_ZONE_OPTIONS else ""
-    view["controls"] = {
-        "teams": teams, "team": team, "players": ["All players"] + players, "player": player,
-        "zones": [{"value": value, "label": value or "Any pitch zone"} for value in PITCH_ZONE_OPTIONS], "zone": zone,
-    }
-    view["stats"] = shot_stats(shots_df, frames.home_team, frames.away_team)
+    team = choice(controls.get("team"), teams)
+    players = ["All players"] + team_players(shots_df, team)
+    player = choice(controls.get("player"), players)
+    zone = choice(controls.get("zone"), PITCH_ZONE_OPTIONS)
+    filters += [segmented("team", "Team", teams, team), select("player", "Player", players, player),
+                pitch_zone_filter(zone)]
+    stats = shot_stats(shots_df, frames.home_team, frames.away_team)
+    result = view(
+        filters=filters, share=stats["share"],
+        stats=[{"label": "Shots", "home": stats["home"]["shots"], "away": stats["away"]["shots"]},
+               {"label": "On target", "home": stats["home"]["on_target"], "away": stats["away"]["on_target"]},
+               {"label": "Goals", "home": stats["home"]["goals"], "away": stats["away"]["goals"]}],
+    )
     shots = filtered_shots(shots_df, team, player, zone)
+    selected = as_index(controls.get("selected"), shots.index)
+    result["controls"] = {"mode": mode, "team": team, "player": player, "zone": zone, "selected": selected}
     if shots.empty:
-        view["empty"] = "No shots match the current filter."
-        return view
-    selected = _as_index(controls.get("selected"), shots.index)
-    view.update({
-        "map": pitch_map_args(frames, shots, team, player, zone, selected, light_mode),
-        "goalframe": goalframe_args(frames, selected, shots.loc[selected], light_mode) if selected is not None else None,
-        "legend": "● Goal  ◯ Saved / Post  ✕ Missed · Click a shot to inspect it",
-        "placeholder": SHOT_PLACEHOLDER,
-        "shots": [{"id": int(idx), "label": shot_label(row)} for idx, row in shots.iterrows()],
-        "selected": shot_detail(frames, selected, shots_df.loc[selected].to_dict()) if selected is not None else None,
-    })
-    return view
+        result["empty"] = "No shots match the current filter."
+        return result
+    components = []
+    if selected is not None:
+        components.append({"role": "aux", "args": goalframe_args(frames, selected, shots.loc[selected], light_mode)})
+    components.append({"role": "map", "args": pitch_map_args(frames, shots, team, player, zone, selected, light_mode)})
+    result.update(
+        components=components,
+        legend="● Goal  ◯ Saved / Post  ✕ Missed · Click a shot to inspect it",
+        picker=picker("Select a shot", SHOT_PLACEHOLDER, shots, shot_label),
+        selected=shot_detail(frames, selected, shots_df.loc[selected].to_dict()) if selected is not None else None,
+    )
+    return result
 
 
-def clip_event(frames, mode, selected):
-    """The event behind a selected shot, for cutting its clip."""
-    shots = frames.pso_shots_df if mode == "penalties" else frames.shots_df
-    index = _as_index(selected, shots.index) if shots is not None else None
-    if index is None:
-        raise ValueError("Select a shot before cutting its clip.")
-    row = shots.loc[index].to_dict()
-    return {"minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
-            "period": str(row.get("period", "FirstHalf")), "player": str(row.get("playerName", ""))}
+clip_event = views_clip_event(build_view)

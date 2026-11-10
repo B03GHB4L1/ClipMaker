@@ -66,7 +66,10 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
 
     const heading = element("div", { class: "native-summary" },
       element("strong", { text: `${summary.home_team || "Home"} vs ${summary.away_team || "Away"}` }),
-      element("span", { text: `${Number(summary.event_count || 0).toLocaleString()} events` }));
+      element("span", { text: `${Number(summary.event_count || 0).toLocaleString()} events` }),
+      // Transitional escape hatch until the classic workspace is retired (Phase 5).
+      element("a", { class: "native-classic-switch", href: classicUrl(""), text: "Classic workspace" }));
+    const classicSwitch = heading.querySelector(".native-classic-switch");
     const tablist = element("div", { class: "native-tabs", role: "tablist", "aria-label": config.views[view].label });
     const panel = element("section", { class: "native-panel", role: "tabpanel", tabindex: "0" });
     const buttons = tabs.map((tab) => element("button", {
@@ -98,6 +101,7 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
         if (selected) tablist.scrollLeft = Math.max(0, button.offsetLeft - tablist.offsetLeft - 12);
       });
       panel.setAttribute("aria-labelledby", `tab-${slug}`);
+      classicSwitch.href = classicUrl(slug);
       const url = new URL(location.href);
       url.searchParams.set("tab", slug);
       history.replaceState(null, "", url);

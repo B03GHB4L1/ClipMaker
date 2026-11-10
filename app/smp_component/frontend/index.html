@@ -1643,6 +1643,12 @@
           return data.tooltip || data.tooltipText || params.name || "";
         },
       }, option.tooltip || {});
+      _cmChart.off("click");
+      _cmChart.on("click", (params) => {
+        // Markers with an event id (e.g. pressing wins) select that event.
+        const id = params && params.data && params.data.customdata;
+        if (id !== undefined && id !== null && typeof id !== "object") Streamlit.setValue([id, Date.now()]);
+      });
       _cmChart.setOption(option, true);
       installResizeHandler(() => {
         if (_cmChart && _cmChart.getDom() === plotEl) {
