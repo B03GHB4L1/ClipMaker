@@ -1,8 +1,8 @@
 # Analysis Workspace Migration Plan: Streamlit to Shared HTML/JS
 
-Status: Phases 0 and 1 complete and green on Windows, Linux and macOS CI
-(9 November 2026). Phase 2 (Shot Map pilot) complete locally on Windows and
-passed its decision gate on 10 November 2026; CI pending. Phase 3 not started.
+Status: Phases 0-2 complete and green on Windows, Linux and macOS CI
+(9-10 November 2026; Phase 2 passed its decision gate). Phase 3 (all Analyst Room tabs
+native, now the default) complete locally on 10 November 2026; CI pending.
 
 ## Goal
 
@@ -278,6 +278,88 @@ Found, not fixed (pre-existing):
 Pass, Defensive Actions, Dribbles & Carries, Goalkeeper, Build-Up, Pressing,
 Comparison (see checklist).
 
+#### Phase 3 progress (10 November 2026)
+
+Approach change: from Phase 3 on, native views are faithful ports in
+`analysis_core` and the classic page code is left as it is, instead of
+refactoring every classic tab to import them. The duplication ends in Phase 5
+when the classic pages are deleted; until then each tab's parity test proves
+the port shows what the classic tab shows.
+
+Done (locally verified, CI pending):
+- Shared view format (`analysis_core/views.py`) and one renderer
+  (`ui/analysis/tabs/event-tab.js`) for map-style tabs: filters, stats,
+  detail ("aux") and clickable ("map") components in separate stable
+  containers so iframes never reload on reorder, picker, details with badges
+  and fields, Watch panel. Clips resolve the selected event through the view
+  builder, so only selectable events can be cut. The Shot Map moved onto it.
+- Pass Map (team/player views, pass network, pass types, zones),
+  Defensive Actions, Dribbles & Carries, Goalkeeper (actions, shots faced,
+  distribution) in `analysis_core/event_maps.py`; Pressing in
+  `analysis_core/pressing.py`.
+- `tests/test_analyst_native.py` checks every recorded scenario of all six
+  tabs: component arguments, picker lists, filter options, stats labels and
+  values (metric cards for Pressing), prompts, empty messages and selected
+  details including all badges. Deliberate one-line changes in notes, labels,
+  stats labels, starter flags and distribution thresholds are each caught.
+- Fixture enriched: goalkeeper distribution (goal kicks, throws), second-half
+  substitutions, last-line defensive actions, chronological order. Before
+  this, Distribution only ever showed its empty message in the snapshot.
+- Real match (Rennes vs PSG) browser check: every tab's prompts, stats,
+  selection, details and 13 s clips at default buffers; all goalkeeper
+  modes; 390 px without overflow; no console errors.
+
+Bug fixed in both workspaces: the classic Pressing caption said "Click a
+press win marker", but markers carried no event id and the chart renderer
+had no click handler, so clicks did nothing and the win detail and clip were
+unreachable. The pressing option builder moved to `analysis_core.pressing`
+(the classic wrapper now calls it) with ids on markers, the renderer reports
+marker clicks, and the classic tab reads them. Native Pressing adds a
+press-win list and the Watch panel. Note for tests: ECharts ignores clicks
+during its 450 ms entry animation.
+
+Build-Up and Comparison (done, locally verified, CI pending):
+- `analysis_core/build_up.py`: entry modes list entries like the map tabs;
+  chain modes list sequences, draw the selected one and clip it from first
+  to last action with the classic timing (both ends on the start period's
+  clock). Real match: a 2 s sequence gives a 15 s clip at 5 s / 8 s buffers.
+- `analysis_core/comparison_helpers.py` holds the classic Comparison helpers
+  copied verbatim by script; `comparison.py` builds radar and zone figures
+  (Plotly JSON), Top 5 tables and the role-mismatch warning. Reels cut each
+  moment and join them losslessly as the classic reel did; real match: five
+  moments give a 65 s reel. `ui/analysis/tabs/comparison.js` draws figures
+  with the Plotly build already shipped in the map component folder, loaded
+  only when the tab opens.
+- Parity: Build-Up compares entry pickers, sequence lists (against the
+  classic buttons), metrics and sequence titles; Comparison compares all
+  three figures (data and layout; templates differ by design because
+  Streamlit sends a placeholder its browser code replaces), both Top 5
+  tables, the warning, role selectors and captions.
+- Recorder fixes: clicks are now part of a scenario's identity (a sequence
+  click changes no control, so it was being dropped), and keeper-vs-outfield
+  and keeper-vs-keeper comparisons are recorded.
+
+With all eight tabs native, the Analyst Room now defaults to the native
+workspace; `?ui=classic` and a "Classic workspace" link keep the classic
+page reachable until Phase 5. The Tactical Lab stays classic (Phase 4).
+
+Timing, real match (Rennes vs PSG), 3 rounds, same session, medians (max).
+Classic stops when Streamlit finishes its script; native waits until maps
+and charts have drawn, so the comparison favours classic.
+
+| Step | Classic | Native |
+|---|---|---|
+| Open the Analyst Room | 3.31 s (8.15) | 0.13 s (0.54) |
+| Pass Map | 0.56 s | 0.32 s |
+| Defensive Actions | 0.24 s | 0.08 s |
+| Dribbles & Carries | 0.34 s | 0.07 s |
+| Goalkeeper | 0.22 s | 0.07 s |
+| Build-Up | 0.46 s (0.95) | 0.20 s |
+| Pressing | 0.43 s | 0.26 s |
+| Comparison | 1.21 s (2.66) | 0.55 s (1.26, first load fetches Plotly) |
+| Shot Map | 0.40 s | 0.13 s |
+| Change Shot Map team | 0.29 s (1.57) | 0.10 s |
+
 ### Phase 4: Tactical Lab
 
 Team selector, multi-match mode, then the five tabs (see checklist).
@@ -319,13 +401,13 @@ and browser-only behaviour still need browser tests), `native` (built),
 | Tab | Behaviour to preserve | Status |
 |---|---|---|
 | Shot Map | Normal and Penalty Shootout modes; team radio, player, pitch zone; click to select; shot list; reclassified shots; stats panel | native (golden parity, browser click/clip/export; CI pending) |
-| Pass Map | Team view and player view; pass network; pass type filter; pitch and depth zones; select pass; stats | golden (data views) |
-| Defensive Actions | Team, player, pitch and depth zones; select action; stats | golden (data views) |
-| Dribbles & Carries | Team, player, pitch and depth zones; select action | golden (data views) |
-| Goalkeeper | Actions, shots faced, distribution modes; zones; select item; empty long-pass case | golden (data views) |
-| Build-Up | Entry modes (possession, final third, box entries) and sequences; min actions slider; sequence list, detail, watch; selection survives reruns | golden (data views) |
-| Pressing | Team and zone; metrics row; detail; clear | golden (data views) |
-| Comparison | Two players across teams; percentile radar; pitch zone heatmaps; role-based Top 5 moments with GK scoring; moments reel | golden (data views) |
+| Pass Map | Team view and player view; pass network; pass type filter; pitch and depth zones; select pass; stats | native (golden parity, real-match browser check; CI pending) |
+| Defensive Actions | Team, player, pitch and depth zones; select action; stats | native (golden parity, real-match browser check; CI pending) |
+| Dribbles & Carries | Team, player, pitch and depth zones; select action | native (golden parity, real-match browser check; CI pending) |
+| Goalkeeper | Actions, shots faced, distribution modes; zones; select item; empty long-pass case | native (golden parity, real-match browser check; CI pending) |
+| Build-Up | Entry modes (possession, final third, box entries) and sequences; min actions slider; sequence list, detail, watch; selection survives reruns | native (golden parity, real-match browser check; CI pending) |
+| Pressing | Team and zone; metrics row; detail; clear | native (golden parity, real-match browser check; CI pending) |
+| Comparison | Two players across teams; percentile radar; pitch zone heatmaps; role-based Top 5 moments with GK scoring; moments reel | native (golden parity, real-match browser check; CI pending) |
 
 ### Tactical Lab
 

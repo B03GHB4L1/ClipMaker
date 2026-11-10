@@ -2585,7 +2585,7 @@ def render_pressing_tab():
     _pr_err  = st.session_state.get("press_clip_error")
 
     # ── Full-width pressing map ────────────────────────────────────────────
-    pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main",
+    raw_press = pressing_map(wins, is_home_team, selected_idx=sel_idx, key="press_map_main",
                  light_mode=st.session_state.get("light_mode", False),
                  **_map_context(
                      f"Pressing Wins - {team_sel}",
@@ -2597,28 +2597,28 @@ def render_pressing_tab():
                  ))
 
     # ── Map click → video clip ─────────────────────────────────────────────
-    _map_state = st.session_state.get("press_map_main")
-    if _map_state and _map_state.get("selection") and _map_state["selection"].get("points"):
-        point = _map_state["selection"]["points"][0]
-        clicked_idx = point.get("customdata")
-        prev_clicked = st.session_state.get("_press_last_clicked_idx")
-        if clicked_idx is not None and str(clicked_idx) != str(prev_clicked):
-            st.session_state["_press_last_clicked_idx"] = clicked_idx
-            sel_win = next((w for w in wins if str(w["idx"]) == str(clicked_idx)), None)
-            if sel_win:
-                st.session_state["press_selected_idx"] = sel_win["idx"]
-                st.session_state["press_clip_path"]    = None
-                st.session_state["press_clip_key"]     = None
-                st.session_state["press_clip_error"]   = None
-                with st.spinner("Cutting clip…"):
-                    try:
-                        _path = cut_clip(sel_win["minute"], sel_win["second"], sel_win["period"])
-                        st.session_state["press_clip_path"] = _path
-                        st.session_state["press_clip_key"]  = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
-                    except Exception as _e:
-                        st.session_state["press_clip_error"] = str(_e)
-                        st.session_state["press_clip_key"]   = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
-                st.rerun()
+    # The map component sends [event id, click time]; it never sent a
+    # Plotly-style selection, so map clicks used to do nothing.
+    clicked_idx, click_ts = (raw_press[0], raw_press[1]) if isinstance(raw_press, (list, tuple)) and len(raw_press) >= 2 else (None, None)
+    sel_win = None
+    if clicked_idx is not None and click_ts != st.session_state.get("_press_last_click_ts"):
+        st.session_state["_press_last_click_ts"] = click_ts
+        st.session_state["_press_last_clicked_idx"] = clicked_idx
+        sel_win = next((w for w in wins if str(w["idx"]) == str(clicked_idx)), None)
+    if sel_win:
+        st.session_state["press_selected_idx"] = sel_win["idx"]
+        st.session_state["press_clip_path"]    = None
+        st.session_state["press_clip_key"]     = None
+        st.session_state["press_clip_error"]   = None
+        with st.spinner("Cutting clip…"):
+            try:
+                _path = cut_clip(sel_win["minute"], sel_win["second"], sel_win["period"])
+                st.session_state["press_clip_path"] = _path
+                st.session_state["press_clip_key"]  = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+            except Exception as _e:
+                st.session_state["press_clip_error"] = str(_e)
+                st.session_state["press_clip_key"]   = f"press_{sel_win['idx']}_{sel_win['minute']}_{sel_win['second']}"
+        st.rerun()
 
     # Re-read after potential rerun
     sel_idx  = st.session_state.get("press_selected_idx")

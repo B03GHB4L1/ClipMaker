@@ -75,7 +75,7 @@ def measure(base, project_id, rounds, teams):
                 label = f"{view} r{round_index + 1}"
                 started = time.monotonic()
                 before = meter.bytes
-                page.goto(f"{base}/analysis.html?view={view}&project={project_id}")
+                page.goto(f"{base}/analysis.html?view={view}&ui=classic&project={project_id}")
                 frame = page.frame_locator("[data-analysis-frame]")
                 frame.get_by_role("tab", name=tabs[0]).wait_for(timeout=120_000)
                 seconds = settle(frame, started)
@@ -117,6 +117,23 @@ def native_step(page, results, name, action, timeout=60_000):
     print(f"  {name:<44} {seconds:6.2f} s", flush=True)
 
 
+def native_tab_switch(page, results, tab):
+    """Time a tab switch until its data loads and its maps or charts have drawn."""
+    started = time.monotonic()
+    page.get_by_role("tab", name=tab, exact=True).click()
+    page.wait_for_function("""() => {
+        const panel = document.querySelector('.native-panel');
+        if (!panel || panel.hasAttribute('aria-busy') || !panel.firstElementChild) return false;
+        const plots = panel.querySelectorAll('.native-figure');
+        if (plots.length) return [...plots].every(p => p.closest('[hidden]') || p.querySelector('.main-svg'));
+        const frames = [...panel.querySelectorAll('iframe')];
+        return frames.every(f => parseInt(f.style.height || '0') > 120);
+    }""", timeout=60_000)
+    seconds = time.monotonic() - started
+    results.append({"step": f"native: switch to {tab}", "seconds": round(seconds, 3), "bytes": 0})
+    print(f"  native: switch to {tab:<32} {seconds:6.2f} s", flush=True)
+
+
 def measure_native(base, project_id, rounds, teams):
     from playwright.sync_api import sync_playwright
     results = []
@@ -143,6 +160,9 @@ def measure_native(base, project_id, rounds, teams):
                         lambda: picker.select_option(picker.locator("option").nth(1).get_attribute("value")))
             native_step(page, results, "native: clear selection",
                         lambda: page.get_by_role("button", name="Clear selection").click())
+            for tab in ["Pass Map", "Defensive Actions", "Dribbles & Carries", "Goalkeeper", "Build-Up",
+                        "Pressing", "Comparison", "Shot Map"]:
+                native_tab_switch(page, results, tab)
             if round_index == 0:
                 page.screenshot(path=str(ROOT / "build" / "timing-native-shot-map.png"))
         browser.close()

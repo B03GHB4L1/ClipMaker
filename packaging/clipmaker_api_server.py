@@ -126,8 +126,15 @@ def prune_files(folder: Path, keep: int) -> None:
 
 
 def _native_tabs():
-    from analysis_core import shot_map
-    return {("analyst", "shot-map"): {"view": shot_map.build_view, "clip_event": shot_map.clip_event}}
+    from analysis_core import event_maps, shot_map
+    tabs = {("analyst", "shot-map"): {"view": shot_map.build_view, "clip_event": shot_map.clip_event}}
+    for slug, builder in event_maps.TABS.items():
+        tabs[("analyst", slug)] = {"view": builder, "clip_event": event_maps.CLIPS[slug]}
+    from analysis_core import build_up, comparison, pressing
+    tabs[("analyst", "pressing")] = {"view": pressing.build_view, "clip_event": pressing.clip}
+    tabs[("analyst", "comparison")] = {"view": comparison.build_view, "clip_event": comparison.clip}
+    tabs[("analyst", "build-up")] = {"view": build_up.build_view, "clip_event": build_up.clip}
+    return tabs
 
 
 class _LazyTabs(dict):
@@ -143,8 +150,11 @@ NATIVE_TABS = _LazyTabs()
 
 
 def analysis_ui_modes() -> dict[str, str]:
-    """Workspace per view: VIZORPLAY_ANALYSIS_UI=native, or analyst=native,tactical=classic."""
-    modes = {"analyst": "classic", "tactical": "classic"}
+    """Workspace per view: VIZORPLAY_ANALYSIS_UI=native, or analyst=classic,tactical=native.
+
+    The Analyst Room defaults to native since every tab passed parity (Phase 3);
+    the Tactical Lab stays classic until Phase 4."""
+    modes = {"analyst": "native", "tactical": "classic"}
     setting = os.environ.get("VIZORPLAY_ANALYSIS_UI", "").strip().lower()
     for part in filter(None, (item.strip() for item in setting.split(","))):
         view, _, mode = part.rpartition("=")
@@ -1257,21 +1267,68 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         before, after = clamp_buffer(body.get("before")), clamp_buffer(body.get("after"))
         if not str(project.get("video_path") or "").strip():
             raise ValueError("No video file loaded. Go to Intake and add the match video.")
-        event = handler["clip_event"](frames, controls.get("mode"), controls.get("selected"))
+        event = handler["clip_event"](frames, controls)
         settings = project.get("filter_settings") or {}
-        period, start, duration = clip_window(
-            frames.df_all, kickoff_times_from_project(project), settings.get("timeline_corrections", []),
-            event["minute"], event["second"], event["period"], before, after)
+        kickoffs, corrections = kickoff_times_from_project(project), settings.get("timeline_corrections", [])
         folder = self.store.data_dir / "analysis-clips"
+        if event.get("reel"):
+            clip = self.analysis_reel(project, frames, event["reel"], kickoffs, corrections, before, after, folder)
+            return self.publish_clip(clip, f"{event['player']}.mp4", before, after, folder)
+        period, start, duration = clip_window(frames.df_all, kickoffs, corrections,
+                                              event["minute"], event["second"], event["period"], before, after)
+        if event.get("end"):
+            # A sequence: classic cut_build_up_clip runs from the first action minus
+            # `before` to the last plus `after`, both on the start period's clock.
+            _, end_start, end_length = clip_window(frames.df_all, kickoffs, corrections, event["end"]["minute"],
+                                                   event["end"]["second"], event["period"], 0, after)
+            start = max(0.0, start)
+            duration = max(1.0, max(start, end_start + end_length) - start)
         # Same encoder settings as the classic Watch panel (libx264 ultrafast, default CRF).
         clip = render_preview_clip(video_for_period(project, period), start, start + duration,
                                    folder, 23, "ultrafast", "128k")
+        return self.publish_clip(clip, f"{event['player']}_{event['minute']}.mp4", before, after, folder)
+
+    def publish_clip(self, clip: Path, name: str, before: int, after: int, folder: Path) -> dict[str, Any]:
         prune_files(folder, keep=20)
         token = uuid.uuid4().hex
         self.media_files[token] = clip
-        name = re.sub(r"[^\w\-.]", "_", f"{event['player']}_{event['minute']}.mp4")
-        return {"name": name, "size": clip.stat().st_size, "url": f"/api/media/{token}",
-                "before": before, "after": after}
+        return {"name": re.sub(r"[^\w\-.]", "_", name), "size": clip.stat().st_size,
+                "url": f"/api/media/{token}", "before": before, "after": after}
+
+    def analysis_reel(self, project, frames, events, kickoffs, corrections, before, after, folder) -> Path:
+        """Cut each moment and join them in order, like the classic Top 5 Moments reel."""
+        import shutil
+        import subprocess
+        from analysis_core.video import clip_window
+        parts: list[Path] = []
+        try:
+            for event in events[:5]:
+                period, start, duration = clip_window(frames.df_all, kickoffs, corrections, event["minute"],
+                                                      event["second"], event["period"], before, after)
+                parts.append(render_preview_clip(video_for_period(project, period), start, start + duration,
+                                                 folder, 23, "ultrafast", "128k"))
+            if len(parts) == 1:
+                return parts.pop()
+            listing = folder / f"reel-{uuid.uuid4().hex[:12]}.txt"
+            listing.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
+            output = folder / f"reel-{uuid.uuid4().hex[:12]}.mp4"
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                import imageio_ffmpeg
+                ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            try:
+                result = subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
+                                         "-i", str(listing), "-c", "copy", str(output)],
+                                        capture_output=True, text=True, timeout=300)
+            finally:
+                listing.unlink(missing_ok=True)
+            if result.returncode != 0:
+                output.unlink(missing_ok=True)
+                raise ValueError(f"Could not join the reel: {(result.stderr or '')[-400:]}")
+            return output
+        finally:
+            for part in parts:
+                part.unlink(missing_ok=True)
 
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
@@ -1500,6 +1557,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 settings = project.get("filter_settings") or {}
                 view["clip_defaults"] = {"before": clamp_buffer(settings.get("before_buffer", 5)),
                                          "after": clamp_buffer(settings.get("after_buffer", 8))}
+                view["has_video"] = bool(str(project.get("video_path") or "").strip())
                 self.send_json(HTTPStatus.OK, {"view": view})
                 return
             if path == "/api/analysis":

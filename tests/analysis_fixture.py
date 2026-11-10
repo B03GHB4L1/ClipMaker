@@ -79,6 +79,11 @@ def build_fixture(events: int = 1400, seed: int = 20261109, home: str = HOME, aw
             x = float(rng.uniform(80, 99)) if event in SHOTS else float(rng.uniform(1, 30)) if event in KEEPER else float(rng.uniform(2, 98))
             y = float(rng.uniform(30, 70)) if event in SHOTS else float(rng.uniform(2, 98))
             end_x = min(100.0, x + float(rng.normal(12, 14))) if event in {"Pass", "Carry"} else (100.0 if event in SHOTS else np.nan)
+            keeper_pass = event == "Pass" and rng.random() < .06
+            if keeper_pass:  # Goal kicks and throws, so goalkeeper distribution has data.
+                player = players[team][0]
+                x = float(rng.uniform(3, 16))
+                end_x = float(rng.uniform(15, 88))
             end_y = float(np.clip(y + rng.normal(0, 16), 0, 100)) if event in {"Pass", "Carry"} else (float(rng.uniform(45, 55)) if event in SHOTS else np.nan)
             row = {
                 "minute": int(seconds // 60), "second": int(seconds % 60), "type": event,
@@ -107,7 +112,8 @@ def build_fixture(events: int = 1400, seed: int = 20261109, home: str = HOME, aw
                 flags["is_box_entry_pass"] = end_x > 83 and 21 < end_y < 79
                 flags["is_final_third_entry_pass"] = x < 66.7 <= end_x
                 flags["is_throw_in"] = rng.random() < .03
-                flags["is_goal_kick"] = player.endswith("Keeper") and rng.random() < .5
+                flags["is_goal_kick"] = keeper_pass and rng.random() < .6
+                flags["is_keeper_throw"] = keeper_pass and not flags["is_goal_kick"]
                 flags["is_freekick"] = rng.random() < .03
                 flags["is_corner"] = x > 98 and rng.random() < .5
                 flags["is_chipped"] = rng.random() < .07
@@ -126,7 +132,21 @@ def build_fixture(events: int = 1400, seed: int = 20261109, home: str = HOME, aw
                 flags["is_gk_save"] = event == "SavedShot"
             elif event == "Card":
                 flags["is_yellow_card"] = True
+            elif event in {"Tackle", "Clearance", "Block"}:
+                flags["is_last_line"] = rng.random() < .15
             row.update(flags)
+            rows.append(row)
+    # Second-half substitutions, so the pass network separates starters.
+    for team, minute in ((home, 61), (away, 67)):
+        for event in ("SubstitutionOff", "SubstitutionOn"):
+            row = {column: rows[0].get(column) for column in rows[0]}
+            row.update(dict.fromkeys(FLAG_COLUMNS, False))
+            row.update({"minute": minute, "second": 0, "type": event, "outcomeType": "Successful",
+                        "period": "SecondHalf", "team": team, "playerName": players[team][9],
+                        "playerId": 9 + (100 if team == away else 0), "player_position": "FW", "shirtNumber": 10,
+                        "x": np.nan, "y": np.nan, "endX": np.nan, "endY": np.nan, "goal_mouth_y": np.nan,
+                        "goal_mouth_z": np.nan, "pitch_zone": "", "depth_zone": "", "xT": 0.0,
+                        "prog_pass": 0.0, "prog_carry": 0.0})
             rows.append(row)
     # Penalty shootout: five alternating kicks per side.
     for kick in range(10):
@@ -146,6 +166,11 @@ def build_fixture(events: int = 1400, seed: int = 20261109, home: str = HOME, aw
                     "is_gk_save": event == "SavedShot", "is_right_foot": True})
         rows.append(row)
     frame = pd.DataFrame(rows)
+    # Chronological like scraped files (substitutions were appended last).
+    order = {"FirstHalf": 1, "SecondHalf": 2, "FirstPeriodOfExtraTime": 3, "SecondPeriodOfExtraTime": 4,
+             "PenaltyShootout": 5}
+    frame["_order"] = frame["period"].map(order)
+    frame = frame.sort_values(["_order", "minute", "second"], kind="stable").drop(columns="_order").reset_index(drop=True)
     return frame[["minute", "second", "type", "outcomeType", "period", "playerName", "team", "playerId",
                   "player_position", "shirtNumber", "x", "y", "endX", "endY", "goal_mouth_y", "goal_mouth_z",
                   *FLAG_COLUMNS, "pitch_zone", "depth_zone", "xT", "prog_pass", "prog_carry",

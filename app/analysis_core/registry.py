@@ -14,13 +14,13 @@ VIEWS = {
 TABS = {
     "analyst": [
         {"slug": "shot-map", "label": "Shot Map", "classic": "◉ Shot Map", "native": True},
-        {"slug": "pass-map", "label": "Pass Map", "classic": "◎ Pass Map", "native": False},
-        {"slug": "defensive-actions", "label": "Defensive Actions", "classic": "■ Defensive Actions", "native": False},
-        {"slug": "dribbles-carries", "label": "Dribbles & Carries", "classic": "◈ Dribbles & Carries", "native": False},
-        {"slug": "goalkeeper", "label": "Goalkeeper", "classic": "⊞ Goalkeeper", "native": False},
-        {"slug": "build-up", "label": "Build-Up", "classic": "↗ Build-Up", "native": False},
-        {"slug": "pressing", "label": "Pressing", "classic": "◆ Pressing", "native": False},
-        {"slug": "comparison", "label": "Comparison", "classic": "⇄ Comparison", "native": False},
+        {"slug": "pass-map", "label": "Pass Map", "classic": "◎ Pass Map", "native": True},
+        {"slug": "defensive-actions", "label": "Defensive Actions", "classic": "■ Defensive Actions", "native": True},
+        {"slug": "dribbles-carries", "label": "Dribbles & Carries", "classic": "◈ Dribbles & Carries", "native": True},
+        {"slug": "goalkeeper", "label": "Goalkeeper", "classic": "⊞ Goalkeeper", "native": True},
+        {"slug": "build-up", "label": "Build-Up", "classic": "↗ Build-Up", "native": True},
+        {"slug": "pressing", "label": "Pressing", "classic": "◆ Pressing", "native": True},
+        {"slug": "comparison", "label": "Comparison", "classic": "⇄ Comparison", "native": True},
     ],
     "tactical": [
         {"slug": "defensive-transitions", "label": "Defensive Transitions", "classic": "Defensive Transitions", "native": False},
