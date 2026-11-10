@@ -1,8 +1,8 @@
 # Analysis Workspace Migration Plan: Streamlit to Shared HTML/JS
 
-Status: Phase 0 complete and green on Windows, Linux and macOS CI
-(9 November 2026). Phase 1 complete locally on Windows; CI pending.
-Phase 2 not started.
+Status: Phases 0 and 1 complete and green on Windows, Linux and macOS CI
+(9 November 2026). Phase 2 (Shot Map pilot) complete locally on Windows and
+passed its decision gate on 10 November 2026; CI pending. Phase 3 not started.
 
 ## Goal
 
@@ -217,6 +217,62 @@ Chosen because it already has browser click/export acceptance tests.
 - Measure against phase 0. **Decision gate:** if the native tab is not clearly
   faster, stop and reassess before migrating the rest.
 
+#### Phase 2 results (10 November 2026)
+
+Built:
+- `analysis_core/common.py` (shared helpers), `shot_map.py` (shot payloads,
+  labels, stats, qualifiers, filters, map arguments, full native view) and
+  `video.py` (`clip_window`, the classic clip timing). The classic page now
+  imports all three; the golden snapshot is unchanged.
+- `POST /api/analysis/analyst/shot-map` returns the whole tab state for the
+  given controls, validated server-side; `.../shot-map/clip` cuts the selected
+  shot's clip with the classic timing and encoder settings (libx264
+  ultrafast, default CRF), buffers 0-60 s, into `analysis-clips/` (newest 20
+  kept).
+- `ui/analysis/tabs/shot-map.js`: collapsible filters, mode/team/player/zone,
+  stats bar, goal frame and pitch maps through the component host, click or
+  list selection, clear, detail panel, Watch with before/after sliders
+  (defaults from the project's filter buffers), re-cut on slider change,
+  download, clear preview, error with retry. Controls save per project.
+
+Verified locally:
+- `tests/test_shot_map_native.py`: every recorded Shot Map scenario (normal
+  and penalty modes) matches the classic page on map and goal-frame
+  arguments, shot list, team/player options, stats numbers and selected-shot
+  details. A deliberate one-line change makes 9 scenarios fail.
+- API tests: view, validation order (bad buffers before missing video), no
+  selection, unknown routes, and a real ffmpeg clip of exactly
+  before + after seconds.
+- Browser: real Rennes vs PSG match with a 125-minute test video: correct
+  teams, a 13 s clip at default buffers whose burned-in clock starts 5 s
+  before the 2'41" shot, re-cut to 18 s after moving a slider, player filter,
+  penalty mode on the fixture, 390 px without overflow, no console errors.
+  CI browser stage: real click on the plotted goal, details, clip at the
+  project's saved 1 s/1 s buffers, PNG export, clear.
+
+Decision gate, real match (Rennes vs PSG, 2,206 events), 3 rounds, same
+session. Classic times stop when Streamlit finishes its script; native times
+also wait for the map to redraw, so the comparison favours classic.
+
+| Step | Classic median (max) | Native median (max) |
+|---|---|---|
+| Open workspace on Shot Map | 3.34 s (8.46 s) | 0.18 s (0.53 s, cold load) |
+| Change team | 0.27 s / 0.23 s back (1.58 s) | 0.10 s / 0.09 s back (0.12 s) |
+| Select a shot | not timed | 0.17 s (0.19 s) |
+| Clear selection | not timed | 0.10 s (0.12 s) |
+
+Result: clearly faster (about 18x to open, 2.5x per control) and within the
+Phase 2 targets (open under 1 s, control under 300 ms). Proceed to Phase 3.
+
+Default stays classic: with only one native tab, native mode would send
+users to the classic workspace for the other seven Analyst tabs. Switch the
+Analyst Room default once Phase 3 completes.
+
+Found, not fixed (pre-existing):
+- The penalty shootout component's header overlaps its export buttons at
+  390 px in both workspaces.
+- Filter-page preview renders in `previews/` are never deleted.
+
 ### Phase 3: Remaining Analyst Room tabs
 
 Pass, Defensive Actions, Dribbles & Carries, Goalkeeper, Build-Up, Pressing,
@@ -262,7 +318,7 @@ and browser-only behaviour still need browser tests), `native` (built),
 
 | Tab | Behaviour to preserve | Status |
 |---|---|---|
-| Shot Map | Normal and Penalty Shootout modes; team radio, player, pitch zone; click to select; shot list; reclassified shots; stats panel | golden (data views) |
+| Shot Map | Normal and Penalty Shootout modes; team radio, player, pitch zone; click to select; shot list; reclassified shots; stats panel | native (golden parity, browser click/clip/export; CI pending) |
 | Pass Map | Team view and player view; pass network; pass type filter; pitch and depth zones; select pass; stats | golden (data views) |
 | Defensive Actions | Team, player, pitch and depth zones; select action; stats | golden (data views) |
 | Dribbles & Carries | Team, player, pitch and depth zones; select action | golden (data views) |

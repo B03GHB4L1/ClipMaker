@@ -153,7 +153,7 @@ class AnalysisApiTests(unittest.TestCase):
         for path in ("/api/analysis/other/shot-map", "/api/analysis/analyst/unknown", "/api/analysis/analyst/shot-map/x"):
             with self.subTest(path=path):
                 self.assertEqual(self.error(path, {"project_id": self.project["id"]})[0], 400)
-        code, payload = self.error("/api/analysis/analyst/shot-map", {"project_id": self.project["id"]})
+        code, payload = self.error("/api/analysis/analyst/pass-map", {"project_id": self.project["id"]})
         self.assertEqual((code, payload.get("classic")), (501, True))
         self.assertEqual(self.error("/api/analysis/analyst/shot-map", {"project_id": "nope"})[0], 400)
 
@@ -176,6 +176,57 @@ class AnalysisApiTests(unittest.TestCase):
         self.assertEqual(self.error(f"/api/projects/{self.project['id']}", {"analysis_state": {"analyst": {"tab": "../x"}}})[0], 400)
         _, body = self.request(f"/api/projects/{self.project['id']}")
         self.assertEqual(json.loads(body)["project"]["analysis_state"], state)
+
+    def test_shot_map_view_and_clip_validation(self):
+        project_id = self.project["id"]
+        _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": project_id, "controls": {"team": "Southport"}})
+        view = json.loads(body)["view"]
+        self.assertEqual(view["controls"]["team"], "Southport")
+        self.assertEqual(view["map"]["component_type"], "shot_map")
+        self.assertEqual(view["clip_defaults"], {"before": 5, "after": 8})
+        selected = view["shots"][0]["id"]
+        clip = "/api/analysis/analyst/shot-map/clip"
+        bad = [({"controls": {"selected": selected}, "before": 61, "after": 8}, "between 0 and 60"),
+               ({"controls": {"selected": selected}, "before": "x", "after": 8}, "between 0 and 60"),
+               ({"controls": {"selected": None}, "before": 5, "after": 8}, "No video file"),
+               ]
+        for extra, message in bad:
+            with self.subTest(extra=extra):
+                code, payload = self.error(clip, {"project_id": project_id, **extra})
+                self.assertEqual(code, 400)
+                self.assertIn(message, payload["error"])
+        self.assertEqual(self.error("/api/analysis/analyst/shot-map/other", {"project_id": project_id})[0], 400)
+        self.assertEqual(self.error("/api/analysis/analyst/pass-map/clip", {"project_id": project_id})[0], 501)
+
+    def test_shot_map_clip_uses_classic_timing(self):
+        import subprocess
+
+        import imageio_ffmpeg
+        video = self.root / "match.mp4"
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=5",
+                        "-t", "1500", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video)],
+                       check=True, capture_output=True, timeout=300)
+        MatchStore(self.root).upsert({"id": self.project["id"], "video_path": str(video),
+                                      "markers": {"1H": "00:00:30", "2H": "00:00:30"}})
+        _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": self.project["id"], "controls": {}})
+        # A first-half shot well inside the 25-minute test video.
+        shot = next({"id": item["df_idx"]} for item in json.loads(body)["view"]["map"]["shots"]
+                    if item["period"] == "FirstHalf" and 1 <= item["minute"] < 20)
+        code, payload = self.error("/api/analysis/analyst/shot-map/clip",
+                                   {"project_id": self.project["id"], "controls": {"selected": None}, "before": 3, "after": 4})
+        self.assertIn("Select a shot", payload["error"])
+        _, body = self.request("/api/analysis/analyst/shot-map/clip",
+                               {"project_id": self.project["id"], "controls": {"selected": shot["id"]}, "before": 3, "after": 4})
+        file = json.loads(body)["file"]
+        self.assertEqual((file["before"], file["after"]), (3, 4))
+        status, data = self.request(file["url"])
+        self.assertEqual(status, 200)
+        clip = self.root / "clip.mp4"
+        clip.write_bytes(data)
+        probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(clip)], capture_output=True, text=True)
+        match = __import__("re").search(r"Duration: (\d+):(\d+):([\d.]+)", probe.stderr)
+        seconds = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
+        self.assertAlmostEqual(seconds, 7.0, delta=0.6)
 
     def test_classic_workspace_url_carries_known_tab_only(self):
         with patch.object(self.server.analysis, "start", return_value=9999):

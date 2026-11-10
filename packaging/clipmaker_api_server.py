@@ -106,6 +106,42 @@ def clean_analysis_state(state: Any) -> dict[str, Any]:
     return clean
 
 
+def clamp_buffer(value: Any) -> int:
+    """Clip buffers use the classic Watch panel's 0-60 second range."""
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        raise ValueError("Clip buffers must be whole seconds between 0 and 60.") from None
+    if not 0 <= number <= 60:
+        raise ValueError("Clip buffers must be whole seconds between 0 and 60.")
+    return number
+
+
+def prune_files(folder: Path, keep: int) -> None:
+    """Keep only the newest ``keep`` files in a scratch folder."""
+    files = sorted((path for path in folder.glob("*.mp4") if path.is_file()),
+                   key=lambda path: path.stat().st_mtime, reverse=True)
+    for stale in files[keep:]:
+        stale.unlink(missing_ok=True)
+
+
+def _native_tabs():
+    from analysis_core import shot_map
+    return {("analyst", "shot-map"): {"view": shot_map.build_view, "clip_event": shot_map.clip_event}}
+
+
+class _LazyTabs(dict):
+    """Imports analysis handlers (and pandas) on first use."""
+
+    def get(self, key, default=None):  # type: ignore[override]
+        if not self:
+            self.update(_native_tabs())
+        return super().get(key, default)
+
+
+NATIVE_TABS = _LazyTabs()
+
+
 def analysis_ui_modes() -> dict[str, str]:
     """Workspace per view: VIZORPLAY_ANALYSIS_UI=native, or analyst=native,tactical=classic."""
     modes = {"analyst": "classic", "tactical": "classic"}
@@ -1215,6 +1251,28 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         self.send_json(status, {"error": message})
 
+    def analysis_clip(self, project, frames, handler, controls, body) -> dict[str, Any]:
+        """Cut the selected event's clip with the classic workspace's timing."""
+        from analysis_core.video import clip_window, kickoff_times_from_project
+        before, after = clamp_buffer(body.get("before")), clamp_buffer(body.get("after"))
+        if not str(project.get("video_path") or "").strip():
+            raise ValueError("No video file loaded. Go to Intake and add the match video.")
+        event = handler["clip_event"](frames, controls.get("mode"), controls.get("selected"))
+        settings = project.get("filter_settings") or {}
+        period, start, duration = clip_window(
+            frames.df_all, kickoff_times_from_project(project), settings.get("timeline_corrections", []),
+            event["minute"], event["second"], event["period"], before, after)
+        folder = self.store.data_dir / "analysis-clips"
+        # Same encoder settings as the classic Watch panel (libx264 ultrafast, default CRF).
+        clip = render_preview_clip(video_for_period(project, period), start, start + duration,
+                                   folder, 23, "ultrafast", "128k")
+        prune_files(folder, keep=20)
+        token = uuid.uuid4().hex
+        self.media_files[token] = clip
+        name = re.sub(r"[^\w\-.]", "_", f"{event['player']}_{event['minute']}.mp4")
+        return {"name": name, "size": clip.stat().st_size, "url": f"/api/media/{token}",
+                "before": before, "after": after}
+
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
             raise ValueError("Open a project before using the analytical workspace.")
@@ -1424,15 +1482,26 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path.startswith("/api/analysis/"):
                 from analysis_core import validate_tab
                 parts = path.split("/")
-                if len(parts) != 5:
+                if len(parts) not in {5, 6} or (len(parts) == 6 and parts[5] != "clip"):
                     raise ValueError("Unknown analytical tab")
                 entry = validate_tab(parts[3], parts[4])
-                self.analysis_project(str(body.get("project_id") or ""))
-                if not entry["native"]:
+                project = self.analysis_project(str(body.get("project_id") or ""))
+                handler = NATIVE_TABS.get((parts[3], parts[4]))
+                if not entry["native"] or handler is None:
                     self.send_json(HTTPStatus.NOT_IMPLEMENTED,
                                    {"error": "This tab still runs in the classic workspace.", "classic": True})
                     return
-                raise ValueError("Unknown analytical tab")  # Phase 2 registers native handlers here.
+                frames = self.server.analysis_frames.get(project["csv_path"])  # type: ignore[attr-defined]
+                controls = body.get("controls") if isinstance(body.get("controls"), dict) else {}
+                if len(parts) == 6:
+                    self.send_json(HTTPStatus.OK, {"file": self.analysis_clip(project, frames, handler, controls, body)})
+                    return
+                view = handler["view"](frames, controls)
+                settings = project.get("filter_settings") or {}
+                view["clip_defaults"] = {"before": clamp_buffer(settings.get("before_buffer", 5)),
+                                         "after": clamp_buffer(settings.get("after_buffer", 8))}
+                self.send_json(HTTPStatus.OK, {"view": view})
+                return
             if path == "/api/analysis":
                 project = self.store.get(str(body.get("project_id") or ""))
                 if not project or not project.get("csv_path") or not Path(project["csv_path"]).is_file():

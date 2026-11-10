@@ -12,6 +12,15 @@ from project_analysis import analysis_frame, session_video, preserve_analysis_co
 from analysis_core import (
     SHOT_TYPES, PERIOD_MAP, DEF_ACTIONS, GK_ACTIONS, defensive_actions_df, build_analyst_frames,
 )
+from analysis_core.common import (
+    HOME_COLOR, AWAY_COLOR, OUTCOME_ICON, OUTCOME_LABEL, OUTCOME_CLASS, PITCH_ZONE_OPTIONS,
+    safe_float, safe_bool, reclassify_shot, fmt_time,
+    filter_by_pitch_zone as _filter_by_pitch_zone, first_nonempty as _first_nonempty,
+    match_export_context as _match_export_context, scope_line as _scope_line,
+    count_scope as _count_scope, zone_scope as _zone_scope, map_context as _core_map_context,
+)
+from analysis_core import shot_map as shot_core
+from analysis_core.video import clip_window
 from smp_component import shot_map, pass_map, defensive_map, dribble_carry_map, goalkeeper_map, build_up_map, penalty_shootout_map, pressing_map
 from clipmaker_core import (
     to_seconds, _effective_pitch_zone_series,
@@ -81,13 +90,6 @@ _MOMENT_TIERS = {
     ],
 }
 
-OUTCOME_ICON  = {"Goal": "●", "SavedShot": "◉", "ShotOnPost": "◎",
-                 "BlockedShot": "■", "MissedShot": "✕"}
-OUTCOME_LABEL = {"Goal": "[GOAL] GOAL", "SavedShot": "[SAVE] SAVED", "ShotOnPost": "[POST] POST",
-                 "BlockedShot": "[DEF] BLOCKED", "MissedShot": "[ERR] MISSED"}
-OUTCOME_CLASS = {"Goal": "badge badge-goal", "SavedShot": "badge badge-saved",
-                 "ShotOnPost": "badge badge-post", "BlockedShot": "badge badge-blocked",
-                 "MissedShot": "badge badge-missed"}
 
 DEF_LABEL = {
     "Tackle": "[TKL] TACKLE", "Interception": "[INT] INTERCEPTION",
@@ -102,8 +104,6 @@ DEF_CLASS = {
     "Dispossessed": "badge badge-disp", "Error": "badge badge-missed",
 }
 
-HOME_COLOR = "#7ab4ff"
-AWAY_COLOR = "#ff7351"
 PLOTLY_EXPORT_BRAND = "VizorPlay · @B03GHB4L1"
 PLOTLY_EXPORT_CONFIG = {
     "displayModeBar": True,
@@ -301,38 +301,6 @@ def _choose_active_match_csv(page_key, current_path):
     return selected
 
 
-def _first_nonempty(df, columns):
-    for col in columns:
-        if col in df.columns:
-            values = df[col].dropna().astype(str)
-            values = values[values.str.strip() != ""]
-            if not values.empty:
-                return values.iloc[0].strip()
-    return ""
-
-
-def _match_export_context(df):
-    if df is None or df.empty:
-        return ""
-    match_name = _first_nonempty(df, ["matchName"])
-    if match_name.lower().endswith(".csv") or "_all_events" in match_name:
-        match_name = os.path.basename(match_name)
-        match_name = match_name.replace("whoscored_", "").replace("scoresway_", "")
-        match_name = match_name.replace("_all_events.csv", "").replace(".csv", "")
-        match_name = match_name.replace("_", " ")
-    if not match_name:
-        home = _first_nonempty(df, ["homeTeam"])
-        away = _first_nonempty(df, ["awayTeam"])
-        match_name = f"{home} vs {away}".strip(" vs ")
-
-    match_date = _first_nonempty(df, ["matchDate", "match_date", "date", "startTime", "kickOffTime", "dtStamp"])
-    if match_date:
-        match_date = match_date[:10]
-
-    parts = [part for part in [match_name, match_date] if part]
-    return " · ".join(parts)
-
-
 def _plotly_header(fig, title, subtitle="", note="", light=False, height=None):
     def _wrap_export_text(text, width=104):
         import textwrap
@@ -379,45 +347,10 @@ def _plotly_header(fig, title, subtitle="", note="", light=False, height=None):
     return fig
 
 
-def _scope_line(*parts):
-    cleaned = []
-    for part in parts:
-        text = str(part or "").strip()
-        if text:
-            cleaned.append(text)
-    return " | ".join(cleaned)
-
-
-def _count_scope(count, singular="event", plural=None):
-    irregular = {
-        "pass": "passes",
-        "entry": "entries",
-        "penalty": "penalties",
-    }
-    plural = plural or irregular.get(singular, f"{singular}s")
-    try:
-        value = int(count)
-    except (TypeError, ValueError):
-        return ""
-    return f"{value} {singular if value == 1 else plural}"
-
-
-def _zone_scope(pitch_zone="", depth_zone=""):
-    return _scope_line(
-        pitch_zone or "Any pitch zone",
-        depth_zone or "Any depth zone",
-    )
-
-
 def _map_context(title, team="", player="", subset="", pitch_zone="", depth_zone="",
                  count=None, unit="event", note=""):
-    match = _match_export_context(globals().get("df_all"))
-    subtitle = _scope_line(match, team, player, subset, _zone_scope(pitch_zone, depth_zone), _count_scope(count, unit))
-    return {
-        "context_title": title,
-        "context_subtitle": subtitle,
-        "context_note": note,
-    }
+    return _core_map_context(globals().get("df_all"), title, team=team, player=player, subset=subset,
+                             pitch_zone=pitch_zone, depth_zone=depth_zone, count=count, unit=unit, note=note)
 
 csv_path    = _ss("csv_path") or _ss("scraped_csv_path")
 csv_path    = _choose_active_match_csv("analysts_room", csv_path)
@@ -484,32 +417,6 @@ if data_loaded:
 # =============================================================================
 # HELPERS
 # =============================================================================
-def safe_float(v):
-    try:
-        out = float(v)
-        if pd.isna(out) or out == float("inf") or out == float("-inf"):
-            return None
-        return out
-    except:
-        return None
-
-def safe_bool(v):
-    if isinstance(v, bool): return v
-    if isinstance(v, str):  return v.strip().lower() in ("true","1","yes")
-    try: return bool(int(v))
-    except: return False
-
-def reclassify_shot(row):
-    t = row.get("type", "")
-    if t == "AttemptSaved": return "SavedShot"
-    if t in ("MissedShots", "Attempt"): return "MissedShot"
-    return t
-
-def fmt_time(minute, second, period):
-    p = PERIOD_MAP.get(period, 1)
-    label = {1:"1H",2:"2H",3:"ET1",4:"ET2",5:"PSO"}.get(p,"UNK")
-    return f"{minute}'{int(second):02d}\" {label}"
-
 def get_ffmpeg():
     import shutil
     cmd = shutil.which("ffmpeg")
@@ -553,20 +460,12 @@ def cut_clip(minute, second, period_str, before=None, after=None):
             before = default_before
         if after is None:
             after = default_after
-    period_int = PERIOD_MAP.get(period_str, 1)
-    period_offset = {1: (0, 0), 2: (45, 0), 3: (90, 0), 4: (105, 0), 5: (120, 0)}
-    period_start = {}
-    if half1_time: period_start[1] = to_seconds(half1_time)
-    if half2_time: period_start[2] = to_seconds(half2_time)
-    if half3_time: period_start[3] = to_seconds(half3_time)
-    if half4_time: period_start[4] = to_seconds(half4_time)
-    if half5_time: period_start[5] = to_seconds(half5_time)
-    period_start = resolve_period_starts_for_video(globals().get("df_all"), period_start)
-    if period_int not in period_start:
-        raise ValueError(f"No kick-off time set for period {period_int}.")
-    video_ts = _corrected_video_timestamp(int(minute), int(second), period_int, period_start, period_offset)
-    start_ts = max(0.0, video_ts - before)
-    duration = (video_ts + after) - start_ts
+    period_int, start_ts, duration = clip_window(
+        globals().get("df_all"),
+        {1: half1_time, 2: half2_time, 3: half3_time, 4: half4_time, 5: half5_time},
+        st.session_state.get("timeline_corrections", []),
+        minute, second, period_str, before, after,
+    )
     if split_video and period_int >= 2:
         if not video2_path:
             raise ValueError("2nd half video file is required for this second-half clip.")
@@ -643,15 +542,13 @@ def cut_build_up_clip(chain, df_source):
 # =============================================================================
 def render_shot_stats():
     if shots_df is None: return
-    hs  = shots_df[shots_df["team"] == home_team] if home_team else pd.DataFrame()
-    as_ = shots_df[shots_df["team"] == away_team] if away_team else pd.DataFrame()
-    sot = {"SavedShot", "Goal", "ShotOnPost"}
-    th, ta = len(hs), len(as_); tot = th + ta
-    sh = len(hs[hs["type"].isin(sot)]); sa = len(as_[as_["type"].isin(sot)])
-    gh = len(hs[hs["type"] == "Goal"]); ga = len(as_[as_["type"] == "Goal"])
+    _stats = shot_core.shot_stats(shots_df, home_team, away_team)
+    th, ta = _stats["home"]["shots"], _stats["away"]["shots"]
+    sh, sa = _stats["home"]["on_target"], _stats["away"]["on_target"]
+    gh, ga = _stats["home"]["goals"], _stats["away"]["goals"]
     share = ""
-    if tot > 0:
-        hp = round(th/tot*100); ap = 100 - hp
+    if _stats["share"]:
+        hp, ap = _stats["share"]["home"], _stats["share"]["away"]
         share = f"""<div class="cm-stats-cell" style="min-width:180px"><div class="cm-stats-label">Shot share</div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
             <span class="cm-stats-home" style="font-size:13px;min-width:28px">{hp}%</span>
@@ -697,19 +594,6 @@ def render_def_stats(df):
         if counts.get(t, 0) > 0
     )
     st.markdown(_h(f'<div class="cm-stats-bar">{cells}</div>'), unsafe_allow_html=True)
-
-
-def _filter_by_pitch_zone(df, selected_zone):
-    if df is None or df.empty or not selected_zone:
-        return df
-    zone_series = _effective_pitch_zone_series(df)
-    combined_pitch_zones = {
-        "Entire Left Side": ["Left Wing", "Left Half Space"],
-        "Entire Right Side": ["Right Wing", "Right Half Space"],
-    }
-    if selected_zone in combined_pitch_zones:
-        return df[zone_series.isin(combined_pitch_zones[selected_zone])]
-    return df[zone_series == selected_zone]
 
 
 # =============================================================================
@@ -900,15 +784,7 @@ def render_shot_tab():
             return
 
         def shot_to_dict(idx, row):
-            return {
-                "df_idx": int(idx), "is_home": bool(row.get("team", "") == home_team),
-                "team": str(row.get("team", "")), "playerName": str(row.get("playerName", "")),
-                "minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
-                "period": str(row.get("period", "")), "type": reclassify_shot(row),
-                "x": safe_float(row.get("x")), "y": safe_float(row.get("y")),
-                "goal_mouth_y": safe_float(row.get("goal_mouth_y")),
-                "goal_mouth_z": safe_float(row.get("goal_mouth_z")),
-            }
+            return shot_core.shot_to_dict(idx, row, home_team)
 
         shots_for_pso = [shot_to_dict(idx, row) for idx, row in pso_shots.iterrows()]
         pso_sel_idx   = st.session_state.get("smp_pso_selected_idx")
@@ -949,11 +825,7 @@ def render_shot_tab():
         )
 
         st.markdown("<div style=\'height:6px\'></div>", unsafe_allow_html=True)
-        def shot_label(row):
-            icon   = OUTCOME_ICON.get(reclassify_shot(row), "✕")
-            period = row.get("period", "")
-            et     = " ET" if "ExtraTime" in str(period) else ""
-            return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"{et}  {row.get('playerName','Unknown')}  ({row.get('team','')})"
+        shot_label = shot_core.shot_label
 
         pso_indices = list(pso_shots.index)
         labels = ["— Select a penalty to inspect —"] + [shot_label(r) for _, r in pso_shots.iterrows()]
@@ -975,14 +847,7 @@ def render_shot_tab():
             s_type     = reclassify_shot(row)
             team       = row.get("team", "")
             accent     = HOME_COLOR if team == home_team else AWAY_COLOR
-            is_penalty  = safe_bool(row.get("is_penalty", ""))
-            is_lfoot    = safe_bool(row.get("is_left_foot", ""))
-            is_rfoot    = safe_bool(row.get("is_right_foot", ""))
-            extras      = " · ".join(x for x in [
-                "Penalty"   if is_penalty else "",
-                "Left Foot" if is_lfoot   else "",
-                "Right Foot" if is_rfoot  else "",
-            ] if x) or "—"
+            extras      = " · ".join(shot_core.qualifiers(row, shot_core.PENALTY_QUALIFIERS)) or "—"
             badge_cls  = OUTCOME_CLASS.get(s_type, "badge badge-missed")
             badge_lbl  = theme.ui_html(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"))
             minute_v   = row.get("minute", 0); second_v = row.get("second", 0); period_v = row.get("period", "")
@@ -1003,20 +868,14 @@ def render_shot_tab():
                 render_watch_panel(row, "smp", shot_label)
         return
 
-    radio_opts = []
-    if home_team: radio_opts.append(home_team)
-    if away_team: radio_opts.append(away_team)
-    if not radio_opts:
-        radio_opts = sorted(shots_df["team"].dropna().unique().tolist())[:2]
+    radio_opts = shot_core.team_options(shots_df, home_team, away_team)
 
     controls = st.columns([1.2, 1, 1]) if os.environ.get("CLIPMAKER_ANALYSIS_MODE") else [st.container() for _ in range(3)]
     with controls[0]:
         team_sel = st.radio("Team", radio_opts, horizontal=True, key="smp_team_radio",
                             label_visibility="collapsed")
 
-    all_shot_players  = sorted(shots_df["playerName"].dropna().unique()) if "playerName" in shots_df.columns else []
-    team_shot_players = [p for p in all_shot_players
-                         if p in shots_df[shots_df["team"] == team_sel]["playerName"].values]
+    team_shot_players = shot_core.team_players(shots_df, team_sel)
     with controls[1]:
         player_filter_shot = st.selectbox("Player", ["All players"] + team_shot_players,
                                           label_visibility="collapsed", key="smp_player_sel")
@@ -1024,7 +883,7 @@ def render_shot_tab():
     with controls[2]:
         smp_pitch_zone = st.selectbox(
             "Pitch Zone",
-            options=["", "Entire Left Side", "Left Wing", "Left Half Space", "Centre", "Right Half Space", "Right Wing", "Entire Right Side"],
+            options=PITCH_ZONE_OPTIONS,
             format_func=lambda x: "Any pitch zone" if x == "" else x,
             key="smp_pitch_zone_sel",
             label_visibility="collapsed",
@@ -1040,25 +899,14 @@ def render_shot_tab():
 
     render_shot_stats()
 
-    disp_shots = shots_df[shots_df["team"] == team_sel].copy()
-    if player_filter_shot != "All players":
-        disp_shots = disp_shots[disp_shots["playerName"] == player_filter_shot]
-    disp_shots = _filter_by_pitch_zone(disp_shots, smp_pitch_zone)
+    disp_shots = shot_core.filtered_shots(shots_df, team_sel, player_filter_shot, smp_pitch_zone)
 
     if disp_shots.empty:
         st.info("No shots match the current filter.")
         return
 
     def shot_to_dict(idx, row):
-        return {
-            "df_idx": int(idx), "is_home": bool(row.get("team", "") == home_team),
-            "team": str(row.get("team", "")), "playerName": str(row.get("playerName", "")),
-            "minute": int(row.get("minute", 0)), "second": int(row.get("second", 0)),
-            "period": str(row.get("period", "")), "type": reclassify_shot(row),
-            "x": safe_float(row.get("x")), "y": safe_float(row.get("y")),
-            "goal_mouth_y": safe_float(row.get("goal_mouth_y")),
-            "goal_mouth_z": safe_float(row.get("goal_mouth_z")),
-        }
+        return shot_core.shot_to_dict(idx, row, home_team)
 
     shots_for_comp = [shot_to_dict(idx, row) for idx, row in disp_shots.iterrows()]
     sel_idx = st.session_state.get("smp_selected_idx")
@@ -1111,11 +959,7 @@ def render_shot_tab():
     )
 
     st.markdown("<div style=\'height:6px\'></div>", unsafe_allow_html=True)
-    def shot_label(row):
-        icon   = OUTCOME_ICON.get(reclassify_shot(row), "✕")
-        period = row.get("period", "")
-        et     = " ET" if "ExtraTime" in str(period) else ""
-        return f"{icon}  {row.get('minute',0)}'{int(row.get('second',0)):02d}\"{et}  {row.get('playerName','Unknown')}  ({row.get('team','')})"
+    shot_label = shot_core.shot_label
 
     disp_indices = list(disp_shots.index)
     labels = ["— Select a shot to inspect —"] + [shot_label(r) for _, r in disp_shots.iterrows()]
@@ -1137,40 +981,7 @@ def render_shot_tab():
         s_type     = reclassify_shot(row)
         team       = row.get("team", "")
         accent     = HOME_COLOR if team == home_team else AWAY_COLOR
-        is_head     = safe_bool(row.get("is_header", ""))
-        is_bc       = safe_bool(row.get("is_big_chance_shot", ""))
-        is_penalty  = safe_bool(row.get("is_penalty", ""))
-        is_volley   = safe_bool(row.get("is_volley", ""))
-        is_chipped  = safe_bool(row.get("is_chipped", ""))
-        is_dcfc     = safe_bool(row.get("is_direct_from_corner", ""))
-        is_lfoot    = safe_bool(row.get("is_left_foot", ""))
-        is_rfoot    = safe_bool(row.get("is_right_foot", ""))
-        is_fb       = safe_bool(row.get("is_fast_break", ""))
-        is_scramble   = safe_bool(row.get("is_scramble", ""))
-        is_corner_sit = safe_bool(row.get("is_corner_situation", ""))
-        is_indiv      = safe_bool(row.get("is_individual_play", ""))
-        is_foll_drib  = safe_bool(row.get("is_follows_dribble", ""))
-        is_strong     = safe_bool(row.get("is_shot_strong", ""))
-        is_weak       = safe_bool(row.get("is_shot_weak", ""))
-        is_woodwork   = safe_bool(row.get("is_hit_woodwork", ""))
-        extras      = " · ".join(x for x in [
-            "Header"            if is_head       else "",
-            "Big Chance"        if is_bc         else "",
-            "Penalty"           if is_penalty    else "",
-            "Volley"            if is_volley     else "",
-            "Chipped"           if is_chipped    else "",
-            "Direct from Corner" if is_dcfc      else "",
-            "Left Foot"         if is_lfoot      else "",
-            "Right Foot"        if is_rfoot      else "",
-            "Fast Break"        if is_fb         else "",
-            "Scramble"          if is_scramble   else "",
-            "2nd Phase"         if is_corner_sit else "",
-            "Solo"              if is_indiv      else "",
-            "After Dribble"     if is_foll_drib  else "",
-            "Strong"            if is_strong     else "",
-            "Weak"              if is_weak       else "",
-            "Woodwork"          if is_woodwork   else "",
-        ] if x) or "—"
+        extras      = " · ".join(shot_core.qualifiers(row)) or "—"
         badge_cls  = OUTCOME_CLASS.get(s_type, "badge badge-missed")
         badge_lbl  = theme.ui_html(OUTCOME_LABEL.get(s_type, "[ERR] MISSED"))
         minute_v   = row.get("minute", 0); second_v = row.get("second", 0); period_v = row.get("period", "")

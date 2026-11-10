@@ -50,8 +50,16 @@ def page_functions(path):
         namespace[name] = getattr(core, name)
     # Shared constants and loaders moved out of the pages into analysis_core.
     import analysis_core
+    import analysis_core.common as common
+    from analysis_core import shot_map as shot_core
+    from analysis_core.video import clip_window
     for name in ("SHOT_TYPES", "PERIOD_MAP", "DEF_ACTIONS", "GK_ACTIONS", "defensive_actions_df"):
         namespace[name] = getattr(analysis_core, name)
+    namespace.update({name: value for name, value in vars(common).items() if not name.startswith("__")})
+    namespace.update(shot_core=shot_core, clip_window=clip_window,
+                     _filter_by_pitch_zone=common.filter_by_pitch_zone, _scope_line=common.scope_line,
+                     _count_scope=common.count_scope, _zone_scope=common.zone_scope,
+                     _first_nonempty=common.first_nonempty, _match_export_context=common.match_export_context)
     names = {"SHOT_TYPES", "DEF_WIN_TYPES", "PPDA_DEFENSIVE_ACTION_TYPES",
              "LOSS_TYPES", "IN_POSSESSION_ACTION_TYPES", "PITCH_ZONE_ORDER",
              "DEPTH_ZONE_ORDER", "PPDA_PRESS_ZONE_MIN_X", "PPDA_SCORE_CEILING",
