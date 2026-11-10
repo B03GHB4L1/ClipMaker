@@ -34,7 +34,7 @@ from packaging.clipmaker_api_server import (
     render_preview_clip,
     video_for_period,
 )
-from app.project_analysis import project_session
+from app.analysis_core.project import project_session
 import clipmaker_core as core
 
 

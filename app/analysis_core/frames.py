@@ -104,7 +104,7 @@ class AnalystFrames:
 
 def build_analyst_frames(raw: pd.DataFrame, source: str = "") -> AnalystFrames:
     """Prepare a raw match CSV frame exactly as the Analyst Room does."""
-    from project_analysis import analysis_frame
+    from .project import analysis_frame
     df_all = analysis_frame(raw)
     # The selected CSV is the source of truth; use event team names for filters/maps.
     home_team, away_team = resolve_event_team_names(df_all)

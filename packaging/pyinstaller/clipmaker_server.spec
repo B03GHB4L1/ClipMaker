@@ -11,12 +11,12 @@ hiddenimports = [
     "clipmaker_core",
     "scoresway_scraper",
     "whoscored_scraper",
-    "theme",
     "team_names",
     "analysis_core",
     "analysis_core.frames",
     "analysis_core.registry",
     "analysis_core.common",
+    "analysis_core.project",
     "analysis_core.shot_map",
     "analysis_core.video",
     "analysis_core.views",
@@ -30,13 +30,11 @@ hiddenimports = [
     "analysis_core.tactical",
     "analysis_core.tactical_page",
     "analysis_core.tactical_fast",
-    "smp_component",
-    "project_analysis",
-    "analysis_server",
+    "process_owner",
     "tkinter",
     "tkinter.filedialog",
 ]
-for package in ("playwright", "imageio_ffmpeg", "streamlit"):
+for package in ("playwright", "imageio_ffmpeg"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -62,6 +60,8 @@ a = Analysis(
         "pytest",
         "scipy",
         "sklearn",
+        "pyarrow",
+        "streamlit",
         "sympy",
         "tensorflow",
         "torch",

@@ -17,6 +17,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_homebrew_formula_installs_every_local_server_module(self):
+        import re
+        formula = (ROOT / "packaging/homebrew/clipmaker.rb.in").read_text(encoding="utf-8")
+        server = (ROOT / "packaging/clipmaker_api_server.py").read_text(encoding="utf-8")
+        siblings = {name for name in re.findall(r"^\s+from (\w+) import", server, re.M)
+                    if (ROOT / "packaging" / f"{name}.py").is_file()}
+        self.assertIn("process_owner", siblings)
+        for name in siblings:
+            self.assertIn(f'libexec.install "packaging/{name}.py"', formula)
+        self.assertNotIn("analysis_server", formula)
+
     def test_homebrew_upgrade_checks_linked_keg_even_if_old_version_is_retained(self):
         from tests.homebrew_upgrade import assert_active_version
         launcher = Mock()

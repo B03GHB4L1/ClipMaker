@@ -9,14 +9,14 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 from packaging.clipmaker_api_server import JobManager, MatchStore, build_clip_config, create_server, detect_source, video_for_period
-from app.project_analysis import project_session
+from app.analysis_core.project import project_session
 
 
 class ProjectStoreTests(unittest.TestCase):
     def test_build_helpers_do_not_hide_dependency_packaging_modules(self):
         from packaging.requirements import Requirement
         from packaging.version import Version
-        self.assertEqual(Requirement("streamlit>=1.55").name, "streamlit")
+        self.assertEqual(Requirement("pandas>=2.3").name, "pandas")
         self.assertGreater(Version("1.55"), Version("1.54"))
 
     def setUp(self):
@@ -190,7 +190,6 @@ class ProjectApiTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
-        self.server.analysis.close()
         self.thread.join(timeout=2)
         self.temporary.cleanup()
 

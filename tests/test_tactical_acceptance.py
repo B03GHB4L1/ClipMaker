@@ -6,10 +6,13 @@ Parity checklist reviewed against older versions/{Windows,Linux,Mac}/pages:
   [x] tactical playlists, trace coordinates, event-window recovery
   [x] real tactical cuts/reels and comparison Top Moments reel, decoded pixels
 
-The pages execute Streamlit navigation on import. Load their actual function
-definitions and named constants with AST, without executing page startup. The
-The nested comparison/cache helpers are lifted unchanged: none uses a closure.
-Only the Streamlit session and temporary-file location are supplied by tests;
+The Tactical Lab functions live, copied verbatim from the retired page, in
+app/analysis_core/tactical_page.py. Load their definitions and named constants
+with AST, so these ledgers check the original detectors (the native workspace
+swaps in tactical_fast's equivalents, compared in test_tactical_native). The
+comparison scoring lives in analysis_core.comparison_helpers; its Top Moments
+reel is cut by the API server's analysis_reel.
+Only the session and temporary-file location are supplied by tests;
 numerical expectations below are hand-written ledgers, not a second algorithm.
 Run: python -m unittest tests.test_tactical_acceptance -v
 """
@@ -29,16 +32,22 @@ import pandas as pd
 # MatchStore initializes the same app import path used by other repository tests.
 from packaging.clipmaker_api_server import MatchStore  # noqa: F401
 import clipmaker_core as core
-from app.project_analysis import analysis_frame
+from app.analysis_core.project import analysis_frame
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TACTICAL = ROOT / "app/pages/3_Tactical_Lab.py"
-COMPARISON = ROOT / "app/pages/2_The_Analysts_Room.py"
+TACTICAL = ROOT / "app/analysis_core/tactical_page.py"
+
+
+def comparison_functions():
+    """The comparison scoring the native Comparison tab uses."""
+    from analysis_core import comparison, comparison_helpers
+    names = {name: value for name, value in vars(comparison_helpers).items() if not name.startswith("__")}
+    return SimpleNamespace(**names, _top5_moments=lambda ev, role, is_gk=False: comparison.top_moments(ev, role, is_gk))
 
 
 def page_functions(path):
-    """Execute source functions, never Streamlit page startup or copied bodies."""
+    """Execute the source's functions and constants, never its module setup."""
     import plotly.graph_objects as go
 
     namespace = dict(pd=pd, os=os, shutil=shutil, subprocess=subprocess,
@@ -283,7 +292,7 @@ class TacticalNumericalAcceptance(unittest.TestCase):
 
 class ComparisonNumericalAcceptance(unittest.TestCase):
     def setUp(self):
-        self.page = page_functions(COMPARISON)
+        self.page = comparison_functions()
 
     def test_role_scores_and_top_five_have_independent_expected_values(self):
         frame = pd.DataFrame([
@@ -355,7 +364,7 @@ class TacticalMediaAcceptance(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.lab = page_functions(TACTICAL)
-        self.page = page_functions(COMPARISON)
+        self.page = comparison_functions()
         for name, color in (("first", "red"), ("second", "lime")):
             subprocess.run([self.ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
                 f"color=c=blue:s=64x48:r=12:d=4[a];color=c={color}:s=64x48:r=12:d=5[b];[a][b]concat=n=2:v=1:a=0",
@@ -373,13 +382,8 @@ class TacticalMediaAcceptance(unittest.TestCase):
         self.state["match_setup_by_csv"] = {str(self.csv): self.setup}
         # Keep every production-created scratch clip/list inside this test's dir.
         temp_api = SimpleNamespace(NamedTemporaryFile=lambda **kw: tempfile.NamedTemporaryFile(dir=self.root, **kw))
-        for function in (self.lab._cut_tactical_clip, self.page.cut_clip):
-            function.__globals__.update(st=SimpleNamespace(session_state=self.state), tempfile=temp_api)
+        self.lab._cut_tactical_clip.__globals__.update(st=SimpleNamespace(session_state=self.state), tempfile=temp_api)
         self.lab._cut_tactical_clip.__globals__["_get_ffmpeg"] = lambda: self.ffmpeg
-        self.page.cut_clip.__globals__.update(
-            get_ffmpeg=lambda: self.ffmpeg, **self.state,
-            half3_time="", half4_time="", half5_time="",
-            session_video=lambda period: self.state.get(f"video{period}_path") or self.state["video2_path"])
 
     def assert_video(self, path, seconds, channels):
         # Decode the ENTIRE export: 12 frames per second, one RGB pixel/frame.
@@ -409,9 +413,19 @@ class TacticalMediaAcceptance(unittest.TestCase):
     def test_real_comparison_top_moments_reel_uses_ranking_and_saved_buffers(self):
         frame = pd.DataFrame([event("lower", 4, "TakeOn", period="FirstHalf"),
                               event("higher", 2702, "Goal", period="SecondHalf")])
+        from analysis_core.video import kickoff_times_from_project
+        from packaging.clipmaker_api_server import analysis_reel
         top, _ = self.page._top5_moments(frame, "attacker")
         self.assertEqual(top.id.tolist(), ["higher", "lower"])
-        reel = self.page._generate_reel(top)
+        # The saved project the server cuts from: same markers, videos, correction.
+        project = {"video_path": self.state["video_path"], "period_videos": {"2H": self.state["video2_path"]},
+                   "markers": {"1H": "00:00:01", "2H": "00:00:01"},
+                   "filter_settings": {"timeline_corrections": self.state["timeline_corrections"]}}
+        events = [{"minute": int(row.minute), "second": int(row.second), "period": row.period} for row in top.itertuples()]
+        folder = self.root / "analysis-clips"
+        folder.mkdir()
+        reel = analysis_reel(project, SimpleNamespace(df_all=frame), events, kickoff_times_from_project(project),
+                             project["filter_settings"]["timeline_corrections"], 1, 1, folder)
         self.assert_video(reel, 4, [(.5, 1), (1.5, 1), (2.5, 0), (3.5, 0)])
 
     def test_missing_marker_and_source_raise_actionable_errors(self):

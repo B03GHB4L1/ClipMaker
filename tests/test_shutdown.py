@@ -9,7 +9,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from packaging.analysis_server import _wait_for_kqueue_exit, wait_for_process_exit, watch_process_owner
+from packaging.process_owner import _wait_for_kqueue_exit, wait_for_process_exit, watch_process_owner
 from packaging.clipmaker_api_server import JobManager
 from packaging.smoke_test import backend, request
 
@@ -67,7 +67,7 @@ class ShutdownTests(unittest.TestCase):
 
     def test_owner_watcher_does_not_notify_on_non_exit(self):
         callback = Mock()
-        with patch("packaging.analysis_server.wait_for_process_exit", return_value=False):
+        with patch("packaging.process_owner.wait_for_process_exit", return_value=False):
             monitor = watch_process_owner(44, callback)
             monitor.join(timeout=2)
             self.assertFalse(monitor.is_alive())

@@ -72,25 +72,22 @@ class SharedUiTests(unittest.TestCase):
             self.assertIn('href="design.css?', (UI / name).read_text(encoding="utf-8"))
         self.assertNotIn("fonts.googleapis.com", (chart / "index.html").read_text(encoding="utf-8"))
 
-    def test_analytical_font_is_embedded_locally(self):
-        import base64
-        import sys
-        from unittest.mock import patch
-        with patch.object(sys, "path", [str(UI.parent / "app"), *sys.path]):
-            from project_analysis import analysis_font_css
-            css = analysis_font_css()
-        encoded = css.split("base64,", 1)[1].split(")", 1)[0]
-        self.assertEqual(base64.b64decode(encoded), (UI / "assets/fonts/GeistMono-Variable.ttf").read_bytes())
-
     def test_analytical_chart_fonts_and_selected_tab_contrast(self):
-        for name in ("2_The_Analysts_Room.py", "3_Tactical_Lab.py"):
-            source = (UI.parent / "app/pages" / name).read_text(encoding="utf-8")
+        for name in ("comparison_helpers.py", "tactical_page.py"):
+            source = (UI.parent / "app/analysis_core" / name).read_text(encoding="utf-8")
             self.assertNotIn('family="Inter, sans-serif"', source)
             self.assertNotIn('family="Space Grotesk, Inter, sans-serif"', source)
             self.assertIn('family="Geist Mono, monospace"', source)
-        source = (UI.parent / "app/project_analysis.py").read_text(encoding="utf-8")
-        self.assertIn("[aria-selected='true'] p {color:#fff!important;}", source)
+        css = (UI / "analysis/native.css").read_text(encoding="utf-8")
+        self.assertIn(".native-tabs [role=tab][aria-selected=true] { color: var(--cm-ink);", css)
 
+    def test_analysis_page_has_no_classic_workspace(self):
+        # Phase 5 retired the Streamlit workspace: no iframe, no classic switch.
+        page = (UI / "analysis.html").read_text(encoding="utf-8")
+        scripts = "".join((UI / name).read_text(encoding="utf-8") for name in ("analysis.js", "analysis/native.js"))
+        self.assertNotIn("<iframe", page)
+        for token in ("ui=classic", "/api/analysis\"", "classicUrl", "data-analysis-frame"):
+            self.assertNotIn(token, scripts)
 
 if __name__ == "__main__":
     unittest.main()

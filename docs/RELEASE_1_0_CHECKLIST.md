@@ -18,6 +18,7 @@ This checklist records evidence, not a guarantee that software has no bugs.
 | Live Scoresway/WhoScored | Earlier local checks passed; Scoresway passed hosted, WhoScored hosted HTTP 403. Retest at release; distinguish external denial |
 | Batch scrape / partial failures | Real Scoresway browser batch passed in run 40212549960, with invalid URL report and prior-project preservation |
 | Advanced Tactical Video Lab and multi-match moments/reels | Focused numerical/media acceptance passes locally, including multi-project video mapping, saved corrections, shootout anchors and cache invalidation; hosted/browser-native acceptance pending |
+| Analysis workspace without Streamlit | Analyst Room and Tactical Lab run in the shared frontend from the main backend (docs/ANALYSIS_MIGRATION_PLAN.md, Phase 5, 10 November 2026). Snapshot parity, source/frozen smoke and browser smoke pass locally; hosted run pending |
 | Native chart controls and OS file dialogs | Browser/chart checks do not certify every native-webview interaction; focused physical-device acceptance remains open |
 | Public Mac install/update | Prepared formula still needs release asset plus authorized tap publication; tap currently private/empty |
 | Public Windows package updates | WinGet manifests prepared; community submission/acceptance still needed |

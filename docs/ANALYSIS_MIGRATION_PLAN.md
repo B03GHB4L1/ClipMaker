@@ -3,8 +3,9 @@
 Status: Phases 0-2 complete and green on Windows, Linux and macOS CI
 (9-10 November 2026; Phase 2 passed its decision gate). Phase 3 (all Analyst Room tabs
 native, now the default) complete and green on CI on 10 November 2026.
-Phase 4 (Tactical Lab native, now the default) complete locally on
-10 November 2026; CI pending. Phase 5 not started.
+Phase 4 (Tactical Lab native, now the default) complete and green on CI on
+10 November 2026. Phase 5 (Streamlit removed) complete locally on 10 November
+2026; CI pending.
 
 ## Goal
 
@@ -109,6 +110,8 @@ Tools:
   `tests/golden/analysis/fixture.json.gz`; `--csv` captures local real
   matches to an uncommitted file. Checked deterministic over two runs.
 - `tests/test_analysis_golden.py`: fails if anything a user sees changes.
+  (Removed with Streamlit in Phase 5, together with the recorder; the
+  committed snapshot remains as a fixed oracle for the native parity tests.)
 - `tests/analysis_timing.py`: browser timing and bytes streamed per step.
 
 Timings: median wall time until Streamlit finishes the rerun. Map drawing
@@ -428,6 +431,41 @@ when Streamlit finishes its script; native waits for charts to draw.
   PyInstaller spec; confirm a frozen build still starts and passes acceptance.
 - Update `FEATURE_PARITY.md`, `RELEASE_1_0_CHECKLIST.md`, browser smoke tests.
 
+#### Phase 5 results (10 November 2026)
+
+Removed: the Streamlit subprocess (`packaging/analysis_server.py`), the classic
+`/api/analysis` endpoint, `--analysis-port`, the `VIZORPLAY_ANALYSIS_UI` switch
+and `?ui=classic`, the "Classic workspace" link and iframe, `app/ClipMaker.py`,
+`app/analysis_entry.py`, `app/pages/`, `app/project_analysis.py`, `app/theme.py`,
+`app/static/` fonts, the Streamlit component wrapper `app/smp_component/__init__.py`
+(its `frontend/` stays: the native map host uses it), the unused
+`packaging/clipmaker_server.py` launcher, `render_stats_panel`, and `streamlit`
+from `requirements.txt` and the PyInstaller spec (now excluded, with `pyarrow`).
+
+Moved: owner-process watching to `packaging/process_owner.py` (the Homebrew
+formula now installs it; a contract test checks every local server module is
+installed); `analysis_frame`/`project_session` to `app/analysis_core/project.py`;
+the Top 5 Moments reel to the module function `analysis_reel`.
+
+Tests: the classic AppTests and the snapshot re-recorder were removed. The
+Tactical acceptance ledgers now load the copied functions from
+`analysis_core/tactical_page.py`, the comparison scoring from
+`analysis_core.comparison_helpers`, and cut the Top Moments reel through
+`analysis_reel` (decoded pixels, ranking order, saved markers and correction).
+Browser smoke checks the native Shot Map PNG and multi-frame GIF export and the
+Tactical Style Profile instead of the classic iframe; the source and frozen
+smoke tests render both views in-process.
+
+Verified locally (Windows 11): 209 Python tests with `streamlit` made
+unimportable, 207 passed and 2 OS-specific skipped; Node autosave test; source
+smoke; frozen-build smoke; full browser smoke.
+
+Size: the installed Streamlit stack (streamlit, pyarrow, altair, pydeck,
+tornado and helpers) was about 168 MB in the build environment. The frozen
+backend is now 973 MB on Windows, of which 757 MB is Playwright's bundled
+browser (656 MB of it Chromium for scraping): that is the next size target,
+not Python.
+
 ## Parity checklist
 
 Source of truth for behaviour: `older versions/` and the current Streamlit
@@ -456,25 +494,25 @@ and browser-only behaviour still need browser tests), `native` (built),
 
 | Tab | Behaviour to preserve | Status |
 |---|---|---|
-| Shot Map | Normal and Penalty Shootout modes; team radio, player, pitch zone; click to select; shot list; reclassified shots; stats panel | native (golden parity, browser click/clip/export; CI pending) |
-| Pass Map | Team view and player view; pass network; pass type filter; pitch and depth zones; select pass; stats | native (golden parity, real-match browser check; CI pending) |
-| Defensive Actions | Team, player, pitch and depth zones; select action; stats | native (golden parity, real-match browser check; CI pending) |
-| Dribbles & Carries | Team, player, pitch and depth zones; select action | native (golden parity, real-match browser check; CI pending) |
-| Goalkeeper | Actions, shots faced, distribution modes; zones; select item; empty long-pass case | native (golden parity, real-match browser check; CI pending) |
-| Build-Up | Entry modes (possession, final third, box entries) and sequences; min actions slider; sequence list, detail, watch; selection survives reruns | native (golden parity, real-match browser check; CI pending) |
-| Pressing | Team and zone; metrics row; detail; clear | native (golden parity, real-match browser check; CI pending) |
-| Comparison | Two players across teams; percentile radar; pitch zone heatmaps; role-based Top 5 moments with GK scoring; moments reel | native (golden parity, real-match browser check; CI pending) |
+| Shot Map | Normal and Penalty Shootout modes; team radio, player, pitch zone; click to select; shot list; reclassified shots; stats panel | native (golden parity, browser click/clip/export; green on Windows, Linux and macOS CI) |
+| Pass Map | Team view and player view; pass network; pass type filter; pitch and depth zones; select pass; stats | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Defensive Actions | Team, player, pitch and depth zones; select action; stats | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Dribbles & Carries | Team, player, pitch and depth zones; select action | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Goalkeeper | Actions, shots faced, distribution modes; zones; select item; empty long-pass case | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Build-Up | Entry modes (possession, final third, box entries) and sequences; min actions slider; sequence list, detail, watch; selection survives reruns | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Pressing | Team and zone; metrics row; detail; clear | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Comparison | Two players across teams; percentile radar; pitch zone heatmaps; role-based Top 5 moments with GK scoring; moments reel | native (golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
 
 ### Tactical Lab
 
 | Tab | Behaviour to preserve | Status |
 |---|---|---|
-| Match scope | Single match, multi-match toggle and multiselect, unique event IDs, saved labels, later opponents in team list | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
-| Defensive Transitions | Reaction window and event cap sliders; period isolation; chart | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
-| Attacking Transitions | Attack window and event cap; includes win, caps all events; chart | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
-| Style Profile | Radar with info, pooled weighted metrics, strengths/weaknesses, zone heatmaps, per-match trends with dimension picker | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
-| Set Pieces | Restart classification, retained/box entry/shot/xT, charts and 16-row table | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
-| Video Lab | Playlists, before/after/reel-count sliders, moment list, sequence trace, cut moment, build and download reel, correct source time and order across projects | native (classic code via recorder, golden parity, real-match browser check; CI pending) |
+| Match scope | Single match, multi-match toggle and multiselect, unique event IDs, saved labels, later opponents in team list | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Defensive Transitions | Reaction window and event cap sliders; period isolation; chart | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Attacking Transitions | Attack window and event cap; includes win, caps all events; chart | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Style Profile | Radar with info, pooled weighted metrics, strengths/weaknesses, zone heatmaps, per-match trends with dimension picker | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Set Pieces | Restart classification, retained/box entry/shot/xT, charts and 16-row table | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
+| Video Lab | Playlists, before/after/reel-count sliders, moment list, sequence trace, cut moment, build and download reel, correct source time and order across projects | native (classic code via recorder, golden parity, real-match browser check; green on Windows, Linux and macOS CI) |
 
 ## Tests to add
 

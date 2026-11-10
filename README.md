@@ -96,7 +96,7 @@ It started as a clip cutter. In `v1.2.3`, it is much closer to a full analyst to
 
 - **Quick filter presets** like set pieces, ball progression, attacking chaos, and defensive display
 - **Filter snapshots** so users can save and reload filter configurations across sessions
-- **Browser-based local UI** built in Streamlit
+- **Browser-based local UI**: one shared HTML/JS frontend over a local Python API
 - **PNG and animated GIF exports** for interactive analysis maps
 - **Cleaner chart export names, titles, match context, and ClipMaker branding**
 - **Packaged launchers** for Windows, macOS, and Linux
