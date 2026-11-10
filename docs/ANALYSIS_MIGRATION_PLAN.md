@@ -4,8 +4,9 @@ Status: Phases 0-2 complete and green on Windows, Linux and macOS CI
 (9-10 November 2026; Phase 2 passed its decision gate). Phase 3 (all Analyst Room tabs
 native, now the default) complete and green on CI on 10 November 2026.
 Phase 4 (Tactical Lab native, now the default) complete and green on CI on
-10 November 2026. Phase 5 (Streamlit removed) complete locally on 10 November
-2026; CI pending.
+10 November 2026. Phase 5 (Streamlit removed) complete and green on
+Windows, Linux and macOS CI (Checks and Full Desktop E2E at e32eb16) on
+10 November 2026. The migration is complete.
 
 ## Goal
 
