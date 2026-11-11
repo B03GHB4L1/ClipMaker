@@ -53,6 +53,7 @@ jobs:
         with:
           node-version: 22
       - run: python -m pip install -r requirements-e2e.txt
+      - uses: ./.github/actions/ubuntu-mirror
       - run: python -m playwright install --with-deps chromium
       - name: Regression tests
         env:
@@ -272,6 +273,7 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: python -m pip install -r requirements-e2e.txt
+      - uses: ./.github/actions/ubuntu-mirror
       - run: python -m playwright install --with-deps chromium-headless-shell
       - run: python tests/live_scrape.py
         env:
