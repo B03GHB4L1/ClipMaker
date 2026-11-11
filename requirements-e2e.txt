@@ -1,5 +1,7 @@
 -r requirements-build.txt
 # Test-only: drives browsers in the smoke tests. The app uses the installed browser.
 playwright==1.58.0
+# Test-only: decodes exported chart PNG/GIF frames in the browser smoke test.
+pillow==11.3.0
 selenium==4.34.0
 PyYAML==6.0.3

@@ -43,6 +43,19 @@ class AutomationContracts(unittest.TestCase):
             self.assertIn(needle, shell)
         self.assertTrue(re.search(r"/api/health", shell))
 
+    def test_app_ships_without_unused_media_libraries(self):
+        # moviepy/imageio were only an FFmpeg lookup fallback; Pillow came with them.
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        for name in ("moviepy", "imageio==", "pillow"):
+            self.assertNotIn(name, requirements)
+        excludes = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8").split("excludes=", 1)[1]
+        for name in ('"PIL"', '"imageio"', '"moviepy"'):
+            self.assertIn(name, excludes)
+        import subprocess
+        result = subprocess.run(["git", "grep", "-n", "-E", "(import|from) (moviepy|PIL)", "--", "app", "packaging/*.py"],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "", "app code must not import moviepy or Pillow")
+
     def test_app_ships_no_bundled_browser(self):
         # docs/SCRAPER_BROWSER_PLAN.md: the scraper uses the installed browser.
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()

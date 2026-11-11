@@ -679,16 +679,10 @@ def _video_ready(row=None, raise_errors=False):
 
 
 def _get_ffmpeg():
-    cmd = shutil.which("ffmpeg")
-    if cmd:
-        return cmd
-    try:
-        from moviepy.config import FFMPEG_BINARY
-        if os.path.exists(FFMPEG_BINARY):
-            return FFMPEG_BINARY
-    except Exception:
-        pass
-    raise ValueError("FFmpeg not found. Install FFmpeg or run VizorPlay with bundled dependencies.")
+    # Not verbatim: the classic page looked up FFmpeg on PATH, then via moviepy.
+    # The app now uses one lookup (bundled build first) everywhere.
+    import video_encoder
+    return video_encoder.find_ffmpeg()
 
 
 def _period_starts(row=None):

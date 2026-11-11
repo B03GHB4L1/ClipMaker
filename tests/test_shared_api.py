@@ -96,6 +96,20 @@ class SharedApiTests(unittest.TestCase):
         with urlopen(request, timeout=3) as response:
             return response.status, json.loads(response.read())
 
+    def test_error_reply_to_a_closed_connection_is_dropped_quietly(self):
+        from http import HTTPStatus
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from packaging.clipmaker_api_server import ClipMakerHandler
+        gone = SimpleNamespace(close_connection=False, send_json=Mock(side_effect=ConnectionAbortedError),
+                               send_post_error=Mock(side_effect=BrokenPipeError))
+        ClipMakerHandler.reply_error(gone, HTTPStatus.BAD_REQUEST, "bad")
+        ClipMakerHandler.reply_error(gone, HTTPStatus.BAD_REQUEST, "bad", post=True)
+        self.assertTrue(gone.close_connection)
+        alive = SimpleNamespace(close_connection=False, send_json=Mock())
+        ClipMakerHandler.reply_error(alive, HTTPStatus.BAD_REQUEST, "bad")
+        alive.send_json.assert_called_once_with(HTTPStatus.BAD_REQUEST, {"error": "bad"})
+
     def test_health_and_static_frontend(self):
         status, body = self.request("/api/health")
         self.assertEqual(status, 200)
