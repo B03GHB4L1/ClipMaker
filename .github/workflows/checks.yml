@@ -22,12 +22,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements-e2e.txt
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: python -m compileall -q app packaging tests
       - run: python -m unittest discover -s tests -v
+        env:
+          VIZORPLAY_REQUIRE_BROWSER_TEST: '1'  # the scraper fallback must be tested with the runner's browser
       - run: node --check ui/app.js
       - run: node --check ui/filters.js
       - run: node --check ui/projects.js
@@ -63,9 +65,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -r requirements-build.txt
-      - name: Install bundled browser
-        shell: bash
-        run: PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium-headless-shell
       - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
       - name: Launch packaged backend and exercise media rendering
         shell: bash

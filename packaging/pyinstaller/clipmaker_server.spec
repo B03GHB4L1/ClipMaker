@@ -9,6 +9,7 @@ datas = [(str(ROOT / "app"), "app"), (str(ROOT / "ui"), "ui")]
 binaries = []
 hiddenimports = [
     "clipmaker_core",
+    "browser_capture",
     "scoresway_scraper",
     "whoscored_scraper",
     "team_names",
@@ -34,7 +35,7 @@ hiddenimports = [
     "tkinter",
     "tkinter.filedialog",
 ]
-for package in ("playwright", "imageio_ffmpeg"):
+for package in ("imageio_ffmpeg",):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
     binaries += package_binaries
@@ -60,6 +61,7 @@ a = Analysis(
         "pytest",
         "scipy",
         "sklearn",
+        "playwright",
         "pyarrow",
         "streamlit",
         "sympy",

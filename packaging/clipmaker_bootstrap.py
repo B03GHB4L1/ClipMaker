@@ -68,10 +68,6 @@ def main() -> int:
             [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(requirements)],
             check=True,
         )
-        subprocess.run(
-            [str(python), "-m", "playwright", "install", "chromium-headless-shell"],
-            check=True,
-        )
         stamp.write_text(digest, encoding="utf-8")
 
     port = args.port if args.port is not None else available_port()

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import re
@@ -160,6 +159,8 @@ def to_float(value, default=np.nan):
 
 def extract_match_id(url):
     patterns = [
+        # /match/<teams-slug>/<id>/<tab>: Opta ids are long lowercase alphanumerics.
+        r"/match/(?:view/)?(?:[^/?#]+/)?([A-Za-z0-9]{20,})(?=[/?#]|$)",
         r"/match/(?:view/)?([A-Za-z0-9]+)",
         r"/view/([A-Za-z0-9]+)",
         r"/([A-Za-z0-9]+)(?:/[^/?#]*)?(?:[?#].*)?$",
@@ -1025,44 +1026,48 @@ def fetch_scoresway_squad_data(url, context, feeds=None, log=lambda msg: None):
     return squad_jsons
 
 
-async def _discover_with_playwright_async(url, match_id=None, log=lambda msg: None):
-    from playwright.async_api import async_playwright
-
-    captured = {"match": None, "matchevent": None}
-    tasks = []
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(extra_http_headers=HEADERS)
-
-        async def capture_response(response):
-            response_url = response.url
-            kind = None
-            if "api.performfeeds.com/soccerdata/matchevent/" in response_url:
-                kind = "matchevent"
-            elif "api.performfeeds.com/soccerdata/match/" in response_url:
-                kind = "match"
-            if not kind:
-                return
-            if match_id and not response_url.rstrip("/").split("?")[0].endswith(match_id):
-                return
-            try:
-                captured[kind] = await response.text()
-                log(f"Captured {kind} feed.")
-            except Exception:
-                pass
-
-        page.on("response", lambda response: tasks.append(asyncio.create_task(capture_response(response))))
-        await page.goto(url, wait_until="networkidle", timeout=60000)
-        await page.wait_for_timeout(3000)
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        await browser.close()
-    return captured["match"], captured["matchevent"]
+def performfeeds_kind(response_url, match_id=None):
+    """"match" or "matchevent" for a PerformFeeds response of this match, else None."""
+    if "api.performfeeds.com/soccerdata/matchevent/" in response_url:
+        kind = "matchevent"
+    elif "api.performfeeds.com/soccerdata/match/" in response_url:
+        kind = "match"
+    else:
+        return None
+    if match_id and not response_url.rstrip("/").split("?")[0].endswith(match_id):
+        return None
+    return kind
 
 
-def discover_with_playwright(url, match_id=None, log=lambda msg: None):
-    return asyncio.run(_discover_with_playwright_async(url, match_id=match_id, log=log))
+def discover_with_browser(url, match_id=None, log=lambda msg: None):
+    """Let the page's scripts run in the installed browser and capture its feeds.
+
+    Pages such as the match summary load the match feed but not the event
+    feed; the match feed's URL names the outlet key and match id, from which
+    the event feed is fetched directly (as static discovery does), so capture
+    stops once the match feed arrives (live pages never go quiet)."""
+    from browser_capture import capture_responses
+    feed_urls = {}
+
+    def classify(response_url):
+        kind = performfeeds_kind(response_url, match_id)
+        if kind:
+            feed_urls.setdefault(kind, response_url)
+        return kind
+
+    captured = capture_responses(url, classify, headers=HEADERS, timeout=60, settle=3,
+                                 expected={"match"}, log=log)
+    match_text, event_text = captured.get("match"), captured.get("matchevent")
+    found = re.search(r"/soccerdata/match/([^/?#]+)/([^/?#]+)", feed_urls.get("match", ""))
+    if match_text and not event_text and found:
+        event_url = (f"https://api.performfeeds.com/soccerdata/matchevent/{found.group(1)}/{found.group(2)}"
+                     "?_rt=c&_lcl=en&_fmt=json")
+        log("Loading the event feed named by the page's match feed...")
+        try:
+            event_text = _fetch_url(event_url)
+        except Exception as exc:
+            log(f"Event feed request failed: {exc}")
+    return match_text, event_text
 
 
 def fetch_scoresway_feed_data(url, log=lambda msg: None):
@@ -1083,9 +1088,12 @@ def fetch_scoresway_feed_data(url, log=lambda msg: None):
         match_text = _fetch_url(feeds["match"])
         event_text = _fetch_url(feeds["matchevent"])
     else:
-        log("Trying Playwright network capture...")
+        log("Trying browser network capture...")
+        from browser_capture import BrowserUnavailable
         try:
-            match_text, event_text = discover_with_playwright(url, match_id=match_id, log=log)
+            match_text, event_text = discover_with_browser(url, match_id=match_id, log=log)
+        except BrowserUnavailable as exc:
+            raise ValueError(f"The page did not list its data feeds. {exc}") from exc
         except Exception as exc:
             raise ValueError(f"Could not locate Scoresway PerformFeeds data: {exc}") from exc
 

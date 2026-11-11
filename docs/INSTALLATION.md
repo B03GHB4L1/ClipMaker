@@ -66,6 +66,16 @@ vizorplay
 The tap is currently private and empty. These public installation commands are
 preparation instructions, not an announcement that the package is available.
 
+## Scraping and the browser fallback
+
+Most Scoresway and all WhoScored scrapes need no browser. When a Scoresway page
+does not list its data links in its HTML, VizorPlay reads it with a browser
+already installed on the computer: Microsoft Edge (included with Windows 10 and
+11), Google Chrome, Chromium or Brave. Safari and Firefox cannot be used. If none
+is installed, that scrape stops with a message asking you to install Edge or
+Chrome; nothing is downloaded automatically. Set `VIZORPLAY_BROWSER` to a
+browser's full path to choose one.
+
 ## Projects and backups
 
 Projects save locally, including match events, kickoff markers, filter settings
