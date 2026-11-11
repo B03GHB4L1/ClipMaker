@@ -119,12 +119,57 @@ def clamp_buffer(value: Any) -> int:
     return number
 
 
-def prune_files(folder: Path, keep: int) -> None:
-    """Keep only the newest ``keep`` files in a scratch folder."""
+VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".ts"}
+PERIOD_KEYS = {"1H", "2H", "ET1", "ET2", "PEN"}
+
+
+def clean_client_project(body: dict[str, Any], existing: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate file paths a browser request may set on a project.
+
+    Paths are later served back through /api/media and read by /api/events, so
+    a request must not be able to point them at arbitrary files (AGENTS.md:
+    no arbitrary filesystem access through the browser API). Event data only
+    comes from scraping or importing; videos must be existing video files.
+    Unchanged values are accepted so a project whose video moved still saves."""
+    existing = existing or {}
+    body = dict(body)
+    if "csv_path" in body and str(body.get("csv_path") or "") != str(existing.get("csv_path") or ""):
+        raise ValueError("Event data is set by scraping a match or importing a CSV.")
+
+    def video(value: Any, previous: Any) -> str:
+        text = str(value or "").strip()
+        if not text or text == str(previous or "").strip():
+            return text
+        path = Path(text)
+        if path.suffix.lower() not in VIDEO_SUFFIXES or not path.is_file():
+            raise ValueError("Choose an existing video file (MP4, MKV, MOV, AVI, WebM, M4V or TS).")
+        return str(path)
+
+    if "video_path" in body:
+        body["video_path"] = video(body.get("video_path"), existing.get("video_path"))
+    if "period_videos" in body:
+        videos = body.get("period_videos")
+        if not isinstance(videos, dict) or not set(videos) <= PERIOD_KEYS:
+            raise ValueError("Period videos must be keyed by 1H, 2H, ET1, ET2 or PEN.")
+        previous = existing.get("period_videos") or {}
+        body["period_videos"] = {key: video(value, previous.get(key)) for key, value in videos.items()}
+    return body
+
+
+def prune_files(folder: Path, keep: int, min_age: float = 1800) -> None:
+    """Delete scratch clips beyond the newest ``keep``, sparing any made in
+    the last ``min_age`` seconds (they may still be open in the app)."""
+    if not folder.is_dir():
+        return
     files = sorted((path for path in folder.glob("*.mp4") if path.is_file()),
                    key=lambda path: path.stat().st_mtime, reverse=True)
+    cutoff = time.time() - min_age
     for stale in files[keep:]:
-        stale.unlink(missing_ok=True)
+        try:
+            if stale.stat().st_mtime < cutoff:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            pass  # In use (Windows) or already gone: try again next time.
 
 
 def _native_tabs():
@@ -155,7 +200,6 @@ NATIVE_TABS = _LazyTabs()
 
 def analysis_reel(project, frames, events, kickoffs, corrections, before, after, folder) -> Path:
     """Cut each moment and join them in order, like the classic Top 5 Moments reel."""
-    import shutil
     import subprocess
     from analysis_core.video import clip_window
     import video_encoder as encoders
@@ -179,10 +223,7 @@ def analysis_reel(project, frames, events, kickoffs, corrections, before, after,
         listing = folder / f"reel-{uuid.uuid4().hex[:12]}.txt"
         listing.write_text("".join(f"file '{part.as_posix()}'\n" for part in parts), encoding="utf-8")
         output = folder / f"reel-{uuid.uuid4().hex[:12]}.mp4"
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            import imageio_ffmpeg
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg = encoders.find_ffmpeg()
         try:
             result = subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
                                      "-i", str(listing), "-c", "copy", str(output)],
@@ -1357,7 +1398,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         filename = Path(unquote(self.headers.get("X-File-Name", ""))).name
         suffix = Path(filename).suffix.lower()
         is_csv = suffix == ".csv"
-        if suffix not in {".csv", ".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".ts"}:
+        if suffix != ".csv" and suffix not in VIDEO_SUFFIXES:
             raise ValueError("Choose a match CSV or a supported video file.")
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > (50_000_000 if is_csv else 100_000_000_000):
@@ -1564,11 +1605,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 project_id = path.rsplit("/", 1)[-1]
                 if self.store.get(project_id) is None:
                     raise ValueError("Project not found")
-                saved = self.store.upsert({**body, "id": project_id})
+                saved = self.store.upsert({**clean_client_project(body, self.store.get(project_id)), "id": project_id})
                 self.send_json(HTTPStatus.OK, {"project": saved})
                 return
             if path == "/api/matches":
-                saved = self.store.upsert(body)
+                saved = self.store.upsert(clean_client_project(body, self.store.get(str(body.get("id") or ""))))
                 self.send_json(HTTPStatus.OK, {"match": saved})
                 return
             if path == "/api/scrape":
@@ -1702,6 +1743,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     audio_bitrate,
                     video_encoder,
                 )
+                prune_files(preview.parent, keep=20)
                 token = uuid.uuid4().hex
                 self.media_files[token] = preview
                 self.send_json(

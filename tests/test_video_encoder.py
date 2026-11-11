@@ -66,6 +66,16 @@ class EncoderChoiceTests(unittest.TestCase):
             ve.probe("ffmpeg-b")
             self.assertEqual(quiet.call_count, 2)
 
+    def test_failed_detection_is_retried_later_but_success_is_kept(self):
+        with patch.object(ve, "_quiet", return_value=False) as quiet, patch.object(ve.time, "monotonic", return_value=1000.0):
+            ve.probe("ffmpeg-c")
+            ve.probe("ffmpeg-c")
+            self.assertEqual(quiet.call_count, 1)
+        with patch.object(ve, "_quiet", return_value=True) as quiet,                 patch.object(ve.time, "monotonic", return_value=1000.0 + ve.RETRY_AFTER + 1):
+            self.assertEqual(ve.probe("ffmpeg-c")["encoder"], ve.NVENC)
+            ve.probe("ffmpeg-c")
+            self.assertEqual(quiet.call_count, 3)  # sample, NVENC, CUDA decode; then cached
+
     def test_real_ffmpeg_detection_reports_a_supported_answer(self):
         result = ve.probe(ve.find_ffmpeg())
         self.assertIn(result["encoder"], {None, ve.NVENC})
@@ -141,6 +151,51 @@ class FallbackMediaTests(unittest.TestCase):
         self.assertEqual(kinds, ["done"], logs)
         self.assertTrue(any("Encoding with software (x264)" in line for line in logs), logs)
         self.assertAlmostEqual(self.duration(files[0]), 5.0, delta=0.3)
+
+    def test_one_failed_individual_clip_fails_the_export(self):
+        calls = []
+
+        def second_clip_breaks(encoder, ffmpeg, crf, preset):
+            calls.append(encoder)
+            if len(calls) == 2:
+                return [], ["-c:v", "vizorplay_missing_encoder"]
+            return real_video_args(encoder, ffmpeg, crf, preset)
+        with patch.object(ve, "video_args", side_effect=second_clip_breaks):
+            files, logs, kinds = self.export(individual=True, encoder_setting="software")
+        self.assertEqual(kinds, ["error"], logs)  # never "done" with a clip missing
+        self.assertTrue(any("1 of 2 clips failed (clip 02)" in line for line in logs), logs)
+        self.assertEqual(len(files), 1)
+
+    def test_bundled_ffmpeg_is_preferred_over_path(self):
+        import imageio_ffmpeg
+        with patch("shutil.which", return_value="/usr/bin/old-ffmpeg"):
+            self.assertEqual(ve.find_ffmpeg(), imageio_ffmpeg.get_ffmpeg_exe())
+        with patch.object(imageio_ffmpeg, "get_ffmpeg_exe", side_effect=RuntimeError("missing")),                 patch("shutil.which", return_value="/usr/bin/ffmpeg"):
+            self.assertEqual(ve.find_ffmpeg(), "/usr/bin/ffmpeg")
+
+    def test_previews_are_pruned_but_recent_ones_kept(self):
+        import os
+        import time
+        from packaging.clipmaker_api_server import prune_files
+        folder = self.root / "prune"
+        folder.mkdir()
+        old = time.time() - 4000
+        for index in range(25):
+            path = folder / f"preview-{index:02d}.mp4"
+            path.write_bytes(b"x")
+            os.utime(path, (old + index, old + index) if index < 22 else None)
+        prune_files(folder, keep=20)
+        left = sorted(path.name for path in folder.glob("*.mp4"))
+        # Newest 20 kept; of the 5 older ones, only those older than 30 minutes go.
+        self.assertEqual(len(left), 20)
+        self.assertNotIn("preview-00.mp4", left)
+        self.assertIn("preview-24.mp4", left)
+        recent = self.root / "prune-recent"
+        recent.mkdir()
+        for index in range(25):
+            (recent / f"clip-{index:02d}.mp4").write_bytes(b"x")
+        prune_files(recent, keep=20)
+        self.assertEqual(len(list(recent.glob("*.mp4"))), 25)  # may still be open in the app
 
     def test_preview_falls_back_but_an_exact_encoder_does_not(self):
         with patch.object(ve, "resolve", return_value=ve.NVENC), patch.object(ve, "video_args", side_effect=broken_hardware):
