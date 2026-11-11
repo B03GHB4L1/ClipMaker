@@ -245,7 +245,11 @@ def capture_responses(url: str, classify: Callable[[str], Optional[str]], *, hea
         # browser that dies is noticed at once, so startup shares the deadline.
         port, path = _debug_port(profile, process, deadline)
         log(f"Started {Path(browser).stem} for network capture.")
-        socket_ = WebSocket(port, path)
+        try:
+            # A busy machine can be slow to answer the first connection too.
+            socket_ = WebSocket(port, path, timeout=max(1.0, deadline - time.monotonic()))
+        except OSError as exc:  # includes timeouts
+            raise CaptureError(f"The browser did not accept the DevTools connection ({exc}).") from exc
         return _Session(socket_, deadline).run(url, classify, headers or {}, settle, set(expected or ()), log)
     finally:
         if socket_:
