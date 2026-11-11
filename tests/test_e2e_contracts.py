@@ -69,6 +69,23 @@ class AutomationContracts(unittest.TestCase):
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):
             self.assertNotIn("PLAYWRIGHT_BROWSERS_PATH=0", workflow.read_text(encoding="utf-8"), workflow.name)
 
+    def test_linux_package_installs_survive_runner_mirror_outage(self):
+        import yaml
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            jobs = yaml.safe_load(workflow.read_text(encoding="utf-8")).get("jobs", {})
+            for name, job in jobs.items():
+                guarded = False
+                for step in job.get("steps", []):
+                    run = step.get("run", "")
+                    if step.get("uses") == "./.github/actions/ubuntu-mirror" or "apt-mirrors.txt" in run:
+                        guarded = True
+                    installs = "--with-deps" in run or "apt-get update" in run
+                    if installs and "ubuntu" in str(job.get("runs-on", "")) + str(job.get("strategy", "")):
+                        self.assertTrue(guarded, f"{workflow.name}:{name} installs packages before the mirror fallback")
+        action = (ROOT / ".github/actions/ubuntu-mirror/action.yml").read_text(encoding="utf-8")
+        self.assertIn("archive.ubuntu.com", action)
+        self.assertIn("::warning::", action)  # the switch is never silent
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
         formula = (ROOT / "packaging/homebrew/clipmaker.rb.in").read_text(encoding="utf-8")
