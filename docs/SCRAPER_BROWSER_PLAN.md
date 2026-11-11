@@ -1,6 +1,7 @@
 # Plan: drop the bundled Playwright browser
 
-Status: implemented 11 November 2026 (results below); hosted CI pending.
+Status: implemented 11 November 2026 (results below). Checks and Full Desktop E2E green
+on Windows, Linux and macOS at d719d03; the installed-browser test ran on all three.
 
 ## Findings
 
