@@ -56,6 +56,27 @@ class BrowserLocatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bc.capture_responses("file:///etc/passwd", lambda url: None, browser=sys.executable)
 
+    def test_slow_browser_start_may_use_the_whole_capture_timeout(self):
+        # CI saw a cold Chrome start take over 20 s; startup must not have a shorter limit.
+        seen = {}
+
+        def fake_debug_port(profile, process, deadline):
+            seen["budget"] = deadline - bc.time.monotonic()
+            raise bc.CaptureError("stop here")
+
+        with patch.object(bc, "_debug_port", fake_debug_port):
+            with self.assertRaises(bc.CaptureError):
+                bc.capture_responses("https://example.test/", lambda url: None, browser=sys.executable, timeout=90)
+        self.assertGreater(seen["budget"], 80)
+
+    def test_browser_that_exits_early_fails_at_once(self):
+        process = type("P", (), {"returncode": 1, "poll": lambda self: 1})()
+        with tempfile.TemporaryDirectory() as profile:
+            started = bc.time.monotonic()
+            with self.assertRaisesRegex(bc.CaptureError, "exited before it was ready"):
+                bc._debug_port(Path(profile), process, started + 60)
+        self.assertLess(bc.time.monotonic() - started, 5)
+
 
 class ScriptedPeer:
     """Stands in for the DevTools WebSocket: replies to commands, then plays events."""

@@ -241,7 +241,9 @@ def capture_responses(url: str, classify: Callable[[str], Optional[str]], *, hea
     deadline = time.monotonic() + timeout
     socket_ = None
     try:
-        port, path = _debug_port(profile, process, min(deadline, time.monotonic() + 20))
+        # A first start on a slow or busy machine can take well over 20 s; a
+        # browser that dies is noticed at once, so startup shares the deadline.
+        port, path = _debug_port(profile, process, deadline)
         log(f"Started {Path(browser).stem} for network capture.")
         socket_ = WebSocket(port, path)
         return _Session(socket_, deadline).run(url, classify, headers or {}, settle, set(expected or ()), log)
