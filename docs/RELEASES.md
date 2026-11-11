@@ -37,19 +37,20 @@ install with `winget install --id B4L1.ClipMaker -e` and receive later versions
 with `winget upgrade --id B4L1.ClipMaker -e`.
 
 The desktop shell starts the packaged shared-UI backend on an available local
-port and displays it inside the VizorPlay window. Analytical workspaces start
-a second local server on demand. The user does not need Python,
-FFmpeg, Playwright, Chromium, Node.js, or Rust.
+port and displays it inside the VizorPlay window. The analysis workspaces run
+in the same backend. The user does not need Python, FFmpeg, Node.js, or Rust.
+Scoresway pages that hide their data links are read with an installed Microsoft
+Edge or Google Chrome (Edge ships with Windows 10 and 11); no browser is bundled.
 
 ## macOS
 
 macOS uses a Homebrew formula rather than an unsigned application bundle. The
 formula installs the shared source and a `clipmaker` launcher. On its first run,
 the launcher creates a private Python environment under the user's Library,
-installs the pinned dependencies and Playwright headless browser, then opens the
+installs the pinned dependencies (no browser download), then opens the
 local VizorPlay interface in the default browser. The primary launcher is
 `vizorplay`; `clipmaker` remains a compatibility alias.
-The formula includes the analytical-server adapter. Video and CSV selection use
+The formula includes the process-owner adapter. Video and CSV selection use
 browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
 installed or promised.

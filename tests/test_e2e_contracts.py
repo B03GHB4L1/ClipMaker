@@ -17,6 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_app_ships_no_bundled_browser(self):
+        # docs/SCRAPER_BROWSER_PLAN.md: the scraper uses the installed browser.
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        self.assertNotIn("playwright", requirements)
+        spec = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8")
+        collected = spec.split("for package in", 1)[1].split(":", 1)[0]
+        self.assertNotIn("playwright", collected)
+        self.assertIn('"playwright"', spec.split("excludes=", 1)[1])
+        self.assertIn('"browser_capture"', spec)
+        self.assertNotIn("playwright", (ROOT / "packaging/clipmaker_bootstrap.py").read_text(encoding="utf-8"))
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            self.assertNotIn("PLAYWRIGHT_BROWSERS_PATH=0", workflow.read_text(encoding="utf-8"), workflow.name)
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
         formula = (ROOT / "packaging/homebrew/clipmaker.rb.in").read_text(encoding="utf-8")

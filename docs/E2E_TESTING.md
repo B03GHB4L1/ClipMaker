@@ -244,8 +244,8 @@ Install the separate test dependencies in a virtual environment:
 
 ```powershell
 python -m pip install -r requirements-e2e.txt
-python -m playwright install --with-deps chromium
-python -m unittest discover -s tests -v
+python -m playwright install --with-deps chromium  # test driver only; the app uses the installed browser
+python -m unittest discover -s tests -v  # tests/test_browser_capture.py drives your installed Edge/Chrome
 node --test tests/projects.test.mjs
 python packaging/smoke_test.py
 python tests/browser_smoke.py --evidence build/e2e/source
