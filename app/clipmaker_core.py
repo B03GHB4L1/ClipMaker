@@ -1011,17 +1011,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             return
 
         def get_ffmpeg_binary():
-            import shutil
-            cmd = shutil.which("ffmpeg")
-            if cmd:
-                return cmd
-            try:
-                from moviepy.config import FFMPEG_BINARY
-                if os.path.exists(FFMPEG_BINARY):
-                    return FFMPEG_BINARY
-            except Exception:
-                pass
-            raise ValueError("FFmpeg not found. Please ensure FFmpeg is installed.")
+            return _video_encoder.find_ffmpeg()
 
         def get_video_duration(path, ffmpeg_bin):
             import subprocess, re
@@ -1293,6 +1283,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 clip_specs_indiv.append((i, src, s, e, label, filepath))
 
             saved = []
+            failed = []
             completed_count = [0]
 
             def _cut_one(spec):
@@ -1318,8 +1309,11 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     i, src, s, e, label, filepath = spec
                     try:
                         fut.result()
+                    except ClipMakerCancelled:
+                        raise
                     except Exception as ex:
                         log(f"  ERROR clip {i:02d}: {ex}")
+                        failed.append(i)
                         continue
 
                     completed_count[0] += 1
@@ -1329,6 +1323,14 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     prog(completed_count[0], total_individual, time.time() - start_time)
 
             log(f"\n\u2713 {len(saved)} clips saved to: {os.path.abspath(out_dir)}/")
+            if failed:
+                # Never report a partial export as complete.
+                numbers = ", ".join(f"{i:02d}" for i in sorted(failed))
+                message = f"{len(failed)} of {len(clip_specs_indiv)} clips failed (clip {numbers}); see the log above."
+                log(f"[ERR] {message}")
+                progress_queue.put({"error": message})
+                log_queue.put({"type": "error"})
+                return
         else:
             clip_specs = []
             for i, (start, end, label, period) in enumerate(windows, 1):

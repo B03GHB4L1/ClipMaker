@@ -235,11 +235,38 @@ class ProjectApiTests(unittest.TestCase):
             self.assertIn("other websites", json.loads(error.exception.read())["error"])
             error.exception.close()
 
+    def test_requests_cannot_point_projects_at_arbitrary_files(self):
+        project = self.request("/api/projects", {})["project"]
+        secret = self.root / "secret.txt"
+        secret.write_text("private", encoding="utf-8")
+        video = self.root / "match.mp4"
+        video.write_bytes(b"video")
+        bad = ({"video_path": str(secret)}, {"video_path": str(self.root / "missing.mp4")},
+               {"period_videos": {"2H": str(secret)}}, {"period_videos": {"XX": str(video)}},
+               {"csv_path": str(secret)})
+        for payload in bad:
+            with self.subTest(payload=payload), self.assertRaises(HTTPError) as error:
+                self.request(f"/api/projects/{project['id']}", payload)
+            self.assertEqual(error.exception.code, 400)
+            error.exception.close()
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/matches", {"id": project["id"], "csv_path": str(secret)})
+        error.exception.close()
+        saved = self.request(f"/api/projects/{project['id']}", {"video_path": str(video), "period_videos": {"2H": str(video)}})
+        self.assertEqual(saved["project"]["video_path"], str(video))
+        # A saved video that has since moved does not block saving other changes.
+        video.unlink()
+        saved = self.request(f"/api/projects/{project['id']}", {"video_path": str(video), "project_name": "Renamed"})
+        self.assertEqual(saved["project"]["project_name"], "Renamed")
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/files/reopen", {"match_id": project["id"]})
+        error.exception.close()
+
     def test_rescrape_same_csv_clears_previous_clip_plan(self):
         project = self.request("/api/projects", {})["project"]
         csv_path = str(self.root / "events.csv")
-        self.request(f"/api/projects/{project['id']}", {
-            "csv_path": csv_path, "preview_windows": [{"start": 1, "end": 3, "period": 1}],
+        self.server.match_store.upsert({
+            "id": project["id"], "csv_path": csv_path, "preview_windows": [{"start": 1, "end": 3, "period": 1}],
             "preview_range": {"first": 1, "last": 1}, "filter_settings": {"filter_types": ["Goal"]},
         })
         result = {"csv_path": csv_path, "home_team": "Home", "away_team": "Away",

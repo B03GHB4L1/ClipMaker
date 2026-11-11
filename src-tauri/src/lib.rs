@@ -14,16 +14,28 @@ fn available_port() -> Result<u16, String> {
     listener.local_addr().map(|address| address.port()).map_err(|error| error.to_string())
 }
 
-fn wait_for_backend(port: u16) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(90);
-    while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(250));
+/// True once our own backend answers /api/health. Matching the process id
+/// rules out another program that took the port after it was released.
+fn backend_ready(port: u16, pid: u32) -> bool {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_secs(1)) else {
+        return false;
+    };
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    if write!(stream, "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").is_err() {
+        return false;
     }
-    false
+    let mut response = String::new();
+    let _ = stream.take(16384).read_to_string(&mut response);
+    // The engine is either the spawned process or, for a launcher, its child.
+    response.starts_with("HTTP/1.")
+        && response.contains(" 200 ")
+        && response.contains("\"status\": \"ok\"")
+        && (response.contains(&format!("\"pid\": {pid},")) || response.contains(&format!("\"parent_pid\": {pid},")))
 }
+
+const START_FAILED: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>VizorPlay could not start</h1><p>The local engine stopped or did not answer. Close this window and open VizorPlay again. If it keeps happening, reinstall VizorPlay; security software may have blocked or quarantined part of it.</p></main>';";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,16 +66,38 @@ pub fn run() {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()?;
+            let pid = child.id();
             *app.state::<BackendProcess>().0.lock().expect("backend lock") = Some((child, port));
 
             let window = app
                 .get_webview_window("main")
                 .ok_or_else(|| std::io::Error::other("main window is missing"))?;
+            let handle = app.handle().clone();
             thread::spawn(move || {
-                if wait_for_backend(port) {
-                    let url = Url::parse(&format!("http://127.0.0.1:{port}"))
-                        .expect("valid VizorPlay URL");
-                    let _ = window.navigate(url);
+                let deadline = Instant::now() + Duration::from_secs(90);
+                loop {
+                    if backend_ready(port, pid) {
+                        let url = Url::parse(&format!("http://127.0.0.1:{port}"))
+                            .expect("valid VizorPlay URL");
+                        let _ = window.navigate(url);
+                        return;
+                    }
+                    // Stop waiting as soon as the engine exits, and say so.
+                    let exited = handle
+                        .state::<BackendProcess>()
+                        .0
+                        .lock()
+                        .ok()
+                        .map(|mut guard| match guard.as_mut() {
+                            Some((child, _)) => !matches!(child.try_wait(), Ok(None)),
+                            None => true,
+                        })
+                        .unwrap_or(true);
+                    if exited || Instant::now() >= deadline {
+                        let _ = window.eval(START_FAILED);
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(250));
                 }
             });
             Ok(())

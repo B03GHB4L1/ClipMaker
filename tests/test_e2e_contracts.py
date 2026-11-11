@@ -17,6 +17,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AutomationContracts(unittest.TestCase):
+    def test_health_reply_matches_the_desktop_shell_check(self):
+        # src-tauri/src/lib.rs backend_ready() matches these exact substrings.
+        import os
+        import re
+        import threading
+        from urllib.request import urlopen
+        from packaging.clipmaker_api_server import create_server
+        with tempfile.TemporaryDirectory() as name:
+            server = create_server("127.0.0.1", 0, Path(name))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/api/health", timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    body = response.read().decode("utf-8")
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertIn('"status": "ok"', body)
+        self.assertIn(f'"pid": {os.getpid()},', body)
+        self.assertRegex(body, r'"parent_pid": \d+,')
+        shell = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        for needle in ('\\"status\\": \\"ok\\"', '\\"pid\\": {pid},', '\\"parent_pid\\": {pid},', "child.try_wait()"):
+            self.assertIn(needle, shell)
+        self.assertTrue(re.search(r"/api/health", shell))
+
     def test_app_ships_no_bundled_browser(self):
         # docs/SCRAPER_BROWSER_PLAN.md: the scraper uses the installed browser.
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()

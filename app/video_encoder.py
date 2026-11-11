@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,7 @@ SOFTWARE = "libx264"
 NVENC = "h264_nvenc"
 SETTINGS = ("auto", "software")
 CQ_OFFSET = 7  # NVENC CQ = x264 CRF + 7 (measured; see the plan)
+RETRY_AFTER = 300  # seconds before a failed probe is tried again (the card may have been busy)
 _cache: dict[str, dict] = {}
 _lock = threading.Lock()
 
@@ -33,14 +35,21 @@ class HardwareEncodeError(RuntimeError):
 
 
 def find_ffmpeg() -> str:
+    """The FFmpeg every cut uses: the bundled, tested build first, then PATH.
+
+    A system FFmpeg can be old or built without libx264, so it is only a
+    fallback when the bundled one is missing."""
+    try:
+        import imageio_ffmpeg
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and os.path.isfile(bundled):
+            return bundled
+    except Exception:
+        pass
     found = shutil.which("ffmpeg")
     if found:
         return found
-    try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception as error:
-        raise ValueError("FFmpeg is required to cut clips.") from error
+    raise ValueError("FFmpeg not found. Reinstall VizorPlay, or install FFmpeg.")
 
 
 def _quiet(command: list[str], timeout: float = 30) -> bool:
@@ -53,12 +62,17 @@ def _quiet(command: list[str], timeout: float = 30) -> bool:
 
 
 def probe(ffmpeg: str) -> dict:
-    """{"encoder": NVENC or None, "cuda_decode": bool}, tested once per binary."""
+    """{"encoder": NVENC or None, "cuda_decode": bool}, tested once per binary.
+
+    A working encoder is remembered for the session. A failure is retried after
+    RETRY_AFTER seconds, because other software (a game, a streaming app) can
+    hold every encoder session for a while."""
     key = os.path.abspath(ffmpeg)
     with _lock:
-        if key in _cache:
-            return _cache[key]
-        result = {"encoder": None, "cuda_decode": False}
+        cached = _cache.get(key)
+        if cached and (cached["encoder"] or time.monotonic() - cached["checked"] < RETRY_AFTER):
+            return cached
+        result = {"encoder": None, "cuda_decode": False, "checked": time.monotonic()}
         base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
         with tempfile.TemporaryDirectory(prefix="vizorplay-encoder-") as name:
             sample = Path(name) / "sample.mp4"

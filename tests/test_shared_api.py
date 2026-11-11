@@ -175,16 +175,13 @@ class SharedApiTests(unittest.TestCase):
             "2,0,Goal,1,Player Two,Away,Successful,False,False,0,0.8\n",
             encoding="utf-8",
         )
-        _, saved = self.request(
-            "/api/matches",
-            method="POST",
-            payload={
+        # Event data paths are set server-side (scrape/import), not by requests.
+        saved = {"match": self.server.match_store.upsert({
                 "home_team": "Home",
                 "away_team": "Away",
                 "csv_path": str(csv_path),
                 "markers": {"1H": "00:00:00", "2H": "00:48:00"},
-            },
-        )
+            })}
         status, result = self.request(
             "/api/filter-options",
             method="POST",
@@ -240,17 +237,14 @@ class SharedApiTests(unittest.TestCase):
             "68,5,SavedShot,2,Player Two,Away\n",
             encoding="utf-8",
         )
-        _, saved = self.request(
-            "/api/matches",
-            method="POST",
-            payload={
+        # Event data paths are set server-side (scrape/import), not by requests.
+        saved = {"match": self.server.match_store.upsert({
                 "home_team": "Home",
                 "away_team": "Away",
                 "csv_path": str(csv_path),
                 "event_count": 2,
                 "markers": {"1H": "00:00:10", "2H": "00:48:00"},
-            },
-        )
+            })}
         status, started = self.request(
             "/api/jobs",
             method="POST",
@@ -280,16 +274,13 @@ class SharedApiTests(unittest.TestCase):
     def test_render_job_requires_native_video_path(self):
         csv_path = Path(self.temporary.name) / "events.csv"
         csv_path.write_text("minute,second,type,period\n1,0,Goal,1\n", encoding="utf-8")
-        _, saved = self.request(
-            "/api/matches",
-            method="POST",
-            payload={
+        # Event data paths are set server-side (scrape/import), not by requests.
+        saved = {"match": self.server.match_store.upsert({
                 "home_team": "Home",
                 "away_team": "Away",
                 "csv_path": str(csv_path),
                 "markers": {"1H": "00:00:00", "2H": "00:48:00"},
-            },
-        )
+            })}
         with self.assertRaises(HTTPError) as context:
             self.request(
                 "/api/jobs",
@@ -330,16 +321,13 @@ class SharedApiTests(unittest.TestCase):
     def test_saved_video_can_be_reopened(self):
         video_path = Path(self.temporary.name) / "saved-match.mp4"
         video_path.write_bytes(b"abcdefghij")
-        _, saved = self.request(
-            "/api/matches",
-            method="POST",
-            payload={
+        # Event data paths are set server-side (scrape/import), not by requests.
+        saved = {"match": self.server.match_store.upsert({
                 "home_team": "Home",
                 "away_team": "Away",
                 "video_name": video_path.name,
                 "video_path": str(video_path),
-            },
-        )
+            })}
         status, result = self.request(
             "/api/files/reopen",
             method="POST",
