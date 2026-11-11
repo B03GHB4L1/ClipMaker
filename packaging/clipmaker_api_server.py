@@ -158,13 +158,22 @@ def analysis_reel(project, frames, events, kickoffs, corrections, before, after,
     import shutil
     import subprocess
     from analysis_core.video import clip_window
+    import video_encoder as encoders
     parts: list[Path] = []
     try:
-        for event in events[:5]:
-            period, start, duration = clip_window(frames.df_all, kickoffs, corrections, event["minute"],
-                                                  event["second"], event["period"], before, after)
-            parts.append(render_preview_clip(video_for_period(project, period), start, start + duration,
-                                             folder, 23, "ultrafast", "128k"))
+        windows = [clip_window(frames.df_all, kickoffs, corrections, event["minute"], event["second"],
+                               event["period"], before, after) for event in events[:5]]
+        encoder = encoders.resolve("auto", encoders.find_ffmpeg())
+        try:
+            for period, start, duration in windows:
+                parts.append(render_preview_clip(video_for_period(project, period), start, start + duration,
+                                                 folder, 23, "ultrafast", "128k", encoder))
+        except encoders.HardwareEncodeError:
+            for part in parts:  # joined by stream copy: never mix encoders
+                part.unlink(missing_ok=True)
+            parts = [render_preview_clip(video_for_period(project, period), start, start + duration,
+                                         folder, 23, "ultrafast", "128k", encoders.SOFTWARE)
+                     for period, start, duration in windows]
         if len(parts) == 1:
             return parts.pop()
         listing = folder / f"reel-{uuid.uuid4().hex[:12]}.txt"
@@ -768,59 +777,42 @@ def render_preview_clip(
     crf: int,
     encoder_preset: str,
     audio_bitrate: str,
+    video_encoder: str = "auto",
 ) -> Path:
-    import shutil
+    """Cut one clip. ``video_encoder`` is a setting ("auto"/"software"), which may
+    fall back to x264, or an exact encoder name, which never changes (reels
+    must not mix encoders)."""
+    import math
     import subprocess
+
+    import video_encoder as encoders
 
     source = Path(video_path).resolve()
     if not source.is_file():
         raise ValueError("The saved match video is no longer available.")
-    import math
     duration = end - start
     if not math.isfinite(start) or not math.isfinite(end) or start < 0 or duration <= 0 or duration > 600:
         raise ValueError("Preview windows must be between 0 and 10 minutes long.")
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        try:
-            import imageio_ffmpeg
-
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception as error:
-            raise ValueError("FFmpeg is required to render clip previews.") from error
+    ffmpeg = encoders.find_ffmpeg()
+    exact = video_encoder in {encoders.SOFTWARE, encoders.NVENC}
+    encoder = video_encoder if exact else encoders.resolve(video_encoder, ffmpeg)
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / f"preview-{uuid.uuid4().hex[:12]}.mp4"
-    command = [
-        ffmpeg,
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-ss",
-        str(start),
-        "-i",
-        str(source),
-        "-t",
-        str(duration),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        "-c:v",
-        "libx264",
-        "-preset",
-        encoder_preset,
-        "-crf",
-        str(crf),
-        "-c:a",
-        "aac",
-        "-b:a",
-        audio_bitrate,
-        "-movflags",
-        "+faststart",
-        str(output),
-    ]
+
+    def run(chosen: str) -> subprocess.CompletedProcess:
+        before, video = encoders.video_args(chosen, ffmpeg, crf, encoder_preset)
+        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin", *before,
+                   "-ss", str(start), "-i", str(source), "-t", str(duration),
+                   "-map", "0:v:0", "-map", "0:a:0?", *video, "-c:a", "aac", "-b:a", audio_bitrate,
+                   "-movflags", "+faststart", str(output)]
+        return subprocess.run(command, capture_output=True, text=True, timeout=180)
+
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        result = run(encoder)
+        if result.returncode != 0 and encoder != encoders.SOFTWARE:
+            if exact:
+                raise encoders.HardwareEncodeError((result.stderr or "")[-500:])
+            result = run(encoders.SOFTWARE)  # graphics card failed on this source
         if result.returncode != 0:
             raise ValueError(f"Could not render preview: {(result.stderr or '')[-500:]}")
     except Exception:
@@ -876,6 +868,9 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
     audio_bitrate = str(options.get("audio_bitrate") or "128k").strip()
     if audio_bitrate not in {"96k", "128k", "160k", "192k", "256k"}:
         raise ValueError("Choose a supported audio bitrate.")
+    video_encoder = str(options.get("video_encoder") or "auto").strip()
+    if video_encoder not in {"auto", "software"}:
+        raise ValueError("Choose automatic or software encoding.")
     requested_output_dir = str(options.get("output_dir") or "").strip().strip('"')
     output_dir = (
         Path(requested_output_dir).expanduser().resolve()
@@ -935,6 +930,7 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         "video_crf": max(16, min(30, int(options.get("video_crf", 20)))),
         "encoder_preset": encoder_preset,
         "audio_bitrate": audio_bitrate,
+        "video_encoder": video_encoder,
         "timeline_corrections": (
             options.get("timeline_corrections")
             if isinstance(options.get("timeline_corrections"), list)
@@ -1693,6 +1689,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 audio_bitrate = str(body.get("audio_bitrate") or "128k")
                 if audio_bitrate not in {"96k", "128k", "160k", "192k", "256k"}:
                     raise ValueError("Choose a supported audio bitrate.")
+                video_encoder = str(body.get("video_encoder") or "auto")
+                if video_encoder not in {"auto", "software"}:
+                    raise ValueError("Choose automatic or software encoding.")
                 preview = render_preview_clip(
                     video_for_period(match, int(body.get("period") or 1)),
                     start,
@@ -1701,6 +1700,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     max(16, min(30, int(body.get("video_crf") or 20))),
                     encoder_preset,
                     audio_bitrate,
+                    video_encoder,
                 )
                 token = uuid.uuid4().hex
                 self.media_files[token] = preview

@@ -250,6 +250,14 @@ const updateSummary = () => {
       : "All match events";
 };
 
+// Previews use the same encoding settings as the export.
+const encodingSettings = () => ({
+  video_crf: Number(document.querySelector("[data-video-crf]").value),
+  encoder_preset: document.querySelector("[data-encoder-preset]").value,
+  video_encoder: document.querySelector("[data-video-encoder]").value,
+  audio_bitrate: document.querySelector("[data-audio-bitrate]").value,
+});
+
 const collectOptions = (dryRun) => {
   const options = {
     dry_run: dryRun,
@@ -276,6 +284,7 @@ const collectOptions = (dryRun) => {
     output_format: document.querySelector("[data-output-format]").value,
     video_crf: Number(document.querySelector("[data-video-crf]").value),
     encoder_preset: document.querySelector("[data-encoder-preset]").value,
+    video_encoder: document.querySelector("[data-video-encoder]").value,
     audio_bitrate: document.querySelector("[data-audio-bitrate]").value,
   };
   selectedValues('input[name="qualifier"]').forEach((flag) => {
@@ -339,6 +348,7 @@ const applyOptions = (options = {}) => {
     "[data-output-format]": options.output_format || ".mp4",
     "[data-video-crf]": options.video_crf ?? 20,
     "[data-encoder-preset]": options.encoder_preset || "veryfast",
+    "[data-video-encoder]": options.video_encoder === "software" ? "software" : "auto",
     "[data-audio-bitrate]": options.audio_bitrate || "128k",
   };
   Object.entries(values).forEach(([selector, value]) => {
@@ -671,6 +681,7 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
       output_filename: current.output_filename,
       video_crf: current.video_crf,
       encoder_preset: current.encoder_preset,
+      video_encoder: current.video_encoder,
       audio_bitrate: current.audio_bitrate,
     });
     showToast(`${button.textContent.trim()} preset applied`);
@@ -896,7 +907,7 @@ const renderPreviews = () => {
       try {
         const result = await apiRequest("/api/previews/render", {
           method: "POST",
-          body: JSON.stringify({ match_id: activeMatch.id, ...window }),
+          body: JSON.stringify({ match_id: activeMatch.id, ...window, ...encodingSettings() }),
         });
         if (version !== revision || generation !== previewRevision) return;
         video.src = result.file.url;
