@@ -69,6 +69,20 @@ class BrowserLocatorTests(unittest.TestCase):
                 bc.capture_responses("https://example.test/", lambda url: None, browser=sys.executable, timeout=90)
         self.assertGreater(seen["budget"], 80)
 
+    def test_slow_devtools_handshake_uses_remaining_time_and_reports_clearly(self):
+        seen = {}
+
+        class SlowWebSocket:
+            def __init__(self, port, path, timeout):
+                seen["timeout"] = timeout
+                raise TimeoutError("timed out")
+
+        with patch.object(bc, "_debug_port", lambda profile, process, deadline: (9, "/x")), \
+                patch.object(bc, "WebSocket", SlowWebSocket):
+            with self.assertRaisesRegex(bc.CaptureError, "did not accept the DevTools connection"):
+                bc.capture_responses("https://example.test/", lambda url: None, browser=sys.executable, timeout=90)
+        self.assertGreater(seen["timeout"], 80)
+
     def test_browser_that_exits_early_fails_at_once(self):
         process = type("P", (), {"returncode": 1, "poll": lambda self: 1})()
         with tempfile.TemporaryDirectory() as profile:
