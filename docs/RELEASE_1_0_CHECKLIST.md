@@ -20,6 +20,7 @@ This checklist records evidence, not a guarantee that software has no bugs.
 | Advanced Tactical Video Lab and multi-match moments/reels | Focused numerical/media acceptance passes locally, including multi-project video mapping, saved corrections, shootout anchors and cache invalidation; hosted/browser-native acceptance pending |
 | Analysis workspace without Streamlit | Analyst Room and Tactical Lab run in the shared frontend from the main backend (docs/ANALYSIS_MIGRATION_PLAN.md, Phase 5, 10 November 2026). Snapshot parity, source/frozen smoke and browser smoke pass locally; hosted run pending |
 | Scraper browser fallback without a bundled browser | Uses installed Edge/Chrome/Chromium/Brave over CDP (docs/SCRAPER_BROWSER_PLAN.md, 11 November 2026). Live Scoresway fallback captured match and event feeds locally with Edge; real-browser integration test passed on Windows, Linux and macOS CI (d719d03) |
+| Faster cutting and export | NVIDIA graphics-card encoding with automatic x264 fallback (docs/EXPORT_SPEED_PLAN.md): 20-clip reel 347 s to 52 s locally, quality VMAF 97.8 vs 96.1. Other GPUs keep x264; CI has no GPU and covers the fallback |
 | Native chart controls and OS file dialogs | Browser/chart checks do not certify every native-webview interaction; focused physical-device acceptance remains open |
 | Public Mac install/update | Prepared formula still needs release asset plus authorized tap publication; tap currently private/empty |
 | Public Windows package updates | WinGet manifests prepared; community submission/acceptance still needed |

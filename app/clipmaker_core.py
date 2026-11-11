@@ -1035,6 +1035,8 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
         video_crf = str(config.get("video_crf", 20))
         encoder_preset = str(config.get("encoder_preset", "veryfast") or "veryfast")
         audio_bitrate = str(config.get("audio_bitrate", "128k") or "128k")
+        import video_encoder as _video_encoder
+        encoder_state = {"name": _video_encoder.SOFTWARE}
         audio_stream_cache = {}
         output_ext = str(config.get("output_format", ".mp4") or ".mp4").strip().lower()
         if output_ext not in {".mp4", ".mov", ".mkv"}:
@@ -1083,17 +1085,20 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             if proc.returncode != 0:
                 raise ValueError(f"{error_label}: {stderr[-500:]}")
 
-        def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path):
+        def cut_clip_ffmpeg(ffmpeg_bin, src_path, start, end, out_path, encoder=None):
             raise_if_cancelled()
+            encoder = encoder or encoder_state["name"]
+            before_input, video_codec = _video_encoder.video_args(encoder, ffmpeg_bin, int(video_crf), encoder_preset)
             duration = max(0.0, end - start)
             if source_has_audio(ffmpeg_bin, src_path):
                 cmd = [
                     ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+                    *before_input,
                     "-ss", str(start),
                     "-i", src_path,
                     "-t", str(duration),
                     "-map", "0:v:0", "-map", "0:a:0?",
-                    "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
+                    *video_codec,
                     "-c:a", "aac", "-b:a", audio_bitrate,
                     "-avoid_negative_ts", "make_zero",
                     out_path
@@ -1101,6 +1106,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             else:
                 cmd = [
                     ffmpeg_bin, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+                    *before_input,
                     "-ss", str(start),
                     "-t", str(duration),
                     "-i", src_path,
@@ -1108,13 +1114,24 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     "-t", str(duration),
                     "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
                     "-map", "0:v:0", "-map", "1:a:0",
-                    "-c:v", "libx264", "-preset", encoder_preset, "-crf", video_crf, "-threads", "0",
+                    *video_codec,
                     "-c:a", "aac", "-b:a", audio_bitrate,
                     "-shortest",
                     "-avoid_negative_ts", "make_zero",
                     out_path
                 ]
-            run_ffmpeg_cancellable(cmd, "FFmpeg error cutting clip")
+            try:
+                run_ffmpeg_cancellable(cmd, "FFmpeg error cutting clip")
+            except ValueError as error:
+                if encoder != _video_encoder.SOFTWARE:
+                    raise _video_encoder.HardwareEncodeError(str(error)) from error
+                raise
+
+        def switch_to_software(error):
+            if encoder_state["name"] != _video_encoder.SOFTWARE:
+                encoder_state["name"] = _video_encoder.SOFTWARE
+                log(f"  Graphics-card encoding failed ({str(error)[-160:].strip()}); "
+                    "continuing with software encoding (x264).")
 
         def cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, start_time):
             import subprocess, tempfile
@@ -1125,23 +1142,39 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             list_path = None
 
             try:
-                for i, (src, start, end) in enumerate(clip_specs, 1):
+                from concurrent.futures import ThreadPoolExecutor
+                tmp_files = [os.path.join(tmp_dir, f"part_{i:04d}.mp4") for i in range(1, total + 1)]
+                encoder = encoder_state["name"]  # one encoder for every part of the reel
+                done = [0]
+                done_lock = threading.Lock()
+
+                def cut_part(index):
+                    src, start, end = clip_specs[index]
                     raise_if_cancelled()
-                    tmp_path = os.path.join(tmp_dir, f"part_{i:04d}.mp4")
                     if start is None and end is None:
                         import shutil as _shutil
-                        _shutil.copy2(src, tmp_path)
+                        _shutil.copy2(src, tmp_files[index])
                     else:
-                        cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_path)
-                    tmp_files.append(tmp_path)
-                    elapsed = time.time() - start_time
-                    progress_queue.put({
-                        "current": i,
-                        "total": total_steps,
-                        "clip_total": total,
-                        "elapsed": elapsed,
-                        "phase": "clips",
-                    })
+                        cut_clip_ffmpeg(ffmpeg_bin, src, start, end, tmp_files[index], encoder=encoder)
+                    with done_lock:
+                        done[0] += 1
+                        progress_queue.put({
+                            "current": done[0],
+                            "total": total_steps,
+                            "clip_total": total,
+                            "elapsed": time.time() - start_time,
+                            "phase": "clips",
+                        })
+
+                with ThreadPoolExecutor(max_workers=_video_encoder.workers(encoder)) as executor:
+                    futures = [executor.submit(cut_part, index) for index in range(total)]
+                    try:
+                        for future in futures:
+                            future.result()
+                    except BaseException:
+                        for future in futures:
+                            future.cancel()
+                        raise
 
                 list_path = os.path.join(tmp_dir, "concat.txt")
                 with open(list_path, "w", encoding="utf-8") as f:
@@ -1184,6 +1217,8 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
         log("Loading video...")
         raise_if_cancelled()
         ffmpeg_bin = get_ffmpeg_binary()
+        encoder_state["name"] = _video_encoder.resolve(str(config.get("video_encoder") or "auto"), ffmpeg_bin)
+        log(f"Encoding with {_video_encoder.label(encoder_state['name'])}.")
         needed_periods = {int(period) for _start, _end, _label, period in windows}
         period_video_sources = {}
         video1_path = str(config.get("video_file", "")).strip().strip("\"'")
@@ -1263,12 +1298,17 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             def _cut_one(spec):
                 raise_if_cancelled()
                 i, src, s, e, label, filepath = spec
-                cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath)
+                try:
+                    cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath)
+                except _video_encoder.HardwareEncodeError as error:
+                    switch_to_software(error)
+                    cut_clip_ffmpeg(ffmpeg_bin, src, s, e, filepath, encoder=_video_encoder.SOFTWARE)
                 return spec
 
             total_individual = max(1, len(clip_specs_indiv))
-            log(f"  Cutting {len(clip_specs_indiv)} clips in parallel (up to 4 workers)...")
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            workers = _video_encoder.workers(encoder_state["name"])
+            log(f"  Cutting {len(clip_specs_indiv)} clips ({workers} at a time)...")
+            with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {executor.submit(_cut_one, spec): spec for spec in clip_specs_indiv}
                 for fut in as_completed(futures):
                     if cancelled():
@@ -1314,7 +1354,12 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             out_path = os.path.join(out_dir, output_filename)
 
             assembly_start = time.time()
-            cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
+            try:
+                cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
+            except _video_encoder.HardwareEncodeError as error:
+                # Parts are joined by stream copy, so a reel never mixes encoders: redo all parts.
+                switch_to_software(error)
+                cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
             log(f"\n\u2713 Saved to: {out_path}")
 
         log_queue.put({"type": "done"})

@@ -9,6 +9,7 @@ datas = [(str(ROOT / "app"), "app"), (str(ROOT / "ui"), "ui")]
 binaries = []
 hiddenimports = [
     "clipmaker_core",
+    "video_encoder",
     "browser_capture",
     "scoresway_scraper",
     "whoscored_scraper",

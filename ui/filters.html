@@ -406,7 +406,14 @@
                   </select></label
                 >
                 <label
-                  ><span>Encoder speed</span
+                  ><span>Encoder</span
+                  ><select data-video-encoder>
+                    <option value="auto" selected>Automatic (graphics card when available)</option>
+                    <option value="software">Software (x264)</option>
+                  </select></label
+                >
+                <label
+                  ><span>Encoder speed (software)</span
                   ><select data-encoder-preset>
                     <option>ultrafast</option>
                     <option>superfast</option>
