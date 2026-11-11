@@ -1500,9 +1500,19 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.validate_local_request()
             self.handle_get()
         except (ValueError, json.JSONDecodeError) as error:
-            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            self.reply_error(HTTPStatus.BAD_REQUEST, str(error))
         except OSError as error:
-            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)})
+            self.reply_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+
+    def reply_error(self, status: HTTPStatus, message: str, post: bool = False) -> None:
+        """Send an error reply unless the client has already disconnected."""
+        try:
+            if post:
+                self.send_post_error(status, message)
+            else:
+                self.send_json(status, {"error": message})
+        except ConnectionError:
+            self.close_connection = True
 
     def handle_get(self) -> None:
         path = urlparse(self.path).path
@@ -1776,9 +1786,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown API endpoint"})
         except (ValueError, json.JSONDecodeError) as error:
-            self.send_post_error(HTTPStatus.BAD_REQUEST, str(error))
+            self.reply_error(HTTPStatus.BAD_REQUEST, str(error), post=True)
         except Exception as error:
-            self.send_post_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+            self.reply_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error), post=True)
 
     def log_message(self, message: str, *args: Any) -> None:
         print(f"[clipmaker] {self.address_string()} {message % args}")
