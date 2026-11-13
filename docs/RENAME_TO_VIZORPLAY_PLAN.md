@@ -59,7 +59,8 @@ browsers: the `clipmaker.*` browser storage keys, the Python module names
    upgrades it.
 4. **Homebrew.** Formula `vizorplay` with the command `vizorplay`. The formula
    was never published, so no `clipmaker` alias is kept. The tap repository
-   keeps its name (`homebrew-clipmaker`); renaming it is a separate GitHub change.
+   was renamed by the owner to `homebrew-vizorplay` (private), so users run
+   `brew tap B03GHB4L1/vizorplay`.
 5. **winget.** Package id `B4L1.VizorPlay` (unpublished, so no migration).
 6. **Environment variables.** Accept `VIZORPLAY_DATA_DIR` /
    `VIZORPLAY_RUNTIME_DIR`, still reading the old `CLIPMAKER_*` names.

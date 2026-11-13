@@ -67,11 +67,11 @@ To render a tag-archive formula locally when troubleshooting, run:
 python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/vizorplay.rb
 ```
 
-The resulting formula belongs in the separate `homebrew-clipmaker` tap.
+The resulting formula belongs in the separate `homebrew-vizorplay` tap.
 Once that tap is published, macOS users install and upgrade with:
 
 ```text
-brew tap B03GHB4L1/clipmaker
+brew tap B03GHB4L1/vizorplay
 brew install vizorplay
 brew upgrade vizorplay
 ```

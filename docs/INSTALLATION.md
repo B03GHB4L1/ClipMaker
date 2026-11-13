@@ -45,7 +45,7 @@ every macOS security warning disappears or disable Gatekeeper.
 After the source release and public tap have been authorized and published:
 
 ```sh
-brew tap B03GHB4L1/clipmaker
+brew tap B03GHB4L1/vizorplay
 brew install vizorplay
 vizorplay
 ```
