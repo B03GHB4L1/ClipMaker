@@ -70,6 +70,7 @@ installs `/usr/bin/vizorplay`, and the Homebrew formula and WinGet id are
 `vizorplay` / `B4L1.VizorPlay`. The project folder ID `com.b4l1.clipmaker` is
 unchanged on purpose. The installed-app upgrade test now starts from the last
 pre-rename commit (fcd36ad), so it upgrades a real `clipmaker` install and
-checks the old program and engine are gone and the project survives. Gate:
-pending until that CI run passes on Windows and Linux, plus one owner upgrade
-over the existing install on their PC.
+checks the old program and engine are gone and the project survives. CI:
+Full Desktop E2E 43427087494 and Checks 43427087368 passed at 640e71d; both
+native jobs ran "verify the renamed program replaced the old one". Remaining:
+one owner upgrade over the existing install on their PC.
