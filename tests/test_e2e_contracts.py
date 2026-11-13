@@ -86,6 +86,16 @@ class AutomationContracts(unittest.TestCase):
         self.assertIn("archive.ubuntu.com", action)
         self.assertIn("::warning::", action)  # the switch is never silent
 
+    def test_windows_desktop_app_opens_no_terminal(self):
+        # Without this attribute Windows opens a terminal beside the app, and
+        # closing that terminal ends the app.
+        main = (ROOT / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn('#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]', main)
+        # The engine stays a console program started without a window, so the
+        # FFmpeg and browser processes it starts never open windows either.
+        lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn("creation_flags(0x08000000)", lib)
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
         formula = (ROOT / "packaging/homebrew/clipmaker.rb.in").read_text(encoding="utf-8")
