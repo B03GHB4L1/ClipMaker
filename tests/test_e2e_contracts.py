@@ -96,9 +96,70 @@ class AutomationContracts(unittest.TestCase):
         lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertIn("creation_flags(0x08000000)", lib)
 
+    def test_programs_users_see_are_named_vizorplay(self):
+        # docs/RENAME_TO_VIZORPLAY_PLAN.md
+        import re
+        cargo = (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('name = "vizorplay"', cargo)  # vizorplay.exe, /usr/bin/vizorplay
+        lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        spec = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r'name="([^"]+)"', spec), ["vizorplay-engine", "vizorplay-engine"])
+        self.assertIn('"backend/vizorplay-engine.exe"', lib)
+        self.assertIn('"backend/vizorplay-engine"', lib)
+        formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
+        self.assertIn("class Vizorplay < Formula", formula)
+        self.assertIn('(bin/"vizorplay").write', formula)
+        winget = sorted(path.name for path in (ROOT / "packaging/winget").glob("*.yaml.in"))
+        self.assertTrue(winget and all(name.startswith("B4L1.VizorPlay.") for name in winget), winget)
+        for name in winget:
+            self.assertIn("PackageIdentifier: B4L1.VizorPlay", (ROOT / "packaging/winget" / name).read_text(encoding="utf-8"))
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            text = workflow.read_text(encoding="utf-8")
+            # pre-rename-dist/ is the deliberately old upgrade predecessor.
+            self.assertIsNone(re.search(r"(?<![\w-])dist/clipmaker-server/", text), workflow.name)
+            self.assertFalse("CLIPMAKER_RUNTIME_DIR" in text, workflow.name)
+        # Projects are saved in a folder named after this ID; changing it would
+        # make upgraded installs open an empty folder.
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["identifier"], "com.b4l1.clipmaker")
+
+    def test_windows_upgrade_removes_pre_rename_programs(self):
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        hooks = ROOT / "src-tauri" / config["bundle"]["windows"]["nsis"]["installerHooks"]
+        source = hooks.read_text(encoding="utf-8")
+        for line in ('Delete "$INSTDIR\\clipmaker.exe"', 'Delete "$INSTDIR\\backend\\clipmaker-server.exe"'):
+            self.assertIn(line, source)
+        for hook in ("NSIS_HOOK_POSTINSTALL", "NSIS_HOOK_POSTUNINSTALL"):
+            self.assertIn(f"!macro {hook}", source)
+        self.assertNotIn("RMDir", source)  # never deletes folders, so never project data
+        workflow = (ROOT / ".github/workflows/e2e.yml").read_text(encoding="utf-8")
+        self.assertIn("--candidate-app (Join-Path $destination 'vizorplay.exe')", workflow)
+        self.assertIn("--candidate-app /usr/bin/vizorplay", workflow)
+        self.assertIn("PRE_RENAME_COMMIT: fcd36ad6d5a8045f0098258a737b209a50c52f36", workflow)
+
+    def test_mac_launcher_moves_pre_rename_data_folder_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            support = home / "Library" / "Application Support"
+            legacy = support / "ClipMaker" / "runtime"
+            (legacy / "data" / "projects" / "p1").mkdir(parents=True)
+            (legacy / "data" / "projects" / "p1" / "project.json").write_text("{}", encoding="utf-8")
+            root = bootstrap.runtime_root({}, home)
+            self.assertEqual(root, support / "VizorPlay" / "runtime")
+            self.assertTrue((root / "data" / "projects" / "p1" / "project.json").is_file())
+            self.assertFalse((support / "ClipMaker").exists())
+            # An existing new folder is never overwritten by a stray old one.
+            (legacy / "data").mkdir(parents=True)
+            self.assertEqual(bootstrap.runtime_root({}, home), root)
+            self.assertTrue(legacy.is_dir())
+            self.assertTrue((root / "data" / "projects" / "p1" / "project.json").is_file())
+        self.assertEqual(bootstrap.runtime_root({"VIZORPLAY_RUNTIME_DIR": "/x/new", "CLIPMAKER_RUNTIME_DIR": "/x/old"}),
+                         Path("/x/new"))
+        self.assertEqual(bootstrap.runtime_root({"CLIPMAKER_RUNTIME_DIR": "/x/old"}), Path("/x/old"))
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
-        formula = (ROOT / "packaging/homebrew/clipmaker.rb.in").read_text(encoding="utf-8")
+        formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
         server = (ROOT / "packaging/clipmaker_api_server.py").read_text(encoding="utf-8")
         siblings = {name for name in re.findall(r"^\s+from (\w+) import", server, re.M)
                     if (ROOT / "packaging" / f"{name}.py").is_file()}
@@ -110,10 +171,10 @@ class AutomationContracts(unittest.TestCase):
     def test_homebrew_upgrade_checks_linked_keg_even_if_old_version_is_retained(self):
         from tests.homebrew_upgrade import assert_active_version
         launcher = Mock()
-        launcher.resolve.return_value = Path("Cellar/clipmaker/1.0.0/bin/clipmaker")
+        launcher.resolve.return_value = Path("Cellar/vizorplay/1.0.0/bin/vizorplay")
         with patch("tests.homebrew_upgrade.brew_version", return_value=["0.9.0", "1.0.0"]):
             assert_active_version(launcher, "1.0.0")
-            launcher.resolve.return_value = Path("Cellar/clipmaker/0.9.0/bin/clipmaker")
+            launcher.resolve.return_value = Path("Cellar/vizorplay/0.9.0/bin/vizorplay")
             with self.assertRaises(AssertionError):
                 assert_active_version(launcher, "1.0.0")
 
@@ -121,7 +182,7 @@ class AutomationContracts(unittest.TestCase):
         from tests.homebrew_upgrade import launcher_command
         launcher = Mock()
         launcher.absolute.return_value = Path("stable/bin/vizorplay")
-        launcher.resolve.return_value = Path("Cellar/clipmaker/0.9.0/bin/clipmaker")
+        launcher.resolve.return_value = Path("Cellar/vizorplay/0.9.0/bin/vizorplay")
         self.assertEqual(launcher_command(launcher), [str(Path("stable/bin/vizorplay")), "--no-browser"])
         launcher.resolve.assert_not_called()
 
@@ -253,7 +314,7 @@ class AutomationContracts(unittest.TestCase):
 
     def test_formula_override_does_not_rewrite_repository_urls(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "clipmaker.rb"
+            target = Path(directory) / "vizorplay.rb"
             command = [sys.executable, str(ROOT / "packaging/render_homebrew_formula.py"),
                        "--version", "1.0.0", "--sha256", "a" * 64, "--output", str(target)]
             subprocess.run([*command, "--source-url", "file:///tmp/vizorplay.tar.gz"], check=True, capture_output=True)

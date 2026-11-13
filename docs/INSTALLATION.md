@@ -46,7 +46,7 @@ After the source release and public tap have been authorized and published:
 
 ```sh
 brew tap B03GHB4L1/clipmaker
-brew install clipmaker
+brew install vizorplay
 vizorplay
 ```
 
@@ -59,7 +59,7 @@ For an update, close VizorPlay, then run:
 
 ```sh
 brew update
-brew upgrade clipmaker
+brew upgrade vizorplay
 vizorplay
 ```
 

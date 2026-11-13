@@ -48,9 +48,9 @@ pub fn run() {
                 .unwrap_or(app.path().app_local_data_dir()?);
             std::fs::create_dir_all(&data_dir)?;
             let executable = if cfg!(windows) {
-                "backend/clipmaker-server.exe"
+                "backend/vizorplay-engine.exe"
             } else {
-                "backend/clipmaker-server"
+                "backend/vizorplay-engine"
             };
             let server = app.path().resolve(executable, BaseDirectory::Resource)?;
             let mut command = Command::new(server);

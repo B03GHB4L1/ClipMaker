@@ -1,4 +1,4 @@
-class Clipmaker < Formula
+class Vizorplay < Formula
   desc "Football video clipping and analysis workstation"
   homepage "https://github.com/B03GHB4L1/ClipMaker"
   url "https://github.com/B03GHB4L1/ClipMaker/archive/refs/tags/v@VERSION@.tar.gz"
@@ -14,16 +14,14 @@ class Clipmaker < Formula
     libexec.install "packaging/clipmaker_api_server.py"
     libexec.install "packaging/process_owner.py"
 
-    (bin/"clipmaker").write <<~SH
+    (bin/"vizorplay").write <<~SH
       #!/bin/bash
       exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
     SH
-    (bin/"clipmaker").chmod 0755
-    bin.install_symlink "clipmaker" => "vizorplay"
+    (bin/"vizorplay").chmod 0755
   end
 
   test do
-    assert_predicate bin/"clipmaker", :executable?
     assert_predicate bin/"vizorplay", :executable?
   end
 end

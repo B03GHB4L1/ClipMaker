@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
-PackageIdentifier: B4L1.ClipMaker
+PackageIdentifier: B4L1.VizorPlay
 PackageVersion: @VERSION@
 InstallerType: nullsoft
 Scope: user

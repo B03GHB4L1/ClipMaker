@@ -77,10 +77,10 @@ jobs:
       - name: Frozen media and real cancellation
         run: |
           set -o pipefail
-          python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" 2>&1 | tee build/e2e/frozen-media.log
+          python packaging/smoke_test.py --server "dist/vizorplay-engine/vizorplay-engine${{ runner.os == 'Windows' && '.exe' || '' }}" 2>&1 | tee build/e2e/frozen-media.log
       - name: Frozen browser journey
         timeout-minutes: 12
-        run: python tests/browser_smoke.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}" --evidence build/e2e/frozen
+        run: python tests/browser_smoke.py --server "dist/vizorplay-engine/vizorplay-engine${{ runner.os == 'Windows' && '.exe' || '' }}" --evidence build/e2e/frozen
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -133,7 +133,7 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
           mkdir -p src-tauri/resources/backend
-          cp -a dist/clipmaker-server/. src-tauri/resources/backend/
+          cp -a dist/vizorplay-engine/. src-tauri/resources/backend/
       - run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Match Edge WebDriver to installed WebView2 runtime
         if: runner.os == 'Windows'
@@ -153,13 +153,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'WebView2 driver could not start' }
           $directory | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - run: npm ci
-      - name: Build controlled predecessor for different-version upgrade acceptance
+      - name: Build the pre-rename app (clipmaker) as the 0.9.0 upgrade predecessor
         shell: bash
+        env:
+          # Last commit before ClipMaker -> VizorPlay program names; upgrading it
+          # proves installed copies switch names and keep their projects.
+          PRE_RENAME_COMMIT: fcd36ad6d5a8045f0098258a737b209a50c52f36
+          CARGO_TARGET_DIR: ${{ github.workspace }}/build/pre-rename-target
         run: |
-          printf '{"version":"0.9.0"}\n' > build/upgrade-config.json
-          npm run tauri build -- --config "$PWD/build/upgrade-config.json" --bundles ${{ matrix.bundles }}
-          mkdir -p build/upgrade-baseline
-          cp src-tauri/target/release/bundle/${{ matrix.bundles }}/*.${{ matrix.package_ext }} build/upgrade-baseline/
+          git fetch --no-tags --depth 1 origin "$PRE_RENAME_COMMIT"
+          git worktree add --detach build/pre-rename "$PRE_RENAME_COMMIT"
+          cd build/pre-rename
+          python -m PyInstaller --noconfirm --distpath ../pre-rename-dist --workpath ../pre-rename-work packaging/pyinstaller/clipmaker_server.spec
+          mkdir -p src-tauri/resources/backend
+          cp -a ../pre-rename-dist/clipmaker-server/. src-tauri/resources/backend/
+          npm ci
+          printf '{"version":"0.9.0"}\n' > ../upgrade-config.json
+          npm run tauri build -- --config "$PWD/../upgrade-config.json" --bundles ${{ matrix.bundles }}
+          mkdir -p ../upgrade-baseline
+          cp "$CARGO_TARGET_DIR"/release/bundle/${{ matrix.bundles }}/*.${{ matrix.package_ext }} ../upgrade-baseline/
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
       - name: Install Windows package and exercise the installed window
         timeout-minutes: 12
@@ -176,7 +188,7 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           $app = @(Get-ChildItem -LiteralPath $destination -Filter clipmaker.exe -Recurse)
           if ($app.Count -ne 1) { throw 'Installed executable not found' }
-          python tests/native_smoke.py --app $app[0].FullName --package $candidate[0].FullName --upgrade-from 0.9.0
+          python tests/native_smoke.py --app $app[0].FullName --candidate-app (Join-Path $destination 'vizorplay.exe') --package $candidate[0].FullName --upgrade-from 0.9.0 --upgrade-fixture "pre-rename predecessor (clipmaker.exe) built from fcd36ad"
           if ($LASTEXITCODE -ne 0) { throw 'Native acceptance failed' }
       - name: Install Linux package and exercise the installed window
         timeout-minutes: 12
@@ -187,7 +199,7 @@ jobs:
           sudo apt-get install -y ./build/upgrade-baseline/*.deb
           package="$(find src-tauri/target/release/bundle/deb -name '*1.0.0*.deb' -print -quit)"
           test -n "$package"
-          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker --package "$package" --upgrade-from 0.9.0
+          xvfb-run -a dbus-run-session -- python tests/native_smoke.py --app /usr/bin/clipmaker --candidate-app /usr/bin/vizorplay --package "$package" --upgrade-from 0.9.0 --upgrade-fixture "pre-rename predecessor (clipmaker) built from fcd36ad"
       - name: Retain the exact package that passed native acceptance
         shell: bash
         run: |
@@ -228,20 +240,20 @@ jobs:
           git archive --format=tar.gz --prefix=vizorplay/ --output="$archive" HEAD
           sha256="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
           brew tap-new local/vizorplay
-          formula="$(brew --repository local/vizorplay)/Formula/clipmaker.rb"
+          formula="$(brew --repository local/vizorplay)/Formula/vizorplay.rb"
           python packaging/render_homebrew_formula.py --version 0.9.0 --sha256 "$sha256" --source-url "file://$archive" --output "$formula"
-          brew install --build-from-source local/vizorplay/clipmaker
-          brew test local/vizorplay/clipmaker
+          brew install --build-from-source local/vizorplay/vizorplay
+          brew test local/vizorplay/vizorplay
           python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 "$sha256" --source-url "file://$archive" --output build/homebrew-candidate/upgrade.rb
       - name: Upgrade installed Homebrew formula and preserve local project
         timeout-minutes: 22
         env:
-          CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
-        run: python tests/homebrew_upgrade.py --formula "$(brew --repository local/vizorplay)/Formula/clipmaker.rb" --candidate build/homebrew-candidate/upgrade.rb --launcher "$(brew --prefix)/bin/vizorplay"
+          VIZORPLAY_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
+        run: python tests/homebrew_upgrade.py --formula "$(brew --repository local/vizorplay)/Formula/vizorplay.rb" --candidate build/homebrew-candidate/upgrade.rb --launcher "$(brew --prefix)/bin/vizorplay"
       - name: Exercise installed launcher and full browser journey
         timeout-minutes: 22
         env:
-          CLIPMAKER_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
+          VIZORPLAY_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
         run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --timeout-seconds 1200 --evidence build/homebrew-evidence
       - name: Retain the exact source archive tested by Homebrew
         run: python packaging/release_candidate.py receipt --platform macOS --payload build/homebrew-candidate/vizorplay-1.0.0-source.tar.gz --evidence build/homebrew-evidence/result.json --evidence build/homebrew-upgrade/result.json --output build/release-packages

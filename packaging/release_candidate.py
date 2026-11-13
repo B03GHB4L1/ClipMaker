@@ -81,7 +81,7 @@ def assemble(directory, output, commit, repository):
     windows = next(receipt for receipt in receipts if receipt["platform"] == "Windows")
     subprocess.run([sys.executable, str(ROOT / "packaging/render_homebrew_formula.py"),
                     "--version", "1.0.0", "--sha256", source["sha256"],
-                    "--source-url", base + quote(source["payload"]), "--output", str(output / "clipmaker.rb")], check=True)
+                    "--source-url", base + quote(source["payload"]), "--output", str(output / "vizorplay.rb")], check=True)
     subprocess.run([sys.executable, str(ROOT / "packaging/render_winget_manifests.py"),
                     "--version", "1.0.0", "--installer-sha256", windows["sha256"],
                     "--installer-url", base + quote(windows["payload"]), "--output", str(output)], check=True)

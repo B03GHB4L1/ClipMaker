@@ -120,6 +120,10 @@ def main():
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--package", type=Path, help="CI-only NSIS/DEB reinstall and uninstall acceptance")
     parser.add_argument("--upgrade-from", help="Expected installed predecessor version; upgrade to --package between launches")
+    parser.add_argument("--candidate-app", type=Path,
+                        help="Installed executable after the upgrade, when the predecessor used another name")
+    parser.add_argument("--upgrade-fixture", default="same-source predecessor package",
+                        help="What the predecessor package is, for the evidence record")
     parser.add_argument("--evidence", type=Path, default=ROOT / "build/native-evidence")
     args = parser.parse_args()
     if sys.platform not in {"win32", "linux"}:
@@ -135,6 +139,10 @@ def main():
     args.app = args.app.resolve()
     if args.upgrade_from and not args.package:
         parser.error("--upgrade-from requires --package")
+    if args.candidate_app and not args.upgrade_from:
+        parser.error("--candidate-app requires --upgrade-from")
+    candidate_app = (args.candidate_app or args.app).resolve()
+    app = args.app
     from selenium import webdriver
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.keys import Keys
@@ -150,7 +158,6 @@ def main():
     faulthandler.dump_traceback_later(600, exit=True)
     options = ArgOptions()
     options.set_capability("browserName", "wry")
-    options.set_capability("tauri:options", {"application": str(args.app.resolve())})
     driver = None
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -174,11 +181,12 @@ def main():
                 versions = []
                 for launch in range(launches):
                     if args.package:
-                        version = installed_version(args.app, args.package)
+                        version = installed_version(app, args.package)
                         expected_version = args.upgrade_from if launch == 0 and args.upgrade_from else "1.0.0"
                         assert version == expected_version, (version, expected_version)
                         versions.append(version)
                     stage(evidence, f"launch {launch + 1}: create native session")
+                    options.set_capability("tauri:options", {"application": str(app)})
                     address = f"http://127.0.0.1:{port}"
                     connection = RemoteConnection(client_config=ClientConfig(remote_server_addr=address, timeout=45))
                     driver = webdriver.Remote(command_executor=connection, options=options)
@@ -272,21 +280,32 @@ def main():
                         stage(evidence, "upgrade predecessor to candidate" if launch == 0 and args.upgrade_from
                               else "reinstall same-version package before relaunch")
                         preserved = project_path.read_bytes()
-                        package_lifecycle(args.app, args.package)
+                        package_lifecycle(app, args.package)
                         assert project_path.read_bytes() == preserved, "Reinstall changed saved project data"
+                        if launch == 0 and args.upgrade_from and candidate_app != app:
+                            stage(evidence, "verify the renamed program replaced the old one")
+                            assert candidate_app.is_file(), f"Upgrade did not install {candidate_app}"
+                            assert not app.exists(), f"Upgrade left the old program behind: {app}"
+                            if sys.platform == "win32":
+                                old_engines = [app.parent / "backend" / "clipmaker-server.exe"]
+                            else:  # the package installs resources under /usr/lib/<product>/
+                                old_engines = list(Path("/usr/lib").glob("*/backend/clipmaker-server"))
+                            left = [str(path) for path in old_engines if path.exists()]
+                            assert not left, f"Upgrade left the old engine behind: {left}"
+                            app = candidate_app
                 if args.package:
                     stage(evidence, "uninstall package and verify saved project data remains")
                     preserved = project_path.read_bytes()
-                    package_lifecycle(args.app, args.package, uninstall=True)
+                    package_lifecycle(app, args.package, uninstall=True)
                     deadline = time.monotonic() + 30
-                    while args.app.exists() and time.monotonic() < deadline:
+                    while app.exists() and time.monotonic() < deadline:
                         time.sleep(.2)
-                    assert not args.app.exists(), "Uninstall did not remove the application"
+                    assert not app.exists(), "Uninstall did not remove the application"
                     assert project_path.read_bytes() == preserved, "Uninstall removed or changed saved project data"
                 result = {"status": "passed", "native_launches": launches,
                     "reinstall_and_uninstall": bool(args.package), "shutdown_verified": True,
                     "installed_versions": versions, "upgrade_from": args.upgrade_from,
-                    "upgrade_fixture": "same-source predecessor package" if args.upgrade_from else None}
+                    "upgrade_fixture": args.upgrade_fixture if args.upgrade_from else None}
             except BaseException:
                 print(traceback.format_exc(), flush=True)
                 (evidence / "result.json").write_text(json.dumps({"status": "failed"}), encoding="utf-8")

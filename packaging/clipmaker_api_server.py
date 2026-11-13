@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlparse, parse_qs, unquote
 
 if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
-    log_dir = Path(os.environ.get("CLIPMAKER_DATA_DIR") or Path.cwd())
+    log_dir = Path(os.environ.get("VIZORPLAY_DATA_DIR") or os.environ.get("CLIPMAKER_DATA_DIR") or Path.cwd())
     log_dir.mkdir(parents=True, exist_ok=True)
     startup_log = (log_dir / "backend-startup.log").open("a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stdout or startup_log

@@ -1,4 +1,4 @@
-"""Homebrew-friendly launcher that maintains ClipMaker's private Python runtime."""
+"""Homebrew-friendly launcher that maintains VizorPlay's private Python runtime."""
 
 from __future__ import annotations
 
@@ -14,11 +14,22 @@ import webbrowser
 from pathlib import Path
 
 
-def runtime_root() -> Path:
-    override = os.environ.get("CLIPMAKER_RUNTIME_DIR")
+def runtime_root(env=os.environ, home: Path | None = None) -> Path:
+    """The runtime and data folder; CLIPMAKER_RUNTIME_DIR is the pre-rename name."""
+    override = env.get("VIZORPLAY_RUNTIME_DIR") or env.get("CLIPMAKER_RUNTIME_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / "Library" / "Application Support" / "ClipMaker" / "runtime"
+    support = (home or Path.home()) / "Library" / "Application Support"
+    current, legacy = support / "VizorPlay" / "runtime", support / "ClipMaker" / "runtime"
+    if legacy.is_dir() and not current.exists():
+        # One-time move from the pre-rename folder, so projects stay.
+        current.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(legacy, current)
+        try:
+            legacy.parent.rmdir()  # only if now empty
+        except OSError:
+            pass
+    return current
 
 
 def venv_python(env_dir: Path) -> Path:

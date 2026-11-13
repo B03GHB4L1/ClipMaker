@@ -67,7 +67,7 @@ the shipped macOS product uses that binary.
 - Every test uses synthetic fixtures and temporary project directories.
 - Tauri accepts `VIZORPLAY_DATA_DIR` for isolated local storage. With no override,
   the existing user data location is unchanged.
-- Homebrew CI sets `CLIPMAKER_RUNTIME_DIR` under the runner's temporary directory.
+- Homebrew CI sets `VIZORPLAY_RUNTIME_DIR` under the runner's temporary directory.
   The launcher accepts `--port`, `--data-dir`, and `--no-browser`; regular launches
   retain the original behavior.
 - Browser failures record a traceback, screenshot, HTML, console log, Playwright
@@ -254,7 +254,7 @@ python tests/browser_smoke.py --evidence build/e2e/source
 After building a frozen backend:
 
 ```powershell
-python tests/browser_smoke.py --server dist/clipmaker-server/clipmaker-server.exe --evidence build/e2e/frozen
+python tests/browser_smoke.py --server dist/vizorplay-engine/vizorplay-engine.exe --evidence build/e2e/frozen
 ```
 
 On Linux/macOS omit `.exe`. Native tests additionally need Rust, `tauri-driver`,
