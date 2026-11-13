@@ -13,7 +13,7 @@ Homebrew formula and command `vizorplay` (renamed 13 November 2026,
 
 ## Compatibility
 
-The repository name, the Homebrew tap name, the Tauri application identifier
+The repository name, the Tauri application identifier
 (`com.b4l1.clipmaker`, which names the project folder), Python module names
 and browser storage keys deliberately keep their old internal names. Renaming
 these would orphan saved projects or need a separate migration. Upgrades
