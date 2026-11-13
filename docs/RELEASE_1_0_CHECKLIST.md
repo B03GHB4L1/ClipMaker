@@ -63,3 +63,13 @@ The published v1.2 Windows ZIP was inspected: it contains source/launcher files,
 not an EXE/MSI installer. GitHub lists v1.0, v1.1 and v1.2, with no published
 1.3 release. A 1.3 → 1.0 installed-package reset is therefore a precaution for
 unreleased test installs, rather than a demonstrated public update channel.
+
+Program rename (13 November 2026, `docs/RENAME_TO_VIZORPLAY_PLAN.md`): the
+Windows app is now `vizorplay.exe` with engine `vizorplay-engine.exe`, Linux
+installs `/usr/bin/vizorplay`, and the Homebrew formula and WinGet id are
+`vizorplay` / `B4L1.VizorPlay`. The project folder ID `com.b4l1.clipmaker` is
+unchanged on purpose. The installed-app upgrade test now starts from the last
+pre-rename commit (fcd36ad), so it upgrades a real `clipmaker` install and
+checks the old program and engine are gone and the project survives. Gate:
+pending until that CI run passes on Windows and Linux, plus one owner upgrade
+over the existing install on their PC.

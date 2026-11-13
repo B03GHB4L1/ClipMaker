@@ -1,12 +1,12 @@
 [package]
-name = "clipmaker"
+name = "vizorplay"
 version = "1.0.0"
 description = "Football video clipping and analysis workstation"
 authors = ["B4L1"]
 edition = "2021"
 
 [lib]
-name = "clipmaker_lib"
+name = "vizorplay_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

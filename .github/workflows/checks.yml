@@ -69,7 +69,7 @@ jobs:
       - run: pyinstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
       - name: Launch packaged backend and exercise media rendering
         shell: bash
-        run: python packaging/smoke_test.py --server "dist/clipmaker-server/clipmaker-server${{ runner.os == 'Windows' && '.exe' || '' }}"
+        run: python packaging/smoke_test.py --server "dist/vizorplay-engine/vizorplay-engine${{ runner.os == 'Windows' && '.exe' || '' }}"
 
   tauri:
     runs-on: ubuntu-22.04

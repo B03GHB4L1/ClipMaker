@@ -6,7 +6,7 @@ clip windows, rendering one preview, and exporting a reel and individual clips
 from a real match video. Prints a table; --json writes raw results.
 
   python tests/workflow_timing.py --video match.mp4 --scoresway-url URL
-  python tests/workflow_timing.py --server dist/clipmaker-server/clipmaker-server.exe ...
+  python tests/workflow_timing.py --server dist/vizorplay-engine/vizorplay-engine.exe ...
   VIZORPLAY_VIDEO_ENCODER=software python tests/workflow_timing.py ...   # force x264
 
 The scrape is network-bound and the clip timings depend on the video and the

@@ -33,8 +33,8 @@ candidate rather than being advertised as verified installers.
 
 The release also includes a three-file WinGet manifest set. After the first
 version is accepted into the WinGet community repository, Windows users can
-install with `winget install --id B4L1.ClipMaker -e` and receive later versions
-with `winget upgrade --id B4L1.ClipMaker -e`.
+install with `winget install --id B4L1.VizorPlay -e` and receive later versions
+with `winget upgrade --id B4L1.VizorPlay -e`.
 
 The desktop shell starts the packaged shared-UI backend on an available local
 port and displays it inside the VizorPlay window. The analysis workspaces run
@@ -45,11 +45,10 @@ Edge or Google Chrome (Edge ships with Windows 10 and 11); no browser is bundled
 ## macOS
 
 macOS uses a Homebrew formula rather than an unsigned application bundle. The
-formula installs the shared source and a `clipmaker` launcher. On its first run,
+formula installs the shared source and a `vizorplay` launcher. On its first run,
 the launcher creates a private Python environment under the user's Library,
 installs the pinned dependencies (no browser download), then opens the
-local VizorPlay interface in the default browser. The primary launcher is
-`vizorplay`; `clipmaker` remains a compatibility alias.
+local VizorPlay interface in the default browser.
 The formula includes the process-owner adapter. Video and CSV selection use
 browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
@@ -61,11 +60,11 @@ is public by the owner's instruction. The separate tap remains private and
 empty until an authorized publication step; `brew tap` is not yet a public
 installation path.
 
-The candidate includes a rendered `clipmaker.rb` formula with its source SHA-256.
+The candidate includes a rendered `vizorplay.rb` formula with its source SHA-256.
 To render a tag-archive formula locally when troubleshooting, run:
 
 ```text
-python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/clipmaker.rb
+python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/vizorplay.rb
 ```
 
 The resulting formula belongs in the separate `homebrew-clipmaker` tap.
@@ -73,8 +72,8 @@ Once that tap is published, macOS users install and upgrade with:
 
 ```text
 brew tap B03GHB4L1/clipmaker
-brew install clipmaker
-brew upgrade clipmaker
+brew install vizorplay
+brew upgrade vizorplay
 ```
 
 ## Linux installation and upgrades
@@ -91,8 +90,9 @@ playback dependencies. There is no apt/dnf repository or in-app automatic update
 yet: Linux updates currently require downloading the newer DEB. Fedora/RPM and
 other distributions remain outside the verified 1.0 candidate scope.
 
-Acceptance installs a controlled 0.9.0 predecessor built from the same source,
-saves project data, upgrades to 1.0.0, relaunches and renders/exports, reinstalls,
+Acceptance installs a 0.9.0 predecessor built from the last commit before the
+program rename (so it is `clipmaker.exe` / `/usr/bin/clipmaker`), saves
+project data, upgrades to 1.0.0, checks the old program and engine are gone, relaunches and renders/exports, reinstalls,
 then uninstalls while preserving the isolated project. macOS likewise upgrades
 a local test formula from 0.9.0 to 1.0.0 and reopens the project. These checks
 exercise different-version package lifecycle; they do not certify migration

@@ -69,8 +69,8 @@ jobs:
             release-artifacts/*.exe
             release-artifacts/*.deb
             release-artifacts/*-source.tar.gz
-            release-artifacts/clipmaker.rb
-            release-artifacts/B4L1.ClipMaker*.yaml
+            release-artifacts/vizorplay.rb
+            release-artifacts/B4L1.VizorPlay*.yaml
             release-artifacts/SHA256SUMS
             release-artifacts/candidate-manifest.json
             release-artifacts/receipt-*.json

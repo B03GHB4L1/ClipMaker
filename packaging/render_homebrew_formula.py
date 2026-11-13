@@ -21,7 +21,7 @@ def main() -> None:
     if not re.fullmatch(r"[0-9a-fA-F]{64}", args.sha256):
         parser.error("SHA-256 must contain exactly 64 hexadecimal characters")
 
-    template = Path(__file__).with_name("homebrew") / "clipmaker.rb.in"
+    template = Path(__file__).with_name("homebrew") / "vizorplay.rb.in"
     rendered = template.read_text(encoding="utf-8")
     rendered = rendered.replace("@VERSION@", args.version.lstrip("v"))
     rendered = rendered.replace("@SHA256@", args.sha256.lower())

@@ -15,7 +15,7 @@ from smoke_test import backend, fixture_csv, request
 
 
 def brew_version():
-    result = subprocess.run(["brew", "list", "--versions", "clipmaker"],
+    result = subprocess.run(["brew", "list", "--versions", "vizorplay"],
                             check=True, capture_output=True, text=True, timeout=60)
     return result.stdout.split()[1:]
 
@@ -31,7 +31,7 @@ def assert_active_version(launcher, expected):
     installed = brew_version()
     assert expected in installed, installed
     target = launcher.resolve()
-    assert target.parent.parent.name == expected and target.parent.parent.parent.name == "clipmaker", target
+    assert target.parent.parent.name == expected and target.parent.parent.parent.name == "vizorplay", target
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
     formula = args.formula.resolve()
     tap = Path(subprocess.run(["brew", "--repository", "local/vizorplay"], check=True,
                              capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
-    if formula != tap / "Formula/clipmaker.rb":
+    if formula != tap / "Formula/vizorplay.rb":
         parser.error("Refusing to modify a formula outside the disposable local/vizorplay tap")
     evidence = ROOT / "build/homebrew-upgrade"
     evidence.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ def main():
             project_path = data / "projects" / project_id / "project.json"
             preserved = project_path.read_bytes()
             shutil.copyfile(args.candidate.resolve(), formula)
-            subprocess.run(["brew", "upgrade", "--build-from-source", "local/vizorplay/clipmaker"],
+            subprocess.run(["brew", "upgrade", "--build-from-source", "local/vizorplay/vizorplay"],
                            check=True, timeout=600)
             assert_active_version(args.launcher, "1.0.0")
             assert project_path.read_bytes() == preserved, "Homebrew upgrade changed the project"

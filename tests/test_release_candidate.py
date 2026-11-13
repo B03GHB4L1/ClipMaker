@@ -39,11 +39,11 @@ class ReleaseCandidateTests(unittest.TestCase):
         for receipt in manifest["artifacts"]:
             self.assertEqual(digest(target / receipt["payload"]), receipt["sha256"])
         source = next(item for item in manifest["artifacts"] if item["platform"] == "macOS")
-        formula = (target / "clipmaker.rb").read_text()
+        formula = (target / "vizorplay.rb").read_text()
         self.assertIn(source["sha256"], formula)
         self.assertIn("releases/download/v1.0.0/vizorplay-1.0.0-source.tar.gz", formula)
         windows = next(item for item in manifest["artifacts"] if item["platform"] == "Windows")
-        installer = (target / "B4L1.ClipMaker.installer.yaml").read_text()
+        installer = (target / "B4L1.VizorPlay.installer.yaml").read_text()
         self.assertIn(windows["sha256"].upper(), installer)
         for line in (target / "SHA256SUMS").read_text().splitlines():
             checksum, filename = line.split("  ", 1)
