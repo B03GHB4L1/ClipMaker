@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.packaging-venv/
+venv/
+build/
+dist/
+target/
+node_modules/
+.clipmaker_theme
+match data/
+.secrets/

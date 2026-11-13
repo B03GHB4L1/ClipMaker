@@ -1,0 +1,399 @@
+"""Test automation wiring without invoking a GUI or touching real user projects."""
+import hashlib
+import io
+import json
+import queue
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import MagicMock, Mock, patch
+from urllib.error import HTTPError
+
+from packaging import clipmaker_bootstrap as bootstrap
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class AutomationContracts(unittest.TestCase):
+    def test_health_reply_matches_the_desktop_shell_check(self):
+        # src-tauri/src/lib.rs backend_ready() matches these exact substrings.
+        import os
+        import re
+        import threading
+        from urllib.request import urlopen
+        from packaging.clipmaker_api_server import create_server
+        with tempfile.TemporaryDirectory() as name:
+            server = create_server("127.0.0.1", 0, Path(name))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{server.server_port}/api/health", timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    body = response.read().decode("utf-8")
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertIn('"status": "ok"', body)
+        self.assertIn(f'"pid": {os.getpid()},', body)
+        self.assertRegex(body, r'"parent_pid": \d+,')
+        shell = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        for needle in ('\\"status\\": \\"ok\\"', '\\"pid\\": {pid},', '\\"parent_pid\\": {pid},', "child.try_wait()"):
+            self.assertIn(needle, shell)
+        self.assertTrue(re.search(r"/api/health", shell))
+
+    def test_app_ships_without_unused_media_libraries(self):
+        # moviepy/imageio were only an FFmpeg lookup fallback; Pillow came with them.
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        for name in ("moviepy", "imageio==", "pillow"):
+            self.assertNotIn(name, requirements)
+        excludes = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8").split("excludes=", 1)[1]
+        for name in ('"PIL"', '"imageio"', '"moviepy"'):
+            self.assertIn(name, excludes)
+        import subprocess
+        result = subprocess.run(["git", "grep", "-n", "-E", "(import|from) (moviepy|PIL)", "--", "app", "packaging/*.py"],
+                                cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "", "app code must not import moviepy or Pillow")
+
+    def test_app_ships_no_bundled_browser(self):
+        # docs/SCRAPER_BROWSER_PLAN.md: the scraper uses the installed browser.
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+        self.assertNotIn("playwright", requirements)
+        spec = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8")
+        collected = spec.split("for package in", 1)[1].split(":", 1)[0]
+        self.assertNotIn("playwright", collected)
+        self.assertIn('"playwright"', spec.split("excludes=", 1)[1])
+        self.assertIn('"browser_capture"', spec)
+        self.assertNotIn("playwright", (ROOT / "packaging/clipmaker_bootstrap.py").read_text(encoding="utf-8"))
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            self.assertNotIn("PLAYWRIGHT_BROWSERS_PATH=0", workflow.read_text(encoding="utf-8"), workflow.name)
+
+    def test_linux_package_installs_survive_runner_mirror_outage(self):
+        import yaml
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            jobs = yaml.safe_load(workflow.read_text(encoding="utf-8")).get("jobs", {})
+            for name, job in jobs.items():
+                guarded = False
+                for step in job.get("steps", []):
+                    run = step.get("run", "")
+                    if step.get("uses") == "./.github/actions/ubuntu-mirror" or "apt-mirrors.txt" in run:
+                        guarded = True
+                    installs = "--with-deps" in run or "apt-get update" in run
+                    if installs and "ubuntu" in str(job.get("runs-on", "")) + str(job.get("strategy", "")):
+                        self.assertTrue(guarded, f"{workflow.name}:{name} installs packages before the mirror fallback")
+        action = (ROOT / ".github/actions/ubuntu-mirror/action.yml").read_text(encoding="utf-8")
+        self.assertIn("archive.ubuntu.com", action)
+        self.assertIn("::warning::", action)  # the switch is never silent
+
+    def test_windows_desktop_app_opens_no_terminal(self):
+        # Without this attribute Windows opens a terminal beside the app, and
+        # closing that terminal ends the app.
+        main = (ROOT / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn('#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]', main)
+        # The engine stays a console program started without a window, so the
+        # FFmpeg and browser processes it starts never open windows either.
+        lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn("creation_flags(0x08000000)", lib)
+
+    def test_programs_users_see_are_named_vizorplay(self):
+        # docs/RENAME_TO_VIZORPLAY_PLAN.md
+        import re
+        cargo = (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('name = "vizorplay"', cargo)  # vizorplay.exe, /usr/bin/vizorplay
+        lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        spec = (ROOT / "packaging/pyinstaller/clipmaker_server.spec").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r'name="([^"]+)"', spec), ["vizorplay-engine", "vizorplay-engine"])
+        self.assertIn('"backend/vizorplay-engine.exe"', lib)
+        self.assertIn('"backend/vizorplay-engine"', lib)
+        formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
+        self.assertIn("class Vizorplay < Formula", formula)
+        self.assertIn('(bin/"vizorplay").write', formula)
+        winget = sorted(path.name for path in (ROOT / "packaging/winget").glob("*.yaml.in"))
+        self.assertTrue(winget and all(name.startswith("B4L1.VizorPlay.") for name in winget), winget)
+        for name in winget:
+            self.assertIn("PackageIdentifier: B4L1.VizorPlay", (ROOT / "packaging/winget" / name).read_text(encoding="utf-8"))
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            text = workflow.read_text(encoding="utf-8")
+            # pre-rename-dist/ is the deliberately old upgrade predecessor.
+            self.assertIsNone(re.search(r"(?<![\w-])dist/clipmaker-server/", text), workflow.name)
+            self.assertFalse("CLIPMAKER_RUNTIME_DIR" in text, workflow.name)
+        # Projects are saved in a folder named after this ID; changing it would
+        # make upgraded installs open an empty folder.
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertEqual(config["identifier"], "com.b4l1.clipmaker")
+
+    def test_windows_upgrade_removes_pre_rename_programs(self):
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        hooks = ROOT / "src-tauri" / config["bundle"]["windows"]["nsis"]["installerHooks"]
+        source = hooks.read_text(encoding="utf-8")
+        for line in ('Delete "$INSTDIR\\clipmaker.exe"', 'Delete "$INSTDIR\\backend\\clipmaker-server.exe"'):
+            self.assertIn(line, source)
+        for hook in ("NSIS_HOOK_POSTINSTALL", "NSIS_HOOK_POSTUNINSTALL"):
+            self.assertIn(f"!macro {hook}", source)
+        self.assertNotIn("RMDir", source)  # never deletes folders, so never project data
+        workflow = (ROOT / ".github/workflows/e2e.yml").read_text(encoding="utf-8")
+        self.assertIn("--candidate-app (Join-Path $destination 'vizorplay.exe')", workflow)
+        self.assertIn("--candidate-app /usr/bin/vizorplay", workflow)
+        self.assertIn("PRE_RENAME_COMMIT: fcd36ad6d5a8045f0098258a737b209a50c52f36", workflow)
+
+    def test_mac_launcher_moves_pre_rename_data_folder_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            support = home / "Library" / "Application Support"
+            legacy = support / "ClipMaker" / "runtime"
+            (legacy / "data" / "projects" / "p1").mkdir(parents=True)
+            (legacy / "data" / "projects" / "p1" / "project.json").write_text("{}", encoding="utf-8")
+            root = bootstrap.runtime_root({}, home)
+            self.assertEqual(root, support / "VizorPlay" / "runtime")
+            self.assertTrue((root / "data" / "projects" / "p1" / "project.json").is_file())
+            self.assertFalse((support / "ClipMaker").exists())
+            # An existing new folder is never overwritten by a stray old one.
+            (legacy / "data").mkdir(parents=True)
+            self.assertEqual(bootstrap.runtime_root({}, home), root)
+            self.assertTrue(legacy.is_dir())
+            self.assertTrue((root / "data" / "projects" / "p1" / "project.json").is_file())
+        self.assertEqual(bootstrap.runtime_root({"VIZORPLAY_RUNTIME_DIR": "/x/new", "CLIPMAKER_RUNTIME_DIR": "/x/old"}),
+                         Path("/x/new"))
+        self.assertEqual(bootstrap.runtime_root({"CLIPMAKER_RUNTIME_DIR": "/x/old"}), Path("/x/old"))
+
+    def test_homebrew_formula_installs_every_local_server_module(self):
+        import re
+        formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
+        server = (ROOT / "packaging/clipmaker_api_server.py").read_text(encoding="utf-8")
+        siblings = {name for name in re.findall(r"^\s+from (\w+) import", server, re.M)
+                    if (ROOT / "packaging" / f"{name}.py").is_file()}
+        self.assertIn("process_owner", siblings)
+        for name in siblings:
+            self.assertIn(f'libexec.install "packaging/{name}.py"', formula)
+        self.assertNotIn("analysis_server", formula)
+
+    def test_homebrew_upgrade_checks_linked_keg_even_if_old_version_is_retained(self):
+        from tests.homebrew_upgrade import assert_active_version
+        launcher = Mock()
+        launcher.resolve.return_value = Path("Cellar/vizorplay/1.0.0/bin/vizorplay")
+        with patch("tests.homebrew_upgrade.brew_version", return_value=["0.9.0", "1.0.0"]):
+            assert_active_version(launcher, "1.0.0")
+            launcher.resolve.return_value = Path("Cellar/vizorplay/0.9.0/bin/vizorplay")
+            with self.assertRaises(AssertionError):
+                assert_active_version(launcher, "1.0.0")
+
+    def test_homebrew_upgrade_uses_stable_launcher_not_predecessor_cellar_path(self):
+        from tests.homebrew_upgrade import launcher_command
+        launcher = Mock()
+        launcher.absolute.return_value = Path("stable/bin/vizorplay")
+        launcher.resolve.return_value = Path("Cellar/vizorplay/0.9.0/bin/vizorplay")
+        self.assertEqual(launcher_command(launcher), [str(Path("stable/bin/vizorplay")), "--no-browser"])
+        launcher.resolve.assert_not_called()
+
+    def test_windows_package_lifecycle_uses_silent_installer_and_installed_uninstaller(self):
+        from tests.native_smoke import package_lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "clipmaker.exe"
+            uninstaller = root / "uninstall.exe"
+            uninstaller.touch()
+            with patch("tests.native_smoke.sys.platform", "win32"), \
+                 patch("tests.native_smoke.subprocess.CREATE_NO_WINDOW", 0x08000000, create=True), \
+                 patch("tests.native_smoke.subprocess.run") as run:
+                package_lifecycle(app, root / "setup.exe")
+                self.assertEqual(run.call_args.args[0], [str(root / "setup.exe"), "/S", f"/D={root}"])
+                package_lifecycle(app, root / "setup.exe", uninstall=True)
+                self.assertEqual(run.call_args.args[0], [str(uninstaller), "/S"])
+                self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_linux_package_lifecycle_uses_package_metadata_and_checked_commands(self):
+        from tests.native_smoke import package_lifecycle
+        with patch("tests.native_smoke.sys.platform", "linux"), \
+             patch("tests.native_smoke.subprocess.run") as run:
+            run.return_value.stdout = "vizorplay\n"
+            package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"))
+            self.assertEqual(run.call_args.args[0], ["sudo", "apt-get", "install", "--reinstall", "-y", str(Path("/tmp/app.deb"))])
+            package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"), uninstall=True)
+            self.assertEqual(run.call_args.args[0], ["sudo", "apt-get", "remove", "-y", "vizorplay"])
+            self.assertEqual(run.call_args.kwargs["timeout"], 120)
+            run.return_value.stdout = "--unsafe"
+            with self.assertRaises(RuntimeError):
+                package_lifecycle(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb"), uninstall=True)
+
+    def test_native_export_reads_dom_label_not_css_transformed_text(self):
+        from tests.native_smoke import export_finished
+        driver = Mock()
+        label = driver.find_element.return_value
+        label.text = "EXPORT COMPLETE"
+        label.get_attribute.return_value = "Export complete"
+        self.assertTrue(export_finished(driver))
+        label.get_attribute.assert_called_with("textContent")
+        label.get_attribute.return_value = "Exporting reel"
+        self.assertFalse(export_finished(driver))
+        for failure in ("Export failed", "Job cancelled", "Could not build plan", "Setup needs attention"):
+            label.get_attribute.return_value = failure
+            with self.subTest(failure=failure), self.assertRaises(AssertionError):
+                export_finished(driver)
+
+    def test_native_lookup_scrolls_before_testing_reveal_visibility(self):
+        from tests.native_smoke import ready_element
+        driver = Mock()
+        target = driver.find_element.return_value
+        target.is_displayed.return_value = False
+        driver.execute_script.side_effect = lambda *args: setattr(target.is_displayed, "return_value", True)
+        wait = Mock()
+        wait.until.side_effect = lambda condition: condition(driver)
+        self.assertIs(ready_element(driver, wait, "[data-continue]"), target)
+        driver.execute_script.assert_called_once()
+        target.is_displayed.assert_called_once()
+
+    def test_live_checks_preserve_success_and_report_response_body(self):
+        from tests.live_scrape import check_providers
+        match = {"event_count": 23, "home_team": "Home", "away_team": "Away"}
+        denied = HTTPError("http://localhost/api/scrape", 500, "error", {},
+                           io.BytesIO(b'{"error":"WhoScored blocked the request (403)"}'))
+        replies = [{"project": {"id": "first"}}, {"match": match}, {"project": match},
+                   {"project": {"id": "second"}}, denied]
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("tests.live_scrape.request", side_effect=replies):
+            result = check_providers("http://localhost", {"scoresway": "one", "whoscored": "two"}, Path(directory))
+            self.assertEqual(result["scoresway"], {"status": "passed", "events": 23})
+            self.assertEqual(result["whoscored"]["status"], "failed")
+            self.assertIn("403", result["whoscored"]["error"])
+            self.assertEqual(json.loads((Path(directory) / "result.json").read_text()), result)
+
+    def test_live_checks_continue_after_first_provider_fails(self):
+        from tests.live_scrape import check_providers
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("tests.live_scrape.request", side_effect=RuntimeError("provider unavailable")) as fetch:
+            result = check_providers("http://localhost", {"scoresway": "one", "whoscored": "two"}, Path(directory))
+        self.assertEqual(fetch.call_count, 2)
+        self.assertTrue(all(item["status"] == "failed" for item in result.values()))
+
+    def test_whoscored_keeps_provider_error_in_queue(self):
+        from app import whoscored_scraper
+        messages = queue.Queue()
+        session = Mock()
+        session.get.return_value.status_code = 403
+        with patch("curl_cffi.requests.Session", return_value=session), \
+             patch.object(whoscored_scraper.time, "sleep"):
+            whoscored_scraper.scrape_whoscored("https://www.whoscored.com/matches/1", messages, str(ROOT / "app"))
+        errors = [item for item in list(messages.queue) if item["type"] == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("403", errors[0]["msg"])
+
+    def test_native_driver_waits_for_protocol_readiness(self):
+        from tests.native_smoke import wait_for_driver
+        process = Mock()
+        process.poll.return_value = None
+        responses = [OSError("native driver is not listening yet"),
+                     io.BytesIO(b'{"value":{"ready":false}}'),
+                     io.BytesIO(b'{"value":{"ready":true}}')]
+        with patch("tests.native_smoke.urlopen", side_effect=responses) as query, \
+             patch("tests.native_smoke.time.sleep"):
+            wait_for_driver(process, 4444)
+        self.assertEqual(query.call_count, 3)
+
+    def test_launcher_accepts_isolated_data_and_suppresses_browser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            python = bootstrap.venv_python(runtime / "venv")
+            python.parent.mkdir(parents=True)
+            python.touch()
+            requirements = root / "requirements.txt"
+            requirements.write_bytes(b"fixture\n")
+            (runtime / "requirements.sha256").write_text(hashlib.sha256(requirements.read_bytes()).hexdigest())
+            process = Mock()
+            process.wait.return_value = 0
+            with patch.object(bootstrap, "__file__", str(root / "clipmaker_bootstrap.py")), \
+                 patch.object(bootstrap, "runtime_root", return_value=runtime), \
+                 patch.object(bootstrap, "wait_until_ready", return_value=True), \
+                 patch.object(bootstrap.subprocess, "Popen", return_value=process) as start, \
+                 patch.object(bootstrap.webbrowser, "open") as browser, \
+                 patch.object(sys, "argv", ["launcher", "--no-browser", "--port", "4188", "--data-dir", str(root / "isolated")]):
+                self.assertEqual(bootstrap.main(), 0)
+            self.assertEqual(start.call_args.args[0][-4:], ["--port", "4188", "--data-dir", str((root / "isolated").resolve())])
+            browser.assert_not_called()
+
+    def test_formula_override_does_not_rewrite_repository_urls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "vizorplay.rb"
+            command = [sys.executable, str(ROOT / "packaging/render_homebrew_formula.py"),
+                       "--version", "1.0.0", "--sha256", "a" * 64, "--output", str(target)]
+            subprocess.run([*command, "--source-url", "file:///tmp/vizorplay.tar.gz"], check=True, capture_output=True)
+            source = target.read_text()
+            self.assertIn('url "file:///tmp/vizorplay.tar.gz"', source)
+            self.assertIn('version "1.0.0"', source)
+            self.assertIn('homepage "https://github.com/B03GHB4L1/ClipMaker"', source)
+            rejected = subprocess.run([*command, "--source-url", 'file:///tmp/a"; system("bad")'], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+
+    def test_native_selectors_exist_in_shipped_pages(self):
+        intake = (ROOT / "ui/index.html").read_text(encoding="utf-8")
+        filters = (ROOT / "ui/filters.html").read_text(encoding="utf-8")
+        for selector in ("data-new-project", "data-continue", "data-engine-state"):
+            self.assertIn(selector, intake)
+        for selector in ("filter-preview-button", "data-export-button", "data-preview-count", "data-job-state"):
+            self.assertIn(selector, filters)
+        self.assertIn('id="timing"', filters)
+
+    def test_debian_package_declares_playback_codecs(self):
+        config = json.loads((ROOT / "src-tauri/tauri.conf.json").read_text())
+        dependencies = config["bundle"]["linux"]["deb"]["depends"]
+        self.assertIn("gstreamer1.0-plugins-good", dependencies)
+        self.assertIn("gstreamer1.0-libav", dependencies)
+
+    def test_full_workflow_is_read_only_and_covers_all_os(self):
+        # PyYAML is a CI-only dependency; source guards still run locally without it.
+        source = (ROOT / ".github/workflows/e2e.yml").read_text()
+        self.assertNotIn("github.event.repository.private", source)
+        self.assertIn("contents: read", source)
+        self.assertNotIn("contents: write", source)
+        for runner in ("windows-latest", "ubuntu-22.04", "macos-latest"):
+            self.assertIn(runner, source)
+        for script in ("browser_smoke.py", "native_smoke.py", "live_scrape.py"):
+            self.assertIn(script, source)
+        self.assertIn("if: always()", source)
+        self.assertNotIn("action-gh-release", source)
+        try:
+            import yaml
+        except ImportError:
+            return
+        parsed = yaml.safe_load(source)
+        triggers = parsed.get("on", parsed.get(True))
+        self.assertEqual(set(triggers), {"workflow_dispatch", "workflow_call", "push"})
+        self.assertEqual(triggers["push"]["branches"], ["codex/release-packaging"])
+        self.assertEqual(parsed["permissions"], {"contents": "read"})
+        self.assertEqual(set(parsed["jobs"]["verdict"]["needs"]),
+                         {"core", "installed-desktop", "homebrew", "live-providers"})
+        release = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        self.assertEqual(release["jobs"]["acceptance"]["uses"], "./.github/workflows/e2e.yml")
+        self.assertEqual(release["jobs"]["candidate"]["needs"], "acceptance")
+        self.assertNotIn("build", release["jobs"], "Never rebuild installers after acceptance")
+        self.assertEqual(release["jobs"]["publish"]["needs"], "candidate")
+        self.assertEqual(release["jobs"]["publish"]["if"], "github.ref == 'refs/tags/v1.0.0'")
+        self.assertIn("tested-package-*", json.dumps(release["jobs"]["candidate"]))
+        self.assertIn("--upgrade-from 0.9.0", source)
+        self.assertIn("tests/homebrew_upgrade.py", source)
+
+    def test_installed_linux_version_comes_from_package_database(self):
+        from tests.native_smoke import installed_version
+        with patch("tests.native_smoke.sys.platform", "linux"), \
+             patch("tests.native_smoke.subprocess.run") as run:
+            run.side_effect = [Mock(stdout="vizorplay\n"), Mock(stdout="1.0.0")]
+            self.assertEqual(installed_version(Path("/usr/bin/clipmaker"), Path("/tmp/app.deb")), "1.0.0")
+            self.assertEqual(run.call_args.args[0], ["dpkg-query", "--show", "--showformat=${Version}", "vizorplay"])
+
+    def test_installed_windows_version_accepts_quoted_nsis_install_location(self):
+        from tests.native_smoke import installed_version
+        registry = MagicMock()
+        registry.KEY_READ = 1
+        registry.KEY_WOW64_64KEY = 2
+        registry.KEY_WOW64_32KEY = 4
+        registry.QueryInfoKey.return_value = (1, 0, 0)
+        app = Path("installed/clipmaker.exe").resolve()
+        values = {"DisplayName": "VizorPlay", "InstallLocation": f'"{app.parent}"', "DisplayVersion": "0.9.0"}
+        registry.QueryValueEx.side_effect = lambda key, name: (values[name], 1)
+        with patch.dict(sys.modules, {"winreg": registry}), patch("tests.native_smoke.sys.platform", "win32"):
+            self.assertEqual(installed_version(app, Path("candidate.exe")), "0.9.0")
+
+
+if __name__ == "__main__":
+    unittest.main()

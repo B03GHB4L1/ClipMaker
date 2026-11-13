@@ -1,0 +1,108 @@
+/* Native analysis workspace (Phase 1 shell). Uses the shared design tokens. */
+.native-workspace { display: grid; grid-template-rows: auto auto 1fr; align-content: start; gap: 8px; padding-bottom: 12px; height: calc(100vh - 119px); overflow: auto; font-family: var(--cm-font); }
+.native-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 12px; color: var(--cm-muted); }
+.native-summary strong { color: var(--cm-ink); font-size: 14px; }
+.native-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cm-rule); scrollbar-width: thin; }
+.native-tabs [role=tab] { flex: none; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--cm-muted); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.native-tabs [role=tab]:hover { color: var(--cm-ink); }
+.native-tabs [role=tab][aria-selected=true] { color: var(--cm-ink); border-bottom-color: var(--cm-ink); }
+.native-tabs [role=tab]:focus-visible, .native-panel:focus-visible, .native-retry:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
+.native-panel { min-height: 240px; }
+.native-panel[aria-busy=true] { opacity: .6; transition: opacity .2s var(--cm-settle); }
+.native-message { max-width: 560px; padding: 28px 4px; }
+.native-message h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--cm-ink); }
+.native-message p { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--cm-muted); }
+.native-error h2 { color: #ac302e; }
+.native-loading p::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 8px; border: 2px solid var(--cm-rule); border-top-color: var(--cm-ink); border-radius: 50%; vertical-align: -1px; animation: native-spin .8s linear infinite; }
+.native-retry { display: inline-block; padding: 7px 12px; border: 1px solid var(--cm-ink); background: var(--cm-ink); color: var(--cm-paper); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.analysis-component { display: block; width: 100%; border: 0; }
+@keyframes native-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .native-loading p::after { animation: none; } }
+@media (max-width: 560px) { .native-workspace { height: auto; min-height: calc(100vh - 119px); } .native-tabs [role=tab] { padding: 8px; font-size: 11px; } }
+
+/* Shot Map and shared tab controls (Phase 2) */
+.native-panel { display: grid; gap: 10px; align-content: start; }
+.native-controls { border: 1px solid var(--cm-rule); padding: 0 10px; }
+.native-controls > summary { padding: 8px 0; font-size: 12px; cursor: pointer; color: var(--cm-ink); }
+.native-control-grid { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 0 0 10px; }
+.native-field { display: grid; gap: 4px; min-width: 0; }
+.native-field-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--cm-muted); }
+.native-field select { min-width: 180px; max-width: 100%; padding: 5px 6px; border: 1px solid var(--cm-rule); background: var(--cm-paper); color: var(--cm-ink); font: inherit; font-size: 12px; }
+.native-segmented { display: flex; flex-wrap: wrap; border: 1px solid var(--cm-rule); }
+.native-segmented label { position: relative; cursor: pointer; }
+.native-segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.native-segmented span { display: block; padding: 5px 10px; font-size: 12px; color: var(--cm-muted); }
+.native-segmented input:checked + span { background: var(--cm-ink); color: var(--cm-paper); }
+.native-segmented input:focus-visible + span { outline: 2px solid var(--cm-ink); outline-offset: 1px; }
+.native-stats { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 8px 10px; border: 1px solid var(--cm-rule); }
+.native-stat { display: grid; gap: 2px; }
+.native-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--cm-muted); }
+.native-stat-values { display: flex; gap: 6px; align-items: baseline; font-size: 15px; }
+.native-share { min-width: 180px; }
+.native-share-bar { height: 6px; background: #ff7351; overflow: hidden; }
+.native-share-bar span { display: block; height: 100%; background: #7ab4ff; }
+.native-stat .native-stat-values b { font-weight: 600; }
+.is-home { color: #1f5fae; }
+.is-away { color: #b4412b; }
+.native-legend, .native-muted { margin: 0; font-size: 11px; color: var(--cm-muted); }
+.native-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.native-picker select { flex: 1 1 260px; max-width: 520px; padding: 6px; border: 1px solid var(--cm-rule); background: var(--cm-paper); color: var(--cm-ink); font: inherit; font-size: 12px; }
+.native-button { display: inline-block; padding: 7px 12px; border: 1px solid var(--cm-ink); background: var(--cm-ink); color: var(--cm-paper); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
+.native-button.native-secondary { background: transparent; color: var(--cm-ink); }
+.native-button:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
+.native-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
+.native-shot-panel h3 { margin: 0 0 2px; font-size: 16px; }
+.native-shot-panel dl { margin: 12px 0 0; font-size: 12px; }
+.native-shot-panel dt { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--cm-muted); }
+.native-shot-panel dd { margin: 2px 0 0; }
+.native-badge { display: inline-block; margin-top: 8px; padding: 2px 8px; border: 1px solid currentColor; font-size: 11px; color: var(--cm-muted); }
+.native-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.native-badges .native-badge { margin-top: 0; }
+.native-tone-good { color: #2d7a2d; }
+.native-tone-info { color: #1f5fae; }
+.native-tone-bad { color: #b4412b; }
+.native-notice { padding: 28px 4px; text-align: center; }
+.native-aux-box:empty, .native-map-box:empty { display: none; }
+.native-components { display: grid; gap: 8px; }
+.native-watch { display: grid; gap: 8px; align-content: start; }
+.native-clip-label { margin: 0; font-size: 12px; font-weight: 600; }
+.native-slider-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.native-slider { grid-template-columns: 1fr auto; align-items: center; }
+.native-slider .native-field-label { grid-column: 1 / -1; }
+.native-slider output { font-size: 12px; min-width: 3ch; text-align: right; }
+.native-watch video { width: 100%; max-height: 320px; background: #000; }
+.native-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.native-inline-message { margin: 0; font-size: 12px; color: var(--cm-muted); }
+.native-inline-error { margin: 0; font-size: 12px; color: #ac302e; }
+@media (max-width: 720px) { .native-detail { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .native-field select { min-width: 0; width: 100%; } .native-control-grid > .native-field { flex: 1 1 100%; } }
+
+/* Comparison (Phase 3) */
+.native-comparison-controls { align-items: end; }
+.native-warning { padding: 8px 10px; border: 1px solid #ac302e; }
+.native-figure-section { display: grid; gap: 6px; }
+.native-figure-section h3 { margin: 6px 0 0; font-size: 13px; font-weight: 600; }
+.native-figure { min-height: 120px; width: 100%; }
+.native-figure-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.native-moments { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.native-moment { display: grid; gap: 8px; align-content: start; }
+.native-moment h4 { margin: 0; font-size: 13px; }
+.native-table-wrap { overflow-x: auto; }
+.native-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.native-table th, .native-table td { padding: 5px 8px; border-bottom: 1px solid var(--cm-rule); text-align: left; }
+.native-table th { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--cm-muted); }
+@media (max-width: 720px) { .native-figure-pair, .native-moments { grid-template-columns: 1fr; } }
+
+/* Tactical Lab (Phase 4) */
+.native-tactical { display: grid; gap: 10px; align-content: start; }
+.native-section-title { margin: 6px 0 0; font-size: 15px; font-weight: 600; }
+.native-metrics { gap: 8px 28px; }
+.native-metrics .native-stat-values b { font-size: 16px; }
+.native-tab-controls { padding: 4px 0; }
+.native-check { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+.native-match-list { display: grid; gap: 4px; margin: 0; padding: 6px 8px; border: 1px solid var(--cm-rule); max-height: 180px; overflow: auto; }
+.native-info { padding: 8px 10px; border: 1px solid var(--cm-rule); }
+.native-html { font-size: 12px; overflow-x: auto; }
+.native-markdown p, .native-markdown h4 { margin: 0 0 6px; font-size: 12px; }
+.native-tactical-media { display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
+.native-tactical-media h4 { margin: 0; font-size: 13px; }

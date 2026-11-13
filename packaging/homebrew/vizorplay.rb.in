@@ -1,0 +1,27 @@
+class Vizorplay < Formula
+  desc "Football video clipping and analysis workstation"
+  homepage "https://github.com/B03GHB4L1/ClipMaker"
+  url "https://github.com/B03GHB4L1/ClipMaker/archive/refs/tags/v@VERSION@.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on "ffmpeg"
+  depends_on "python@3.12"
+
+  def install
+    libexec.install "app", "ui", "requirements.txt"
+    libexec.install "packaging/clipmaker_bootstrap.py"
+    libexec.install "packaging/clipmaker_api_server.py"
+    libexec.install "packaging/process_owner.py"
+
+    (bin/"vizorplay").write <<~SH
+      #!/bin/bash
+      exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
+    SH
+    (bin/"vizorplay").chmod 0755
+  end
+
+  test do
+    assert_predicate bin/"vizorplay", :executable?
+  end
+end
