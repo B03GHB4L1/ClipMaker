@@ -18,7 +18,8 @@ def _figure_json(fig):
     """Figure JSON for Plotly.js. The classic page sends Streamlit's placeholder
     template (replaced by its theme in the browser); every colour these charts
     show is set explicitly, so the native page uses the neutral "none" template."""
-    figure = json.loads(fig.to_json())
+    from .st_shim import figure_json
+    figure = figure_json(fig)
     figure.setdefault("layout", {})["template"] = {}
     return figure
 

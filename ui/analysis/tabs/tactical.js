@@ -16,6 +16,49 @@ const el = (tag, attributes = {}, ...children) => {
   return node;
 };
 
+// Tabs whose single pitch map sits beside its controls and stats, not under them.
+const SIDE_BY_SIDE_TABS = new Set(["defensive-transitions", "attacking-transitions"]);
+
+const isPitch = (figure) => figure.layout?.yaxis?.scaleanchor === "x";
+
+// Pitch maps size from their width so the pitch fills the plot instead of sitting
+// small in a wide strip. On narrow screens the legend moves under the pitch.
+const NARROW_PITCH = 640;
+
+const pitchLayout = (target, figure) => {
+  const { layout } = figure;
+  const narrow = target.clientWidth < NARROW_PITCH;
+  const named = new Set(figure.data.filter((trace) => trace.name && trace.showlegend !== false).map((trace) => trace.name));
+  const hasLegend = layout.showlegend !== false && named.size > 1;
+  const margin = { l: 80, r: 80, t: 100, b: 80, ...layout.margin };
+  const adjusted = {
+    ...layout,
+    // Spare room goes to the page colour around the pitch, never to stretched grass.
+    xaxis: { ...layout.xaxis, constrain: "domain" },
+    yaxis: { ...layout.yaxis, constrain: "domain" },
+  };
+  let legendWidth = hasLegend ? 150 : 0;
+  if (narrow) {
+    legendWidth = 0;
+    const rows = hasLegend ? Math.ceil(named.size / 2) : 0;
+    Object.assign(adjusted, {
+      margin: { ...margin, l: 8, r: 8, t: 64, b: 24 + rows * 22 },
+      legend: { ...layout.legend, orientation: "h", x: 0, xanchor: "left", y: -0.04, yanchor: "top" },
+      title: layout.title && { ...layout.title, font: { ...layout.title.font, size: 13 } },
+      // The hover hint does not apply to touch, and it runs off a phone screen.
+      annotations: (layout.annotations || []).filter((note) => !(note.yref === "paper" && note.y < 0)),
+    });
+  }
+  const used = adjusted.margin || margin;
+  const span = (axis) => Math.abs((axis?.range?.[1] ?? 100) - (axis?.range?.[0] ?? 0)) || 100;
+  const ratio = (layout.yaxis.scaleratio || 1) * span(layout.yaxis) / span(layout.xaxis);
+  const plotWidth = Math.max(160, target.clientWidth - (used.l ?? 80) - (used.r ?? 80) - legendWidth);
+  const natural = plotWidth * ratio + (used.t ?? 100) + (used.b ?? 80);
+  // Capped so the whole pitch fits the window.
+  adjusted.height = Math.round(Math.min(Math.max(natural, narrow ? 240 : 360), Math.max(420, window.innerHeight - 120)));
+  return adjusted;
+};
+
 let plotlyLoading = null;
 const loadPlotly = () => {
   if (window.Plotly) return Promise.resolve(window.Plotly);
@@ -74,6 +117,7 @@ export async function renderTactical(panel, context) {
   const id = `tactical-${++uid}`;
   let view = null;
   let request = 0;
+  let resizeWatch = null;
 
   const scope = el("details", { class: "native-controls", open: true }, el("summary", { text: "Match and team" }));
   const scopeBody = el("div", { class: "native-control-grid" });
@@ -211,11 +255,39 @@ export async function renderTactical(panel, context) {
         default: break;
       }
     }
-    body.replaceChildren(...nodes);
+    const pitchFigures = figures.filter(([, element]) => isPitch(element.figure));
+    if (SIDE_BY_SIDE_TABS.has(context.slug) && figures.length === 1 && pitchFigures.length === 1) {
+      const [target] = figures[0];
+      const side = el("div", { class: "native-pitch-side" }, ...nodes.filter((node) => node !== target));
+      body.replaceChildren(el("div", { class: "native-pitch-layout" }, side, el("div", { class: "native-pitch-main" }, target)));
+    } else {
+      body.replaceChildren(...nodes);
+    }
+    resizeWatch?.disconnect();
     if (figures.length) {
       const Plotly = await loadPlotly();
-      await Promise.all(figures.map(([target, element]) =>
-        Plotly.react(target, element.figure.data, element.figure.layout, { ...element.config, responsive: true })));
+      await Promise.all(figures.map(([target, element]) => {
+        if (isPitch(element.figure)) target.dataset.narrow = String(target.clientWidth < NARROW_PITCH);
+        return Plotly.react(target, element.figure.data,
+          isPitch(element.figure) ? pitchLayout(target, element.figure) : element.figure.layout,
+          { ...element.config, responsive: true });
+      }));
+      if (pitchFigures.length && "ResizeObserver" in window) {
+        let frame = 0;
+        resizeWatch = new ResizeObserver(() => {
+          cancelAnimationFrame(frame);
+          frame = requestAnimationFrame(() => pitchFigures.forEach(([target, element]) => {
+            if (!target.isConnected) return;
+            const layout = pitchLayout(target, element.figure);
+            const narrow = String(target.clientWidth < NARROW_PITCH);
+            if (narrow !== target.dataset.narrow || Math.abs(layout.height - (target.layout?.height || 0)) > 4) {
+              target.dataset.narrow = narrow;
+              window.Plotly.react(target, element.figure.data, layout, { ...element.config, responsive: true });
+            }
+          }));
+        });
+        pitchFigures.forEach(([target]) => resizeWatch.observe(target));
+      }
     }
   };
 
@@ -237,5 +309,8 @@ export async function renderTactical(panel, context) {
   };
 
   await load();
-  return () => body.querySelectorAll(".native-figure").forEach((target) => window.Plotly && window.Plotly.purge(target));
+  return () => {
+    resizeWatch?.disconnect();
+    body.querySelectorAll(".native-figure").forEach((target) => window.Plotly && window.Plotly.purge(target));
+  };
 }

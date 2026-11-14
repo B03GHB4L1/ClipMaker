@@ -277,7 +277,8 @@ def _pitch_layout(fig, title="", height=520):
         dict(type="line", x0=50, y0=0, x1=50, y1=100, line=dict(color=line, width=1.4)),
         dict(type="rect", x0=0, y0=21, x1=16.5, y1=79, line=dict(color=line, width=1.3)),
         dict(type="rect", x0=83.5, y0=21, x1=100, y1=79, line=dict(color=line, width=1.3)),
-        dict(type="circle", x0=41.5, y0=35, x1=58.5, y1=65, line=dict(color=line, width=1.3)),
+        # Round on screen: y units are drawn at 0.68 of x units.
+        dict(type="circle", x0=41.3, y0=37.2, x1=58.7, y1=62.8, line=dict(color=line, width=1.3)),
     ]
     fig.update_layout(shapes=shapes)
     _annotate_plotly_export(

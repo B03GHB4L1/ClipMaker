@@ -7,8 +7,42 @@ Controls take their values from the request, validated like Streamlit would.
 """
 from __future__ import annotations
 
+import base64
 import json
+import math
 from contextlib import contextmanager
+
+
+def _plain_arrays(value):
+    """Decode Plotly's binary arrays ({"dtype", "bdata", "shape"}) into plain lists.
+
+    plotly.py 6 writes numpy data that way, but the bundled Plotly.js 2.27 cannot
+    read it and silently draws nothing, as the Tactical Lab transition maps did.
+    Non-finite numbers become null, which Plotly.js draws as a gap.
+    """
+    if isinstance(value, dict):
+        if isinstance(value.get("bdata"), str) and isinstance(value.get("dtype"), str):
+            import numpy as np
+            array = np.frombuffer(base64.b64decode(value["bdata"]), dtype=np.dtype(value["dtype"]))
+            shape = value.get("shape")
+            if shape:
+                dims = [int(part) for part in (shape.split(",") if isinstance(shape, str) else shape)]
+                array = array.reshape(dims)
+
+            def clean(item):
+                if isinstance(item, list):
+                    return [clean(part) for part in item]
+                return None if isinstance(item, float) and not math.isfinite(item) else item
+            return clean(array.tolist())
+        return {key: _plain_arrays(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_plain_arrays(item) for item in value]
+    return value
+
+
+def figure_json(figure):
+    """A Plotly figure as JSON the bundled Plotly.js can draw."""
+    return _plain_arrays(json.loads(figure.to_json()))
 
 
 class StopRender(Exception):
@@ -77,7 +111,7 @@ class Recorder:
                               "delta": str(delta or ""), "help": str(help or "")})
 
     def plotly_chart(self, figure, *args, config=None, **kwargs):
-        spec = json.loads(figure.to_json())
+        spec = figure_json(figure)
         self.elements.append({"kind": "plotly", "figure": spec, "config": _json(config or {})})
 
     def dataframe(self, data, *args, **kwargs):
