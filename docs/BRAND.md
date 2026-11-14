@@ -12,3 +12,9 @@ size; set only a width or a height where it is used.
 | `*-on-dark.svg` | The same three with the black parts in off-white `#F4F4F0`, for dark backgrounds |
 
 Colours: ink `#161616`, green `#1C9938`.
+
+The files are in `ui/assets/brand/`. The app shows the wordmark in the brand
+panel of every screen and uses the mark as the browser tab icon; the README
+uses the lockup. The desktop app icons (`src-tauri/icons/icon.png` and
+`icon.ico`) are the mark on an off-white rounded tile, so they stay visible on
+dark taskbars.

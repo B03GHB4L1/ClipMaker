@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./ui/assets/vizorplay-football.png" alt="VizorPlay" width="140">
+  <img src="./ui/assets/brand/vizorplay-lockup.svg" alt="VizorPlay" width="260">
 </p>
 
 <div align="center">
