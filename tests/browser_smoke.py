@@ -657,6 +657,23 @@ def exercise(page, base, root, evidence, errors):
     expect(page.get_by_role("spinbutton", name="End (video seconds)", exact=True)).to_have_value("3.5")
     page.screenshot(path=str(evidence / "filters.png"))
     exercise_native_workspace(page, base, project_id, evidence, errors)
+    stage("timeline sync gives the video most of the row and fits the player on screen")
+    # The player used to be capped at 610px beside a wide text column.
+    for width, height, min_video in ((1366, 768, 700), (760, 1000, 600)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(base + "/?project=" + project_id)
+        page.evaluate("document.querySelector('.sync-section').scrollIntoView({block: 'start'})")
+        sizes = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          return {video: box('.match-frame').width, shell: box('.preview-shell'), section: box('.sync-section'),
+                  setKickoff: box('[data-set-marker]').bottom, footer: box('.app-footer').top};
+        }""")
+        assert sizes["video"] >= min_video, (width, sizes)
+        if width > 800:
+            # Everything used while scrubbing stays on screen; Confirm may sit below the fold.
+            assert sizes["setKickoff"] <= sizes["footer"], ("Set kick-off runs under the footer", sizes)
+        else:
+            assert sizes["shell"]["width"] >= sizes["section"]["width"] - 1, ("stacked player is not full width", sizes)
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):
         page.set_viewport_size({"width": width, "height": height})
