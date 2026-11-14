@@ -117,19 +117,37 @@ class FallbackMediaTests(unittest.TestCase):
         self.assertIn("Audio", probe.stderr)
         return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
-    def export(self, individual, encoder_setting="auto"):
-        out = self.root / f"out-{individual}-{encoder_setting}"
+    def export(self, individual, encoder_setting="auto", windows=None, name=None):
+        out = self.root / (name or f"out-{individual}-{encoder_setting}")
         match = {"id": "m", "csv_path": str(self.csv), "video_path": str(self.video),
                  "markers": {"1H": "00:00:00", "2H": "00:00:00"}}
         config = build_clip_config(match, {
             "dry_run": False, "individual_clips": individual, "video_encoder": encoder_setting,
             "output_dir": str(out), "output_filename": "Reel", "encoder_preset": "ultrafast",
-            "clip_windows": [{"start": 1, "end": 3, "period": 1}, {"start": 6, "end": 9, "period": 1}]}, self.root)
+            "clip_windows": windows or [{"start": 1, "end": 3, "period": 1}, {"start": 6, "end": 9, "period": 1}]},
+            self.root)
         messages, progress = queue.Queue(), queue.Queue()
         core.run_clip_maker(config, messages, progress)
-        logs = [str(m.get("msg", "")) for m in messages.queue]
-        kinds = [m.get("type") for m in messages.queue if m.get("type") in {"done", "error"}]
+        self.messages = list(messages.queue)
+        logs = [str(m.get("msg", "")) for m in self.messages]
+        kinds = [m.get("type") for m in self.messages if m.get("type") in {"done", "error"}]
         return sorted(out.glob("*.mp4")), logs, kinds
+
+    def test_a_chosen_set_saved_as_files_keeps_timeline_numbers(self):
+        # Clips 3 and 7 of the timeline, one trimmed to 1.5 seconds.
+        windows = [{"start": 1, "end": 2.5, "period": 1, "number": 3, "label": "Ana - Goal @ 0:02 (P1)"},
+                   {"start": 6, "end": 9, "period": 1, "number": 7, "label": "Bo - Pass @ 0:08 (P1)"}]
+        files, logs, kinds = self.export(True, "software", windows, name="chosen-set")
+        self.assertEqual(kinds, ["done"], logs)
+        self.assertEqual([path.name for path in files], ["03_Ana_-_Goal.mp4", "07_Bo_-_Pass.mp4"])
+        self.assertAlmostEqual(self.duration(files[0]), 1.5, delta=0.3)
+        done = next(message for message in self.messages if message.get("type") == "done")
+        self.assertEqual(sorted(done["files"]), [str(path) for path in files])
+
+    def test_a_reel_reports_the_file_it_wrote(self):
+        files, logs, kinds = self.export(False, "software", name="reported-reel")
+        done = next(message for message in self.messages if message.get("type") == "done")
+        self.assertEqual(done["files"], [str(files[0])])
 
     def test_reel_redoes_every_part_in_software_when_the_card_fails(self):
         with patch.object(ve, "resolve", return_value=ve.NVENC), patch.object(ve, "video_args", side_effect=broken_hardware):

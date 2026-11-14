@@ -1,4 +1,8 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
+import {
+  duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
+  restoreSelection, totalDuration, trimClip,
+} from "./timeline.js";
 
 const form = document.querySelector("[data-filter-form]");
 const toast = document.querySelector("[data-toast]");
@@ -15,37 +19,57 @@ const jobLogs = document.querySelector("[data-job-logs]");
 const jobProgress = document.querySelector("[data-job-progress]");
 const cancelJobButton = document.querySelector("[data-cancel-job]");
 const snapshotSelect = document.querySelector("[data-snapshot-select]");
+const video = document.querySelector("[data-editor-video]");
+const track = document.querySelector("[data-clip-list]");
 const snapshotStorageKey = "clipmaker.filter-snapshots.v1";
+const PERIOD_KEYS = { 1: "1H", 2: "2H", 3: "ET1", 4: "ET2", 5: "PEN" };
 let snapshotLibrary = {};
 
 let activeMatch;
 let filterMetadata;
 let activeJobId;
-let previewComplete = false;
 let toastTimer;
 let corrections = [];
-let previewWindows = [];
 let previewRevision = 0;
 let previewBusy = false;
 let shotsAndKeyPasses = false;
-let selectedRange = { first: 1, last: null };
 let restoringProject = false;
+
+// Timeline editor state.
+let clips = [];
+let selected = new Set();
+let focusIndex = 0;
+let lastRemoved;
+let sources = new Map(); // period -> Promise<media url>
+let sourceUrls = new Map(); // file path -> media url, so periods in one file share it
+let fallbackMode = false; // the footage cannot play here, so clips are rendered
+let playAllActive = false;
+let draggingEdge = false;
+
+const field = (name) => document.querySelector(`[data-${name}]`);
+
 const persistFilters = () => {
   if (!activeMatch?.id || restoringProject) return Promise.resolve();
   const saving = saveProject(activeMatch.id, {
     project_name: document.querySelector("[data-project-name]").value.trim() || "Untitled project",
-    filter_settings: collectOptions(true), preview_windows: structuredClone(previewWindows),
-    preview_range: selectedRange,
+    filter_settings: collectOptions(true),
+    preview_windows: structuredClone(clips),
+    preview_range: { selected: [...selected] },
   });
   saving.catch((error) => showToast(error.message));
   return saving;
 };
+let persistTimer;
+const persistSoon = () => {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistFilters, 350);
+};
+
 const setExportBusy = (busy) => {
   document
-    .querySelectorAll(".filter-flow, .preset-row, [data-preview-results]")
+    .querySelectorAll(".filter-rail, .trim-panel, .trim-strip, .clip-timeline, .export-bar fieldset, .export-settings")
     .forEach((element) => (element.inert = busy));
   matchSelect.disabled = busy;
-  form.querySelector("[type=submit]").disabled = busy;
 };
 
 const apiRequest = async (path, options = {}) => {
@@ -105,19 +129,9 @@ const selectedValues = (selector) =>
     (input) => input.value,
   );
 
-const resetPreview = () => {
-  previewRevision++;
-  previewWindows = [];
-  selectedRange = { first: 1, last: null };
-  document
-    .querySelectorAll("[data-clip-list] video")
-    .forEach((video) => video.pause());
-  document.querySelector("[data-preview-results]").hidden = true;
-  previewComplete = false;
-  exportButton.disabled = true;
-  document.querySelector("[data-summary-note]").textContent =
-    "Preview first to confirm the matching clips.";
-};
+// ---------------------------------------------------------------------------
+// Filters
+// ---------------------------------------------------------------------------
 
 const currentTeam = () =>
   form.querySelector('input[name="team"]:checked')?.value || "";
@@ -131,8 +145,8 @@ const playerPool = () => {
   );
 };
 
-const renderPlayers = (selected = []) => {
-  const validSelection = new Set(selected);
+const renderPlayers = (chosen = []) => {
+  const validSelection = new Set(chosen);
   playerOptions.replaceChildren();
   playerPool().forEach((player) => {
     playerOptions.appendChild(
@@ -291,35 +305,36 @@ const updateSummary = () => {
   const half = form.querySelector('input[name="half"]:checked')?.value;
   const actions = selectedValues('input[name="action"]');
   const qualifiers = selectedValues('input[name="qualifier"]');
-  document.querySelector("[data-summary-team]").textContent =
-    team || "Both teams";
-  document.querySelector("[data-summary-players]").textContent = players.length
+  field("summary-team").textContent = team || "Both teams";
+  field("summary-players").textContent = players.length
     ? players.length <= 2
       ? players.join(", ")
       : `${players.length} players`
     : "All players";
-  document.querySelector("[data-summary-half]").textContent = half;
-  document.querySelector("[data-summary-actions]").textContent = actions.length
+  field("summary-half").textContent = half;
+  field("summary-actions").textContent = actions.length
     ? actions.length <= 2
       ? actions.map(humanize).join(", ")
       : `${actions.length} action types`
     : "All actions";
-  document.querySelector("[data-summary-qualifiers]").textContent =
+  field("summary-qualifiers").textContent =
     qualifiers.length ? `${qualifiers.length} active` : "None";
-  document.querySelector("[data-summary-title]").textContent =
-    actions.length || qualifiers.length
-      ? "Custom clip selection"
-      : "All match events";
+  field("action-count").textContent = actions.length ? `${actions.length} chosen` : "All";
+  field("timing-summary").textContent =
+    `${field("before-buffer").value || 0}s + ${field("after-buffer").value || 0}s`;
   refreshScopeCounts();
 };
 
 // Previews use the same encoding settings as the export.
 const encodingSettings = () => ({
-  video_crf: Number(document.querySelector("[data-video-crf]").value),
-  encoder_preset: document.querySelector("[data-encoder-preset]").value,
-  video_encoder: document.querySelector("[data-video-encoder]").value,
-  audio_bitrate: document.querySelector("[data-audio-bitrate]").value,
+  video_crf: Number(field("video-crf").value),
+  encoder_preset: field("encoder-preset").value,
+  video_encoder: field("video-encoder").value,
+  audio_bitrate: field("audio-bitrate").value,
 });
+
+const exportScope = () => document.querySelector('input[name="export-scope"]:checked')?.value || "all";
+const exportAs = () => document.querySelector('input[name="export-as"]:checked')?.value || "reel";
 
 const collectOptions = (dryRun) => {
   const options = {
@@ -330,25 +345,21 @@ const collectOptions = (dryRun) => {
     half_filter: form.querySelector('input[name="half"]:checked').value,
     qualifier_logic: form.querySelector('input[name="qualifier-logic"]:checked')
       .value,
-    before_buffer: Number(document.querySelector("[data-before-buffer]").value),
-    after_buffer: Number(document.querySelector("[data-after-buffer]").value),
-    min_gap: Number(document.querySelector("[data-min-gap]").value),
-    pitch_zone_filter: document.querySelector("[data-pitch-zone]").value,
-    depth_zone_filter: document.querySelector("[data-depth-zone]").value,
-    xt_min: Number(document.querySelector("[data-xt-min]").value),
-    top_n: Number(document.querySelector("[data-top-n]").value) || null,
-    output_filename:
-      document.querySelector("[data-output-name]").value.trim() ||
-      "Highlights.mp4",
-    individual_clips: document.querySelector("[data-individual-clips]").checked,
+    before_buffer: Number(field("before-buffer").value),
+    after_buffer: Number(field("after-buffer").value),
+    min_gap: Number(field("min-gap").value),
+    pitch_zone_filter: field("pitch-zone").value,
+    depth_zone_filter: field("depth-zone").value,
+    xt_min: Number(field("xt-min").value),
+    top_n: Number(field("top-n").value) || null,
+    output_filename: field("output-name").value.trim() || "Highlights.mp4",
+    individual_clips: exportAs() === "files",
+    export_scope: exportScope(),
     shots_and_key_passes_only: shotsAndKeyPasses,
     timeline_corrections: structuredClone(corrections),
-    output_dir: document.querySelector("[data-output-dir]").value.trim(),
-    output_format: document.querySelector("[data-output-format]").value,
-    video_crf: Number(document.querySelector("[data-video-crf]").value),
-    encoder_preset: document.querySelector("[data-encoder-preset]").value,
-    video_encoder: document.querySelector("[data-video-encoder]").value,
-    audio_bitrate: document.querySelector("[data-audio-bitrate]").value,
+    output_dir: field("output-dir").value.trim(),
+    output_format: field("output-format").value,
+    ...encodingSettings(),
   };
   selectedValues('input[name="qualifier"]').forEach((flag) => {
     options[flag] = true;
@@ -357,10 +368,15 @@ const collectOptions = (dryRun) => {
 };
 
 const setCheckedValues = (name, values = []) => {
-  const selected = new Set(values);
+  const chosen = new Set(values);
   form.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
-    input.checked = selected.has(input.value);
+    input.checked = chosen.has(input.value);
   });
+};
+
+const setRadio = (name, value) => {
+  const input = document.querySelector(`input[name="${name}"][value="${CSS.escape(value)}"]`);
+  if (input) input.checked = true;
 };
 
 const resetFilters = () => {
@@ -390,10 +406,7 @@ const applyOptions = (options = {}) => {
     (input) => input.value === options.half_filter,
   );
   if (half) half.checked = true;
-  const logic = form.querySelector(
-    `input[name="qualifier-logic"][value="${options.qualifier_logic || "any"}"]`,
-  );
-  if (logic) logic.checked = true;
+  setRadio("qualifier-logic", options.qualifier_logic || "any");
   const qualifierFlags = Object.keys(options).filter(
     (key) => key.endsWith("_only") && options[key] === true,
   );
@@ -417,12 +430,11 @@ const applyOptions = (options = {}) => {
   Object.entries(values).forEach(([selector, value]) => {
     document.querySelector(selector).value = value;
   });
-  document.querySelector("[data-individual-clips]").checked = Boolean(
-    options.individual_clips,
-  );
+  setRadio("export-as", options.individual_clips ? "files" : "reel");
+  setRadio("export-scope", options.export_scope === "selected" ? "selected" : "all");
   corrections = structuredClone(options.timeline_corrections || []);
   renderCorrections();
-  document.querySelector("[data-quality]").value = "custom";
+  field("quality").value = "custom";
   updateSummary();
 };
 
@@ -467,9 +479,7 @@ const presets = {
   },
 };
 
-const getSnapshots = () => {
-  return structuredClone(snapshotLibrary);
-};
+const getSnapshots = () => structuredClone(snapshotLibrary);
 
 const renderSnapshots = () => {
   const snapshots = getSnapshots();
@@ -487,22 +497,422 @@ const renderSnapshots = () => {
     option.textContent = name;
     snapshotSelect.appendChild(option);
   });
-  document.querySelector("[data-load-snapshot]").disabled = true;
-  document.querySelector("[data-delete-snapshot]").disabled = true;
+  field("load-snapshot").disabled = true;
+  field("delete-snapshot").disabled = true;
 };
+
+const clockSeconds = (value) => {
+  if (!/^\d+:\d{2}(?::\d{2})?$/.test(value.trim()))
+    throw new Error("Use MM:SS or HH:MM:SS.");
+  const parts = value.trim().split(":").map(Number);
+  if (parts.slice(1).some((part) => part > 59))
+    throw new Error("Seconds and minutes must be below 60.");
+  return parts.reduce((total, part) => total * 60 + part, 0);
+};
+const renderCorrections = () => {
+  field("correction-list").replaceChildren();
+  field("correction-count").textContent = corrections.length ? `${corrections.length} active` : "None active";
+  corrections.forEach((correction, index) => {
+    const row = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = `P${correction.period} from ${correction.clock || correction.at_seconds + "s"}: ${correction.seconds ?? correction.amount_seconds}s ${correction.note || ""}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.onclick = () => {
+      corrections.splice(index, 1);
+      renderCorrections();
+      resetPreview();
+      persistFilters();
+    };
+    row.append(label, remove);
+    field("correction-list").append(row);
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Timeline editor
+// ---------------------------------------------------------------------------
+
+const hasFootage = () => Boolean(activeMatch?.video_path);
+const clipCount = (count) => `${count} clip${count === 1 ? "" : "s"}`;
+const focused = () => clips[focusIndex];
+
+const resetPreview = () => {
+  previewRevision++;
+  video.pause();
+  clips = [];
+  selected = new Set();
+  focusIndex = 0;
+  lastRemoved = undefined;
+  field("preview-results").hidden = true;
+  field("editor-empty").hidden = false;
+  refreshExportState();
+  field("summary-note").textContent = "Find clips to build the timeline.";
+};
+
+const sourceFor = (period) => {
+  const key = PERIOD_KEYS[period] || "1H";
+  if (!sources.has(key)) {
+    const request = apiRequest("/api/files/reopen", {
+      method: "POST",
+      body: JSON.stringify({ match_id: activeMatch.id, period: key }),
+    }).then(({ file }) => {
+      if (!sourceUrls.has(file.path)) sourceUrls.set(file.path, file.url);
+      return sourceUrls.get(file.path);
+    });
+    request.catch(() => sources.delete(key));
+    sources.set(key, request);
+  }
+  return sources.get(key);
+};
+
+// Resolves once the element shows `url` with its duration known.
+const loadSource = (url) => {
+  if (video.dataset.src === url && video.readyState >= 1) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const done = () => { video.removeEventListener("loadedmetadata", ok); video.removeEventListener("error", fail); };
+    const ok = () => { done(); resolve(); };
+    const fail = () => { done(); reject(new Error("This footage cannot be played in the app's player.")); };
+    video.addEventListener("loadedmetadata", ok);
+    video.addEventListener("error", fail);
+    video.dataset.src = url;
+    video.src = url;
+  });
+};
+
+const footageLimit = (clip) =>
+  !fallbackMode && video.dataset.period === String(clip.period) && Number.isFinite(video.duration)
+    ? video.duration : Infinity;
+
+const enterFallback = (message) => {
+  fallbackMode = true;
+  video.pause();
+  const notice = field("viewer-message");
+  notice.textContent = `${message} Render a clip to watch it.`;
+  notice.hidden = false;
+  field("render-fallback").hidden = false;
+  field("trim-playhead").hidden = true;
+};
+
+// Show clip `index` in the viewer; optionally start playing it.
+const showClip = async (index, { play = false, at } = {}) => {
+  if (!clips.length) return;
+  focusIndex = Math.max(0, Math.min(index, clips.length - 1));
+  renderFocus();
+  const clip = focused();
+  if (fallbackMode || !hasFootage()) return;
+  const generation = previewRevision;
+  try {
+    const url = await sourceFor(clip.period);
+    if (generation !== previewRevision || clip !== focused()) return;
+    await loadSource(url);
+    video.dataset.period = String(clip.period);
+    if (clip !== focused()) return;
+    if (!draggingEdge) renderTrimPanel(); // the footage length now bounds the trim bar
+    video.currentTime = at ?? clip.start;
+    if (play) await video.play();
+  } catch (error) {
+    if (error.name === "AbortError" || error.name === "NotAllowedError") return;
+    enterFallback(error.message);
+  }
+};
+
+const updatePlayhead = () => {
+  const clip = focused();
+  if (!clip) return;
+  const now = fallbackMode ? 0 : video.currentTime;
+  const inside = Math.min(Math.max(now - clip.start, 0), duration(clip));
+  field("clip-clock").textContent = `${formatClock(inside)} / ${formatClock(duration(clip))}`;
+  const { from, to } = trimContext(clip);
+  const playhead = field("trim-playhead");
+  playhead.style.left = `${((now - from) / (to - from)) * 100}%`;
+  playhead.hidden = fallbackMode || now < from || now > to;
+};
+
+// Stop at the clip's end, or carry on into the next clip.
+const watchPlayback = () => {
+  if (video.paused) return;
+  const clip = focused();
+  if (clip && !draggingEdge && video.currentTime >= clip.end - 0.04) {
+    if (playAllActive && focusIndex < clips.length - 1) {
+      showClip(focusIndex + 1, { play: true });
+    } else {
+      video.pause();
+      video.currentTime = clip.end;
+    }
+  }
+  updatePlayhead();
+  requestAnimationFrame(watchPlayback);
+};
+
+const setPlayIcon = (playing) => {
+  const button = field("play-clip");
+  button.setAttribute("aria-label", playing ? "Pause clip" : "Play clip");
+  document.querySelector("[data-play-icon]").setAttribute("d", playing ? "M4 3h3v10H4zM9 3h3v10H9z" : "M5 3l8 5-8 5z");
+};
+
+const togglePlay = async () => {
+  const clip = focused();
+  if (!clip) return;
+  if (fallbackMode) {
+    if (video.src) video.paused ? video.play() : video.pause();
+    return;
+  }
+  if (!video.paused) {
+    video.pause();
+    return;
+  }
+  const inside = video.dataset.period === String(clip.period)
+    && video.currentTime >= clip.start && video.currentTime < clip.end - 0.1;
+  await showClip(focusIndex, { play: true, at: inside ? video.currentTime : clip.start });
+};
+
+// The trim bar shows the clip with some footage either side to extend into.
+let trimFrame;
+const trimContext = (clip) => {
+  if (draggingEdge && trimFrame) return trimFrame;
+  const pad = Math.max(8, duration(clip) * 0.5);
+  const to = clip.end + pad;
+  trimFrame = { from: Math.max(0, clip.start - pad), to: Number.isFinite(footageLimit(clip)) ? Math.min(footageLimit(clip), to) : to };
+  return trimFrame;
+};
+
+const renderTrimPanel = () => {
+  const clip = focused();
+  if (!clip) return;
+  field("trim-number").textContent = `Clip ${focusIndex + 1}`;
+  field("trim-label").textContent = clip.label;
+  const { from, to } = trimContext(clip);
+  field("trim-from").textContent = formatClock(from, false);
+  field("trim-to").textContent = formatClock(to, false);
+  const position = (seconds) => ((seconds - from) / (to - from)) * 100;
+  const region = field("trim-region");
+  region.style.left = `${position(clip.start)}%`;
+  region.style.width = `${position(clip.end) - position(clip.start)}%`;
+  document.querySelector('[data-trim-handle="start"]').style.left = `${position(clip.start)}%`;
+  document.querySelector('[data-trim-handle="end"]').style.left = `${position(clip.end)}%`;
+  document.querySelector('[data-trim-handle="start"]').setAttribute("aria-valuetext", formatClock(clip.start));
+  document.querySelector('[data-trim-handle="end"]').setAttribute("aria-valuetext", formatClock(clip.end));
+  document.querySelectorAll("[data-edge-input]").forEach((input) => {
+    if (document.activeElement !== input) input.value = formatClock(clip[input.dataset.edgeInput]);
+    input.removeAttribute("aria-invalid");
+  });
+  field("clip-duration").textContent = `${duration(clip).toFixed(1)}s`;
+  field("reset-clip").disabled = !isTrimmed(clip);
+  field("prev-clip").disabled = focusIndex === 0;
+  field("next-clip").disabled = focusIndex >= clips.length - 1;
+  updatePlayhead();
+};
+
+const blockWidth = (clip) => `${Math.max(64, duration(clip) * Number(field("zoom").value))}px`;
+
+const describeBlock = (item, clip, index) => {
+  item.style.width = blockWidth(clip);
+  item.querySelector(".clip-number").textContent = index + 1;
+  item.querySelector(".clip-length").textContent = `${duration(clip).toFixed(1)}s`;
+  item.classList.toggle("is-trimmed", isTrimmed(clip));
+  item.querySelector(".clip-body").setAttribute("aria-label",
+    `Clip ${index + 1}: ${clip.label}, ${duration(clip).toFixed(1)} seconds`);
+};
+
+const renderTimeline = () => {
+  track.replaceChildren();
+  clips.forEach((clip, index) => {
+    const item = document.createElement("li");
+    item.className = "clip-block";
+    item.dataset.id = clip.id;
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.className = "clip-tick";
+    tick.checked = selected.has(clip.id);
+    tick.setAttribute("aria-label", `Select clip ${index + 1}`);
+    tick.onchange = () => {
+      tick.checked ? selected.add(clip.id) : selected.delete(clip.id);
+      if (tick.checked && selected.size === 1) setRadio("export-scope", "selected");
+      if (!selected.size) setRadio("export-scope", "all");
+      item.classList.toggle("is-selected", tick.checked);
+      refreshExportState();
+      persistFilters();
+    };
+    const body = document.createElement("button");
+    body.type = "button";
+    body.className = "clip-body";
+    body.innerHTML = '<span class="clip-number"></span><span class="clip-label"></span><span class="clip-length"></span>';
+    body.querySelector(".clip-label").textContent = clip.label;
+    body.onclick = () => showClip(clips.indexOf(clip));
+    body.ondblclick = () => showClip(clips.indexOf(clip), { play: true });
+    const handles = ["start", "end"].map((edge) => {
+      const handle = document.createElement("span");
+      handle.className = `clip-handle clip-handle-${edge}`;
+      handle.setAttribute("role", "slider");
+      handle.tabIndex = 0;
+      handle.setAttribute("aria-label", `Clip ${index + 1} ${edge}`);
+      handle.dataset.edge = edge;
+      return handle;
+    });
+    item.classList.toggle("is-selected", selected.has(clip.id));
+    item.append(handles[0], tick, body, handles[1]);
+    describeBlock(item, clip, index);
+    track.append(item);
+  });
+  field("preview-count").textContent = clips.length;
+  field("preview-noun").textContent = clips.length === 1 ? "clip" : "clips";
+  field("total-duration").textContent = clips.length ? `· ${formatClock(totalDuration(clips), false)}` : "";
+  field("undo-remove").hidden = !lastRemoved;
+  renderFocus();
+  refreshExportState();
+};
+
+const renderFocus = () => {
+  track.querySelectorAll(".clip-block").forEach((item, index) => {
+    const current = index === focusIndex;
+    item.classList.toggle("is-focused", current);
+    item.querySelector(".clip-body").setAttribute("aria-current", current ? "true" : "false");
+  });
+  // Scroll the timeline sideways only; moving the page would hide the viewer.
+  const item = track.children[focusIndex];
+  if (item) {
+    const left = item.offsetLeft; // the track is the offset parent
+    if (left < track.scrollLeft || left + item.offsetWidth > track.scrollLeft + track.clientWidth) {
+      track.scrollTo({ left: Math.max(0, left - 24), behavior: "smooth" });
+    }
+  }
+  renderTrimPanel();
+  resetRenderedClip();
+};
+
+// Update one clip after a trim, without rebuilding the timeline.
+const applyTrim = (index, clip, { seek = true } = {}) => {
+  clips[index] = clip;
+  const item = track.children[index];
+  if (item) describeBlock(item, clip, index);
+  field("total-duration").textContent = `· ${formatClock(totalDuration(clips), false)}`;
+  if (index === focusIndex) {
+    renderTrimPanel();
+    resetRenderedClip();
+  }
+  persistSoon();
+  return clip;
+};
+
+const trimEdge = (index, edge, seconds, options) => {
+  const clip = clips[index];
+  if (!clip) return;
+  const next = applyTrim(index, trimClip(clip, edge, seconds, footageLimit(clip)), options);
+  if (options?.seek !== false && index === focusIndex && !fallbackMode && video.dataset.period === String(next.period)) {
+    video.pause();
+    video.currentTime = edge === "start" ? next.start : Math.max(next.start, next.end - 0.05);
+  }
+};
+
+const removeClip = (index) => {
+  const [clip] = clips.splice(index, 1);
+  if (!clip) return;
+  lastRemoved = { clip, index, wasSelected: selected.delete(clip.id) };
+  focusIndex = Math.min(index, clips.length - 1);
+  if (!clips.length) {
+    video.pause();
+    field("summary-note").textContent = "Every clip was removed. Undo, or find clips again.";
+  }
+  renderTimeline();
+  persistFilters();
+  if (clips.length) showClip(focusIndex);
+};
+
+const refreshExportState = () => {
+  const scope = exportScope();
+  const count = scope === "selected" ? selected.size : clips.length;
+  field("scope-all").textContent = `All clips (${clips.length})`;
+  field("scope-selected").textContent = `Selected (${selected.size})`;
+  field("selection-count").textContent = `${selected.size} selected`;
+  const files = exportAs() === "files";
+  exportButton.textContent = files
+    ? `Export ${count} clip${count === 1 ? "" : "s"}`
+    : scope === "selected" ? `Export reel of ${count}` : "Export reel";
+  exportButton.disabled = !clips.length || !count || Boolean(activeJobId) || !hasFootage();
+  exportButton.title = hasFootage() ? "" : "Add match footage in Intake before exporting.";
+};
+
+const showClips = (windows, savedSelection) => {
+  clips = normaliseClips(windows);
+  selected = restoreSelection(savedSelection, clips);
+  if (savedSelection && !Array.isArray(savedSelection.selected) && selected.size) {
+    setRadio("export-scope", "selected");
+  }
+  focusIndex = 0;
+  lastRemoved = undefined;
+  fallbackMode = false;
+  field("viewer-message").hidden = true;
+  field("render-fallback").hidden = true;
+  field("editor-empty").hidden = clips.length > 0;
+  field("preview-results").hidden = clips.length === 0;
+  renderTimeline();
+  if (!hasFootage()) {
+    const notice = field("viewer-message");
+    notice.textContent = "Add the match footage in Intake to watch and export these clips.";
+    notice.hidden = false;
+  } else {
+    showClip(0);
+  }
+};
+
+// Rendered clips are the fallback for footage the app's player cannot decode.
+let renderRevision = 0;
+const resetRenderedClip = () => {
+  renderRevision++;
+  if (!fallbackMode) return;
+  video.pause();
+  video.removeAttribute("src");
+  delete video.dataset.src;
+  video.load();
+  field("render-download").hidden = true;
+  field("render-status").textContent = "";
+};
+
+const renderClip = async () => {
+  const clip = focused();
+  if (!clip) return;
+  const version = ++renderRevision;
+  const generation = previewRevision;
+  const button = field("render-clip");
+  button.disabled = true;
+  field("render-status").textContent = "Rendering clip...";
+  try {
+    const result = await apiRequest("/api/previews/render", {
+      method: "POST",
+      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+    });
+    if (version !== renderRevision || generation !== previewRevision) return;
+    video.dataset.src = result.file.url;
+    video.src = result.file.url;
+    const download = field("render-download");
+    download.href = result.file.url;
+    download.download = `clip-${focusIndex + 1}.mp4`;
+    download.hidden = false;
+    field("render-status").textContent = "Clip ready";
+  } catch (error) {
+    field("render-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Find clips and export
+// ---------------------------------------------------------------------------
 
 const renderJob = (job) => {
   const labels = {
     queued: "Queued",
-    running: job.dry_run ? "Calculating clip windows" : "Exporting reel",
-    complete: job.dry_run ? "Clip plan ready" : "Export complete",
-    failed: "Could not build plan",
-    cancelled: "Job cancelled",
+    running: "Exporting",
+    complete: "Export complete",
+    failed: "Export failed",
+    cancelled: "Export cancelled",
   };
   const finished = ["complete", "failed", "cancelled"].includes(job.status);
   jobState.textContent = labels[job.status] || job.status;
-  jobLogs.textContent =
-    (job.logs || []).join("\n") || "Reading match events...";
+  jobLogs.textContent = (job.logs || []).join("\n") || "Preparing clips...";
   jobLogs.scrollTop = jobLogs.scrollHeight;
   const progress = job.progress;
   const ratio = progress?.total ? progress.current / progress.total : 0;
@@ -511,30 +921,20 @@ const renderJob = (job) => {
   if (!finished) return;
   activeJobId = undefined;
   setExportBusy(false);
-  exportButton.disabled = !previewComplete || !activeMatch?.video_path;
-  if (job.status === "complete" && job.dry_run) {
-    previewComplete = true;
-    exportButton.disabled = !activeMatch.video_path;
-    document.querySelector("[data-summary-note]").textContent =
-      activeMatch.video_path
-        ? "Plan ready. Export will use the same filters."
-        : "Plan ready. Add match footage in Intake before exporting.";
-  } else if (job.status === "complete") {
-    document.querySelector("[data-summary-note]").textContent =
-      "Export finished. See the log for the saved file location.";
-    const list = document.querySelector("[data-export-files]");
-    list.replaceChildren();
-    (job.files || []).forEach((file) => {
-      const link = document.createElement("a");
-      link.href = file.url;
-      link.download = file.name;
-      link.textContent = file.name;
-      list.append(link);
-    });
-    const previous = activeMatch.export_history || [];
-    activeMatch.export_history = [...previous, { id: job.id, finished_at: job.finished_at, files: job.files || [] }].slice(-50);
-    saveProject(activeMatch.id, { status: "complete", export_history: activeMatch.export_history }).catch((error) => showToast(error.message));
-  }
+  refreshExportState();
+  if (job.status !== "complete") return;
+  const list = field("export-files");
+  list.replaceChildren();
+  (job.files || []).forEach((file) => {
+    const link = document.createElement("a");
+    link.href = file.url;
+    link.download = file.name;
+    link.textContent = file.name;
+    list.append(link);
+  });
+  const previous = activeMatch.export_history || [];
+  activeMatch.export_history = [...previous, { id: job.id, finished_at: job.finished_at, files: job.files || [] }].slice(-50);
+  saveProject(activeMatch.id, { status: "complete", export_history: activeMatch.export_history }).catch((error) => showToast(error.message));
 };
 
 const pollJob = async (jobId) => {
@@ -551,25 +951,26 @@ const pollJob = async (jobId) => {
   }
 };
 
-const startClipJob = async (dryRun) => {
-  if (activeJobId || previewBusy) return;
-  if (dryRun) return buildPreview();
-  if (!previewComplete || !previewWindows.length) return;
-  if (!activeMatch?.id) {
-    showToast("Choose a saved match before filtering");
-    return;
-  }
-  if (!dryRun && !activeMatch.video_path) {
+const startExport = async () => {
+  if (activeJobId || previewBusy || !clips.length) return;
+  if (!hasFootage()) {
     showToast("Add match footage in Intake before exporting");
     return;
   }
+  const windows = exportWindows(clips, exportScope(), selected);
+  if (!windows.length) {
+    showToast("Tick the clips to export first.");
+    return;
+  }
+  video.pause();
   planOutput.hidden = false;
   setExportBusy(true);
   cancelJobButton.hidden = false;
   exportButton.disabled = true;
-  jobState.textContent = dryRun ? "Starting preview" : "Starting export";
-  jobLogs.textContent = "Preparing filters...";
+  jobState.textContent = "Starting export";
+  jobLogs.textContent = "Preparing clips...";
   jobProgress.style.width = "4%";
+  field("export-files").replaceChildren();
   try {
     await persistFilters();
     await flushProject();
@@ -577,7 +978,7 @@ const startClipJob = async (dryRun) => {
       method: "POST",
       body: JSON.stringify({
         match_id: activeMatch.id,
-        options: { ...collectOptions(dryRun), clip_windows: exportWindows() },
+        options: { ...collectOptions(false), clip_windows: windows },
       }),
     });
     activeJobId = result.job.id;
@@ -590,14 +991,58 @@ const startClipJob = async (dryRun) => {
     jobState.textContent = "Setup needs attention";
     jobLogs.textContent = error.message;
     jobProgress.style.width = "0%";
-    exportButton.disabled = !previewComplete || !activeMatch.video_path;
+    refreshExportState();
     showToast(error.message);
+  }
+};
+
+const buildPreview = async () => {
+  if (activeJobId || previewBusy) return;
+  if (!activeMatch?.id) {
+    showToast("Choose a match first.");
+    return;
+  }
+  resetPreview();
+  const generation = previewRevision;
+  previewBusy = true;
+  const button = form.querySelector("[type=submit]");
+  button.disabled = true;
+  field("summary-note").textContent = "Finding clips...";
+  try {
+    const result = await apiRequest("/api/previews", {
+      method: "POST",
+      body: JSON.stringify({
+        match_id: activeMatch.id,
+        options: collectOptions(true),
+      }),
+    });
+    if (generation !== previewRevision) return;
+    setRadio("export-scope", "all");
+    showClips(result.windows);
+    await persistFilters();
+    field("summary-note").textContent = clips.length
+      ? `${clipCount(clips.length)} ready to review.`
+      : "No matching clips. Adjust the filters.";
+    if (clips.length && window.matchMedia("(max-width: 900px)").matches) {
+      document.querySelector(".editor").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  } catch (error) {
+    showToast(error.message);
+    field("summary-note").textContent = error.message;
+  } finally {
+    previewBusy = false;
+    button.disabled = false;
   }
 };
 
 const loadMatch = async (matchId) => {
   resetPreview();
   activeMatch = undefined;
+  sources = new Map();
+  sourceUrls = new Map();
+  video.removeAttribute("src");
+  delete video.dataset.src;
+  delete video.dataset.period;
   const revision = previewRevision;
   const result = await apiRequest("/api/filter-options", {
     method: "POST",
@@ -618,14 +1063,10 @@ const loadMatch = async (matchId) => {
   restoringProject = true;
   applyOptions(activeMatch.filter_settings || {});
   if (activeMatch.preview_windows?.length) {
-    previewWindows = structuredClone(activeMatch.preview_windows);
-    selectedRange = activeMatch.preview_range || { first: 1, last: null };
-    previewComplete = true;
-    renderPreviews();
-    exportButton.disabled = !activeMatch.video_path;
-    document.querySelector("[data-summary-note]").textContent = activeMatch.video_path
-      ? `${previewWindows.length} clips ready to review.`
-      : "Plan ready. Add match footage in Intake before exporting.";
+    showClips(activeMatch.preview_windows, activeMatch.preview_range || {});
+    field("summary-note").textContent = hasFootage()
+      ? `${clipCount(clips.length)} ready to review.`
+      : "Clips found. Add match footage in Intake before exporting.";
   }
   restoringProject = false;
 };
@@ -658,11 +1099,11 @@ const connect = async () => {
     });
     const requested = new URLSearchParams(window.location.search).get("match");
     const remembered = sessionStorage.getItem("clipmaker.active-match");
-    const selected = matches.find(
+    const chosen = matches.find(
       (match) =>
         match.id === requested || (!requested && match.id === remembered),
     );
-    matchSelect.value = selected?.id || matches[0].id;
+    matchSelect.value = chosen?.id || matches[0].id;
     await loadMatch(matchSelect.value);
     renderSnapshots();
   } catch (error) {
@@ -670,6 +1111,10 @@ const connect = async () => {
     showToast(error.message);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Events: filters
+// ---------------------------------------------------------------------------
 
 matchSelect.addEventListener("change", async () => {
   try {
@@ -688,8 +1133,7 @@ teamOptions.addEventListener("change", () => {
 });
 
 form.addEventListener("input", (event) => {
-  if (event.target.closest("#export-settings, #snapshots, #corrections"))
-    return;
+  if (event.target.closest("#snapshots, #corrections")) return;
   if (event.target.name === "action" || event.target.name === "qualifier")
     shotsAndKeyPasses = false;
   resetPreview();
@@ -698,36 +1142,32 @@ form.addEventListener("input", (event) => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  await startClipJob(true);
+  await buildPreview();
 });
 
-document
-  .querySelector("[data-select-all-actions]")
-  .addEventListener("click", () => {
-    form.querySelectorAll('input[name="action"]').forEach((input) => {
-      input.checked = true;
-    });
-    resetPreview();
-    updateSummary();
+field("select-all-actions").addEventListener("click", () => {
+  form.querySelectorAll('input[name="action"]').forEach((input) => {
+    input.checked = true;
   });
+  resetPreview();
+  updateSummary();
+});
 
-document.querySelector("[data-clear-actions]").addEventListener("click", () => {
+field("clear-actions").addEventListener("click", () => {
   setCheckedValues("action");
   resetPreview();
   updateSummary();
 });
 
-document
-  .querySelector("[data-select-all-players]")
-  .addEventListener("click", () => {
-    form.querySelectorAll('input[name="player"]').forEach((input) => {
-      input.checked = true;
-    });
-    resetPreview();
-    updateSummary();
+field("select-all-players").addEventListener("click", () => {
+  form.querySelectorAll('input[name="player"]').forEach((input) => {
+    input.checked = true;
   });
+  resetPreview();
+  updateSummary();
+});
 
-document.querySelector("[data-clear-players]").addEventListener("click", () => {
+field("clear-players").addEventListener("click", () => {
   setCheckedValues("player");
   resetPreview();
   updateSummary();
@@ -742,6 +1182,7 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
       output_dir: current.output_dir,
       output_format: current.output_format,
       output_filename: current.output_filename,
+      individual_clips: current.individual_clips,
       video_crf: current.video_crf,
       encoder_preset: current.encoder_preset,
       video_encoder: current.video_encoder,
@@ -751,13 +1192,13 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
   });
 });
 
-document.querySelector("[data-reset-filters]").addEventListener("click", () => {
+field("reset-filters").addEventListener("click", () => {
   resetFilters();
   showToast("All filters cleared");
 });
 
-document.querySelector("[data-save-snapshot]").addEventListener("click", async () => {
-  const name = document.querySelector("[data-snapshot-name]").value.trim();
+field("save-snapshot").addEventListener("click", async () => {
+  const name = field("snapshot-name").value.trim();
   if (!name) {
     showToast("Enter a snapshot name first");
     return;
@@ -773,11 +1214,11 @@ document.querySelector("[data-save-snapshot]").addEventListener("click", async (
 
 snapshotSelect.addEventListener("change", () => {
   const enabled = Boolean(snapshotSelect.value);
-  document.querySelector("[data-load-snapshot]").disabled = !enabled;
-  document.querySelector("[data-delete-snapshot]").disabled = !enabled;
+  field("load-snapshot").disabled = !enabled;
+  field("delete-snapshot").disabled = !enabled;
 });
 
-document.querySelector("[data-load-snapshot]").addEventListener("click", () => {
+field("load-snapshot").addEventListener("click", () => {
   const name = snapshotSelect.value;
   const snapshot = getSnapshots()[name];
   if (!snapshot) return;
@@ -788,61 +1229,15 @@ document.querySelector("[data-load-snapshot]").addEventListener("click", () => {
   showToast(`Loaded snapshot: ${name}`);
 });
 
-document
-  .querySelector("[data-delete-snapshot]")
-  .addEventListener("click", async () => {
-    const name = snapshotSelect.value;
-    try {
-      snapshotLibrary = (await apiRequest("/api/snapshots/delete", { method: "POST", body: JSON.stringify({ name }) })).snapshots;
-      renderSnapshots();
-      showToast(`Deleted snapshot: ${name}`);
-    } catch (error) { showToast(error.message); }
-  });
-
-exportButton.addEventListener("click", () => startClipJob(false));
-
-cancelJobButton.addEventListener("click", async () => {
-  if (!activeJobId) return;
+field("delete-snapshot").addEventListener("click", async () => {
+  const name = snapshotSelect.value;
   try {
-    await apiRequest(`/api/jobs/${activeJobId}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    jobState.textContent = "Cancelling";
-  } catch (error) {
-    showToast(error.message);
-  }
+    snapshotLibrary = (await apiRequest("/api/snapshots/delete", { method: "POST", body: JSON.stringify({ name }) })).snapshots;
+    renderSnapshots();
+    showToast(`Deleted snapshot: ${name}`);
+  } catch (error) { showToast(error.message); }
 });
 
-const field = (name) => document.querySelector(`[data-${name}]`);
-const clockSeconds = (value) => {
-  if (!/^\d+:\d{2}(?::\d{2})?$/.test(value.trim()))
-    throw new Error("Use MM:SS or HH:MM:SS.");
-  const parts = value.trim().split(":").map(Number);
-  if (parts.slice(1).some((part) => part > 59))
-    throw new Error("Seconds and minutes must be below 60.");
-  return parts.reduce((total, part) => total * 60 + part, 0);
-};
-const renderCorrections = () => {
-  field("correction-list").replaceChildren();
-  field("correction-count").textContent = `${corrections.length} active`;
-  corrections.forEach((correction, index) => {
-    const row = document.createElement("div");
-    const label = document.createElement("span");
-    label.textContent = `P${correction.period} from ${correction.clock || correction.at_seconds + "s"}: ${correction.seconds ?? correction.amount_seconds}s ${correction.note || ""}`;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "Remove";
-    remove.onclick = () => {
-      corrections.splice(index, 1);
-      renderCorrections();
-      resetPreview();
-      persistFilters();
-    };
-    row.append(label, remove);
-    field("correction-list").append(row);
-  });
-};
 field("add-correction").onclick = () => {
   try {
     const at = clockSeconds(field("correction-clock").value);
@@ -862,6 +1257,193 @@ field("add-correction").onclick = () => {
     showToast(error.message);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Events: editor and export
+// ---------------------------------------------------------------------------
+
+field("clear-preview").onclick = () => {
+  resetPreview();
+  persistFilters();
+};
+field("undo-remove").onclick = () => {
+  if (!lastRemoved) return;
+  const { clip, index, wasSelected } = lastRemoved;
+  clips.splice(Math.min(index, clips.length), 0, clip);
+  if (wasSelected) selected.add(clip.id);
+  lastRemoved = undefined;
+  field("editor-empty").hidden = true;
+  field("preview-results").hidden = false;
+  renderTimeline();
+  showClip(index);
+  persistFilters();
+};
+field("play-clip").onclick = togglePlay;
+field("prev-clip").onclick = () => showClip(focusIndex - 1);
+field("next-clip").onclick = () => showClip(focusIndex + 1);
+field("play-all").onchange = (event) => { playAllActive = event.target.checked; };
+field("reset-clip").onclick = () => {
+  const clip = focused();
+  if (!clip) return;
+  applyTrim(focusIndex, { ...clip, start: clip.source_start, end: clip.source_end });
+  showClip(focusIndex);
+};
+field("remove-clip").onclick = () => removeClip(focusIndex);
+field("render-clip").onclick = renderClip;
+field("select-all-clips").onclick = () => {
+  selected = new Set(clips.map((clip) => clip.id));
+  renderTimeline();
+  persistFilters();
+};
+field("select-no-clips").onclick = () => {
+  selected = new Set();
+  setRadio("export-scope", "all");
+  renderTimeline();
+  persistFilters();
+};
+field("zoom").addEventListener("input", () => {
+  track.querySelectorAll(".clip-block").forEach((item, index) => describeBlock(item, clips[index], index));
+});
+document.querySelectorAll("[data-export-scope], [data-export-as]").forEach((input) =>
+  input.addEventListener("change", () => { refreshExportState(); persistFilters(); }));
+
+document.querySelectorAll("[data-nudge]").forEach((button) => {
+  button.onclick = () => {
+    const clip = focused();
+    if (clip) trimEdge(focusIndex, button.dataset.nudge, clip[button.dataset.nudge] + Number(button.dataset.step));
+  };
+});
+document.querySelectorAll("[data-set-edge]").forEach((button) => {
+  button.onclick = () => {
+    if (!focused() || fallbackMode) return;
+    trimEdge(focusIndex, button.dataset.setEdge, video.currentTime, { seek: false });
+  };
+});
+document.querySelectorAll("[data-edge-input]").forEach((input) => {
+  input.addEventListener("change", () => {
+    const seconds = parseClock(input.value);
+    if (!Number.isFinite(seconds)) {
+      input.setAttribute("aria-invalid", "true");
+      showToast("Use minutes:seconds, like 54:31.5");
+      return;
+    }
+    trimEdge(focusIndex, input.dataset.edgeInput, seconds);
+    input.value = formatClock(focused()[input.dataset.edgeInput]);
+  });
+});
+
+video.addEventListener("play", () => { setPlayIcon(true); requestAnimationFrame(watchPlayback); });
+video.addEventListener("pause", () => { setPlayIcon(false); updatePlayhead(); });
+video.addEventListener("seeked", updatePlayhead);
+
+// Drag an edge: a timeline handle (seconds per pixel from the zoom) or a trim
+// bar handle (seconds per pixel from the bar's span). Clicking the trim bar seeks.
+const startDrag = (event, target, index, edge, secondsPerPixel) => {
+  event.preventDefault();
+  try { target.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+  const origin = event.clientX;
+  const initial = clips[index][edge];
+  draggingEdge = true;
+  if (index === focusIndex) trimContext(clips[index]);
+  target.classList.add("is-dragging");
+  const move = (moveEvent) => {
+    trimEdge(index, edge, initial + (moveEvent.clientX - origin) * secondsPerPixel);
+  };
+  const end = () => {
+    draggingEdge = false;
+    target.classList.remove("is-dragging");
+    target.removeEventListener("pointermove", move);
+    target.removeEventListener("pointerup", end);
+    target.removeEventListener("pointercancel", end);
+    if (index === focusIndex) renderTrimPanel();
+    persistFilters();
+  };
+  target.addEventListener("pointermove", move);
+  target.addEventListener("pointerup", end);
+  target.addEventListener("pointercancel", end);
+};
+
+track.addEventListener("pointerdown", (event) => {
+  const handle = event.target.closest(".clip-handle");
+  if (!handle) return;
+  const index = [...track.children].indexOf(handle.closest(".clip-block"));
+  if (index !== focusIndex) showClip(index);
+  startDrag(event, handle, index, handle.dataset.edge, 1 / Number(field("zoom").value));
+});
+
+const nudgeKeys = { ArrowLeft: -0.5, ArrowRight: 0.5, ArrowDown: -0.5, ArrowUp: 0.5 };
+track.addEventListener("keydown", (event) => {
+  const handle = event.target.closest(".clip-handle");
+  if (!handle || !(event.key in nudgeKeys)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const index = [...track.children].indexOf(handle.closest(".clip-block"));
+  const step = nudgeKeys[event.key] * (event.shiftKey ? 4 : 1);
+  trimEdge(index, handle.dataset.edge, clips[index][handle.dataset.edge] + step);
+});
+
+const trimBar = field("trim-bar");
+document.querySelectorAll("[data-trim-handle]").forEach((handle) => {
+  handle.addEventListener("pointerdown", (event) => {
+    const clip = focused();
+    if (!clip) return;
+    const { from, to } = trimContext(clip);
+    startDrag(event, handle, focusIndex, handle.dataset.trimHandle, (to - from) / trimBar.getBoundingClientRect().width);
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (!(event.key in nudgeKeys)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const edge = handle.dataset.trimHandle;
+    trimEdge(focusIndex, edge, focused()[edge] + nudgeKeys[event.key] * (event.shiftKey ? 4 : 1));
+  });
+});
+trimBar.addEventListener("pointerdown", (event) => {
+  if (event.target.closest("[data-trim-handle]") || fallbackMode || !focused()) return;
+  const { from, to } = trimContext(focused());
+  const box = trimBar.getBoundingClientRect();
+  const seconds = from + ((event.clientX - box.left) / box.width) * (to - from);
+  showClip(focusIndex, { at: Math.max(0, seconds) });
+});
+
+// Editor shortcuts, ignored while typing in a field.
+document.querySelector(".editor").addEventListener("keydown", (event) => {
+  if (!clips.length || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.target.closest("input, select, textarea, summary, .clip-handle, [data-trim-handle]")) return;
+  const key = event.key.toLowerCase();
+  const clip = focused();
+  if (key === " " && !event.target.closest("button, a")) {
+    event.preventDefault();
+    togglePlay();
+  } else if (key === "i" && !fallbackMode) {
+    trimEdge(focusIndex, "start", video.currentTime, { seek: false });
+  } else if (key === "o" && !fallbackMode) {
+    trimEdge(focusIndex, "end", video.currentTime, { seek: false });
+  } else if ((key === "arrowleft" || key === "arrowright") && !fallbackMode && clip) {
+    event.preventDefault();
+    const step = (key === "arrowleft" ? -1 : 1) * (event.shiftKey ? 5 : 1);
+    showClip(focusIndex, { at: Math.max(0, video.currentTime + step), play: !video.paused });
+  } else if (key === "arrowup" || key === "arrowdown") {
+    event.preventDefault();
+    showClip(focusIndex + (key === "arrowup" ? -1 : 1));
+  }
+});
+
+exportButton.addEventListener("click", startExport);
+
+cancelJobButton.addEventListener("click", async () => {
+  if (!activeJobId) return;
+  try {
+    await apiRequest(`/api/jobs/${activeJobId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    jobState.textContent = "Cancelling";
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
 field("browse-output").onclick = async () => {
   try {
     const result = await apiRequest("/api/folders/output", {
@@ -887,184 +1469,14 @@ field("quality").onchange = () => {
   persistFilters();
 };
 ["video-crf", "encoder-preset", "audio-bitrate"].forEach((key) =>
-  field(key).addEventListener(
-    "change",
-    () => (field("quality").value = "custom"),
-  ),
+  field(key).addEventListener("change", () => (field("quality").value = "custom")),
 );
-field("clear-preview").onclick = resetPreview;
-
-const renderPreviews = () => {
-  const list = field("clip-list");
-  list.querySelectorAll("video").forEach((video) => video.pause());
-  list.replaceChildren();
-  field("preview-results").hidden = false;
-  field("preview-count").textContent = previewWindows.length;
-  field("range-first").max = previewWindows.length || 1;
-  field("range-last").max = previewWindows.length || 1;
-  selectedRange.first = Math.min(selectedRange.first || 1, previewWindows.length || 1);
-  selectedRange.last = Math.min(selectedRange.last || previewWindows.length || 1, previewWindows.length || 1);
-  field("range-first").value = selectedRange.first;
-  field("range-last").value = selectedRange.last;
-  field("range-count").textContent = `${Math.max(0, selectedRange.last - selectedRange.first + 1)} selected`;
-  previewWindows.forEach((window, index) => {
-    const item = document.createElement("details");
-    item.className = "clip-preview";
-    const summary = document.createElement("summary");
-    summary.textContent = `${index + 1}. ${window.label}`;
-    const controls = document.createElement("div");
-    controls.className = "clip-editor";
-    const video = document.createElement("video");
-    video.controls = true;
-    video.preload = "metadata";
-    video.hidden = true;
-    const status = document.createElement("p");
-    status.setAttribute("role", "status");
-    const play = document.createElement("button");
-    play.type = "button";
-    play.textContent = "Render preview";
-    const download = document.createElement("a");
-    download.hidden = true;
-    download.textContent = "Download clip";
-    let revision = 0;
-    ["start", "end"].forEach((key) => {
-      const label = document.createElement("label");
-      label.textContent = `${key === "start" ? "Start" : "End"} (video seconds)`;
-      const input = document.createElement("input");
-      input.type = "number";
-      input.min = "0";
-      input.step = "0.1";
-      input.value = window[key];
-      input.oninput = () => {
-        revision++;
-        video.pause();
-        video.hidden = true;
-        download.hidden = true;
-        window[key] = Number(input.value);
-        const valid = previewWindows.every(
-          (clip) =>
-            Number.isFinite(clip.start) &&
-            Number.isFinite(clip.end) &&
-            clip.start >= 0 &&
-            clip.end > clip.start,
-        );
-        exportButton.disabled =
-          !valid || Boolean(activeJobId) || !activeMatch.video_path;
-        status.textContent = valid
-          ? "Window changed. Render to review."
-          : "End must be later than start.";
-        if (valid) persistFilters();
-      };
-      label.append(input);
-      controls.append(label);
-    });
-    play.onclick = async () => {
-      if (!(window.end > window.start && window.start >= 0)) {
-        status.textContent = "Enter a valid clip window.";
-        return;
-      }
-      const version = revision;
-      const generation = previewRevision;
-      play.disabled = true;
-      status.textContent = "Rendering preview...";
-      try {
-        const result = await apiRequest("/api/previews/render", {
-          method: "POST",
-          body: JSON.stringify({ match_id: activeMatch.id, ...window, ...encodingSettings() }),
-        });
-        if (version !== revision || generation !== previewRevision) return;
-        video.src = result.file.url;
-        video.hidden = false;
-        download.href = result.file.url;
-        download.download = `clip-${index + 1}.mp4`;
-        download.hidden = false;
-        status.textContent = "Preview ready";
-      } catch (error) {
-        status.textContent = error.message;
-      } finally {
-        play.disabled = false;
-      }
-    };
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "Exclude clip";
-    remove.onclick = () => {
-      previewWindows.splice(index, 1);
-      renderPreviews();
-      exportButton.disabled =
-        !previewWindows.length ||
-        Boolean(activeJobId) ||
-        !activeMatch.video_path;
-      persistFilters();
-    };
-    controls.append(play, remove, download);
-    item.append(summary, controls, status, video);
-    list.append(item);
-  });
-};
-const buildPreview = async () => {
-  if (!activeMatch?.id) {
-    showToast("Choose a match first.");
-    return;
-  }
-  resetPreview();
-  const generation = previewRevision;
-  previewBusy = true;
-  const button = form.querySelector("[type=submit]");
-  button.disabled = true;
-  field("summary-note").textContent = "Calculating clip windows...";
-  try {
-    const result = await apiRequest("/api/previews", {
-      method: "POST",
-      body: JSON.stringify({
-        match_id: activeMatch.id,
-        options: collectOptions(true),
-      }),
-    });
-    if (generation !== previewRevision) return;
-    previewWindows = result.windows;
-    previewComplete = previewWindows.length > 0;
-    renderPreviews();
-    await persistFilters();
-    exportButton.disabled = !previewComplete || !activeMatch.video_path;
-    field("summary-note").textContent = previewComplete
-      ? `${previewWindows.length} clips ready to review.`
-      : "No matching clips. Adjust the filters.";
-    field("preview-results").scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  } catch (error) {
-    showToast(error.message);
-    field("summary-note").textContent = error.message;
-  } finally {
-    previewBusy = false;
-    button.disabled = false;
-  }
-};
-
-const exportWindows = () => {
-  const first = Number(field("range-first").value);
-  const last = Number(field("range-last").value);
-  if (!Number.isInteger(first) || !Number.isInteger(last) || first < 1 || last > previewWindows.length || last < first) {
-    throw new Error("Choose a valid first and last clip.");
-  }
-  return previewWindows.slice(first - 1, last);
-};
-["range-first", "range-last"].forEach((key) => field(key).addEventListener("input", () => {
-  try {
-    const windows = exportWindows();
-    selectedRange = { first: Number(field("range-first").value), last: Number(field("range-last").value) };
-    field("range-count").textContent = `${windows.length} selected`;
-    exportButton.disabled = Boolean(activeJobId) || !activeMatch?.video_path;
-    persistFilters();
-  } catch (error) { field("range-count").textContent = error.message; exportButton.disabled = true; }
-}));
+document.querySelector(".export-settings").addEventListener("change", persistFilters);
 
 form.addEventListener("change", persistFilters);
 form.addEventListener("input", persistFilters);
 document.querySelector("[data-project-name]").addEventListener("change", persistFilters);
-document.querySelectorAll("[data-preset], [data-reset-filters], [data-load-snapshot], [data-select-all-actions], [data-clear-actions], [data-select-all-players], [data-clear-players], [data-clear-preview]").forEach((button) => button.addEventListener("click", persistFilters));
+document.querySelectorAll("[data-preset], [data-reset-filters], [data-load-snapshot], [data-select-all-actions], [data-clear-actions], [data-select-all-players], [data-clear-players]").forEach((button) => button.addEventListener("click", persistFilters));
 const menuButton = document.querySelector("[data-filter-menu]");
 const menu = document.querySelector("#filter-menu");
 const closeMenu = () => {

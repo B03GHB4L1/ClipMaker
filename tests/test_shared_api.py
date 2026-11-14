@@ -47,11 +47,23 @@ class SharedApiTests(unittest.TestCase):
         config = build_clip_config(match, {'clip_windows': [window], 'output_format': '.mkv',
             'output_filename': 'test.mp4', 'video_crf': 24, 'encoder_preset': 'fast',
             'audio_bitrate': '96k'}, Path(self.temporary.name))
-        self.assertEqual(config['clip_windows'], [window])
+        # Each window keeps its timeline number (here, the first and only clip).
+        self.assertEqual(config['clip_windows'], [{**window, 'number': 1}])
         self.assertEqual(config['output_filename'], 'test.mkv')
         self.assertEqual(config['video_crf'], 24)
         self.assertEqual(config['encoder_preset'], 'fast')
         self.assertEqual(config['audio_bitrate'], '96k')
+
+    def test_a_chosen_set_keeps_its_timeline_numbers(self):
+        match = self.preview_match()
+        windows = [{'start': 1, 'end': 3, 'period': 1, 'number': 3}, {'start': 6, 'end': 9, 'period': 1, 'number': 7},
+                   {'start': 10, 'end': 12, 'period': 1}]
+        config = build_clip_config(match, {'clip_windows': windows}, Path(self.temporary.name))
+        self.assertEqual([window['number'] for window in config['clip_windows']], [3, 7, 3])
+        for number in (0, 10000, 'x'):
+            with self.subTest(number=number), self.assertRaises(ValueError):
+                build_clip_config(match, {'clip_windows': [{'start': 1, 'end': 3, 'number': number}]},
+                                  Path(self.temporary.name))
 
     def test_invalid_windows_rejected(self):
         match = self.preview_match()

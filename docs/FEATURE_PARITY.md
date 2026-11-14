@@ -109,9 +109,9 @@ file dialogs, and dependency setup rather than different analytical algorithms.
 | Filter snapshots | Atomic local shared library, migrated browser/project snapshots, recoverable deletion | Restart and recoverability regression; browser acceptance pending |
 | Before / after / merge gap | Shared controls and original engine | Real two-second render smoke |
 | Timeline corrections | Period-specific additive corrections | Boundary and other-period regressions |
-| Editable clip previews | Real FFmpeg rendering, start/end edits, exclusions | Preview and edited-window regressions |
-| Clip selection range | First/last numeric clip controls | Seven-goal Chelsea plan and range 2-3 persist after browser reload |
-| Combined and individual exports | Original engine; per-project default export directory | Combined and individual synthetic-video exports decoded; real-match multi-clip acceptance pending |
+| Editable clip previews | Timeline editor: clips play straight from the match footage, trim by dragging either edge, nudging or setting to the playhead, reset, remove with undo; FFmpeg render when the player cannot decode the footage | Browser journey: stops at the trimmed end, edge drag bounded by footage, keyboard trim, render fallback decoded; installed-app playback check |
+| Clip selection range | Any set of ticked clips (replaces the first/last range; saved ranges become a ticked set) | Selection survives reload; legacy range conversion checked in the timeline rules |
+| Combined and individual exports | Export all clips or the ticked set, as one reel or separate files; separate files keep their timeline numbers | Synthetic-video reel and numbered-file exports decoded; real Reims footage: 2-clip set as files (13.0 s, 15.0 s) and as a reel with one trimmed clip (25.06 s) |
 | Format / CRF / speed / audio bitrate | Shared advanced settings | Config validation; MKV previously manually tested |
 | Cancellation and logs | Existing cancellation-aware engine and progress polling | Cancellation-event regression; native in-flight FFmpeg cancellation acceptance pending |
 | Export downloads | Registered local media URLs; saved export history | Download bytes match real individual export; browser save-dialog acceptance pending |

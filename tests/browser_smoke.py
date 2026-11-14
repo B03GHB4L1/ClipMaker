@@ -153,6 +153,170 @@ def exercise_snapshot_restore(page):
     page.locator('#snapshots summary').click()
 
 
+
+def decode(path):
+    decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(path), "-f", "null", "-"],
+                             capture_output=True, timeout=60)
+    assert decoded.returncode == 0 and path.stat().st_size > 0, decoded.stderr
+
+
+def duration_of(path):
+    probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(path)], capture_output=True, text=True, timeout=60)
+    hours, minutes, seconds = re.search(r"Duration: (\d+):(\d+):([\d.]+)", probe.stderr).groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+TIMELINE_RULES = """async () => {
+  const t = await import('/timeline.js');
+  const [clip] = t.normaliseClips([{ start: 10, end: 20, period: 2, label: 'A' }]);
+  const clips = t.normaliseClips([{ id: 4, start: 1, end: 3 }, { id: 4, start: 5, end: 9 }, { start: 11, end: 12 }]);
+  return {
+    clip,
+    ids: clips.map((item) => item.id),
+    tooShort: t.trimClip(clip, 'end', 10.2).end,
+    pastStart: t.trimClip(clip, 'start', 25).start,
+    beforeZero: t.trimClip(clip, 'start', -4).start,
+    pastFootage: t.trimClip(clip, 'end', 99, 30).end,
+    tooLong: t.trimClip(clip, 'end', 2000).end,
+    legacyRange: [...t.restoreSelection({ first: 2, last: 3 }, clips)],
+    legacyAll: [...t.restoreSelection({ first: 1, last: null }, clips)],
+    saved: [...t.restoreSelection({ selected: [5, 99] }, clips)],
+    chosen: t.exportWindows(clips, 'selected', new Set([5, 6])).map((w) => w.number),
+    all: t.exportWindows(clips, 'all').map((w) => w.number),
+    clocks: [t.parseClock('54:31.5'), t.parseClock('1:02:03'), t.parseClock('12.5'), String(t.parseClock('1:75'))],
+    formatted: [t.formatClock(3271.5), t.formatClock(3723)],
+  };
+}"""
+
+
+def exercise_timeline_rules(page):
+    """The editor's clip rules (ui/timeline.js), checked directly."""
+    stage("timeline rules: trim limits, saved selections and export numbering")
+    result = page.evaluate(TIMELINE_RULES)
+    assert result["clip"]["source_start"] == 10 and result["clip"]["source_end"] == 20, result
+    assert result["ids"] == [4, 5, 6], result  # duplicate and missing ids are replaced
+    assert result["tooShort"] == 11 and result["pastStart"] == 19 and result["beforeZero"] == 0, result
+    assert result["pastFootage"] == 30 and result["tooLong"] == 610, result
+    assert result["legacyRange"] == [5, 6] and result["legacyAll"] == [] and result["saved"] == [5], result
+    assert result["chosen"] == [2, 3] and result["all"] == [1, 2, 3], result
+    assert result["clocks"] == [3271.5, 3723, 12.5, "NaN"], result
+    assert result["formatted"] == ["54:31.5", "1:02:03.0"], result
+
+
+def exercise_clip_editor(page, evidence):
+    """Find clips, then watch, trim and export them in the timeline editor."""
+    exercise_timeline_rules(page)
+    stage("find clips and land them on the timeline")
+    page.get_by_role("button", name="Find clips", exact=True).click()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    # Rendering the timeline precedes the awaited project write; hard refresh must
+    # wait for the same completion state a user sees after saving.
+    expect(page.locator('[data-summary-note]')).to_have_text("1 clip ready to review.", timeout=30000)
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    assert page.locator('input[name="action"][value="Goal"]').is_checked()
+    expect(page.locator('[data-summary-note]')).to_have_text("1 clip ready to review.")
+    expect(page.locator('[data-editor-empty]')).to_be_hidden()
+    expect(page.locator('.clip-block')).to_have_count(1)
+    expect(page.locator('.clip-block .clip-label')).to_have_text("One - Goal @ 0:02 (P1)")
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.0s")
+
+    stage("the clip plays straight from the match footage and stops at its end")
+    video = page.locator('[data-editor-video]')
+    page.wait_for_function("document.querySelector('[data-editor-video]').readyState >= 1")
+    page.get_by_role("button", name="Play clip").click()
+    page.wait_for_function("""() => { const v = document.querySelector('[data-editor-video]');
+        return v.paused && v.currentTime >= 2.9 && v.videoWidth > 0; }""", timeout=30000)
+    assert abs(video.evaluate("(v) => v.currentTime") - 3.0) < 0.15
+    expect(page.locator('[data-trim-to]')).to_have_text("0:08")  # bounded by the 8 second footage
+
+    stage("drag the trim bar's end handle, then nudge and reset the clip")
+    handle = page.locator('[data-trim-handle="end"]')
+    box = handle.bounding_box()
+    bar = page.locator('[data-trim-bar]').bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(bar["x"] + bar["width"] - 2, box["y"] + box["height"] / 2, steps=6)
+    page.mouse.up()
+    dragged = float(page.locator('[data-clip-duration]').inner_text().rstrip("s"))
+    assert 2.5 < dragged <= 7.0, dragged  # longer, but never past the end of the 8 second footage
+    expect(page.locator('.clip-block')).to_have_class(re.compile("is-trimmed"))
+    page.get_by_role("button", name="Reset timing").click()
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.0s")
+    page.get_by_role("button", name="End 1 second later").click()
+    expect(page.locator('[data-clip-duration]')).to_have_text("3.0s")
+    page.get_by_role("slider", name="Clip 1 end").focus()
+    page.keyboard.press("ArrowLeft")
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.5s")
+    end = page.get_by_role("textbox", name="Clip end (video time)")
+    expect(end).to_have_value("0:03.5")
+    end.fill("not a time")
+    end.press("Tab")
+    expect(end).to_have_attribute("aria-invalid", "true")
+    end.fill("3.5")
+    end.press("Tab")
+    expect(end).to_have_value("0:03.5")
+
+    stage("remove a clip and undo it")
+    page.get_by_role("button", name="Remove clip").click()
+    expect(page.locator('.clip-block')).to_have_count(0)
+    page.get_by_role("button", name="Undo remove").click()
+    expect(page.locator('.clip-block')).to_have_count(1)
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.5s")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+
+    stage("export the reel and decode the download")
+    with page.expect_response(lambda response: urlparse(response.url).path == "/api/jobs"
+                              and response.request.method == "POST") as started:
+        page.get_by_role("button", name="Export reel", exact=True).click()
+    assert started.value.request.post_data_json["options"]["clip_windows"][0]["end"] == 3.5
+    page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
+    with page.expect_download() as download:
+        page.locator('[data-export-files] a').first.click()
+    exported = evidence / "export.mp4"
+    download.value.save_as(str(exported))
+    decode(exported)
+    assert abs(duration_of(exported) - 2.5) < 0.3, duration_of(exported)
+
+    stage("export a ticked set as separate files, named by timeline number")
+    page.get_by_role("checkbox", name="Select clip 1").check()
+    expect(page.locator('input[name="export-scope"][value="selected"]')).to_be_checked()
+    page.locator('.export-bar label').filter(has_text="Separate files").click()
+    page.get_by_role("button", name="Export 1 clip", exact=True).click()
+    page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
+    expect(page.locator('[data-export-files] a')).to_have_text(["01_One_-_Goal.mp4"])
+
+    stage("trim, selection and export choice survive a reload")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    expect(page.get_by_role("textbox", name="Clip end (video time)")).to_have_value("0:03.5")
+    expect(page.get_by_role("checkbox", name="Select clip 1")).to_be_checked()
+    expect(page.locator('input[name="export-as"][value="files"]')).to_be_checked()
+    expect(page.get_by_role("button", name="Export 1 clip", exact=True)).to_be_enabled()
+    page.screenshot(path=str(evidence / "filters.png"))
+
+    stage("footage the player cannot decode falls back to rendering the clip")
+    page.route("**/api/files/reopen", lambda route: route.fulfill(
+        json={"file": {"name": "x.mp4", "path": "unplayable", "url": "/api/media/unplayable"}}))
+    page.reload()
+    expect(page.locator('[data-viewer-message]')).to_contain_text("cannot be played", timeout=30000)
+    page.get_by_role("button", name="Render this clip").click()
+    expect(page.locator('[data-render-status]')).to_have_text("Clip ready", timeout=60000)
+    page.wait_for_function("document.querySelector('[data-editor-video]')?.videoWidth > 0")
+    assert 2.3 <= video.evaluate("(v) => v.duration") <= 2.7
+    with page.expect_download() as download:
+        page.get_by_role("link", name="Download clip", exact=True).click()
+    preview = evidence / "preview.mp4"
+    download.value.save_as(str(preview))
+    decode(preview)
+    page.unroute("**/api/files/reopen")
+    page.locator('.export-bar label').filter(has_text="One reel").click()
+    page.get_by_role("button", name="Select none").click()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+
+
 def exercise_native_workspace(page, base, project_id, evidence, errors):
     stage("open native analysis workspace shell (now the Analyst Room default)")
     console_errors = []
@@ -646,52 +810,7 @@ def exercise(page, base, root, evidence, errors):
     page.get_by_role("spinbutton", name="Seconds after", exact=True).fill("1")
     page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("0")
     exercise_snapshot_restore(page)
-    page.get_by_role("button", name="Preview clip plan").click()
-    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
-    # Rendering the list precedes the awaited project write; hard refresh must
-    # wait for the same completion state a user sees after saving.
-    expect(page.locator('[data-summary-note]')).to_have_text("1 clips ready to review.", timeout=30000)
-    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
-    page.reload()
-    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
-    assert page.locator('input[name="action"][value="Goal"]').is_checked()
-    expect(page.locator('[data-summary-note]')).to_have_text("1 clips ready to review.")
-    page.locator('.clip-preview summary').click()
-    page.get_by_role("spinbutton", name="End (video seconds)", exact=True).fill("3.5")
-    page.get_by_role("button", name="Render preview", exact=True).click()
-    stage("render edited preview")
-    page.get_by_text("Preview ready", exact=True).wait_for(timeout=60000)
-    page.wait_for_function("document.querySelector('.clip-preview video')?.videoWidth > 0")
-    duration = page.locator('.clip-preview video').evaluate('(video) => video.duration')
-    assert 2.3 <= duration <= 2.7, duration
-    with page.expect_download() as download:
-        page.get_by_role("link", name="Download clip", exact=True).click()
-    preview = evidence / "preview.mp4"
-    download.value.save_as(str(preview))
-    decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(preview),
-                              "-f", "null", "-"], capture_output=True, timeout=60)
-    assert decoded.returncode == 0 and preview.stat().st_size > 0, decoded.stderr
-    stage("export reel and decode download")
-    with page.expect_response(lambda response: urlparse(response.url).path == "/api/jobs" and response.request.method == "POST") as started:
-        page.get_by_role("button", name="Export reel", exact=True).click()
-    job_id = started.value.json()["job"]["id"]
-    page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
-    job = request(base, "/api/jobs/" + job_id)["job"]
-    assert job["status"] == "complete" and job["files"], job
-    with page.expect_download() as download:
-        page.locator('[data-export-files] a').first.click()
-    exported = evidence / "export.mp4"
-    download.value.save_as(str(exported))
-    assert exported.stat().st_size == job["files"][0]["size"]
-    decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(exported),
-                              "-f", "null", "-"], capture_output=True, timeout=60)
-    assert decoded.returncode == 0, decoded.stderr
-    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
-    page.reload()
-    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
-    page.locator('.clip-preview summary').click()
-    expect(page.get_by_role("spinbutton", name="End (video seconds)", exact=True)).to_have_value("3.5")
-    page.screenshot(path=str(evidence / "filters.png"))
+    exercise_clip_editor(page, evidence)
     exercise_native_workspace(page, base, project_id, evidence, errors)
     stage("timeline sync gives the video most of the row and fits the player on screen")
     # The player used to be capped at 610px beside a wide text column.
@@ -710,6 +829,24 @@ def exercise(page, base, root, evidence, errors):
             assert sizes["setKickoff"] <= sizes["footer"], ("Set kick-off runs under the footer", sizes)
         else:
             assert sizes["shell"]["width"] >= sizes["section"]["width"] - 1, ("stacked player is not full width", sizes)
+    stage("the clip editor keeps the video, trim bar and timeline together")
+    # The old page stacked eight sections above a list of clips.
+    for width, height in ((1440, 900), (1366, 768), (1024, 768)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(base + "/filters.html?match=" + project_id)
+        page.locator('.clip-block').first.wait_for()
+        page.evaluate("window.scrollTo(0, 0)")
+        sizes = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          return {video: box('.viewer-frame'), track: box('.timeline-track'), footer: box('.app-footer').top,
+                  rail: box('.filter-rail'), editor: box('.editor'), inspector: box('.inspector')};
+        }""")
+        assert sizes["rail"]["right"] <= sizes["editor"]["left"], ("filters stacked above the editor", width, sizes)
+        assert sizes["video"]["width"] >= 560, ("video too small", width, sizes)
+        if width == 1440:
+            assert sizes["track"]["bottom"] <= sizes["footer"] + 1, ("timeline runs under the footer", sizes)
+            assert sizes["inspector"]["left"] >= sizes["video"]["right"], ("clip controls not beside the video", sizes)
+        page.screenshot(path=str(evidence / f"editor-{width}x{height}.png"))
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):
         page.set_viewport_size({"width": width, "height": height})
