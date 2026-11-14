@@ -5,7 +5,6 @@ body { padding-bottom: 30px; }
 .batch-import textarea { display: block; width: 100%; resize: vertical; min-height: 65px; padding: 8px; border: 1px solid #d7d8d2; margin: 6px 0; font: 12px Arial,sans-serif; }
 .batch-import button { border: 1px solid #d7d8d2; border-radius: 4px; background: #fff; padding: 7px 10px; cursor: pointer; }
 .batch-import output { display: block; margin-top: 6px; font-size: 11px; overflow-wrap: anywhere; }
-.use-playhead { display: block; margin-bottom: 8px; padding: 6px 10px; background: #fff; color: #151916; border: 1px solid #d7d8d2; border-radius: 4px; font-size: 12px; cursor: pointer; }
 .clip-list { max-height: 460px; overflow: auto; overscroll-behavior: contain; }
 .clip-range { display: flex; align-items: center; gap: 12px; margin: 8px 0 14px; font-size: 12px; }
 .clip-range label { display: flex; align-items: center; gap: 6px; }
@@ -334,4 +333,34 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+/* Kick-off player: step, speed, zoom and period markers. */
+.player-controls, .marker-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.marker-controls { justify-content: space-between; }
+.step-group, .zoom-group { display: inline-flex; align-items: center; gap: 2px; }
+.player-controls button, .player-controls select, .marker-controls button {
+  min-height: 28px; padding: 0 8px; border: 1px solid #353a32; border-radius: 4px; background: #222620; color: #e8eae4;
+  font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer;
+}
+.player-controls button:hover:not(:disabled), .player-controls select:hover:not(:disabled), .marker-controls button:hover:not(:disabled) { border-color: #c8f135; }
+.player-controls :disabled, .marker-controls :disabled { opacity: 0.4; cursor: not-allowed; }
+.player-controls :focus-visible, .marker-controls :focus-visible, .timeline-marker:focus-visible span { outline: 2px solid #c8f135; outline-offset: 1px; }
+.player-controls .player-toggle { min-width: 36px; border-color: #c8f135; background: #c8f135; color: #11130f; }
+.player-controls [aria-pressed="true"], .marker-controls [aria-pressed="true"] { border-color: #c8f135; background: #c8f135; color: #11130f; }
+.speed-control { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #9aa095; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.zoom-group > span { margin-right: 4px; color: #9aa095; font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.marker-controls .set-kickoff { border-color: #c8f135; color: #c8f135; }
+.timeline-markers { position: absolute; z-index: 1; inset: 0 0 28px; pointer-events: none; }
+.timeline-marker {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: flex-end; padding: 0; border: 0; background: none;
+  color: #11130f; font: 600 9px ui-monospace, SFMono-Regular, Consolas, monospace; transform: translateX(-50%);
+  pointer-events: auto; cursor: pointer;
+}
+.timeline-marker[hidden] { display: none; }
+.timeline-marker::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #f4f4f0; }
+.timeline-marker span { position: relative; padding: 1px 4px; border-radius: 3px; background: #f4f4f0; }
+.timeline-marker.is-active::before, .timeline-marker.is-active span { background: #ffb547; }
+@media (max-width: 560px) {
+  .speed-control { margin-left: 0; }
+  .player-controls button, .marker-controls button { padding: 0 6px; }
 }

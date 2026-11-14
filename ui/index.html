@@ -6,11 +6,11 @@
     <meta name="theme-color" content="#f4f4f0" />
     <title>VizorPlay - Match Intake</title>
     <link rel="stylesheet" href="styles.css?v=9" />
-    <link rel="stylesheet" href="compact.css?v=7" />
+    <link rel="stylesheet" href="compact.css?v=8" />
     <link rel="stylesheet" href="design.css?v=4" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
-    <script type="module" src="app.js?v=14"></script>
+    <script type="module" src="app.js?v=15"></script>
   </head>
   <body>
     <div class="page-wipe" aria-hidden="true"><span>VizorPlay</span></div>
@@ -357,8 +357,8 @@
             />
           </div>
           <p class="period-note">
-            <button type="button" class="use-playhead" data-set-marker>Use playhead as kick-off</button>
-            Extra time and penalties are enabled only when the match includes
+            Pause the video on the kick-off, then press <strong>Set kick-off
+            here</strong> under the player. Extra time and penalties are enabled only when the match includes
             them.
           </p>
         </div>
@@ -396,15 +396,55 @@
               ▶
             </button>
           </div>
+          <div
+            class="player-controls"
+            role="group"
+            aria-label="Playback controls"
+            data-player-controls
+          >
+            <button type="button" class="player-toggle" data-player-toggle aria-label="Play" disabled>▶</button
+            ><span class="step-group" role="group" aria-label="Step back"
+              ><button type="button" data-step="-60" title="Back 1 minute (Ctrl+←)" disabled>−1m</button
+              ><button type="button" data-step="-10" title="Back 10 seconds (Shift+←)" disabled>−10s</button
+              ><button type="button" data-step="-1" title="Back 1 second (←)" disabled>−1s</button
+              ><button type="button" data-step="frame-back" title="Back 1 frame (,)" aria-label="Back 1 frame" disabled>−1f</button></span
+            ><span class="step-group" role="group" aria-label="Step forward"
+              ><button type="button" data-step="frame-forward" title="Forward 1 frame (.)" aria-label="Forward 1 frame" disabled>+1f</button
+              ><button type="button" data-step="1" title="Forward 1 second (→)" disabled>+1s</button
+              ><button type="button" data-step="10" title="Forward 10 seconds (Shift+→)" disabled>+10s</button
+              ><button type="button" data-step="60" title="Forward 1 minute (Ctrl+→)" disabled>+1m</button></span
+            ><label class="speed-control"
+              >Speed
+              <select data-playback-rate aria-label="Playback speed" disabled>
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+                <option value="8">8×</option>
+              </select></label
+            ><button type="button" data-mute aria-pressed="false" disabled>Mute</button>
+          </div>
           <div class="timeline" data-timeline>
             <div class="filmstrip" aria-hidden="true">
               <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
             </div>
+            <div class="timeline-markers" data-timeline-markers></div>
             <div class="playhead" data-playhead><span></span></div>
             <div class="timeline-label">
-              <span>00:00</span><strong data-timeline-time>00:00:00</strong
+              <span data-timeline-start>00:00:00</span
+              ><strong data-timeline-time>00:00:00.0</strong
               ><span data-timeline-end>--:--:--</span>
             </div>
+          </div>
+          <div class="marker-controls">
+            <span class="zoom-group" role="group" aria-label="Timeline zoom"
+              ><span>Zoom</span
+              ><button type="button" data-zoom="0" aria-pressed="true">Full</button
+              ><button type="button" data-zoom="600" aria-pressed="false">10 min</button
+              ><button type="button" data-zoom="120" aria-pressed="false">2 min</button></span
+            ><button type="button" class="set-kickoff" data-set-marker disabled>
+              Set 1H kick-off here
+            </button>
           </div>
           <div class="preview-actions">
             <button type="button" class="text-button">Reset marker</button

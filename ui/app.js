@@ -315,6 +315,8 @@ const matchFrame = document.querySelector(".match-frame");
 const previewName = document.querySelector(".preview-top span:first-child");
 const previewDuration = document.querySelector(".preview-top span:last-child");
 let videoUrl;
+// Where to put the playhead once a reloaded period video is ready.
+let pendingSeek = null;
 
 const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
@@ -330,6 +332,7 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   previewName.textContent = name;
   previewName.title = name;
   document.querySelector(".play-button").disabled = false;
+  setPlayerEnabled(true);
   if (save) {
     activeMatch.video_name = name;
     activeMatch.video_path = path || "";
@@ -399,6 +402,7 @@ document.querySelectorAll("[data-period-video]").forEach((input) => input.addEve
     activeMatch.period_videos = { ...(activeMatch.period_videos || {}), [input.dataset.periodVideo]: result.file.path };
     document.querySelector(`[data-period-file="${input.dataset.periodVideo}"]`).textContent = file.name;
     await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos });
+    renderTimelineMarkers();
   } catch (error) { showToast(error.message); }
   finally { finish(); }
   input.value = "";
@@ -407,14 +411,16 @@ document.querySelectorAll("[data-remove-period]").forEach((button) => button.add
   const period = button.dataset.removePeriod;
   delete (activeMatch.period_videos || {})[period];
   document.querySelector(`[data-period-file="${period}"]`).textContent = "";
+  renderTimelineMarkers();
   try { await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos || {} }); }
   catch (error) { showToast(error.message); }
 }));
 matchVideo.addEventListener("loadedmetadata", () => {
   previewDuration.textContent = formatTime(matchVideo.duration);
-  document.querySelector("[data-timeline-end]").textContent = formatTime(
-    matchVideo.duration,
-  );
+  matchVideo.playbackRate = Number(playbackRate.value);
+  renderTimelineMarkers();
+  if (pendingSeek !== null) setScrubTime(pendingSeek);
+  pendingSeek = null;
   syncPlaybackUi();
 });
 const clearFootage = () => {
@@ -428,11 +434,12 @@ const clearFootage = () => {
   activeMatch.video_path = "";
   document.querySelector("[data-file-count]").textContent = "No file";
   document.querySelector(".play-button").disabled = true;
+  setPlayerEnabled(false);
+  pendingSeek = null;
   previewName.textContent = "No footage selected";
   previewDuration.textContent = "--:--:--";
-  document.querySelector("[data-timeline-end]").textContent = "--:--:--";
-  document.querySelector("[data-timeline-time]").textContent = "00:00:00";
-  playhead.style.left = "0%";
+  previewSeconds = 0;
+  renderTimeline();
   videoInput.value = "";
 };
 document.querySelector(".remove-button").addEventListener("click", () => {
@@ -546,12 +553,35 @@ const timeline = document.querySelector("[data-timeline]");
 const playhead = document.querySelector("[data-playhead]");
 const markerInput = document.querySelector("[data-time]");
 const playbackTime = document.querySelector("[data-timeline-time]");
+const timelineStart = document.querySelector("[data-timeline-start]");
+const timelineEnd = document.querySelector("[data-timeline-end]");
+const timelineMarkers = document.querySelector("[data-timeline-markers]");
 const playButton = document.querySelector(".play-button");
+const playerToggle = document.querySelector("[data-player-toggle]");
+const playbackRate = document.querySelector("[data-playback-rate]");
+const muteButton = document.querySelector("[data-mute]");
+const setKickoffButton = document.querySelector("[data-set-marker]");
+const periodLabels = {
+  "1H": "First-half kick-off",
+  "2H": "Second-half kick-off",
+  ET1: "Extra-time first-half kick-off",
+  ET2: "Extra-time second-half kick-off",
+  PEN: "First penalty kick",
+};
 const updateMarkerTime = (value) => {
   markerInput.value = value;
 };
 const scrubCursor = document.querySelector(".scrub-cursor");
 let scrubbing = false;
+// Seconds shown when no footage is loaded (design preview), a zoomed view's
+// width in seconds (0 = whole video) and where that view starts.
+let previewSeconds = 0;
+let zoomSpan = 0;
+let viewStart = 0;
+// One frame, measured from playback where the webview supports it.
+const DEFAULT_FRAME_STEP = 1 / 25;
+let measuredFrameStep = null;
+const frameStep = () => measuredFrameStep || DEFAULT_FRAME_STEP;
 const formatTime = (seconds) => {
   const safeSeconds = Number.isFinite(seconds)
     ? Math.max(0, Math.round(seconds))
@@ -561,34 +591,113 @@ const formatTime = (seconds) => {
   const secs = safeSeconds % 60;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 };
+// Playhead readout with tenths, so frame steps visibly move it.
+const formatPreciseTime = (seconds) => {
+  const tenths = Math.floor((Number.isFinite(seconds) ? Math.max(0, seconds) : 0) * 10);
+  return `${formatTime(Math.floor(tenths / 10))}.${tenths % 10}`;
+};
+const parseClock = (value) =>
+  String(value).split(":").reduce((total, part) => total * 60 + Number(part), 0);
+const hasVideo = () => matchFrame.classList.contains("has-video");
+const hasDuration = () =>
+  hasVideo() && Number.isFinite(matchVideo.duration) && matchVideo.duration > 0;
+const videoDuration = () => (hasDuration() ? matchVideo.duration : 600);
+const currentSeconds = () =>
+  hasVideo() && Number.isFinite(matchVideo.currentTime) ? matchVideo.currentTime : previewSeconds;
+const activePeriodButton = () => document.querySelector(".period-selector .is-active");
+
+// The part of the video the timeline shows. A zoomed view follows the
+// playhead when it leaves the window (playback, steps, marker jumps).
+const timelineView = (current = currentSeconds()) => {
+  const duration = videoDuration();
+  if (!zoomSpan || zoomSpan >= duration) {
+    viewStart = 0;
+    return { start: 0, span: duration };
+  }
+  if (current < viewStart || current > viewStart + zoomSpan) viewStart = current - zoomSpan / 2;
+  viewStart = Math.max(0, Math.min(viewStart, duration - zoomSpan));
+  return { start: viewStart, span: zoomSpan };
+};
+const viewPercent = (seconds, view) => ((seconds - view.start) / view.span) * 100;
+const renderTimeline = () => {
+  const current = currentSeconds();
+  const view = timelineView(current);
+  playhead.style.left = `${Math.max(0, Math.min(100, viewPercent(current, view)))}%`;
+  playbackTime.textContent = formatPreciseTime(current);
+  timelineStart.textContent = formatTime(view.start);
+  timelineEnd.textContent = hasDuration() ? formatTime(view.start + view.span) : "--:--:--";
+  timelineMarkers.querySelectorAll("[data-marker-seconds]").forEach((marker) => {
+    const percent = viewPercent(Number(marker.dataset.markerSeconds), view);
+    marker.hidden = percent < 0 || percent > 100;
+    marker.style.left = `${percent}%`;
+  });
+};
+// Periods whose kick-off lies in the loaded file: a period with its own video
+// file shows only its own marker; otherwise every period sharing the main video.
+const periodsInLoadedVideo = () => {
+  const own = activeMatch.period_videos || {};
+  const active = activePeriodButton()?.dataset.period;
+  if (active && own[active]) return new Set([active]);
+  return new Set(Object.keys(periodLabels).filter((period) => !own[period]));
+};
+const renderTimelineMarkers = () => {
+  const periods = periodsInLoadedVideo();
+  const active = activePeriodButton();
+  timelineMarkers.replaceChildren();
+  document.querySelectorAll(".period-selector [data-period]").forEach((button) => {
+    const period = button.dataset.period;
+    if (button.disabled || button.dataset.markerSet !== "true" || !periods.has(period)) return;
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = `timeline-marker${button === active ? " is-active" : ""}`;
+    marker.dataset.markerSeconds = String(parseClock(button.dataset.marker));
+    marker.dataset.markerPeriod = period;
+    marker.title = `${periodLabels[period]} ${button.dataset.marker}`;
+    marker.setAttribute(
+      "aria-label",
+      `Jump to ${periodLabels[period].toLowerCase()} at ${button.dataset.marker}`,
+    );
+    const label = document.createElement("span");
+    label.textContent = period;
+    marker.append(label);
+    marker.addEventListener("pointerdown", (event) => event.stopPropagation());
+    marker.addEventListener("click", () => setScrubTime(Number(marker.dataset.markerSeconds)));
+    timelineMarkers.append(marker);
+  });
+  renderTimeline();
+};
+// Markers change from many places (typing, reset, loading a project), so the
+// period buttons' own data is the single source the timeline redraws from.
+new MutationObserver(renderTimelineMarkers).observe(
+  document.querySelector(".period-selector"),
+  { subtree: true, attributes: true, attributeFilter: ["data-marker", "data-marker-set", "disabled", "class"] },
+);
+const setPlayerEnabled = (enabled) => {
+  document
+    .querySelectorAll("[data-player-toggle], [data-step], [data-playback-rate], [data-mute], [data-set-marker]")
+    .forEach((control) => {
+      control.disabled = !enabled;
+    });
+};
+const updateKickoffButton = () => {
+  const period = activePeriodButton()?.dataset.period || "1H";
+  setKickoffButton.textContent =
+    period === "PEN" ? "Set first penalty here" : `Set ${period} kick-off here`;
+};
 const syncPlaybackUi = () => {
-  const current = Number.isFinite(matchVideo.currentTime)
-    ? matchVideo.currentTime
-    : 0;
-  const duration = Number.isFinite(matchVideo.duration)
-    ? matchVideo.duration
-    : 0;
-  playbackTime.textContent = formatTime(current);
   document.querySelector(".frame-score time").textContent =
-    formatTime(current).slice(3);
-  playhead.style.left = `${duration ? (current / duration) * 100 : 0}%`;
+    formatTime(currentSeconds()).slice(3);
+  renderTimeline();
 };
 const setScrubTime = (seconds, updateMarker = false) => {
-  const duration = Number.isFinite(matchVideo.duration)
-    ? matchVideo.duration
-    : 600;
-  const safeSeconds = Math.max(0, Math.min(seconds, duration));
-  if (matchFrame.classList.contains("has-video")) {
-    matchVideo.currentTime = safeSeconds;
-    syncPlaybackUi();
-  } else {
-    playbackTime.textContent = formatTime(safeSeconds);
-    playhead.style.left = `${(safeSeconds / duration) * 100}%`;
-  }
+  const safeSeconds = Math.max(0, Math.min(seconds, videoDuration()));
+  if (hasVideo()) matchVideo.currentTime = safeSeconds;
+  else previewSeconds = safeSeconds;
+  syncPlaybackUi();
   if (updateMarker) {
     const value = formatTime(safeSeconds);
     updateMarkerTime(value);
-    const activePeriod = document.querySelector(".period-selector .is-active");
+    const activePeriod = activePeriodButton();
     if (activePeriod) { activePeriod.dataset.marker = value; activePeriod.dataset.markerSet = "true"; }
   }
 };
@@ -598,10 +707,8 @@ const updateTimeline = (clientX) => {
     0,
     Math.min(1, (clientX - bounds.left) / bounds.width),
   );
-  const duration = Number.isFinite(matchVideo.duration)
-    ? matchVideo.duration
-    : 600;
-  setScrubTime(ratio * duration);
+  const view = timelineView();
+  setScrubTime(view.start + ratio * view.span);
 };
 timeline.addEventListener("pointerdown", (event) => {
   scrubbing = true;
@@ -625,71 +732,123 @@ timeline.addEventListener("pointerleave", () => {
   scrubCursor.classList.remove("is-visible");
 });
 document.querySelector(".text-button").addEventListener("click", () => {
-  const activePeriod = document.querySelector(".period-selector .is-active");
+  const activePeriod = activePeriodButton();
   const resetValue = "00:00:00";
   activePeriod.dataset.marker = resetValue;
   activePeriod.dataset.markerSet = "false";
-  const seconds = resetValue
-    .split(":")
-    .reduce((total, part) => total * 60 + Number(part), 0);
-  setScrubTime(seconds);
+  setScrubTime(parseClock(resetValue));
   updateMarkerTime(resetValue);
   persistIntake();
   showToast("Kick-off marker reset");
 });
 const togglePlayback = () => {
-  if (!matchFrame.classList.contains("has-video")) return;
+  if (!hasVideo()) return;
   if (matchVideo.paused) matchVideo.play();
   else matchVideo.pause();
 };
+// The time to seek to for a frame step: the middle of the neighbouring frame.
+// Adding a frame length to currentTime can land a hair before a frame boundary
+// (101.08 - 0.04 = 101.039999), which shows the wrong frame.
+const frameStepTarget = (current, direction, length) =>
+  (Math.floor(current / length + 1e-3) + direction + 0.5) * length;
+// A step is a number of seconds, or one frame back/forward. Frame steps pause.
+const stepPlayback = (step) => {
+  if (!hasVideo()) return;
+  if (step === "frame-back" || step === "frame-forward") {
+    matchVideo.pause();
+    setScrubTime(frameStepTarget(matchVideo.currentTime, step === "frame-back" ? -1 : 1, frameStep()));
+  } else {
+    setScrubTime(matchVideo.currentTime + Number(step));
+  }
+};
 playButton.addEventListener("click", togglePlayback);
+playerToggle.addEventListener("click", togglePlayback);
+document.querySelectorAll("[data-step]").forEach((button) =>
+  button.addEventListener("click", () => stepPlayback(button.dataset.step)),
+);
+playbackRate.addEventListener("change", () => {
+  matchVideo.defaultPlaybackRate = Number(playbackRate.value);
+  matchVideo.playbackRate = Number(playbackRate.value);
+});
+muteButton.addEventListener("click", () => {
+  matchVideo.muted = !matchVideo.muted;
+  muteButton.setAttribute("aria-pressed", String(matchVideo.muted));
+});
+document.querySelectorAll("[data-zoom]").forEach((button) =>
+  button.addEventListener("click", () => {
+    zoomSpan = Number(button.dataset.zoom);
+    document.querySelectorAll("[data-zoom]").forEach((item) =>
+      item.setAttribute("aria-pressed", String(item === button)),
+    );
+    viewStart = currentSeconds() - zoomSpan / 2;
+    renderTimeline();
+  }),
+);
 matchVideo.addEventListener("timeupdate", syncPlaybackUi);
 matchVideo.addEventListener("play", () => {
   playButton.textContent = "Ⅱ";
   playButton.setAttribute("aria-label", "Pause preview");
+  playerToggle.textContent = "Ⅱ";
+  playerToggle.setAttribute("aria-label", "Pause");
 });
 matchVideo.addEventListener("pause", () => {
   playButton.textContent = "▶";
   playButton.setAttribute("aria-label", "Play preview");
+  playerToggle.textContent = "▶";
+  playerToggle.setAttribute("aria-label", "Play");
 });
+if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+  // The smallest gap between presented frames is one frame: dropped frames
+  // only lengthen gaps, and seeks or a new file reset the measurement.
+  let lastMediaTime = null;
+  const onFrame = (_now, metadata) => {
+    if (lastMediaTime !== null) {
+      const gap = metadata.mediaTime - lastMediaTime;
+      if (gap > 0.008 && gap < 0.1) measuredFrameStep = Math.min(measuredFrameStep || gap, gap);
+    }
+    lastMediaTime = metadata.mediaTime;
+    matchVideo.requestVideoFrameCallback(onFrame);
+  };
+  matchVideo.addEventListener("seeking", () => { lastMediaTime = null; });
+  matchVideo.addEventListener("loadstart", () => { lastMediaTime = null; measuredFrameStep = null; });
+  matchVideo.requestVideoFrameCallback(onFrame);
+}
 
 document.addEventListener("keydown", (event) => {
   const target = event.target;
+  if (!(target instanceof Element)) return;
   const isEditing =
     target instanceof HTMLInputElement ||
     target instanceof HTMLSelectElement ||
     target instanceof HTMLTextAreaElement ||
     target.isContentEditable;
   const isControl = target.closest("button, a, summary, [role='tab'], dialog");
-  if (isEditing || isControl || eventDialog.open) return;
-  if (event.code === "Space" && matchFrame.classList.contains("has-video")) {
+  // Step keys keep working while focus is on the player's own buttons.
+  const inPlayer = target.closest("[data-player-controls], .marker-controls, [data-timeline]");
+  if (isEditing || eventDialog.open || !hasVideo()) return;
+  if (isControl && !inPlayer) return;
+  if (event.code === "Space") {
+    if (isControl) return; // Space presses the focused button instead.
     event.preventDefault();
     togglePlayback();
-  }
-  if (
-    ["ArrowLeft", "ArrowRight"].includes(event.key) &&
-    matchFrame.classList.contains("has-video")
-  ) {
+  } else if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
-    const direction = event.key === "ArrowLeft" ? -1 : 1;
-    setScrubTime(
-      matchVideo.currentTime + direction * (event.shiftKey ? 10 : 5),
-    );
-    persistIntake();
+    const seconds = event.ctrlKey || event.metaKey ? 60 : event.shiftKey ? 10 : 1;
+    stepPlayback((event.key === "ArrowLeft" ? -1 : 1) * seconds);
+  } else if (event.key === "," || event.key === ".") {
+    event.preventDefault();
+    stepPlayback(event.key === "," ? "frame-back" : "frame-forward");
   }
 });
 
-const periodLabels = {
-  "1H": "First-half kick-off",
-  "2H": "Second-half kick-off",
-  ET1: "Extra-time first-half kick-off",
-  ET2: "Extra-time second-half kick-off",
-  PEN: "First penalty kick",
-};
-document.querySelector("[data-set-marker]").addEventListener("click", () => {
-  if (!Number.isFinite(matchVideo.duration)) { showToast("Load footage before setting a marker from playback."); return; }
+setKickoffButton.addEventListener("click", () => {
+  if (!hasDuration()) {
+    showToast("Load footage before setting a marker from playback.");
+    return;
+  }
   setScrubTime(matchVideo.currentTime, true);
   persistIntake();
+  showToast(`${periodLabels[activePeriodButton().dataset.period]} set to ${formatTime(matchVideo.currentTime)}`);
 });
 const setOptionalPeriods = () => {
   const extraTime = document.querySelector("[data-extra-time]").checked;
@@ -717,10 +876,7 @@ document.querySelector("[data-time]").addEventListener("change", (event) => {
   active.dataset.marker = value;
   active.dataset.markerSet = "true";
   updateMarkerTime(value);
-  const seconds = value
-    .split(":")
-    .reduce((total, part) => total * 60 + Number(part), 0);
-  setScrubTime(seconds, false);
+  setScrubTime(parseClock(value), false);
   persistIntake();
 });
 document.querySelector("[data-time]").addEventListener("input", (event) => {
@@ -746,14 +902,15 @@ document
         });
       document.querySelector("[data-period-label]").textContent =
         periodLabels[button.dataset.period];
+      updateKickoffButton();
       updateMarkerTime(button.dataset.marker);
+      const seconds = parseClock(button.dataset.marker);
       if (activeMatch.id && (activeMatch.video_path || activeMatch.period_videos?.[button.dataset.period])) {
+        // Reopening reloads the video, so land on this period's kick-off once it is ready.
         apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: activeMatch.id, period: button.dataset.period }) })
-          .then((result) => showSelectedVideo(result.file, false)).catch((error) => showToast(error.message));
+          .then((result) => { pendingSeek = seconds; showSelectedVideo(result.file, false); })
+          .catch((error) => showToast(error.message));
       }
-      const seconds = button.dataset.marker
-        .split(":")
-        .reduce((total, part) => total * 60 + Number(part), 0);
       if (Number.isFinite(matchVideo.duration)) {
         setScrubTime(seconds, false);
       }
