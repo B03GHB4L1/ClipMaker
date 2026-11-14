@@ -227,15 +227,29 @@ def main():
                         checkbox.find_element(By.XPATH, "..").click()
                         element('button.filter-preview-button').click()
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
-                        endpoint = element('[data-edge-input="end"]')
-                        endpoint.send_keys(Keys.CONTROL, "a")
-                        endpoint.send_keys("3.5", Keys.TAB)
-                        stage(evidence, "play the trimmed clip from the footage in the installed webview")
-                        element('[data-play-clip]').click()
-                        # The editor plays the match footage itself and stops at the trimmed end.
-                        wait.until(lambda current: current.execute_script(
-                            "const v=document.querySelector('[data-editor-video]');"
-                            " return v.videoWidth > 0 && v.paused && Math.abs(v.currentTime - 3.5) < 0.25"))
+                        if args.upgrade_from:
+                            # Launch 1 runs the installed predecessor, which still has the
+                            # pre-timeline clip list; its saved edit must carry into the editor.
+                            element('.clip-preview summary').click()
+                            endpoint = element('.clip-editor label:nth-child(2) input')
+                            endpoint.send_keys(Keys.CONTROL, "a")
+                            endpoint.send_keys("3.5", Keys.TAB)
+                            stage(evidence, "render edited preview in the installed predecessor")
+                            element('.clip-editor > button:first-of-type').click()
+                            wait.until(lambda current: current.execute_script(
+                                "const v=document.querySelector('.clip-preview video'); return v && !v.hidden && v.videoWidth > 0"))
+                            duration = driver.execute_script("return document.querySelector('.clip-preview video').duration")
+                            assert 3.3 <= duration <= 3.7, duration
+                        else:
+                            endpoint = element('[data-edge-input="end"]')
+                            endpoint.send_keys(Keys.CONTROL, "a")
+                            endpoint.send_keys("3.5", Keys.TAB)
+                            stage(evidence, "play the trimmed clip from the footage in the installed webview")
+                            element('[data-play-clip]').click()
+                            # The editor plays the match footage itself and stops at the trimmed end.
+                            wait.until(lambda current: current.execute_script(
+                                "const v=document.querySelector('[data-editor-video]');"
+                                " return v.videoWidth > 0 && v.paused && Math.abs(v.currentTime - 3.5) < 0.25"))
                         stage(evidence, "export edited clip")
                         element('[data-export-button]').click()
                         wait.until(export_finished)
