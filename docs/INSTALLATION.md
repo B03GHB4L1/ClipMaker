@@ -11,8 +11,12 @@ channels must be published separately before their public commands work.
 3. Run the installer and follow its prompts. It installs for your user account.
 4. Open VizorPlay from the Start menu.
 
-For an update, download and run the newer setup file. Keep the same installation
-location. Saved projects are stored separately from the installed program.
+Updates install from inside the app. When a newer version is released, the
+bottom bar of every screen says "VizorPlay 1.x is available" with an **Update
+and restart** button. VizorPlay downloads the new installer, checks it is signed
+with VizorPlay's update key (anything else is refused), closes, updates and opens
+again by itself. Saved projects are stored separately from the installed program
+and are kept. Running a newer setup file by hand also still works.
 The prepared installer is unsigned, so Windows may display a security warning.
 The release must state its signing status clearly.
 
@@ -31,9 +35,10 @@ sudo apt install ./VizorPlay_1.0.0_amd64.deb
 
 4. Open VizorPlay from your applications menu.
 
-For an update, close VizorPlay and install the newer DEB with the same command.
-APT installs required system dependencies. This is a downloaded package; an
-automatic APT update repository is not currently configured. Other distributions
+When a newer version is released, the bottom bar says so and its **Download**
+button opens the release page. Close VizorPlay and install the newer DEB with
+the same command. APT installs required system dependencies. Linux packages do
+not update from inside the app, and no APT repository is configured. Other distributions
 and RPM packages are outside the verified candidate scope.
 
 ## macOS Homebrew
@@ -55,7 +60,8 @@ private Python environment, dependencies and scraper browser; it needs internet
 access and may take several minutes. Later launches reuse that environment.
 Press Control-C in the terminal when finished.
 
-For an update, close VizorPlay, then run:
+When a newer version is released, the bottom bar shows the update command.
+Close VizorPlay, then run:
 
 ```sh
 brew update

@@ -364,3 +364,15 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
   .speed-control { margin-left: 0; }
   .player-controls button, .marker-controls button { padding: 0 6px; }
 }
+/* Footer notice for a newer release (ui/update.js). */
+.update-notice { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: #2f5f17; font-weight: 600; }
+.update-notice[hidden] { display: none; }
+.update-notice > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-notice button { flex: none; min-height: 22px; padding: 0 10px; border: 1px solid #347b19; border-radius: 4px; background: #347b19; color: #fff; font: inherit; cursor: pointer; }
+.update-notice button:disabled { opacity: 0.6; }
+.update-notice code { flex: none; padding: 1px 6px; border-radius: 3px; background: #e7ebe2; color: #151916; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; user-select: all; }
+.app-footer { gap: 12px; }
+.app-footer > span:last-child { flex: none; white-space: nowrap; }
+@media (max-width: 560px) {
+  .app-footer:has(.update-notice:not([hidden])) > span:first-child { display: none; }
+}

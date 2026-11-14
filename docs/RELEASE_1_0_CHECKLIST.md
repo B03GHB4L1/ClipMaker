@@ -74,3 +74,14 @@ checks the old program and engine are gone and the project survives. CI:
 Full Desktop E2E 43427087494 and Checks 43427087368 passed at 640e71d; both
 native jobs ran "verify the renamed program replaced the old one". Remaining:
 one owner upgrade over the existing install on their PC.
+
+In-app updates (14 November 2026, `docs/RELEASES.md` "In-app updates"): the
+engine checks the release feed once per launch and every screen's bottom bar
+offers newer versions. Windows installs them in the app (signed with the
+updater key, verified, engine stopped, passive installer, automatic reopen);
+Linux opens the release page; Homebrew shows `brew upgrade vizorplay`. The
+updater key is in the repository secrets with an owner backup. Covered by unit
+tests, the browser journey and the CI-only Windows update test
+(`tests/windows_update.py`). Remaining: the CI result for this change, and the
+first real update from a published release, which can only happen after 1.0
+is published.

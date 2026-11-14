@@ -45,8 +45,15 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 if __package__:
     from .process_owner import watch_process_owner
+    from . import update_check
 else:
     from process_owner import watch_process_owner
+    import update_check
+
+
+# Navigating here asks the Windows desktop shell to install the update
+# (src-tauri/src/lib.rs watches for it).
+INSTALL_UPDATE_PATH = "/__vizorplay__/install-update"
 
 
 def atomic_json(path: Path, value: Any) -> None:
@@ -1534,6 +1541,16 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0", "pid": os.getpid(), "parent_pid": os.getppid(),
                 "desktop_owner_pid": getattr(self.server, "desktop_owner_pid", None)})
             return
+        if path == "/api/update":
+            self.send_json(HTTPStatus.OK, {"update": self.server.update_status.get()})  # type: ignore[attr-defined]
+            return
+        if path == INSTALL_UPDATE_PATH:
+            # The desktop shell intercepts this navigation and installs the
+            # update. Anywhere else, No Content keeps the page where it is.
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if path == "/api/matches":
             self.send_json(HTTPStatus.OK, {"matches": self.store.list()})
             return
@@ -1573,6 +1590,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 self.receive_upload()
                 return
             body = self.read_json()
+            if path == "/api/update/open-release":
+                self.send_json(HTTPStatus.OK, {"opened": update_check.open_release_page()})
+                return
             if path in {"/api/snapshots", "/api/snapshots/delete"}:
                 options = body.get("options")
                 if path == "/api/snapshots" and not isinstance(options, dict):
@@ -1814,6 +1834,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.match_store = MatchStore(data_dir)  # type: ignore[attr-defined]
     server.match_data_dir = data_dir / "match-data"  # type: ignore[attr-defined]
     server.jobs = JobManager()  # type: ignore[attr-defined]
+    server.update_status = update_check.UpdateStatus(desktop=False)  # type: ignore[attr-defined]
     server.media_files = {}  # type: ignore[attr-defined]
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     return server
@@ -1831,6 +1852,7 @@ def main() -> int:
         raise ValueError("Desktop owner must identify another live process")
     server = create_server(args.host, args.port, args.data_dir.resolve())
     server.desktop_owner_pid = owner_pid
+    server.update_status = update_check.UpdateStatus(desktop=owner_pid is not None)
     if owner_pid is not None:
         watch_process_owner(owner_pid, server.shutdown)
     print(f"VizorPlay shared UI running at http://{args.host}:{args.port}")
