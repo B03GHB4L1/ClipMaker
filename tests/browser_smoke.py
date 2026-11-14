@@ -337,10 +337,115 @@ def main():
     stage("finished")
 
 
+def exercise_kickoff_player(page, base, root):
+    """Step, zoom, period markers and set-kick-off in the intake player, in its own project."""
+    stage("kick-off player: own project with a 3-minute 25 fps video")
+    page.get_by_role("button", name="New project", exact=True).click()
+    page.locator('[data-toast]').filter(has_text="New local project created").wait_for()
+    video = root / "kickoff-player.mp4"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=160x90:rate=25", "-t", "180", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video)],
+                   check=True, capture_output=True)
+    page.locator('[data-video-input]').set_input_files(str(video))
+    page.get_by_role("button", name="Play preview", exact=True).wait_for()
+    page.wait_for_function("document.querySelector('[data-match-video]').duration > 179")
+    current = lambda: page.locator('[data-match-video]').evaluate("(video) => video.currentTime")
+    controls = page.get_by_role("group", name="Playback controls")
+    kickoff = page.get_by_role("textbox", name="Selected period kick-off time")
+
+    def switch_period(name):
+        # A period tab reopens its video; wait for that reload before going on.
+        page.locator('[data-match-video]').evaluate(
+            "(video) => { window.__periodLoads = 0; video.addEventListener('loadedmetadata',"
+            " () => { window.__periodLoads += 1; }, { once: true }); }")
+        page.get_by_role("tab", name=name, exact=True).click()
+        page.wait_for_function("window.__periodLoads > 0")
+
+    stage("kick-off player: second, minute and frame steps by button and key")
+    controls.get_by_role("button", name="+1m").click()
+    controls.get_by_role("button", name="+10s").click()
+    controls.get_by_role("button", name="+1s").click()
+    assert abs(current() - 71) < 0.01, current()
+    controls.get_by_role("button", name="Forward 1 frame").click()
+    controls.get_by_role("button", name="Forward 1 frame").click()
+    controls.get_by_role("button", name="Back 1 frame").click()
+    # Frame steps land mid-frame (71.06 is inside frame 1776 at 25 fps), never a
+    # hair before a frame boundary, which would show the previous frame.
+    assert abs(current() - 71.06) < 0.005, current()
+    expect(page.locator('[data-timeline-time]')).to_have_text("00:01:11.0")
+    # Focus is on a player button, where step keys still work.
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Shift+ArrowLeft")
+    page.keyboard.press("Control+ArrowRight")
+    page.keyboard.press(",")
+    assert abs(current() - 120.02) < 0.005, current()
+
+    stage("kick-off player: set kick-offs and see them as timeline markers")
+    page.get_by_role("button", name="Set 1H kick-off here").click()
+    expect(kickoff).to_have_value("00:02:00")
+    switch_period("2H")
+    expect(page.get_by_role("button", name="Set 2H kick-off here")).to_be_visible()
+    kickoff.fill("00:02:50")
+    kickoff.press("Tab")
+    first = page.get_by_role("button", name="Jump to first-half kick-off at 00:02:00")
+    second = page.get_by_role("button", name="Jump to second-half kick-off at 00:02:50")
+    expect(second).to_have_class("timeline-marker is-active")
+    expect(first).to_have_class("timeline-marker")
+    first.click()
+    assert abs(current() - 120) < 0.01, current()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    project_id = parse_qs(urlparse(page.url).query)["project"][0]
+    saved = request(base, f"/api/projects/{project_id}")["project"]["markers"]
+    assert saved == {"1H": "00:02:00", "2H": "00:02:50"}, saved
+
+    stage("kick-off player: 2-minute zoom follows the playhead and hides far markers")
+    controls.get_by_role("button", name="−1m").click()
+    controls.get_by_role("button", name="−1m").click()
+    page.get_by_role("button", name="2 min").click()
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:02:00")
+    expect(first).to_be_visible()
+    expect(second).to_be_hidden()
+    controls.get_by_role("button", name="+1m").click()
+    controls.get_by_role("button", name="+1m").click()  # 2:00 is the window's edge: it stays.
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    controls.get_by_role("button", name="+10s").click()  # 2:10 leaves it: it recentres.
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:01:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
+    expect(second).to_be_visible()
+    page.get_by_role("button", name="Full").click()
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
+
+    stage("kick-off player: switching period lands on its kick-off after the video reloads")
+    switch_period("2H")
+    page.wait_for_function("Math.abs(document.querySelector('[data-match-video]').currentTime - 170) < 0.01")
+    switch_period("1H")
+    page.wait_for_function("Math.abs(document.querySelector('[data-match-video]').currentTime - 120) < 0.01")
+
+    stage("kick-off player: speed, mute and play")
+    speed = page.get_by_role("combobox", name="Playback speed")
+    speed.select_option("4")
+    mute = controls.get_by_role("button", name="Mute")
+    mute.click()
+    expect(mute).to_have_attribute("aria-pressed", "true")
+    controls.get_by_role("button", name="Play", exact=True).click()
+    page.wait_for_function("document.querySelector('[data-match-video]').currentTime > 121")
+    state = page.locator('[data-match-video]').evaluate(
+        "(video) => ({rate: video.playbackRate, muted: video.muted, paused: video.paused})")
+    assert state == {"rate": 4, "muted": True, "paused": False}, state
+    controls.get_by_role("button", name="Pause", exact=True).click()
+    expect(page.get_by_role("button", name="Play preview", exact=True)).to_be_visible()
+    speed.select_option("1")
+    mute.click()
+
+
 def exercise(page, base, root, evidence, errors):
     stage("open intake and create project")
     page.goto(base)
     page.locator('[data-project-name]').wait_for()
+    exercise_kickoff_player(page, base, root)
     assert page.locator('[data-workflow-progress]').count() == 0
     page.evaluate('document.fonts.load(\'400 13px "Geist Mono"\')')
     assert page.evaluate('document.fonts.check(\'400 13px "Geist Mono"\')')

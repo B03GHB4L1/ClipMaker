@@ -123,7 +123,6 @@ input[type=file]::file-selector-button { background: #e9ede4; font: inherit; fon
 .time-readout { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; padding-bottom: 10px; }
 .time-readout span { font-size: 10px; }
 .time-readout input { width: 124px; font-size: 18px; font-weight: 400; }
-.use-playhead { font-size: 10px; padding: 6px 10px; }
 .preview-shell { background: #1b1d1b; border-radius: 4px; }
 .preview-top { font-size: 9px; color: #c7ccc2; }
 .continue-button { min-height: 36px; font-size: 11px; font-weight: 500; border-radius: 4px; }
