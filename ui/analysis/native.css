@@ -106,3 +106,18 @@
 .native-markdown p, .native-markdown h4 { margin: 0 0 6px; font-size: 12px; }
 .native-tactical-media { display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
 .native-tactical-media h4 { margin: 0; font-size: 13px; }
+
+/* Transition tabs: controls, stats and reading notes in a rail; the pitch takes the rest. */
+.native-pitch-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.native-pitch-side { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.native-pitch-side .native-section-title { margin: 0; }
+.native-pitch-side .native-control-grid { display: grid; gap: 10px; padding: 0; }
+.native-pitch-side .native-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+.native-pitch-side .native-muted { margin: 0; }
+.native-pitch-main { min-width: 0; }
+@media (max-width: 1180px) {
+  .native-pitch-layout { grid-template-columns: minmax(0, 1fr); }
+  .native-pitch-side .native-control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .native-pitch-side .native-stats { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+}
+@media (max-width: 560px) { .native-pitch-side .native-control-grid { grid-template-columns: minmax(0, 1fr); } }

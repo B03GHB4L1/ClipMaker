@@ -4,6 +4,7 @@ The native tabs run the classic tab code (copied verbatim into
 analysis_core.tactical_page) against a recorder; this checks the recorded
 output matches what Streamlit showed for every recorded scenario.
 """
+import json
 import sys
 import tempfile
 import unittest
@@ -16,10 +17,29 @@ sys.path.insert(0, str(ROOT))
 from analysis_core import TABS, tactical  # noqa: E402
 from packaging.clipmaker_api_server import MatchStore  # noqa: E402
 from analysis_core.plotly_theme import replace_placeholders  # noqa: E402
+from analysis_core.st_shim import _plain_arrays  # noqa: E402
 from tests import analysis_golden  # noqa: E402
 
 COMPARED = {"Subheader", "Caption", "Markdown", "Info", "Warning", "Error", "Success", "Metric", "plotly",
             "Dataframe", "Selectbox", "Slider", "Button"}
+
+
+# The classic centre circle was drawn oval (y units are 0.68 of x units).
+OVAL_CIRCLE = {"x0": 41.5, "y0": 35, "x1": 58.5, "y1": 65}
+ROUND_CIRCLE = {"x0": 41.3, "y0": 37.2, "x1": 58.7, "y1": 62.8}
+
+
+def deliberate_fixes(figure):
+    """The classic figure with VizorPlay's deliberate fixes applied: binary arrays
+    decoded to the plain lists the bundled Plotly.js can draw, and a round circle."""
+    figure = _plain_arrays(figure)
+    shapes = figure.get("layout", {}).get("shapes")
+    if shapes:
+        figure["layout"]["shapes"] = [
+            {**shape, **ROUND_CIRCLE} if shape.get("type") == "circle"
+            and all(shape.get(key) == value for key, value in OVAL_CIRCLE.items()) else shape
+            for shape in shapes]
+    return figure
 
 
 def normal(element, norm):
@@ -33,7 +53,7 @@ def normal(element, norm):
     if kind == "plotly":
         # Classic figures carry Streamlit's placeholder colours, swapped for its
         # light palette in the browser; compare the colours users saw.
-        figure = replace_placeholders(analysis_golden._round(element["figure"]))
+        figure = replace_placeholders(analysis_golden._round(deliberate_fixes(element["figure"])))
         layout = {k: v for k, v in figure.get("layout", {}).items() if k != "template"}
         return (kind, norm.data({**figure, "layout": layout}))
     if kind == "Dataframe":
@@ -74,6 +94,8 @@ class TacticalNativeParityTests(unittest.TestCase):
                         if multi:
                             controls.update(multi=True, matches=multi_ids)
                         view, _ = tactical.render(slug, controls, project, projects)
+                        # Plotly.js 2.27 cannot read binary arrays; it drew empty maps.
+                        self.assertNotIn('"bdata"', json.dumps(view))
                         elements = record["elements"]
                         start = next(i for i, e in enumerate(elements) if e.get("key") == "tactical_team") + 1
                         expected = [n for n in (normal(e, analysis_golden.Normalizer(Path("/nonexistent"), []))

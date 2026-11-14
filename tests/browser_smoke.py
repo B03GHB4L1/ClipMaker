@@ -195,6 +195,42 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     expect(page.get_by_role("link", name="Classic workspace")).to_have_count(0)
     page.screenshot(path=str(evidence / "tactical.png"))
 
+    stage("Tactical Lab transition maps draw their points beside the controls")
+    # The pitch used to sit small in a full-width strip. This two-event project has
+    # no transitions, so the tab's view is given a small pitch map in the shape the
+    # engine sends (test_tactical_native checks real maps carry plain lists).
+    def transition_view(route):
+        result = route.fetch().json()
+        pitch = {"height": 510, "margin": {"l": 36, "r": 36, "t": 92, "b": 116},
+                 "xaxis": {"range": [0, 100], "visible": False},
+                 "yaxis": {"range": [0, 100], "visible": False, "scaleanchor": "x", "scaleratio": 0.68}}
+        result["view"].update(empty=None, elements=[
+            {"kind": "Subheader", "value": "Transitions"},
+            {"kind": "Slider", "key": "dt_seconds", "label": "Reaction window", "min": 4, "max": 15, "value": 8},
+            {"kind": "Metric", "label": "Losses Tracked", "value": "3", "delta": "", "help": ""},
+            {"kind": "Metric", "label": "Recovered", "value": "33%", "delta": "", "help": ""},
+            {"kind": "plotly", "config": {}, "figure": {"layout": pitch, "data": [
+                {"type": "scatter", "mode": "markers", "name": "Recovered", "x": [20, 50], "y": [30, 70]},
+                {"type": "scatter", "mode": "markers", "name": "Shot conceded", "x": [80], "y": [40]}]}},
+            {"kind": "Caption", "value": "Where the losses happen."}])
+        route.fulfill(json=result)
+    page.route("**/api/analysis/tactical/*-transitions", transition_view)
+    for slug, name in (("defensive-transitions", "Defensive Transitions"), ("attacking-transitions", "Attacking Transitions")):
+        page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab={slug}")
+        expect(page.get_by_role("tab", name=name)).to_have_attribute("aria-selected", "true")
+        page.wait_for_function("document.querySelectorAll('.native-pitch-layout .native-figure .scatterlayer .point').length > 0",
+                               timeout=60000)
+        shape = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          const pitch = box('.native-pitch-main .nsewdrag');
+          return {side: box('.native-pitch-side').width, main: box('.native-pitch-main').width,
+                  ratio: pitch.width / pitch.height, sideTop: box('.native-pitch-side').top, mainTop: box('.native-pitch-main').top};
+        }""")
+        assert abs(shape["ratio"] - 100 / 68) < 0.03, ("pitch is not drawn to scale", shape)
+        assert shape["main"] > 2 * shape["side"] and abs(shape["sideTop"] - shape["mainTop"]) < 2, ("map not beside the rail", shape)
+    page.screenshot(path=str(evidence / "tactical-transitions.png"))
+    page.unroute("**/api/analysis/tactical/*-transitions")
+
     stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=shot-map")
     expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")

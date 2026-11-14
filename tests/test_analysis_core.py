@@ -65,6 +65,29 @@ class AnalysisCoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cache.get(str(Path(name) / "missing.csv"))
 
+    def test_figures_reach_the_page_as_plain_lists(self):
+        # plotly.py 6 writes numpy data as {"dtype", "bdata"}; the bundled Plotly.js
+        # 2.27 cannot read that and drew the Tactical Lab transition maps empty.
+        import json
+        import numpy as np
+        import plotly.graph_objects as go
+        from analysis_core.st_shim import Recorder, figure_json
+        figure = go.Figure([go.Scatter(x=np.array([1.5, 2.0, np.nan]), y=np.array([3, 4, 5], dtype="int32"),
+                                       name="a"),
+                            go.Heatmap(z=np.arange(6, dtype="float64").reshape(2, 3))])
+        self.assertIn("bdata", figure.to_json())  # the format this guards against
+        spec = figure_json(figure)
+        self.assertNotIn("bdata", json.dumps(spec))
+        self.assertEqual(spec["data"][0]["x"], [1.5, 2.0, None])
+        self.assertEqual(spec["data"][0]["y"], [3, 4, 5])
+        self.assertEqual(spec["data"][1]["z"], [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
+        json.dumps(spec, allow_nan=False)  # valid JSON for the browser
+        recorder = Recorder({})
+        recorder.plotly_chart(figure)
+        self.assertNotIn("bdata", json.dumps(recorder.elements))
+        frontend = (ROOT / "ui" / "analysis" / "tabs" / "tactical.js").read_text(encoding="utf-8")
+        self.assertIn("plotly-2.27.0.min.js", frontend)  # if Plotly.js is upgraded, this decoding can go
+
     def test_pressing_map_is_oriented_like_the_other_pitch_maps(self):
         # The pressing map was mirrored top to bottom: a win on the left wing
         # (high y) was drawn at the bottom, unlike every other pitch map.
