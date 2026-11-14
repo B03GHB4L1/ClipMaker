@@ -96,6 +96,23 @@ class SharedApiTests(unittest.TestCase):
         with urlopen(request, timeout=3) as response:
             return response.status, json.loads(response.read())
 
+    def test_engine_queues_a_burst_of_page_load_connections(self):
+        # A page load opens about a dozen connections at once. With the standard
+        # backlog of 5, Windows refused the extra ones while the engine was busy,
+        # and a reloaded filters page lost its engine connection.
+        import socket
+        with tempfile.TemporaryDirectory() as name:
+            busy = create_server("127.0.0.1", 0, Path(name))  # listening, not accepting yet
+            sockets = []
+            try:
+                for _ in range(20):
+                    sockets.append(socket.create_connection(("127.0.0.1", busy.server_port), timeout=2))
+            finally:
+                for connection in sockets:
+                    connection.close()
+                busy.server_close()
+        self.assertEqual(len(sockets), 20)
+
     def test_error_reply_to_a_closed_connection_is_dropped_quietly(self):
         from http import HTTPStatus
         from types import SimpleNamespace
