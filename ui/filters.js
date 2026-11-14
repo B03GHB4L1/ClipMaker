@@ -713,7 +713,7 @@ const describeBlock = (item, clip, index) => {
   item.querySelector(".clip-length").textContent = `${duration(clip).toFixed(1)}s`;
   item.classList.toggle("is-trimmed", isTrimmed(clip));
   item.querySelector(".clip-body").setAttribute("aria-label",
-    `Clip ${index + 1}: ${clip.label}, ${duration(clip).toFixed(1)} seconds`);
+    `Clip ${index + 1}: ${clip.label}, ${duration(clip).toFixed(1)} seconds${isTrimmed(clip) ? ", trimmed" : ""}`);
 };
 
 const renderTimeline = () => {
