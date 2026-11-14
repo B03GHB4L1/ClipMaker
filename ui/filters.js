@@ -209,6 +209,68 @@ const renderQualifiers = () => {
     `${available.length} of ${filterMetadata.qualifiers.length} available`;
 };
 
+const HALF_PERIODS = { "1st half only": 1, "2nd half only": 2 };
+
+// Count what is left in the chosen scope (team, period, players): events per
+// action type, and per qualifier within the scope and any chosen action types.
+// Returns null when the engine sent no event index (older engine).
+const scopeCounts = (index = filterMetadata?.events) => {
+  if (!index || !Array.isArray(index.type)) return null;
+  const team = currentTeam();
+  const teamPosition = team ? index.teams.indexOf(team) : null;
+  const players = new Set(
+    selectedValues('input[name="player"]').map((name) => index.players.indexOf(name)),
+  );
+  const period =
+    HALF_PERIODS[form.querySelector('input[name="half"]:checked')?.value] || 0;
+  const actionTypes = filterMetadata.action_types || [];
+  const chosenTypes = new Set(
+    selectedValues('input[name="action"]').map((type) => actionTypes.indexOf(type)),
+  );
+  const inScope = new Uint8Array(index.type.length);
+  const types = new Map();
+  for (let row = 0; row < index.type.length; row += 1) {
+    if (teamPosition !== null && index.team[row] !== teamPosition) continue;
+    if (players.size && !players.has(index.player[row])) continue;
+    if (period && index.period[row] !== period) continue;
+    const type = index.type[row];
+    if (type >= 0) types.set(actionTypes[type], (types.get(actionTypes[type]) || 0) + 1);
+    if (!chosenTypes.size || chosenTypes.has(type)) inScope[row] = 1;
+  }
+  const qualifiers = new Map();
+  Object.entries(index.qualifiers || {}).forEach(([flag, rows]) => {
+    qualifiers.set(flag, rows.reduce((total, row) => total + inScope[row], 0));
+  });
+  return { types, qualifiers };
+};
+
+const setChoiceCount = (input, count) => {
+  const wrapper = input.closest("label");
+  let badge = wrapper.querySelector("small");
+  if (!badge) {
+    badge = document.createElement("small");
+    wrapper.appendChild(badge);
+  }
+  badge.textContent = Number(count).toLocaleString();
+  wrapper.classList.toggle("is-empty", count === 0);
+};
+
+const refreshScopeCounts = () => {
+  const counts = scopeCounts();
+  if (!counts) return;
+  form.querySelectorAll('input[name="action"]').forEach((input) => {
+    setChoiceCount(input, counts.types.get(input.value) || 0);
+  });
+  let available = 0;
+  form.querySelectorAll('input[name="qualifier"]').forEach((input) => {
+    const count = counts.qualifiers.get(input.value) || 0;
+    if (count) available += 1;
+    setChoiceCount(input, count);
+  });
+  document.querySelector("[data-qualifier-availability]").textContent =
+    `${available} of ${filterMetadata.qualifiers.length} available`;
+};
+
 const renderMatchContext = () => {
   document.querySelector("[data-match-name]").textContent =
     `${activeMatch.home_team} vs ${activeMatch.away_team}`;
@@ -248,6 +310,7 @@ const updateSummary = () => {
     actions.length || qualifiers.length
       ? "Custom clip selection"
       : "All match events";
+  refreshScopeCounts();
 };
 
 // Previews use the same encoding settings as the export.

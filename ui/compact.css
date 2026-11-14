@@ -376,3 +376,21 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
 @media (max-width: 560px) {
   .app-footer:has(.update-notice:not([hidden])) > span:first-child { display: none; }
 }
+
+/* Action types and qualifiers with nothing left in the chosen scope. */
+.choice-grid label.is-empty:not(:has(input:checked)),
+.qualifier-group label.is-empty:not(:has(input:checked)) {
+  opacity: 0.45;
+}
+
+/* Keep each segmented control's hidden radio inside its own label, so it
+   cannot drift off the page and widen it. */
+.segmented-control label {
+  position: relative;
+}
+.segmented-control input {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
