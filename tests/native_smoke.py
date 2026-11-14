@@ -22,7 +22,7 @@ from process_owner import wait_for_process_exit
 def export_finished(driver):
     # WebDriver .text applies CSS text-transform; textContent is the actual label.
     label = driver.find_element("css selector", "[data-job-state]").get_attribute("textContent").strip()
-    if label in {"Export failed", "Job cancelled", "Could not build plan", "Setup needs attention"}:
+    if label in {"Export failed", "Export cancelled", "Job cancelled", "Could not build plan", "Setup needs attention"}:
         logs = driver.find_element("css selector", "[data-job-logs]").get_attribute("textContent")
         raise AssertionError(f"{label}: {logs}")
     return label == "Export complete"
@@ -227,16 +227,15 @@ def main():
                         checkbox.find_element(By.XPATH, "..").click()
                         element('button.filter-preview-button').click()
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
-                        element('.clip-preview summary').click()
-                        endpoint = element('.clip-editor label:nth-child(2) input')
+                        endpoint = element('[data-edge-input="end"]')
                         endpoint.send_keys(Keys.CONTROL, "a")
                         endpoint.send_keys("3.5", Keys.TAB)
-                        stage(evidence, "render edited preview in the installed webview")
-                        element('.clip-editor > button:first-of-type').click()
+                        stage(evidence, "play the trimmed clip from the footage in the installed webview")
+                        element('[data-play-clip]').click()
+                        # The editor plays the match footage itself and stops at the trimmed end.
                         wait.until(lambda current: current.execute_script(
-                            "const v=document.querySelector('.clip-preview video'); return v && !v.hidden && v.videoWidth > 0"))
-                        duration = driver.execute_script("return document.querySelector('.clip-preview video').duration")
-                        assert 3.3 <= duration <= 3.7, duration
+                            "const v=document.querySelector('[data-editor-video]');"
+                            " return v.videoWidth > 0 && v.paused && Math.abs(v.currentTime - 3.5) < 0.25"))
                         stage(evidence, "export edited clip")
                         element('[data-export-button]').click()
                         wait.until(export_finished)
@@ -256,10 +255,9 @@ def main():
                         driver.get(f"{base}/filters.html?match={project_id}")
                         wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-preview-count]').text == "1")
                         stage(evidence, "verify upgraded/reinstalled candidate renders and exports saved plan")
-                        element('.clip-preview summary').click()
-                        element('.clip-editor > button:first-of-type').click()
                         wait.until(lambda current: current.execute_script(
-                            "const v=document.querySelector('.clip-preview video'); return v && !v.hidden && v.videoWidth > 0"))
+                            "const v=document.querySelector('[data-editor-video]'); return v.readyState >= 1 && v.videoWidth > 0"))
+                        assert driver.execute_script("return document.querySelector('[data-edge-input=\"end\"]').value") == "0:03.5"
                         element('[data-export-button]').click()
                         wait.until(export_finished)
                         link = element('[data-export-files] a')

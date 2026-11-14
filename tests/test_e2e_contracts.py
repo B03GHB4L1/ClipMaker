@@ -231,7 +231,7 @@ class AutomationContracts(unittest.TestCase):
         label.get_attribute.assert_called_with("textContent")
         label.get_attribute.return_value = "Exporting reel"
         self.assertFalse(export_finished(driver))
-        for failure in ("Export failed", "Job cancelled", "Could not build plan", "Setup needs attention"):
+        for failure in ("Export failed", "Export cancelled", "Job cancelled", "Could not build plan", "Setup needs attention"):
             label.get_attribute.return_value = failure
             with self.subTest(failure=failure), self.assertRaises(AssertionError):
                 export_finished(driver)
@@ -335,7 +335,8 @@ class AutomationContracts(unittest.TestCase):
         filters = (ROOT / "ui/filters.html").read_text(encoding="utf-8")
         for selector in ("data-new-project", "data-continue", "data-engine-state"):
             self.assertIn(selector, intake)
-        for selector in ("filter-preview-button", "data-export-button", "data-preview-count", "data-job-state"):
+        for selector in ("filter-preview-button", "data-export-button", "data-preview-count", "data-job-state",
+                         'data-edge-input="end"', "data-play-clip", "data-editor-video"):
             self.assertIn(selector, filters)
         self.assertIn('id="timing"', filters)
 

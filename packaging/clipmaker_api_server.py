@@ -608,6 +608,7 @@ class JobManager:
         )
         engine.start()
         terminal_status = None
+        reported_files: list[str] | None = None
         while engine.is_alive() or not logs.empty() or not progress.empty():
             while not logs.empty():
                 message = logs.get_nowait()
@@ -615,6 +616,8 @@ class JobManager:
                     self._append_log(job_id, str(message["msg"]))
                 if message.get("type") == "done":
                     terminal_status = "complete"
+                    if isinstance(message.get("files"), list):
+                        reported_files = [str(item) for item in message["files"]]
                 elif message.get("type") == "error":
                     terminal_status = "failed"
                 elif message.get("type") == "cancelled":
@@ -629,8 +632,15 @@ class JobManager:
         engine.join()
         files = []
         if terminal_status == "complete" and not config["dry_run"]:
-            directory = Path(config["output_dir"])
-            outputs = sorted(directory.glob("*")) if config.get("individual_clips") else [directory / config["output_filename"]]
+            directory = Path(config["output_dir"]).resolve()
+            if reported_files is not None:
+                # Only what this run wrote, and only inside the chosen folder.
+                outputs = [path for path in (Path(item).resolve() for item in reported_files)
+                           if path.parent == directory]
+            elif config.get("individual_clips"):
+                outputs = sorted(directory.glob("*"))
+            else:
+                outputs = [directory / config["output_filename"]]
             files = [{"path": str(path), "name": path.name, "size": path.stat().st_size} for path in outputs if path.is_file() and path.stat().st_size > 0 and path.suffix.lower() in {".mp4", ".mov", ".mkv"}]
             if not files:
                 terminal_status = "failed"
@@ -939,16 +949,21 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
                 start = float(item.get("start", 0))
                 end = float(item.get("end", 0))
                 period = int(float(item.get("period", 1)))
+                raw_number = item.get("number")
+                number = len(clip_windows) + 1 if raw_number in (None, "") else int(raw_number)
             except (TypeError, ValueError):
                 raise ValueError("Invalid clip window.")
             if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start or period not in {1, 2, 3, 4, 5}:
                 raise ValueError("Clip end must follow a non-negative start, with a valid period.")
+            if not 1 <= number <= 9999:
+                raise ValueError("Clip numbers must be between 1 and 9999.")
             clip_windows.append(
                 {
                     "start": start,
                     "end": end,
-                    "label": str(item.get("label") or "Edited clip"),
+                    "label": str(item.get("label") or "Edited clip")[:300],
                     "period": period,
+                    "number": number,
                 }
             )
 

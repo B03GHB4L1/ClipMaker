@@ -989,8 +989,11 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
+        clip_numbers = list(range(1, len(windows) + 1))
         edited_windows = config.get("clip_windows") or []
         if edited_windows:
+            # A chosen set keeps each clip's timeline number for its file name.
+            clip_numbers = [int(window.get("number") or index) for index, window in enumerate(edited_windows, 1)]
             windows = [
                 (
                     float(window["start"]),
@@ -1278,7 +1281,8 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     continue
                 actions = [pt.split(" @")[0].strip() for pt in label.split(" + ")]
                 dominant = max(set(actions), key=actions.count).replace(" ", "_")
-                filename = f"{i:02d}_{dominant}{output_ext}"
+                dominant = re.sub(r'[<>:"/\\|?*]+', "_", dominant).strip(" .") or "Clip"
+                filename = f"{clip_numbers[i - 1]:02d}_{dominant}{output_ext}"
                 filepath = os.path.join(out_dir, filename)
                 clip_specs_indiv.append((i, src, s, e, label, filepath))
 
@@ -1331,6 +1335,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 progress_queue.put({"error": message})
                 log_queue.put({"type": "error"})
                 return
+            written = sorted(saved)
         else:
             clip_specs = []
             for i, (start, end, label, period) in enumerate(windows, 1):
@@ -1363,8 +1368,10 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 switch_to_software(error)
                 cut_and_concat_ffmpeg(ffmpeg_bin, clip_specs, out_path, progress_queue, assembly_start)
             log(f"\n\u2713 Saved to: {out_path}")
+            written = [out_path]
 
-        log_queue.put({"type": "done"})
+        # Report exactly what this run wrote; the folder may hold older exports.
+        log_queue.put({"type": "done", "files": written})
 
     except ClipMakerCancelled as e:
         log(f"\n[CANCELLED] {e}")

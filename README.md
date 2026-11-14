@@ -77,9 +77,11 @@ computer.
 - Quick presets and saved filter snapshots
 - Clip windows with adjustable before/after time, with nearby events merged
   into one clip
-- **Preview and trim** any clip before exporting
-- **Individual clips or a combined reel**, with progress, cancel, and a clear
-  report if any clip fails
+- **Timeline editor**: watch every clip straight from the match video, drag
+  either edge to lengthen or shorten it, or set its start and end at the
+  playhead
+- Export **all clips or a ticked set**, as **one reel or separate files**, with
+  progress, cancel, and a clear report if any clip fails
 
 ### Export speed
 
