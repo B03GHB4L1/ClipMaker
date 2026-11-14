@@ -172,7 +172,23 @@ jobs:
           npm run tauri build -- --config "$PWD/../upgrade-config.json" --bundles ${{ matrix.bundles }}
           mkdir -p ../upgrade-baseline
           cp "$CARGO_TARGET_DIR"/release/bundle/${{ matrix.bundles }}/*.${{ matrix.package_ext }} ../upgrade-baseline/
-      - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      - name: Build the candidate (the Windows installer is signed for the in-app updater)
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+              echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is unavailable, so the Windows installer cannot be signed for in-app updates."
+              exit 1
+            fi
+            printf '{"bundle":{"createUpdaterArtifacts":true}}\n' > build/updater-config.json
+            npm run tauri build -- --config "$PWD/build/updater-config.json" --bundles ${{ matrix.bundles }}
+            test -s src-tauri/target/release/bundle/nsis/*1.0.0*-setup.exe.sig
+          else
+            npm run tauri build -- --bundles ${{ matrix.bundles }}
+          fi
       - name: Install Windows package and exercise the installed window
         timeout-minutes: 12
         if: runner.os == 'Windows'
@@ -190,6 +206,19 @@ jobs:
           if ($app.Count -ne 1) { throw 'Installed executable not found' }
           python tests/native_smoke.py --app $app[0].FullName --candidate-app (Join-Path $destination 'vizorplay.exe') --package $candidate[0].FullName --upgrade-from 0.9.0 --upgrade-fixture "pre-rename predecessor (clipmaker.exe) built from fcd36ad"
           if ($LASTEXITCODE -ne 0) { throw 'Native acceptance failed' }
+      - name: Update the installed Windows app in place from a signed feed
+        timeout-minutes: 15
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*1.0.0*-setup.exe)
+          if ($candidate.Count -ne 1) { throw 'Expected exactly one 1.0.0 NSIS candidate' }
+          python tests/windows_update.py --installer $candidate[0].FullName --evidence build/update-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'In-app update acceptance failed' }
       - name: Install Linux package and exercise the installed window
         timeout-minutes: 12
         if: runner.os == 'Linux'
@@ -204,7 +233,11 @@ jobs:
         shell: bash
         run: |
           package="$(find src-tauri/target/release/bundle/${{ matrix.bundles }} -maxdepth 1 -name '*1.0.0*.${{ matrix.package_ext }}' -type f -print -quit)"
-          python packaging/release_candidate.py receipt --platform "${{ runner.os }}" --payload "$package" --evidence build/native-evidence/result.json --output build/release-packages
+          updater=()
+          if [ "${{ runner.os }}" = Windows ]; then
+            updater=(--signature "$package.sig" --evidence build/update-evidence/result.json)
+          fi
+          python packaging/release_candidate.py receipt --platform "${{ runner.os }}" --payload "$package" --evidence build/native-evidence/result.json "${updater[@]}" --output build/release-packages
       - uses: actions/upload-artifact@v4
         with:
           name: tested-package-${{ runner.os }}
@@ -215,7 +248,9 @@ jobs:
         if: always()
         with:
           name: native-${{ runner.os }}
-          path: build/native-evidence/
+          path: |
+            build/native-evidence/
+            build/update-evidence/
           retention-days: 7
           if-no-files-found: warn
 

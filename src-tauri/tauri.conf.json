@@ -10,6 +10,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "VizorPlay",
         "width": 1440,
         "height": 900,
@@ -39,6 +40,17 @@
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJCNzY4MEVCOTY1RDBBRDgKUldUWUNsMlc2NEIydXpjNWtUdFhhMEgvSmgrMTFhSGxKZTkyamhYSlkrQjQwWGpaQUZrMHVsdXQK",
+      "endpoints": [
+        "https://github.com/B03GHB4L1/ClipMaker/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

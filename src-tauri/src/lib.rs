@@ -1,13 +1,20 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::path::BaseDirectory;
-use tauri::{Manager, RunEvent, Url};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_updater::UpdaterExt;
 
 struct BackendProcess(Mutex<Option<(Child, u16)>>);
+
+/// The page asks for an update by navigating here (ui/update.js); the engine
+/// answers 204 for the same path, so nothing happens outside the desktop app.
+const INSTALL_UPDATE_PATH: &str = "/__vizorplay__/install-update";
+static UPDATING: AtomicBool = AtomicBool::new(false);
 
 fn available_port() -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
@@ -35,11 +42,83 @@ fn backend_ready(port: u16, pid: u32) -> bool {
         && (response.contains(&format!("\"pid\": {pid},")) || response.contains(&format!("\"parent_pid\": {pid},")))
 }
 
+/// Ask the engine to finish its work and exit, killing it after 20 seconds.
+fn stop_backend(app_handle: &AppHandle) {
+    let Ok(mut guard) = app_handle.state::<BackendProcess>().0.lock() else { return };
+    let Some((mut child, port)) = guard.take() else { return };
+    if let Ok(mut stream) = TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}").parse().expect("local address"),
+        Duration::from_secs(1),
+    ) {
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = write!(stream, "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+        let _ = stream.take(4096).read_to_end(&mut Vec::new());
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) { break; }
+        thread::sleep(Duration::from_millis(50));
+    }
+    if matches!(child.try_wait(), Ok(None)) { let _ = child.kill(); }
+    let _ = child.wait();
+}
+
+/// Tell the page how the update is going (window.vizorplayUpdateStatus).
+fn report_update(window: &WebviewWindow, state: &str, detail: &str) {
+    let script = format!(
+        "window.vizorplayUpdateStatus && window.vizorplayUpdateStatus({}, {});",
+        serde_json::Value::from(state),
+        serde_json::Value::from(detail),
+    );
+    let _ = window.eval(&script);
+}
+
+/// Only the engine's own page, on its own port, can start an update.
+fn is_install_request(url: &Url, port: u16) -> bool {
+    url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port() == Some(port)
+        && url.path() == INSTALL_UPDATE_PATH
+}
+
+/// Download the update named by the release feed, check its signature against
+/// the public key built into this app, stop the engine, and run the installer.
+/// On Windows the installer closes VizorPlay, updates it and reopens it.
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let mut builder = app.updater_builder();
+    // Acceptance tests point at a local https feed. The public key cannot be
+    // replaced, so only updates signed with VizorPlay's key ever install.
+    if let Some(feed) = std::env::var("VIZORPLAY_UPDATE_URL").ok().filter(|value| !value.is_empty()) {
+        let url = Url::parse(&feed).map_err(|error| error.to_string())?;
+        builder = builder.endpoints(vec![url]).map_err(|error| error.to_string())?;
+    }
+    let update = builder
+        .build()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "this is already the newest version".to_string())?;
+    // download() verifies the signature before returning the installer.
+    let installer = update.download(|_, _| {}, || {}).await.map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_webview_window("main") {
+        report_update(&window, "installing", "");
+    }
+    // The installer replaces the engine's files, so the engine must exit first.
+    stop_backend(&app);
+    update
+        .install(installer)
+        .map_err(|error| format!("{error}. Close VizorPlay and open it again"))?;
+    app.restart();
+}
+
 const START_FAILED: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>VizorPlay could not start</h1><p>The local engine stopped or did not answer. Close this window and open VizorPlay again. If it keeps happening, reinstall VizorPlay; security software may have blocked or quarantined part of it.</p></main>';";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;
@@ -69,9 +148,40 @@ pub fn run() {
             let pid = child.id();
             *app.state::<BackendProcess>().0.lock().expect("backend lock") = Some((child, port));
 
-            let window = app
-                .get_webview_window("main")
-                .ok_or_else(|| std::io::Error::other("main window is missing"))?;
+            // The window is created here, not from config alone, so update
+            // requests from the page can be intercepted.
+            let config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .cloned()
+                .ok_or_else(|| std::io::Error::other("main window configuration is missing"))?;
+            let updater_handle = app.handle().clone();
+            let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .on_navigation(move |url| {
+                    if !is_install_request(url, port) {
+                        return true;
+                    }
+                    // Linux packages and Homebrew update outside the app.
+                    if cfg!(windows) && !UPDATING.swap(true, Ordering::SeqCst) {
+                        let app = updater_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Some(window) = app.get_webview_window("main") {
+                                report_update(&window, "downloading", "");
+                            }
+                            if let Err(error) = install_update(app.clone()).await {
+                                UPDATING.store(false, Ordering::SeqCst);
+                                if let Some(window) = app.get_webview_window("main") {
+                                    report_update(&window, "error", &error);
+                                }
+                            }
+                        });
+                    }
+                    false
+                })
+                .build()?;
             let handle = app.handle().clone();
             thread::spawn(move || {
                 let deadline = Instant::now() + Duration::from_secs(90);
@@ -107,26 +217,7 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
-            if let Ok(mut guard) = app_handle.state::<BackendProcess>().0.lock() {
-                if let Some((mut child, port)) = guard.take() {
-                    if let Ok(mut stream) = TcpStream::connect_timeout(
-                        &format!("127.0.0.1:{port}").parse().expect("local address"),
-                        Duration::from_secs(1),
-                    ) {
-                        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                        let _ = write!(stream, "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
-                        let _ = stream.take(4096).read_to_end(&mut Vec::new());
-                    }
-                    let deadline = Instant::now() + Duration::from_secs(20);
-                    while Instant::now() < deadline {
-                        if matches!(child.try_wait(), Ok(Some(_))) { break; }
-                        thread::sleep(Duration::from_millis(50));
-                    }
-                    if matches!(child.try_wait(), Ok(None)) { let _ = child.kill(); }
-                    let _ = child.wait();
-                }
-            }
+            stop_backend(app_handle);
         }
     });
 }

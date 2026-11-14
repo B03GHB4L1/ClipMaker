@@ -26,10 +26,21 @@ class ReleaseCandidateTests(unittest.TestCase):
         evidence.write_text(json.dumps(result))
         return payload, evidence
 
-    def record_all(self):
+    def updater(self, passed=True):
+        signature = self.root / "VizorPlay_1.0.0_x64-setup.exe.sig"
+        signature.write_text("dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkK\n")
+        evidence = self.root / "update.json"
+        evidence.write_text(json.dumps({"status": "passed", "update_installed": passed, "bad_signature_rejected": True}))
+        return signature, evidence
+
+    def record_all(self, signed=True):
         for platform in ("Windows", "Linux", "macOS"):
             payload, evidence = self.fixture(platform)
-            record_receipt(platform, payload, [evidence], self.receipts, self.commit)
+            if platform == "Windows" and signed:
+                signature, update = self.updater()
+                record_receipt(platform, payload, [evidence, update], self.receipts, self.commit, signature)
+            else:
+                record_receipt(platform, payload, [evidence], self.receipts, self.commit)
 
     def test_assembles_exact_tested_bytes_and_consistent_install_manifests(self):
         self.record_all()
@@ -49,8 +60,30 @@ class ReleaseCandidateTests(unittest.TestCase):
             checksum, filename = line.split("  ", 1)
             self.assertEqual(Path(filename).name, filename, "Release assets are published with flat filenames")
             self.assertEqual(checksum, digest(target / filename))
+        feed = json.loads((target / "latest.json").read_text())
+        self.assertEqual(feed["version"], "1.0.0")
+        self.assertEqual(feed["platforms"]["windows-x86_64"], {
+            "signature": windows["updater_signature"],
+            "url": "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_x64-setup.exe"})
+        self.assertEqual(set(feed["platforms"]), {"windows-x86_64"}, "Only Windows installs in the app")
         with self.assertRaises(ValueError):
             assemble(self.receipts, target, self.commit, "B03GHB4L1/ClipMaker")
+
+    def test_release_needs_a_signed_windows_updater_package_and_update_evidence(self):
+        self.record_all(signed=False)
+        with self.assertRaisesRegex(ValueError, "signed updater"):
+            assemble(self.receipts, self.root / "unsigned", self.commit, "B03GHB4L1/ClipMaker")
+        payload, evidence = self.fixture("Windows")
+        signature, update = self.updater(passed=False)
+        record_receipt("Windows", payload, [evidence, update], self.receipts, self.commit, signature)
+        with self.assertRaisesRegex(ValueError, "update evidence"):
+            assemble(self.receipts, self.root / "unverified", self.commit, "B03GHB4L1/ClipMaker")
+        signature.write_text("not a signature")
+        with self.assertRaisesRegex(ValueError, "signature"):
+            record_receipt("Windows", payload, [evidence], self.receipts, self.commit, signature)
+        linux, linux_evidence = self.fixture("Linux")
+        with self.assertRaisesRegex(ValueError, "Only the Windows"):
+            record_receipt("Linux", linux, [linux_evidence], self.receipts, self.commit, signature)
 
     def test_rejects_modified_payload_wrong_commit_and_path_escape(self):
         self.record_all()

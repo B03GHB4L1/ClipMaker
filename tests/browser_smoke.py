@@ -441,8 +441,53 @@ def exercise_kickoff_player(page, base, root):
     mute.click()
 
 
+def exercise_update_notice(page, base):
+    """The footer offers a newer release the way this kind of install updates (ui/update.js)."""
+    def offer(install):
+        status = {"available": True, "current": "1.0.0", "latest": "1.0.1", "install": install,
+                  "release_url": "https://github.com/B03GHB4L1/ClipMaker/releases/latest"}
+        page.route("**/api/update", lambda route: route.fulfill(json={"update": status}))
+    notice = page.locator("[data-update-notice]")
+
+    stage("update notice: Windows desktop installs in the app")
+    offer("in-app")
+    page.goto(base + "/filters.html")
+    expect(notice).to_contain_text("VizorPlay 1.0.1 is available.")
+    page.get_by_role("button", name="Update and restart").click()
+    # Outside the desktop shell the engine answers 204, so the page stays put.
+    expect(notice).to_contain_text("Downloading VizorPlay 1.0.1")
+    assert page.url.endswith("/filters.html"), page.url
+    page.evaluate("window.vizorplayUpdateStatus('error', 'the signature did not match')")
+    expect(notice).to_contain_text("The update did not install: the signature did not match")
+    expect(page.get_by_role("button", name="Try again")).to_be_enabled()
+    page.unroute("**/api/update")
+
+    stage("update notice: Linux opens the download page; Homebrew shows its command")
+    offer("download")
+    page.route("**/api/update/open-release", lambda route: route.fulfill(json={"opened": True}))
+    page.goto(base + "/analysis.html")
+    page.get_by_role("button", name="Download").click()
+    expect(notice).to_contain_text("download page opened in your browser")
+    page.unroute("**/api/update")
+    page.unroute("**/api/update/open-release")
+    offer("homebrew")
+    page.goto(base)
+    expect(notice.locator("code")).to_have_text("brew upgrade vizorplay")
+    page.unroute("**/api/update")
+
+    stage("update notice: hidden when there is nothing newer")
+    page.route("**/api/update", lambda route: route.fulfill(json={"update": {"available": False}}))
+    page.goto(base)
+    page.locator('[data-project-name]').wait_for()
+    expect(notice).to_be_hidden()
+    page.unroute("**/api/update")
+
+
 def exercise(page, base, root, evidence, errors):
     stage("open intake and create project")
+    page.goto(base)
+    page.locator('[data-project-name]').wait_for()
+    exercise_update_notice(page, base)
     page.goto(base)
     page.locator('[data-project-name]').wait_for()
     exercise_kickoff_player(page, base, root)

@@ -44,8 +44,11 @@ Version 1.0 is being prepared and is not published yet.
 | Ubuntu, Debian, Linux Mint | `sudo apt install ./VizorPlay_1.0.0_amd64.deb`, then start **VizorPlay** from the app menu or run `vizorplay`. |
 | macOS | Through Homebrew once the tap is published: `brew tap B03GHB4L1/vizorplay`, `brew install vizorplay`, then run `vizorplay`. It opens in your default browser. There is no Apple-signed app, so no promise that every macOS security prompt is avoided. |
 
-Installing a newer version over an older one upgrades it and keeps your
-projects. Uninstalling also keeps your projects. See
+You only install once. When a new version comes out, the bar at the bottom of
+the app says so: on Windows, **Update and restart** installs it for you; on
+Linux, **Download** opens the release page; on macOS it shows the
+`brew upgrade vizorplay` command. Updates keep your projects, and so does
+uninstalling. See
 [docs/INSTALLATION.md](docs/INSTALLATION.md) for details, including where
 projects are stored.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -14,6 +15,8 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = {"Windows": ".exe", "Linux": ".deb", "macOS": ".tar.gz"}
+# Feed key the desktop updater looks up; only Windows installs in the app.
+UPDATER_TARGET = "windows-x86_64"
 
 
 def digest(path):
@@ -26,10 +29,24 @@ def validate_commit(commit):
         raise ValueError("An exact 40-character Git commit is required")
 
 
-def record_receipt(platform, payload, evidence, output, commit):
+def read_signature(path):
+    """The minisign signature Tauri writes beside a signed installer (<installer>.sig)."""
+    text = path.read_text(encoding="ascii").strip()
+    if not re.fullmatch(r"[A-Za-z0-9+/=]{40,4096}", text):
+        raise ValueError("Updater signature is not a Tauri signature file")
+    return text
+
+
+def update_verified(results):
+    return any(result.get("update_installed") and result.get("bad_signature_rejected") for result in results)
+
+
+def record_receipt(platform, payload, evidence, output, commit, signature=None):
     validate_commit(commit)
     if platform not in PLATFORMS or not payload.name.endswith(PLATFORMS[platform]):
         raise ValueError("Unexpected release payload type")
+    if signature is not None and platform != "Windows":
+        raise ValueError("Only the Windows installer is installed by the in-app updater")
     results = [json.loads(path.read_text(encoding="utf-8")) for path in evidence]
     if not results or any(result.get("status") != "passed" for result in results):
         raise ValueError("Every acceptance result must be passed")
@@ -45,6 +62,8 @@ def record_receipt(platform, payload, evidence, output, commit):
     receipt = {"schema": 1, "platform": platform, "version": "1.0.0", "commit": commit,
                "payload": payload.name, "sha256": digest(payload), "size": payload.stat().st_size,
                "acceptance": results}
+    if signature is not None:
+        receipt["updater_signature"] = read_signature(signature)
     (output / f"receipt-{platform}.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     return receipt
 
@@ -79,17 +98,26 @@ def assemble(directory, output, commit, repository):
     base = f"https://github.com/{repository}/releases/download/v1.0.0/"
     source = next(receipt for receipt in receipts if receipt["platform"] == "macOS")
     windows = next(receipt for receipt in receipts if receipt["platform"] == "Windows")
+    if not windows.get("updater_signature") or not update_verified(windows["acceptance"]):
+        raise ValueError("A Windows release needs a signed updater installer and passed in-app update evidence")
     subprocess.run([sys.executable, str(ROOT / "packaging/render_homebrew_formula.py"),
                     "--version", "1.0.0", "--sha256", source["sha256"],
                     "--source-url", base + quote(source["payload"]), "--output", str(output / "vizorplay.rb")], check=True)
     subprocess.run([sys.executable, str(ROOT / "packaging/render_winget_manifests.py"),
                     "--version", "1.0.0", "--installer-sha256", windows["sha256"],
                     "--installer-url", base + quote(windows["payload"]), "--output", str(output)], check=True)
+    # The feed every installed copy reads (releases/latest/download/latest.json).
+    feed = {"version": "1.0.0", "notes": "See the release page for what changed.",
+            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": {UPDATER_TARGET: {"signature": windows["updater_signature"],
+                                           "url": base + quote(windows["payload"])}}}
+    (output / "latest.json").write_text(json.dumps(feed, indent=2) + "\n", encoding="utf-8")
     manifest = {"schema": 1, "version": "1.0.0", "commit": commit, "published": False,
                 "repository": repository, "artifacts": receipts,
                 "limits": ["Controlled predecessor uses the same source, not a historical binary",
                            "Unsigned Windows installer may show a security warning",
                            "macOS is a Homebrew source launcher opening the default browser",
+                           "In-app updates install on Windows only; Linux and macOS show a notice",
                            "Public Homebrew tap and WinGet submissions are separate publication steps",
                            "Linux support verified on Ubuntu 22.04 DEB; RPM is not included",
                            "Skipped live-provider checks do not certify current provider availability"]}
@@ -101,8 +129,10 @@ def assemble(directory, output, commit, repository):
         "package preserves local projects. Ubuntu 22.04: `sudo apt install ./VizorPlay_1.0.0_amd64.deb` "
         "(use the actual DEB filename). macOS: the prepared formula requires publication of the "
         "source asset and Homebrew tap before its public install command will work.\n\n"
-        "No release, tap update, WinGet submission, signing or automatic updater has been published "
-        "by this candidate job. See candidate-manifest.json for acceptance evidence and limits.\n",
+        "latest.json is the update feed: once it is published with the release, installed Windows "
+        "copies offer the update in the app and Linux and macOS copies show a notice.\n\n"
+        "No release, tap update or WinGet submission has been published by this candidate job. "
+        "See candidate-manifest.json for acceptance evidence and limits.\n",
         encoding="utf-8")
     lines = [f"{digest(path)}  {path.relative_to(output).as_posix()}\n"
              for path in sorted(output.rglob("*")) if path.is_file()]
@@ -118,6 +148,7 @@ def main():
     receipt.add_argument("--payload", type=Path, required=True)
     receipt.add_argument("--evidence", type=Path, action="append", required=True)
     receipt.add_argument("--output", type=Path, required=True)
+    receipt.add_argument("--signature", type=Path, help="Windows only: the installer's updater .sig file")
     candidate = commands.add_parser("assemble")
     candidate.add_argument("--input", type=Path, required=True)
     candidate.add_argument("--output", type=Path, required=True)
@@ -126,7 +157,7 @@ def main():
         command.add_argument("--commit", default=os.environ.get("GITHUB_SHA", ""))
     args = parser.parse_args()
     if args.command == "receipt":
-        record_receipt(args.platform, args.payload, args.evidence, args.output, args.commit)
+        record_receipt(args.platform, args.payload, args.evidence, args.output, args.commit, args.signature)
     else:
         assemble(args.input, args.output, args.commit, args.repository)
 

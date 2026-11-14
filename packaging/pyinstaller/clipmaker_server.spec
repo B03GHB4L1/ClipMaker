@@ -33,6 +33,7 @@ hiddenimports = [
     "analysis_core.tactical_page",
     "analysis_core.tactical_fast",
     "process_owner",
+    "update_check",
     "tkinter",
     "tkinter.filedialog",
 ]

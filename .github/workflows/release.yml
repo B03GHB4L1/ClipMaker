@@ -20,6 +20,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/e2e.yml
+    # The Windows installer is signed for in-app updates during acceptance.
+    secrets: inherit
     with:
       scoresway_url: ${{ inputs.scoresway_url || '' }}
       whoscored_url: ${{ inputs.whoscored_url || '' }}
@@ -71,6 +73,7 @@ jobs:
             release-artifacts/*-source.tar.gz
             release-artifacts/vizorplay.rb
             release-artifacts/B4L1.VizorPlay*.yaml
+            release-artifacts/latest.json
             release-artifacts/SHA256SUMS
             release-artifacts/candidate-manifest.json
             release-artifacts/receipt-*.json
