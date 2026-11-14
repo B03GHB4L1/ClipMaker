@@ -1873,8 +1873,15 @@ class LazyFrameCache:
         return self._cache.get(csv_path)
 
 
+class EngineServer(ThreadingHTTPServer):
+    # A page load opens a dozen connections at once. The standard backlog of 5
+    # makes Windows refuse the extra ones outright (Linux and macOS queue them),
+    # which left a reloaded page without its engine connection.
+    request_queue_size = 128
+
+
 def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), ClipMakerHandler)
+    server = EngineServer((host, port), ClipMakerHandler)
     server.match_store = MatchStore(data_dir)  # type: ignore[attr-defined]
     server.match_data_dir = data_dir / "match-data"  # type: ignore[attr-defined]
     server.jobs = JobManager()  # type: ignore[attr-defined]

@@ -153,8 +153,11 @@ def main():
             feed_port = server.server_address[1]
             write_feed(feed_dir, feed_port, installer_name, bad_signature)
 
-            env = {**os.environ, "VIZORPLAY_DATA_DIR": str(root / "projects"),
-                   "VIZORPLAY_UPDATE_URL": f"https://127.0.0.1:{feed_port}/latest.json"}
+            # Use the app's normal projects folder, as a real user does: the installer
+            # relaunches VizorPlay without this test's environment, so a test-only
+            # VIZORPLAY_DATA_DIR would point the reopened app at a different folder.
+            env = {key: value for key, value in os.environ.items() if key != "VIZORPLAY_DATA_DIR"}
+            env["VIZORPLAY_UPDATE_URL"] = f"https://127.0.0.1:{feed_port}/latest.json"
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 driver_port = listener.getsockname()[1]
@@ -177,7 +180,8 @@ def main():
             project = request(base, "/api/projects", {})["project"]
             request(base, f"/api/projects/{project['id']}", {"project_name": "Survives the update",
                                                              "markers": {"1H": "00:01:00"}})
-            project_file = Path(request(base, "/api/projects")["directory"]) / project["id"] / "project.json"
+            projects_dir = request(base, "/api/projects")["directory"]
+            project_file = Path(projects_dir) / project["id"] / "project.json"
             saved = project_file.read_bytes()
 
             stage(evidence, "the footer offers 1.0.1; an update signed for other bytes is refused")
@@ -214,6 +218,8 @@ def main():
             wait_until(lambda: request(reopened_base, "/api/health").get("status") == "ok", 60,
                        "The reopened engine did not answer")
             assert request(reopened_base, "/api/health")["desktop_owner_pid"] in reopened
+            reopened_dir = request(reopened_base, "/api/projects")["directory"]
+            assert reopened_dir == projects_dir, ("The updated app opened another projects folder", projects_dir, reopened_dir)
             kept = request(reopened_base, f"/api/projects/{project['id']}")["project"]
             assert kept["project_name"] == "Survives the update" and kept["markers"] == {"1H": "00:01:00"}, kept
             assert project_file.read_bytes() == saved, "Updating changed the saved project"
