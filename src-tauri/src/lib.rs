@@ -44,8 +44,12 @@ fn backend_ready(port: u16, pid: u32) -> bool {
 
 /// Ask the engine to finish its work and exit, killing it after 20 seconds.
 fn stop_backend(app_handle: &AppHandle) {
-    let Ok(mut guard) = app_handle.state::<BackendProcess>().0.lock() else { return };
-    let Some((mut child, port)) = guard.take() else { return };
+    let state = app_handle.state::<BackendProcess>();
+    let taken = match state.0.lock() {
+        Ok(mut guard) => guard.take(),
+        Err(_) => None,
+    };
+    let Some((mut child, port)) = taken else { return };
     if let Ok(mut stream) = TcpStream::connect_timeout(
         &format!("127.0.0.1:{port}").parse().expect("local address"),
         Duration::from_secs(1),
