@@ -132,6 +132,10 @@ class AutomationContracts(unittest.TestCase):
         for hook in ("NSIS_HOOK_POSTINSTALL", "NSIS_HOOK_POSTUNINSTALL"):
             self.assertIn(f"!macro {hook}", source)
         self.assertNotIn("RMDir", source)  # never deletes folders, so never project data
+        # An update that changes the logo must not leave the old icon on shortcuts.
+        postinstall = source.split("!macro NSIS_HOOK_POSTINSTALL", 1)[1].split("!macroend", 1)[0]
+        self.assertIn("VIZORPLAY_REFRESH_ICONS", postinstall)
+        self.assertIn("shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)", source)
         workflow = (ROOT / ".github/workflows/e2e.yml").read_text(encoding="utf-8")
         self.assertIn("--candidate-app (Join-Path $destination 'vizorplay.exe')", workflow)
         self.assertIn("--candidate-app /usr/bin/vizorplay", workflow)
