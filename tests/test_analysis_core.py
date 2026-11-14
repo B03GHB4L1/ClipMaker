@@ -65,6 +65,24 @@ class AnalysisCoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 cache.get(str(Path(name) / "missing.csv"))
 
+    def test_pressing_map_is_oriented_like_the_other_pitch_maps(self):
+        # The pressing map was mirrored top to bottom: a win on the left wing
+        # (high y) was drawn at the bottom, unlike every other pitch map.
+        from analysis_core.pressing import pressing_option
+        wins = [{"idx": 1, "press_zone": "High", "x": 80, "y": 95, "type": "Tackle", "minute": 1, "second": 0,
+                 "period": "FirstHalf", "playerName": "Left"},
+                {"idx": 2, "press_zone": "High", "x": 80, "y": 5, "type": "Tackle", "minute": 2, "second": 0,
+                 "period": "FirstHalf", "playerName": "Right"}]
+        option = pressing_option(wins)
+        y_axis = option["yAxis"]
+        self.assertFalse(y_axis.get("inverse", False))  # larger values are drawn higher up
+        markers = {point["customdata"]: point["value"] for series in option["series"] if series.get("name")
+                   for point in series["data"]}
+        self.assertGreater(markers[1][1], markers[2][1])  # left-wing win sits above the right-wing win
+        frontend = (ROOT / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("return { x: x, y: 100 - y };", frontend)  # the other maps: left touchline on top
+        self.assertIn("yRange=[105,-5]", frontend)
+
     def test_pressing_markers_carry_their_event_ids(self):
         # Without ids, clicks on the pressing map could never select a win.
         from analysis_core.pressing import pressing_option

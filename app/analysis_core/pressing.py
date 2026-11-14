@@ -103,7 +103,9 @@ def pressing_option(press_wins, selected_idx=None, light_mode=False, context_tit
         },
         "grid": {"left": 20, "right": 20, "top": 72 if context_title else 24, "bottom": 42, "containLabel": False},
         "xAxis": {"type": "value", "min": -2, "max": PITCH_LENGTH + 2, "show": False},
-        "yAxis": {"type": "value", "min": -2, "max": PITCH_WIDTH + 2, "show": False, "inverse": True},
+        # Not inverted: y=100 (the left touchline when attacking left to right) is drawn at the top,
+        # as on every other pitch map in the app.
+        "yAxis": {"type": "value", "min": -2, "max": PITCH_WIDTH + 2, "show": False},
         "legend": {"bottom": 8, "left": "center", "textStyle": {"color": _leg_font, "fontSize": 11}},
         "tooltip": {"trigger": "item", "confine": True},
         "graphic": [

@@ -18,6 +18,20 @@ from analysis_core import build_analyst_frames, build_up, event_maps, pressing, 
 from tests import analysis_golden  # noqa: E402
 
 IGNORED_ARGS = {"key", "default"}
+
+
+def classic_args(args):
+    """The classic component's args, with deliberate fixes to the original applied.
+
+    The classic pressing map inverted its y axis, which drew it mirrored top to
+    bottom compared with every other pitch map; VizorPlay draws it upright.
+    """
+    args = {k: v for k, v in args.items() if k not in IGNORED_ARGS}
+    option = args.get("option")
+    if isinstance(option, dict) and args.get("filename_hint") == "pressing_map":
+        y_axis = {k: v for k, v in option["yAxis"].items() if k != "inverse"}
+        args = {**args, "option": {**option, "yAxis": y_axis}}
+    return args
 SPECS = {
     "◉ Shot Map": {
         "build": shot_map.build_view,
@@ -139,8 +153,7 @@ class AnalystNativeParityTests(unittest.TestCase):
             self.assertIn(result["notice"], markdown)
         if result["empty"]:
             self.assertIn(result["empty"], infos)
-        self.assertEqual([{k: v for k, v in e["args"].items() if k not in IGNORED_ARGS}
-                          for e in elements if e["kind"] == "component"],
+        self.assertEqual([classic_args(e["args"]) for e in elements if e["kind"] == "component"],
                          [component["args"] for component in result["components"]], "components")
 
         pickers = [by_key[key] for key in spec["pickers"] if key in by_key]
