@@ -199,7 +199,7 @@ def main():
                     parsed = urlparse(driver.current_url)
                     base = f"{parsed.scheme}://{parsed.netloc}"
                     wait.until(lambda current: current.find_element(By.CSS_SELECTOR, '[data-engine-state]').text == "Engine ready")
-                    assert driver.find_element(By.CSS_SELECTOR, '.cm-logo').text == "VizorPlay"
+                    assert driver.execute_script("const img = document.querySelector('.cm-logo img'); return img.complete && img.naturalWidth > 0 && img.src.endsWith('/assets/brand/vizorplay-wordmark.svg')")
                     assert "Version 1.0" in driver.find_element(By.CSS_SELECTOR, 'footer').text
                     if launch == 0:
                         stage(evidence, "create and seed isolated project")

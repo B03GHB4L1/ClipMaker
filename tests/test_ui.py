@@ -18,13 +18,21 @@ class SharedUiTests(unittest.TestCase):
     def test_vizorplay_brand_and_footer_version(self):
         for name in ("index.html", "filters.html", "analysis.html"):
             source = (UI / name).read_text(encoding="utf-8")
-            self.assertIn('<span class="cm-logo" aria-hidden="true">VizorPlay</span', source)
+            # The brand panel shows the wordmark; the button's label names it.
+            self.assertIn('<span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt=""', source)
+            self.assertIn('<link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />', source)
             self.assertIn('<span>VizorPlay</span><span>Version 1.0</span>', source)
             self.assertNotIn("ClipMaker", source)
             self.assertNotIn("<sup>", source)
             title = re.search(r"<title>(.*?)</title>", source).group(1)
             self.assertIn("VizorPlay", title)
             self.assertNotIn("1.0", title)
+        for name in ("mark", "wordmark", "lockup"):
+            for suffix in ("", "-on-dark"):
+                svg = (UI / f"assets/brand/vizorplay-{name}{suffix}.svg").read_text(encoding="utf-8")
+                self.assertTrue(svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '), name)
+                self.assertIn("#1C9938", svg)
+                self.assertNotIn("<script", svg)
         config = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(config["productName"], "VizorPlay")
         self.assertEqual(config["version"], "1.0.0")

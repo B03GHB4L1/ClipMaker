@@ -242,3 +242,9 @@ input[type=file]::file-selector-button { background: #e9ede4; font: inherit; fon
 @media (prefers-reduced-motion: reduce) {
   button:not(:disabled):active { translate: none; }
 }
+
+/* Brand panel: the VizorPlay wordmark (ui/assets/brand). */
+.cm-logo img { display: block; width: auto; height: 20px; }
+@media (max-width: 560px) {
+  .cm-logo img { height: 16px; }
+}
