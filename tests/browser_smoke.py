@@ -1,5 +1,6 @@
 """CI-only browser regression for the shared desktop UI."""
 import json
+import re
 import argparse
 import struct
 from pathlib import Path
@@ -441,6 +442,71 @@ def exercise_kickoff_player(page, base, root):
     mute.click()
 
 
+def exercise_scope_counts(page):
+    """Action type and qualifier counts follow the team, period, players and
+    chosen action types. The fixture has a Home Goal (One, 1st half) and an
+    Away Pass (Two, 1st half); a Successful qualifier on both is added to the
+    engine's answer because the fixture has no qualifier columns."""
+    stage("filter counts follow the scope")
+
+    def add_qualifier(route):
+        response = route.fetch()
+        data = response.json()
+        data["qualifiers"] = [
+            {"flag": "successful_only", "label": "Successful", "group": "Outcome & movement",
+             "available": True, "count": 2},
+            *[item for item in data["qualifiers"] if item["flag"] != "successful_only"],
+        ]
+        data["events"]["qualifiers"]["successful_only"] = [0, 1]
+        route.fulfill(response=response, json=data)
+
+    page.route("**/api/filter-options", add_qualifier)
+    page.reload()
+    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+    for band in ("#scope", "#actions", "#qualifiers"):
+        page.locator(band + " > summary").click()
+    page.locator('#qualifiers .qualifier-group summary').first.click()
+
+    def counts(name):
+        return page.evaluate("""(name) => Object.fromEntries([...document.querySelectorAll(
+            `input[name="${name}"]`)].map((input) => [input.value,
+            input.closest("label").querySelector("small")?.textContent]))""", name)
+
+    availability = page.locator("[data-qualifier-availability]")
+    assert counts("action") == {"Goal": "1", "Pass": "1"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "2"}, counts("qualifier")
+    expect(availability).to_contain_text(re.compile(r"^1 of \d+ available$"))
+
+    page.locator("[data-team-options] label").filter(has_text="Home").click()
+    assert counts("action") == {"Goal": "1", "Pass": "0"}, counts("action")
+    expect(page.locator('label:has(input[name="action"][value="Pass"])')).to_have_class(re.compile("is-empty"))
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+
+    page.locator('input[name="action"][value="Pass"]').check()
+    assert counts("qualifier") == {"successful_only": "0"}, counts("qualifier")
+    expect(availability).to_contain_text(re.compile(r"^0 of \d+ available$"))
+    page.locator('input[name="action"][value="Goal"]').check()
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+    page.locator("[data-clear-actions]").click()
+
+    page.locator("[data-team-options] label").filter(has_text="Both teams").click()
+    page.locator('#scope').scroll_into_view_if_needed()
+    page.locator('label:has(input[name="half"][value="2nd half only"])').click()
+    assert counts("action") == {"Goal": "0", "Pass": "0"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "0"}, counts("qualifier")
+    page.locator('label:has(input[name="half"][value="Both halves"])').click()
+    page.locator('input[name="player"][value="Two"]').check()
+    assert counts("action") == {"Goal": "0", "Pass": "1"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+    page.locator("[data-clear-players]").click()
+    assert counts("action") == {"Goal": "1", "Pass": "1"}, counts("action")
+
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.unroute("**/api/filter-options", add_qualifier)
+    page.reload()
+    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+
+
 def exercise_update_notice(page, base):
     """The footer offers a newer release the way this kind of install updates (ui/update.js)."""
     def offer(install):
@@ -535,6 +601,7 @@ def exercise(page, base, root, evidence, errors):
     stage("filter and build clip plan")
     page.wait_for_url("**/filters.html?match=*")
     page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+    exercise_scope_counts(page)
     page.locator('#actions summary').click()
     page.locator('input[name="action"][value="Goal"]').check()
     page.locator('#timing summary').click()

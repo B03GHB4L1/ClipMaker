@@ -1134,30 +1134,12 @@ def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
             )
 
     qualifiers = []
+    qualifier_rows: dict[str, list[int]] = {}
     for flag, column, label, group, expected in FILTER_QUALIFIERS:
-        count = 0
-        if column == "__progressive__":
-            progressive = pd.Series(False, index=frame.index)
-            for progressive_column in ("prog_pass", "prog_carry"):
-                if progressive_column in frame.columns:
-                    progressive |= (
-                        pd.to_numeric(frame[progressive_column], errors="coerce")
-                        .fillna(0)
-                        .gt(0)
-                    )
-            count = int(progressive.sum())
-        elif column in frame.columns:
-            if expected is not None:
-                count = int(frame[column].astype(str).eq(expected).sum())
-            else:
-                count = int(
-                    frame[column]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .isin({"true", "1", "yes"})
-                    .sum()
-                )
+        mask = qualifier_mask(frame, column, expected)
+        count = int(mask.sum())
+        if count:
+            qualifier_rows[flag] = [int(index) for index in mask.to_numpy().nonzero()[0]]
         qualifiers.append(
             {
                 "flag": flag,
@@ -1173,8 +1155,70 @@ def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
         "action_types": action_types,
         "team_players": team_players,
         "qualifiers": qualifiers,
+        "events": event_index(frame, action_types, team_players, qualifier_rows),
         "has_xt": "xT" in frame.columns,
         "event_count": len(frame),
+    }
+
+
+def qualifier_mask(frame: Any, column: str, expected: str | None) -> Any:
+    """Rows where a filter qualifier holds, as the clip filters read it."""
+    import pandas as pd
+
+    if column == "__progressive__":
+        progressive = pd.Series(False, index=frame.index)
+        for progressive_column in ("prog_pass", "prog_carry"):
+            if progressive_column in frame.columns:
+                progressive |= (
+                    pd.to_numeric(frame[progressive_column], errors="coerce").fillna(0).gt(0)
+                )
+        return progressive
+    if column not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    if expected is not None:
+        return frame[column].astype(str).eq(expected)
+    return frame[column].astype(str).str.strip().str.lower().isin({"true", "1", "yes"})
+
+
+def event_index(
+    frame: Any,
+    action_types: list[str],
+    team_players: dict[str, list[str]],
+    qualifier_rows: dict[str, list[int]],
+) -> dict[str, Any]:
+    """A compact per-event table so the filter page can count what is left in a
+    scope (team, period, players, action types) without asking the engine.
+
+    Each event is a position in the parallel lists; -1 means unknown. The period
+    is 1-5 or 0 when the row has none."""
+    teams = list(team_players)
+    players = sorted({name for names in team_players.values() for name in names}, key=str.casefold)
+
+    def positions(column: str, values: list[str]) -> list[int]:
+        if column not in frame.columns:
+            return [-1] * len(frame)
+        lookup = {value: position for position, value in enumerate(values)}
+        return [
+            lookup.get(str(value).strip(), -1) if value == value and value is not None else -1
+            for value in frame[column].tolist()
+        ]
+
+    if "period" in frame.columns:
+        periods = []
+        for value in frame["period"].tolist():
+            period = normalize_period(value) if value == value else ""
+            periods.append(period if isinstance(period, int) and 1 <= period <= 5 else 0)
+    else:
+        periods = [0] * len(frame)
+
+    return {
+        "teams": teams,
+        "players": players,
+        "team": positions("team", teams),
+        "player": positions("playerName", players),
+        "type": positions("type", action_types),
+        "period": periods,
+        "qualifiers": qualifier_rows,
     }
 
 

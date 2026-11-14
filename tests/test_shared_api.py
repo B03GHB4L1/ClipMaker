@@ -208,6 +208,40 @@ class SharedApiTests(unittest.TestCase):
         self.assertTrue(qualifier_map["crosses_only"]["available"])
         self.assertTrue(qualifier_map["progressive_only"]["available"])
         self.assertFalse(qualifier_map["own_goals_only"]["available"])
+        # The page counts per scope from this event index.
+        events = result["events"]
+        self.assertEqual(events["teams"], ["Away", "Home"])
+        self.assertEqual(events["players"], ["Player One", "Player Two"])
+        self.assertEqual(events["team"], [1, 0])
+        self.assertEqual(events["player"], [0, 1])
+        self.assertEqual(events["type"], [1, 0])
+        self.assertEqual(events["period"], [1, 1])
+        self.assertEqual(events["qualifiers"]["successful_only"], [0, 1])
+        self.assertEqual(events["qualifiers"]["crosses_only"], [0])
+        self.assertEqual(events["qualifiers"]["progressive_only"], [0])
+        self.assertNotIn("own_goals_only", events["qualifiers"])
+
+    def test_filter_event_index_handles_missing_and_unknown_values(self):
+        csv_path = Path(self.temporary.name) / "sparse.csv"
+        csv_path.write_text(
+            "minute,second,type,period,team,outcomeType\n"
+            "1,0,Pass,FirstHalf,Home,Successful\n"
+            "2,0,,SecondHalf,,Unsuccessful\n"
+            "3,0,TakeOn,,Home,Successful\n",
+            encoding="utf-8",
+        )
+        saved = self.server.match_store.upsert({"id": "sparse", "csv_path": str(csv_path)})
+        status, result = self.request(
+            "/api/filter-options", method="POST", payload={"match_id": saved["id"]}
+        )
+        self.assertEqual(status, 200)
+        events = result["events"]
+        self.assertEqual(events["players"], [])
+        self.assertEqual(events["player"], [-1, -1, -1])  # no playerName column
+        self.assertEqual(events["team"], [0, -1, 0])
+        self.assertEqual(events["type"], [0, -1, 1])
+        self.assertEqual(events["period"], [1, 2, 0])
+        self.assertEqual(events["qualifiers"]["unsuccessful_only"], [1])
 
     def test_config_applies_team_players_and_extended_qualifiers(self):
         csv_path = Path(self.temporary.name) / "scope.csv"
