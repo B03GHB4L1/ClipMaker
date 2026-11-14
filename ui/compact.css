@@ -108,7 +108,18 @@ main#intake > section { scroll-margin-top: 76px; }
 .event-table-wrap { max-height: 160px; }
 .dropzone { height: 132px; }
 .drop-icon { margin-bottom: 8px; }
-.sync-section { grid-template-columns: minmax(250px, 0.8fr) minmax(0, 1.2fr); gap: 28px; padding: 28px 0; }
+/* Timeline sync: a narrow control rail and a player that takes the rest of the row.
+   The player is capped by viewport height so everything used while scrubbing (picture,
+   transport, timeline, "Set kick-off here") fits on screen; ~340px covers the top bar,
+   section padding, that chrome and the version footer. Confirm may sit below the fold. */
+.sync-section {
+  --sync-player-max: max(560px, calc((100vh - 340px) * 16 / 9 + 20px));
+  --sync-player-max: max(560px, calc((100svh - 340px) * 16 / 9 + 20px));
+  grid-template-columns: minmax(220px, 260px) minmax(0, var(--sync-player-max));
+  justify-content: space-between;
+  gap: 28px;
+  padding: 28px 0;
+}
 .sync-copy h2, .recent-section h2 { margin: 14px 0 12px; font-size: 30px; line-height: 1.07; }
 .sync-copy > p { font-size: 13px; line-height: 1.5; margin-bottom: 14px; }
 .sync-copy { align-self: start; }
@@ -122,7 +133,7 @@ main#intake > section { scroll-margin-top: 76px; }
 .preview-actions { margin-top: 8px; min-height: 44px; }
 .continue-button { min-height: 38px; }
 .preview-actions .continue-button { min-width: 0; }
-.sync-section .preview-shell { max-width: 610px; justify-self: end; width: 100%; }
+.sync-section .preview-shell { width: 100%; }
 .recent-section { grid-template-columns: 0.7fr 1.3fr; padding: 22px 0; gap: 32px; }
 .recent-row { min-height: 56px; }
 .recent-list { max-height: 260px; overflow-y: auto; align-self: start; }
@@ -196,7 +207,7 @@ main#intake > section { scroll-margin-top: 76px; }
   .sync-copy h2 br { display: none; }
   .period-selector, .period-options, .time-readout { margin: 4px 0; max-width: none; }
   .period-options { align-items: center; flex-wrap: wrap; gap: 8px; }
-  .time-readout { grid-column: 2; grid-row: 4 / 6; align-self: center; }
+  .time-readout { grid-column: 2; grid-row: 4 / 6; align-self: center; margin: 0; padding: 0; border-top: 0; }
   .period-note { margin: 0; }
   .hero-ball { width: 192px; height: 192px; right: -8px; top: -8px; }
   .intro { min-height: 210px; }
@@ -211,14 +222,6 @@ main#intake > section { scroll-margin-top: 76px; }
   .snapshot-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 640px) and (max-width: 800px) {
-  .sync-section { grid-template-columns: minmax(230px, 0.85fr) minmax(0, 1.15fr); }
-  .sync-copy { display: block; }
-  .sync-copy > p { margin: 10px 0; }
-  .sync-copy h2 { margin: 10px 0; }
-  .period-selector { margin-top: 14px; }
-  .period-options { margin-top: 8px; }
-  .time-readout { margin-top: 12px; }
-  .period-note { margin-top: 8px; }
   .continue-button { font-size: 12px; padding: 0 10px; }
   .preview-actions { gap: 6px; }
   .recent-section { grid-template-columns: 0.7fr 1.3fr; }
