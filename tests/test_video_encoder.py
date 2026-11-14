@@ -142,12 +142,13 @@ class FallbackMediaTests(unittest.TestCase):
         self.assertEqual([path.name for path in files], ["03_Ana_-_Goal.mp4", "07_Bo_-_Pass.mp4"])
         self.assertAlmostEqual(self.duration(files[0]), 1.5, delta=0.3)
         done = next(message for message in self.messages if message.get("type") == "done")
-        self.assertEqual(sorted(done["files"]), [str(path) for path in files])
+        self.assertEqual([Path(item).resolve() for item in sorted(done["files"])],
+                         [path.resolve() for path in files])
 
     def test_a_reel_reports_the_file_it_wrote(self):
         files, logs, kinds = self.export(False, "software", name="reported-reel")
         done = next(message for message in self.messages if message.get("type") == "done")
-        self.assertEqual(done["files"], [str(files[0])])
+        self.assertEqual([Path(item).resolve() for item in done["files"]], [files[0].resolve()])
 
     def test_reel_redoes_every_part_in_software_when_the_card_fails(self):
         with patch.object(ve, "resolve", return_value=ve.NVENC), patch.object(ve, "video_args", side_effect=broken_hardware):
