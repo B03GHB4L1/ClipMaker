@@ -161,9 +161,10 @@ class AutomationContracts(unittest.TestCase):
         import re
         formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
         server = (ROOT / "packaging/clipmaker_api_server.py").read_text(encoding="utf-8")
-        siblings = {name for name in re.findall(r"^\s+from (\w+) import", server, re.M)
-                    if (ROOT / "packaging" / f"{name}.py").is_file()}
-        self.assertIn("process_owner", siblings)
+        imported = re.findall(r"^\s*(?:from (\w+) import|import (\w+)\s*$)", server, re.M)
+        siblings = {name for pair in imported for name in pair
+                    if name and (ROOT / "packaging" / f"{name}.py").is_file()}
+        self.assertTrue({"process_owner", "update_check"} <= siblings, siblings)
         for name in siblings:
             self.assertIn(f'libexec.install "packaging/{name}.py"', formula)
         self.assertNotIn("analysis_server", formula)
