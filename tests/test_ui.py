@@ -77,6 +77,23 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("Clip match footage from event data in one seamless experience.", html)
         self.assertNotIn("footage footage", html)
 
+    def test_watched_clips_are_saved_by_the_engine_not_browser_downloads(self):
+        # The desktop app windows ignore <a download>, so those buttons did nothing there.
+        for name in ("filters.js", "analysis/tabs/event-tab.js", "analysis/tabs/comparison.js", "analysis/tabs/tactical.js"):
+            source = (UI / name).read_text(encoding="utf-8")
+            self.assertIn("save-clip.js", source, name)
+            self.assertNotIn("download: clip.file", source, name)
+            self.assertNotIn("download: reel.file", source, name)
+            self.assertNotIn("download: slot.file", source, name)
+            self.assertNotIn('download.download = `clip-', source, name)
+        self.assertIn('<button type="button" data-render-download hidden>Save clip</button>',
+                      (UI / "filters.html").read_text(encoding="utf-8"))
+        helper = (UI / "save-clip.js").read_text(encoding="utf-8")
+        self.assertIn("/api/media/${encodeURIComponent(id)}/save", helper)
+        self.assertIn("/api/saved/${encodeURIComponent(saved.id)}/reveal", helper)
+        self.assertIn("Open folder", helper)
+        self.assertIn(".saved-popup", (UI / "design.css").read_text(encoding="utf-8"))
+
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
             source = (UI / name).read_text(encoding="utf-8")

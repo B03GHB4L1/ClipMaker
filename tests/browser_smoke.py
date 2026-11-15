@@ -7,6 +7,7 @@ import struct
 from pathlib import Path
 import sys
 import tempfile
+import shutil
 import subprocess
 import imageio_ffmpeg
 import traceback
@@ -320,11 +321,19 @@ def exercise_clip_editor(page, evidence):
     expect(page.locator('[data-render-status]')).to_have_text("Clip ready", timeout=60000)
     page.wait_for_function("document.querySelector('[data-editor-video]')?.videoWidth > 0")
     assert 2.3 <= video.evaluate("(v) => v.duration") <= 2.7
-    with page.expect_download() as download:
-        page.get_by_role("link", name="Download clip", exact=True).click()
-    preview = evidence / "preview.mp4"
-    download.value.save_as(str(preview))
+    # "Save clip" has the engine copy the clip into Videos/VizorPlay (desktop windows
+    # ignore browser downloads) and a pop-up says where it went.
+    page.get_by_role("button", name="Save clip", exact=True).click()
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Clip saved", timeout=30000)
+    saved_name = popup.locator("[data-saved-file]").text_content()
+    assert saved_name.endswith(".mp4") and "Goal" in saved_name, saved_name
+    expect(popup.get_by_role("button", name="Open folder")).to_be_visible()
+    preview = Path(os.environ["VIZORPLAY_EXPORT_DIR"]) / saved_name
     decode(preview)
+    shutil.copyfile(preview, evidence / "preview.mp4")
+    popup.get_by_role("button", name="Close").click()
+    expect(page.locator(".saved-popup.is-visible")).to_have_count(0)
     page.unroute("**/api/files/reopen")
     page.locator('.export-bar label').filter(has_text="One reel").click()
     page.get_by_role("button", name="Select none").click()
@@ -481,7 +490,17 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
                 panel: document.querySelector('.native-detail').getBoundingClientRect().width}; }""")
     assert player["bars"] <= 2, player
     assert player["width"] >= player["panel"] * 0.6 or player["width"] >= 640, player
-    expect(page.get_by_role("link", name="Download clip")).to_have_attribute("download", "One_0.mp4")
+    page.get_by_role("button", name="Save clip", exact=True).click()
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Clip saved", timeout=30000)
+    expect(popup.locator("[data-saved-file]")).to_have_text("One 0'.mp4")
+    decode(Path(os.environ["VIZORPLAY_EXPORT_DIR"]) / "One 0'.mp4")
+    page.set_viewport_size({"width": 390, "height": 844})
+    box = popup.bounding_box()
+    assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, box  # fits a phone-width window
+    page.screenshot(path=str(evidence / "clip-saved-390.png"))
+    page.set_viewport_size({"width": 1280, "height": 800})
+    popup.get_by_role("button", name="Close").click()
     with page.expect_download(timeout=30000) as downloaded:
         component.locator('[data-export="png"]').click()
     downloads = [validate_chart_download(downloaded.value, evidence / "native-shot-map.png", "PNG")]

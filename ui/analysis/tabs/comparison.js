@@ -1,6 +1,7 @@
 // Native Player Comparison: radar and zone charts (Plotly, bundled with the
 // map component), Top 5 Moments tables and highlight reels cut server-side.
 import { projectRequest } from "../../projects.js";
+import { saveClipButton } from "../../save-clip.js";
 
 const el = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -123,7 +124,7 @@ export async function renderComparison(panel, context) {
         actions.append(el("p", { class: "native-inline-message", role: "status", text: "Cutting clips..." }));
       } else if (reel.file) {
         actions.append(el("video", { controls: true, preload: "metadata", src: reel.file.url, "aria-label": `Top moments of ${moment.player}` }),
-          el("div", { class: "native-actions" }, el("a", { class: "native-button", href: reel.file.url, download: reel.file.name, text: "Download reel" })));
+          el("div", { class: "native-actions" }, saveClipButton(reel.file, "Reel")));
       } else if (reel.error) {
         actions.append(el("p", { class: "native-inline-error", role: "alert", text: `Could not generate reel: ${reel.error}` }),
           el("button", { type: "button", class: "native-button", text: "Retry", onclick: () => generate(moment.reel) }));
