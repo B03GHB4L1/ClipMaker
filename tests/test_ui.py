@@ -59,6 +59,10 @@ class SharedUiTests(unittest.TestCase):
         self.assertEqual(icon.getpixel((width // 2, height - 4))[3], 0)
         # Centre of the left lens is opaque white.
         self.assertEqual(icon.getpixel((width // 4, height // 2)), (255, 255, 255, 255))
+        # The Windows installer shows the same icon, not NSIS's default box.
+        bundle = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["bundle"]
+        self.assertEqual(bundle["windows"]["nsis"]["installerIcon"], "icons/icon.ico")
+        self.assertIn("icons/icon.ico", bundle["icon"])
         sizes = Image.open(UI.parent / "src-tauri/icons/icon.ico").info["sizes"]
         self.assertIn((256, 256), sizes)
         self.assertIn((16, 16), sizes)
