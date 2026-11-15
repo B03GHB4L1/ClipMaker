@@ -68,6 +68,64 @@ const show = ({ title, file, folder, onOpen, error }) => {
   scheduleHide();
 };
 
+/** The pop-up for a file the engine saved ({name, folder, id}). */
+export const showSaved = (saved, what = "Clip") => show({
+  title: `${what} saved`,
+  file: saved.name,
+  folder: saved.folder,
+  onOpen: async () => {
+    try {
+      await post(`/api/saved/${encodeURIComponent(saved.id)}/reveal`);
+      hide();
+    } catch (error) {
+      show({ title: "Could not open the folder", file: error.message, error: true });
+    }
+  },
+});
+
+export const showSaveError = (message, what = "Clip") =>
+  show({ title: `Could not save the ${what.toLowerCase()}`, file: message, error: true });
+
+/** Save a chart picture (a Blob or data: URL, PNG or GIF, or a promise of one) as `name` in the VizorPlay folder. */
+export const saveImage = async (image, name) => {
+  try {
+    const picture = await image;
+    const blob = typeof picture === "string" ? await (await fetch(picture)).blob() : picture;
+    const response = await fetch("/api/images/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(name || "") },
+      body: blob,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+    showSaved(payload.saved, "Picture");
+    return payload.saved;
+  } catch (error) {
+    showSaveError(error.message, "Picture");
+    return null;
+  }
+};
+
+// Plotly's camera button downloads through <a download>, which the desktop
+// windows ignore; swap it for one that saves through the engine.
+export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
+  if (!config.displayModeBar || !Plotly?.toImage) return config;
+  const options = config.toImageButtonOptions || {};
+  return {
+    ...config,
+    modeBarButtonsToRemove: [...(config.modeBarButtonsToRemove || []), "toImage"],
+    modeBarButtonsToAdd: [...(config.modeBarButtonsToAdd || []), {
+      name: "saveImage",
+      title: "Save as PNG",
+      icon: Plotly.Icons.camera,
+      // Only sizes that are set: toImage never finishes when given width: undefined.
+      click: (chart) => saveImage(Plotly.toImage(chart, { format: "png", scale: options.scale || 2,
+        ...(options.width ? { width: options.width } : {}), ...(options.height ? { height: options.height } : {}) }),
+      `${options.filename || "VizorPlay chart"}.png`),
+    }],
+  };
+};
+
 /** Save the clip behind `url` (an /api/media/<id> link) as `name`; `what` names it ("Clip", "Reel"). */
 export const saveClip = async (url, name, button, what = "Clip") => {
   const id = String(url || "").split("/").pop();
@@ -78,22 +136,10 @@ export const saveClip = async (url, name, button, what = "Clip") => {
   }
   try {
     const { saved } = await post(`/api/media/${encodeURIComponent(id)}/save`, { name });
-    show({
-      title: `${what} saved`,
-      file: saved.name,
-      folder: saved.folder,
-      onOpen: async () => {
-        try {
-          await post(`/api/saved/${encodeURIComponent(saved.id)}/reveal`);
-          hide();
-        } catch (error) {
-          show({ title: "Could not open the folder", file: error.message, error: true });
-        }
-      },
-    });
+    showSaved(saved, what);
     return saved;
   } catch (error) {
-    show({ title: `Could not save the ${what.toLowerCase()}`, file: error.message, error: true });
+    showSaveError(error.message, what);
     return null;
   } finally {
     if (button) {

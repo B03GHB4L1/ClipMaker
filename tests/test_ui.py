@@ -94,6 +94,21 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("Open folder", helper)
         self.assertIn(".saved-popup", (UI / "design.css").read_text(encoding="utf-8"))
 
+    def test_chart_pictures_are_saved_by_the_engine_not_browser_downloads(self):
+        component = (UI.parent / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('fetch("/api/images/save"', component)
+        self.assertIn('type: "vizorplay:saved"', component)
+        host = (UI / "analysis" / "component-host.js").read_text(encoding="utf-8")
+        self.assertIn('message.type === "vizorplay:saved"', host)
+        self.assertIn("showSaved(message.saved", host)
+        # Plotly's own camera button also downloads; it is swapped for one that saves.
+        helper = (UI / "save-clip.js").read_text(encoding="utf-8")
+        self.assertIn('"toImage"', helper)
+        for name in ("analysis/tabs/comparison.js", "analysis/tabs/tactical.js"):
+            source = (UI / name).read_text(encoding="utf-8")
+            self.assertNotIn("{ ...item.config, responsive: true })", source.replace("plotlyConfig({ ...item.config, responsive: true }", ""), name)
+            self.assertNotIn("{ ...element.config, responsive: true })", source.replace("plotlyConfig({ ...element.config, responsive: true }", ""), name)
+
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
             source = (UI / name).read_text(encoding="utf-8")

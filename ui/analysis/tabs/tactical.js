@@ -2,7 +2,7 @@
 // recorder (analysis_core.tactical) and returns its elements in order; this
 // draws them and turns recorded controls back into inputs.
 import { projectRequest } from "../../projects.js";
-import { saveClipButton } from "../../save-clip.js";
+import { saveClipButton, plotlyConfig } from "../../save-clip.js";
 
 const el = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -318,7 +318,7 @@ export async function renderTactical(panel, context) {
         if (isPitch(element.figure)) target.dataset.narrow = String(target.clientWidth < NARROW_PITCH);
         return Plotly.react(target, element.figure.data,
           isPitch(element.figure) ? pitchLayout(target, element.figure) : element.figure.layout,
-          { ...element.config, responsive: true });
+          plotlyConfig({ ...element.config, responsive: true }, Plotly));
       }));
       if (pitchFigures.length && "ResizeObserver" in window) {
         let frame = 0;
@@ -330,7 +330,7 @@ export async function renderTactical(panel, context) {
             const narrow = String(target.clientWidth < NARROW_PITCH);
             if (narrow !== target.dataset.narrow || Math.abs(layout.height - (target.layout?.height || 0)) > 4) {
               target.dataset.narrow = narrow;
-              window.Plotly.react(target, element.figure.data, layout, { ...element.config, responsive: true });
+              window.Plotly.react(target, element.figure.data, layout, plotlyConfig({ ...element.config, responsive: true }, window.Plotly));
             }
           }));
         });

@@ -1235,11 +1235,36 @@
     };
   }
 
+  // VizorPlay's desktop windows ignore <a download>, so the picture goes to the
+  // engine, which saves it in the VizorPlay folder; the page around this frame
+  // then shows where it went (ui/analysis/component-host.js).
   function downloadDataUrl(url, filename) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.click();
+    saveChartPicture(url, filename);
+  }
+
+  async function saveChartPicture(url, filename) {
+    let response;
+    try {
+      const blob = await (await fetch(url)).blob();
+      response = await fetch("/api/images/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(filename || "") },
+        body: blob,
+      });
+    } catch (error) {
+      // No VizorPlay engine behind this page: an ordinary browser download.
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      return;
+    } finally {
+      if (String(url).startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    const payload = await response.json().catch(() => ({}));
+    window.parent.postMessage(response.ok
+      ? { type: "vizorplay:saved", saved: payload.saved }
+      : { type: "vizorplay:save-failed", error: payload.error || `Request failed (${response.status})` }, location.origin);
   }
 
   function exportAnimationKey(args) {
