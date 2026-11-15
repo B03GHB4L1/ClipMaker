@@ -420,5 +420,19 @@ class SharedApiTests(unittest.TestCase):
         self.assertTrue(Path(result["file"]["path"]).samefile(video_path))
 
 
+
+class ServerStartTests(unittest.TestCase):
+    def test_starting_never_looks_up_the_computers_network_name(self):
+        # socket.getfqdn() can search the local network, which makes macOS ask
+        # the user to let "Python" find devices on local networks.
+        with tempfile.TemporaryDirectory() as directory,                 patch("socket.getfqdn", side_effect=AssertionError("network name lookup")) as lookup:
+            server = create_server("127.0.0.1", 0, Path(directory))
+            try:
+                self.assertEqual(server.server_name, "127.0.0.1")
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+        lookup.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

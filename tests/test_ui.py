@@ -72,6 +72,11 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn((512, 512, 2), mac.info["sizes"])
         self.assertEqual(mac.convert("RGBA").getpixel((4, 4))[3], 0)
 
+    def test_intake_intro_reads_cleanly(self):
+        html = (UI / "index.html").read_text(encoding="utf-8")
+        self.assertIn("Clip match footage from event data in one seamless experience.", html)
+        self.assertNotIn("footage footage", html)
+
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
             source = (UI / name).read_text(encoding="utf-8")

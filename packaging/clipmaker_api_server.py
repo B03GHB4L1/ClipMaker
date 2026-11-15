@@ -8,6 +8,7 @@ import mimetypes
 import os
 import queue
 import re
+import socketserver
 import sys
 import tempfile
 import threading
@@ -1983,6 +1984,15 @@ class EngineServer(ThreadingHTTPServer):
     # makes Windows refuse the extra ones outright (Linux and macOS queue them),
     # which left a reloaded page without its engine connection.
     request_queue_size = 128
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind names the server with socket.getfqdn(), a
+        # reverse lookup that can search the local network. On macOS that makes
+        # the system ask the user to let "Python" find devices on local networks.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
 
 
 def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
