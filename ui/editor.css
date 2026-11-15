@@ -548,13 +548,58 @@
 .export-settings-body { margin-top: 12px; }
 .export-settings .export-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .export-settings .folder-control { gap: 8px; margin-bottom: 12px; }
-.export-bar .filter-job-output { flex-basis: 100%; margin: 0; }
-.export-bar .filter-job-output pre { max-height: 140px; }
 .export-bar .export-settings { order: 3; margin-left: auto; }
 .export-bar .export-button { order: 4; }
 .export-bar .export-settings[open] { order: 5; margin-left: 0; }
 .export-bar:has(.export-settings[open]) .export-button { margin-left: auto; }
-.export-bar .filter-job-output { order: 6; }
+.export-bar .export-job { order: 6; }
+
+/* ---- Export progress card ------------------------------------------ */
+
+.export-job { flex-basis: 100%; display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; }
+.export-job[hidden] { display: none; }
+.export-job-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.export-job-icon { position: relative; flex: none; width: 28px; height: 28px; border-radius: 50%; background: #f1f3ec; }
+.export-job-icon::after { content: ""; position: absolute; inset: 6px; border: 2px solid #c9ccc2; border-top-color: #6e8f12; border-radius: 50%; animation: export-spin 0.9s linear infinite; }
+.export-job[data-job-status="complete"] .export-job-icon { background: #c8f135; }
+.export-job[data-job-status="complete"] .export-job-icon::after { inset: auto; top: 6px; left: 11px; width: 6px; height: 11px; border: 0; border-right: 2px solid #11130f; border-bottom: 2px solid #11130f; border-radius: 0; transform: rotate(45deg); animation: none; }
+.export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon { background: #fde4e0; }
+.export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon::before,
+.export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon::after { content: ""; position: absolute; inset: 13px 8px auto; height: 2px; border: 0; border-radius: 1px; background: #b3261e; animation: none; transform: rotate(45deg); }
+.export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon::before { transform: rotate(-45deg); }
+.export-job[data-job-status="cancelled"] .export-job-icon { background: #eceee8; }
+.export-job[data-job-status="cancelled"] .export-job-icon::before,
+.export-job[data-job-status="cancelled"] .export-job-icon::after { background: #6c7066; }
+@keyframes export-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .export-job-icon::after { animation-duration: 3s; } }
+.export-job-title { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.export-job-title strong { color: var(--cm-ink); font-size: 13px; font-weight: 600; }
+.export-job-title span { overflow: hidden; color: var(--cm-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.export-job[data-job-status="failed"] .export-job-title span { color: #b3261e; white-space: normal; }
+.export-job-percent { color: var(--cm-ink); font-size: 18px; font-variant-numeric: tabular-nums; }
+.export-job-bar { height: 6px; overflow: hidden; border-radius: 3px; background: #eceee8; }
+.export-job-bar i { display: block; width: 0; height: 100%; border-radius: inherit; background: #c8f135; transition: width 0.3s ease; }
+.export-job:is([data-job-status="complete"], [data-job-status="failed"], [data-job-status="cancelled"]) .export-job-bar { display: none; }
+.export-job-meta { margin: -4px 0 0; color: var(--cm-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.export-job-meta:empty { display: none; }
+.export-done { display: grid; gap: 8px; }
+.export-done[hidden] { display: none; }
+.export-folder { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border-radius: 4px; background: #f6f7f2; font-size: 11px; }
+.export-folder-label { flex: none; color: var(--cm-muted); }
+.export-folder-path { flex: 1; min-width: 0; overflow: hidden; color: var(--cm-ink); text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.export-folder button { flex: none; min-height: 28px; padding: 0 10px; border: 1px solid var(--cm-ink); border-radius: 4px; background: var(--cm-ink); color: #fff; font: inherit; cursor: pointer; }
+.export-folder button:hover { background: #2b2e27; }
+.export-job .export-files { display: grid; gap: 0; margin: 0; border: 1px solid var(--cm-rule); border-radius: 4px; overflow: hidden; }
+.export-file { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 7px 10px; font-size: 12px; }
+.export-file + .export-file { border-top: 1px solid var(--cm-rule); }
+.export-file a { flex: 1; min-width: 0; overflow: hidden; color: var(--cm-ink); text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.export-file a:hover { text-decoration: underline; }
+.export-file span { flex: none; color: var(--cm-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.export-log { font-size: 11px; }
+.export-log > summary { width: max-content; color: var(--cm-muted); cursor: pointer; }
+.export-log > summary:hover { color: var(--cm-ink); }
+.export-log pre { max-height: 160px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border-radius: 4px; background: #f6f7f2; color: #44473f; font: 10px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+:is(.export-folder button, .export-file a, .export-log > summary):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
 
 /* ---- Narrower screens ---------------------------------------------- */
 

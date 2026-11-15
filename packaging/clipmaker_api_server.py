@@ -45,10 +45,11 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 if __package__:
     from .process_owner import watch_process_owner
-    from . import update_check
+    from . import update_check, user_folders
 else:
     from process_owner import watch_process_owner
     import update_check
+    import user_folders
 
 
 # Navigating here asks the Windows desktop shell to install the update
@@ -890,7 +891,8 @@ def video_for_period(match: dict[str, Any], period: int) -> str:
     return str(match.get("video_path") or "")
 
 
-def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path) -> dict[str, Any]:
+def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
+                      default_output_dir: Path | None = None) -> dict[str, Any]:
     csv_path = str(match.get("csv_path") or "").strip()
     if not csv_path or not Path(csv_path).is_file():
         raise ValueError("This match has no saved event CSV. Scrape it again before filtering.")
@@ -933,6 +935,9 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
     output_dir = (
         Path(requested_output_dir).expanduser().resolve()
         if requested_output_dir
+        # The app passes the user's videos folder (Videos/VizorPlay); embedded callers
+        # and tests without one keep exports inside the project.
+        else Path(default_output_dir).resolve() if default_output_dir
         else (data_dir / "projects" / str(match.get("id") or "match") / "exports").resolve()
     )
     clip_windows = []
@@ -1599,6 +1604,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"status": "ok", "version": "1.0.0", "pid": os.getpid(), "parent_pid": os.getppid(),
                 "desktop_owner_pid": getattr(self.server, "desktop_owner_pid", None)})
             return
+        if path == "/api/folders/output/default":
+            self.send_json(HTTPStatus.OK, {"path": str(self.server.default_export_dir or "")})  # type: ignore[attr-defined]
+            return
         if path == "/api/update":
             self.send_json(HTTPStatus.OK, {"update": self.server.update_status.get()})  # type: ignore[attr-defined]
             return
@@ -1851,9 +1859,18 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if match is None:
                     raise ValueError("Save the match setup before building a clip plan.")
                 options = body.get("options") if isinstance(body.get("options"), dict) else {}
-                config = build_clip_config(match, options, self.store.data_dir)
+                config = build_clip_config(match, options, self.store.data_dir, self.server.default_export_dir)  # type: ignore[attr-defined]
                 job = self.jobs.start(config)
                 self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+                return
+            if path.startswith("/api/jobs/") and path.endswith("/reveal"):
+                # Only a finished job's own output folder; no paths come from the request.
+                job = self.jobs.get(path.split("/")[-2])
+                if job is None or job.get("status") != "complete" or job.get("dry_run"):
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "No finished export to show"})
+                    return
+                user_folders.reveal_folder(Path(job["output_dir"]))
+                self.send_json(HTTPStatus.OK, {"opened": True})
                 return
             if path.startswith("/api/jobs/") and path.endswith("/cancel"):
                 job_id = path.split("/")[-2]
@@ -1902,6 +1919,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.update_status = update_check.UpdateStatus(desktop=False)  # type: ignore[attr-defined]
     server.media_files = {}  # type: ignore[attr-defined]
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
+    server.default_export_dir = None  # type: ignore[attr-defined]  # main() sets the user's videos folder
     return server
 
 
@@ -1917,6 +1935,9 @@ def main() -> int:
         raise ValueError("Desktop owner must identify another live process")
     server = create_server(args.host, args.port, args.data_dir.resolve())
     server.desktop_owner_pid = owner_pid
+    # Exports default to Videos/VizorPlay (Movies on macOS); tests point this elsewhere.
+    override = os.environ.get("VIZORPLAY_EXPORT_DIR")
+    server.default_export_dir = Path(override).resolve() if override else user_folders.default_export_dir()
     server.update_status = update_check.UpdateStatus(desktop=owner_pid is not None)
     if owner_pid is not None:
         watch_process_owner(owner_pid, server.shutdown)

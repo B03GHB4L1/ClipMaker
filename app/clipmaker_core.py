@@ -854,8 +854,11 @@ def apply_filters(df, config, log=None):
 def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
     def log(msg):
         log_queue.put({"type": "log", "msg": msg})
-    def prog(current, total, elapsed):
-        progress_queue.put({"current": current, "total": total, "elapsed": elapsed})
+    def prog(current, total, elapsed, phase=None):
+        update = {"current": current, "total": total, "elapsed": elapsed}
+        if phase:
+            update["phase"] = phase
+        progress_queue.put(update)
     def cancelled():
         return bool(cancel_event is not None and cancel_event.is_set())
     class ClipMakerCancelled(Exception):
@@ -1324,7 +1327,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                     log(f"  Rendered {i:02d}/{total_clips}: {os.path.basename(filepath)}")
 
                     saved.append(filepath)
-                    prog(completed_count[0], total_individual, time.time() - start_time)
+                    prog(completed_count[0], total_individual, time.time() - start_time, "files")
 
             log(f"\n\u2713 {len(saved)} clips saved to: {os.path.abspath(out_dir)}/")
             if failed:
