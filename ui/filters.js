@@ -823,8 +823,16 @@ const removeClip = (index) => {
 const refreshExportState = () => {
   const scope = exportScope();
   const count = scope === "selected" ? selected.size : clips.length;
-  field("scope-all").textContent = `All clips (${clips.length})`;
-  field("scope-selected").textContent = `Selected (${selected.size})`;
+  const withCount = (node, label, count) => {
+    const badge = document.createElement("b");
+    badge.className = "seg-count";
+    badge.textContent = count;
+    node.replaceChildren(`${label} `, badge);
+  };
+  withCount(field("scope-all"), "All clips", clips.length);
+  withCount(field("scope-selected"), "Selected", selected.size);
+  // Nothing ticked: "Selected" has nothing to export, so it cannot be chosen.
+  document.querySelector('input[name="export-scope"][value="selected"]').disabled = !selected.size;
   field("selection-count").textContent = `${selected.size} selected`;
   const files = exportAs() === "files";
   exportButton.textContent = files
