@@ -114,7 +114,6 @@
 .filter-rail .correction-grid .wide,
 .filter-rail .correction-grid button { grid-column: 1 / -1; }
 .filter-rail .control-grid label > span { font-size: 10px; }
-.filter-rail .choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .filter-rail .players-fieldset { margin-top: 0; }
 .filter-rail .field-note { margin: 0; font-size: 11px; }
 .filter-rail fieldset legend { margin-bottom: 6px; font-size: 11px; }
@@ -126,7 +125,11 @@
 .filter-rail .snapshot-band > label { grid-column: 1; }
 .filter-rail .snapshot-band > button { grid-column: 2; }
 .filter-rail .snapshot-band > [data-delete-snapshot] { grid-column: 2; }
-.filter-rail .qualifier-groups { gap: 10px; }
+/* Qualifier groups stack in the rail; each group's options use two readable columns,
+   and long words wrap whole rather than one letter per line. */
+.filter-rail .qualifier-groups { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.filter-rail :is(.qualifier-group > div, .choice-grid) { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 5px; }
+.filter-rail :is(.qualifier-group, .choice-grid) label span { overflow-wrap: break-word; }
 
 .rail-foot {
   display: grid;

@@ -1238,8 +1238,14 @@ field("delete-snapshot").addEventListener("click", async () => {
   } catch (error) { showToast(error.message); }
 });
 
+const correctionFields = ["correction-period", "correction-clock", "correction-direction", "correction-amount", "correction-note"];
 field("add-correction").onclick = () => {
   try {
+    // The form starts blank so no example value is mistaken for a real correction.
+    if (!field("correction-period").value) throw new Error("Choose the period the recording problem is in.");
+    if (!field("correction-clock").value.trim()) throw new Error("Enter the match clock where the problem starts, as MM:SS.");
+    if (!field("correction-direction").value) throw new Error("Choose what happened to the recording.");
+    if (!field("correction-amount").value.trim()) throw new Error("Enter how much to shift later clips, as MM:SS.");
     const at = clockSeconds(field("correction-clock").value);
     const amount = clockSeconds(field("correction-amount").value);
     if (!amount) throw new Error("Enter a non-zero correction.");
@@ -1250,6 +1256,7 @@ field("add-correction").onclick = () => {
         amount * (field("correction-direction").value === "subtract" ? -1 : 1),
       note: field("correction-note").value.trim(),
     });
+    correctionFields.forEach((name) => { field(name).value = ""; });
     renderCorrections();
     resetPreview();
     persistFilters();

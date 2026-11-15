@@ -855,7 +855,33 @@ def exercise(page, base, root, evidence, errors):
           .filter((span) => span.offsetParent && (span.scrollWidth > span.clientWidth + 1 || span.clientWidth < 60))
           .map((span) => span.textContent.trim())""")
         assert cramped == [], ("rail toggles squeezed", width, cramped)
+        # Qualifier and action tiles keep room for whole words (they were ~80px, one letter per line).
+        page.evaluate("document.querySelectorAll('.qualifier-group').forEach((group) => { group.open = true; })")
+        narrow = page.evaluate("""() => [...document.querySelectorAll('.filter-rail :is(.qualifier-group, .choice-grid) label')]
+          .filter((label) => label.offsetParent && (label.clientWidth < 120 || label.clientHeight > 80))
+          .map((label) => [label.textContent.trim(), label.clientWidth, label.clientHeight])""")
+        assert narrow == [], ("rail tiles squeezed", width, narrow[:5])
         page.screenshot(path=str(evidence / f"editor-{width}x{height}.png"))
+    stage("timing corrections start blank and ask for each missing field")
+    for name in ("period", "clock", "direction", "amount"):
+        assert page.locator(f'[data-correction-{name}]').input_value() == "", name
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('.toast')).to_have_text("Choose the period the recording problem is in.")
+    page.locator('[data-correction-period]').select_option("2")
+    page.locator('[data-correction-clock]').fill("10:00")
+    page.locator('[data-correction-direction]').select_option("add")
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('.toast')).to_have_text("Enter how much to shift later clips, as MM:SS.")
+    page.locator('[data-correction-amount]').fill("00:20")
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('[data-correction-count]')).to_have_text("1 active")
+    assert page.locator('[data-correction-clock]').input_value() == ""
+    page.locator('[data-correction-list] button').first.click()
+    expect(page.locator('[data-correction-count]')).to_have_text("None active")
+    # A correction changes clip timing, so it clears the timeline; find the clips again.
+    page.get_by_role("button", name="Find clips", exact=True).click()
+    page.locator('.clip-block').first.wait_for()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):
         page.set_viewport_size({"width": width, "height": height})
