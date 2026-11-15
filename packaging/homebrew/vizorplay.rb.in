@@ -11,6 +11,19 @@ class Vizorplay < Formula
   depends_on "python@3.12"
 
   def install
+    if OS.mac?
+      # Built first, while ui/ is still in the source tree.
+      # Built here on the Mac, so the app is not quarantined like a download.
+      # Homebrew provides the engine, so the app bundles none.
+      system "npm", "ci", "--no-audit", "--no-fund"
+      (buildpath/"homebrew-app.json").write <<~JSON
+        {"bundle": {"resources": null, "createUpdaterArtifacts": false, "macOS": {"signingIdentity": "-"}}}
+      JSON
+      ENV["VIZORPLAY_ENGINE_LAUNCHER"] = "#{opt_libexec}/vizorplay-engine"
+      system "npm", "run", "tauri", "--", "build", "--bundles", "app", "--config", buildpath/"homebrew-app.json"
+      prefix.install "src-tauri/target/release/bundle/macos/VizorPlay.app"
+    end
+
     libexec.install "app", "ui", "requirements.txt"
     libexec.install "packaging/clipmaker_bootstrap.py"
     libexec.install "packaging/clipmaker_api_server.py"
@@ -24,18 +37,6 @@ class Vizorplay < Formula
       exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
     SH
     (libexec/"vizorplay-engine").chmod 0755
-
-    if OS.mac?
-      # Built here on the Mac, so the app is not quarantined like a download.
-      # Homebrew provides the engine, so the app bundles none.
-      system "npm", "ci", "--no-audit", "--no-fund"
-      (buildpath/"homebrew-app.json").write <<~JSON
-        {"bundle": {"resources": null, "createUpdaterArtifacts": false, "macOS": {"signingIdentity": "-"}}}
-      JSON
-      ENV["VIZORPLAY_ENGINE_LAUNCHER"] = "#{opt_libexec}/vizorplay-engine"
-      system "npm", "run", "tauri", "--", "build", "--bundles", "app", "--config", buildpath/"homebrew-app.json"
-      prefix.install "src-tauri/target/release/bundle/macos/VizorPlay.app"
-    end
 
     # `vizorplay` opens the app window; `vizorplay --browser` opens VizorPlay in
     # the default browser; engine options (--no-browser, --port, --data-dir) run the engine.
