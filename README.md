@@ -2,163 +2,119 @@
   <img src="./ui/assets/brand/vizorplay-lockup.svg" alt="VizorPlay" width="260">
 </p>
 
-<div align="center">
-  <h1>VizorPlay</h1>
+<h1 align="center">VizorPlay</h1>
 
-  **Football video clipping and analysis workstation built from match event data**
+<p align="center">Turn a football match video into clips of the moments you care about.</p>
 
-Built by [@B03GHB4L1](https://x.com/B03GHB4L1) · Version 1.0
-</div>
+<p align="center">Made by <a href="https://x.com/B03GHB4L1">@B03GHB4L1</a></p>
 
 ---
 
 ## What it does
 
-VizorPlay turns match event data and match video into clips and analysis, all
-on your own computer.
+Pick a match, choose what you want to see (for example, every pass by one
+player, or every shot), and VizorPlay cuts those moments out of your match video
+for you.
 
-- Scrape a match from Scoresway or WhoScored, or import your own event CSV
-- Attach the match video: one file, or separate halves, extra-time halves and
-  penalties
-- Filter the events you want (players, actions, zones, xT, progressive actions
-  and many football tags) and preview every clip before exporting
-- Export individual clips or one combined reel
-- Explore the match in the Analyst Room and a team's style in the Tactical Lab
+- **Get the match details automatically.** Paste a link to a match on Scoresway
+  or WhoScored and VizorPlay downloads the list of everything that happened in
+  it: every pass, shot, tackle and more, with the time it happened. You can
+  also use your own spreadsheet file (CSV).
+- **Add your match video.** One file for the whole match, or a separate file
+  for each half.
+- **Choose the moments you want.** Filter by player, team, type of action,
+  area of the pitch and more. Watch every clip before you save it, and make any
+  clip longer or shorter.
+- **Save your clips.** As separate video files, or joined into one highlights
+  video.
+- **Look deeper.** See shot maps, pass maps and other charts for a match, and
+  how a team plays across several matches.
 
-Every project is saved locally with its match data, video links, kick-off
-times, filters and export settings. Starting a new project never overwrites
-another one.
+Everything stays on your computer. Your work is saved as you go, and starting
+a new project never deletes an old one.
 
-VizorPlay was previously called ClipMaker.
+VizorPlay used to be called ClipMaker.
 
 ---
 
 ## Install
 
-Installers are attached to each release on the [Releases](../../releases) page.
-Version 1.0 is being prepared and is not published yet.
+> Version 1.0 is not out yet. When it is, the files below will be on the
+> [Releases](../../releases) page.
 
-| System | How |
-|---|---|
-| Windows 10 and 11 | Run `VizorPlay_1.0.0_x64-setup.exe`. It installs for your user only. The installer is not code-signed, so Windows may say "Windows protected your PC": choose **More info**, then **Run anyway**. |
-| Ubuntu, Debian, Linux Mint | `sudo apt install ./VizorPlay_1.0.0_amd64.deb`, then start **VizorPlay** from the app menu or run `vizorplay`. |
-| macOS | Through Homebrew once the tap is published: `brew tap B03GHB4L1/vizorplay`, `brew install vizorplay`, then run `vizorplay`. Homebrew builds the VizorPlay app on your Mac, so it opens in its own window. It is not notarized by Apple, so there is no promise that every macOS security prompt is avoided. |
+### Windows 10 and 11
 
-You only install once. When a new version comes out, the bar at the bottom of
-the app says so: on Windows, **Update and restart** installs it for you; on
-Linux, **Download** opens the release page; on macOS it shows the
-`brew upgrade vizorplay` command. Updates keep your projects, and so does
-uninstalling. See
-[docs/INSTALLATION.md](docs/INSTALLATION.md) for details, including where
-projects are stored.
+1. Download `VizorPlay_1.0.0_x64-setup.exe` from the [Releases](../../releases) page.
+2. Open it to install VizorPlay.
+3. If Windows says "Windows protected your PC", click **More info**, then
+   **Run anyway**. This appears because the app isn't registered with
+   Microsoft, not because something is wrong.
 
-You do not need Python, FFmpeg or Node.js. For Scoresway pages that hide their
-data links, VizorPlay uses the Microsoft Edge or Google Chrome already on your
-computer.
+### Mac
 
----
+VizorPlay installs on a Mac through Homebrew, a free tool for installing apps.
+If you don't have it, follow the one-step instructions at [brew.sh](https://brew.sh).
 
-## Features
+Then open the **Terminal** app and type these three lines, pressing Enter after
+each one:
 
-### Match data
+```sh
+brew tap B03GHB4L1/vizorplay
+brew install vizorplay
+vizorplay
+```
 
-- **Scoresway and WhoScored scraping**, single matches or several at once
-- **CSV import** for your own event data
-- **Kick-off times** for each half, both extra-time halves and penalties, so
-  event times line up with your video
-- **Penalty shootouts** aligned from the timestamp of the first kick
+Installing takes a few minutes. The first time VizorPlay opens, it also needs a
+few minutes and an internet connection to get ready. After that it opens
+straight away: just type `vizorplay` in Terminal.
 
-### Filtering and clips
+VizorPlay isn't approved by Apple, so it's possible your Mac shows a security
+message when you open it.
 
-- Filters for players, teams, action types, halves, pitch and depth zones, xT
-  thresholds, Top N by xT, progressive actions, and boolean tags such as key
-  passes, crosses, switches, through balls, box entries, final-third entries,
-  big chances and touches in the box
-- Quick presets and saved filter snapshots
-- Clip windows with adjustable before/after time, with nearby events merged
-  into one clip
-- **Timeline editor**: watch every clip straight from the match video, drag
-  either edge to lengthen or shorten it, or set its start and end at the
-  playhead
-- Export **all clips or a ticked set**, as **one reel or separate files**, with
-  progress, cancel, and a clear report if any clip fails
+### Linux (Ubuntu, Debian, Linux Mint)
 
-### Export speed
-
-On a computer with an NVIDIA graphics card, VizorPlay encodes on the graphics
-card: a 20-clip reel took 52 s instead of 347 s on the test laptop, at equal or
-better quality. Other computers use x264 software encoding. An "Encoder"
-setting lets you force software encoding. Details:
-[docs/EXPORT_SPEED_PLAN.md](docs/EXPORT_SPEED_PLAN.md).
-
-### Analyst Room
-
-Shot map (with goalframe and penalty-shootout views), pass map and pass
-network, defensive actions, pressing, dribbles and carries, goalkeeper actions
-and shots faced, build-up chains with clip extraction, and player comparison
-radars. Maps export as PNG or animated GIF with match and filter context.
-
-### Tactical Lab
-
-Team style across up to 20 saved matches: style radar, threat split, progression
-funnel, territory heatmap, defensive and attacking transitions, set-piece and
-restart profile, and a video lab for cutting tactical moments into reels.
+1. Download `VizorPlay_1.0.0_amd64.deb` from the [Releases](../../releases) page.
+2. Double-click it to install it. Or open a terminal in your Downloads folder
+   and type `sudo apt install ./VizorPlay_1.0.0_amd64.deb`.
+3. Open **VizorPlay** from your apps menu.
 
 ---
 
-## Event CSV format
+## Updating
 
-Required columns:
+You only install VizorPlay once. When a new version comes out, a message
+appears at the bottom of the app:
 
-| Column | Description |
-|--------|-------------|
-| `minute` | Match clock minute |
-| `second` | Match clock second |
-| `type` | Event type, e.g. `Pass`, `Carry`, `Shot` |
+- **Windows:** click **Update and restart**. That's it.
+- **Mac:** close VizorPlay, then type `brew upgrade vizorplay` in Terminal.
+- **Linux:** click **Download**, then install the new file the same way as
+  before.
 
-`period` (e.g. `FirstHalf` / `SecondHalf` or `1` / `2`) is strongly
-recommended. Optional columns unlock more: `xT`, `prog_pass`, `prog_carry`,
-`team`, `playerName`, `goal_mouth_y`, `goal_mouth_z` and computed `is_*` flags.
-
-Scoresway and WhoScored do not expose identical tags and qualifiers, so some
-analysis can differ slightly between the two sources.
-
----
-
-## Developing
-
-The app is one shared HTML/JS frontend (`ui/`), a local Python engine
-(`packaging/clipmaker_api_server.py`, `app/`) and a small Tauri desktop shell
-(`src-tauri/`), built for Windows, Linux and macOS from the same code. See
-[Contributing.md](Contributing.md) for running from source and the tests, and
-[docs/RELEASES.md](docs/RELEASES.md) for how installers are built and tested.
+Updating never deletes your projects.
 
 ---
 
 ## Version history
 
-### VizorPlay 1.0 (in preparation)
+### VizorPlay 1.0 (coming soon)
 
-- Rebuilt as a desktop app: one shared interface for Windows, Linux and macOS,
-  with Windows and Linux installers that upgrade in place and keep projects
-- Much smaller installers (Windows about 67 MB), with no bundled browser
-- Graphics-card encoding for much faster previews and exports
-- Projects saved locally and reopened exactly as left
-- AI-assisted filtering from earlier versions is not included
+- A brand-new app for Windows, Mac and Linux, under a new name
+- Smaller download, and it updates itself on Windows
+- Much faster video saving on computers with an NVIDIA graphics card
+- Your projects are saved and reopen exactly as you left them
+- The AI filter from older versions has been removed
 
-### Earlier versions (as ClipMaker)
+### Older versions (as ClipMaker)
 
-- **1.2.3**: Scoresway scraping, PNG/GIF map exports, extra-time and shootout
-  handling, an expanded Tactical Lab
-- **1.2.2**: Tactical Lab, multi-player reels, multi-match scraping
-- **1.2.1**: pressing map, clip trimming from preview, faster previews
-- **1.2**: WhoScored scraping, the Analyst Room, presets and filter snapshots
-- **1.1**: xT, progressive and Top N filters, split video files, FFmpeg cutting
-- **1.0**: first release, clips and reels from an event CSV
-
-The original applications are kept in `older versions/` as the feature
-baseline.
+- **1.2.3:** match details from Scoresway, save charts as pictures or
+  animations, support for extra time and penalty shootouts
+- **1.2.2:** see how a team plays across matches, highlights of several players
+  at once, get several matches at once
+- **1.2.1:** pressing chart, trim clips while watching them, faster previews
+- **1.2:** match details from WhoScored, match charts, saved filters
+- **1.1:** more ways to filter, support for videos split into halves
+- **1.0:** first version
 
 ---
 
-*VizorPlay by B4L1 · [@B03GHB4L1](https://x.com/B03GHB4L1)*
+<p align="center">VizorPlay by B4L1 · <a href="https://x.com/B03GHB4L1">@B03GHB4L1</a></p>
