@@ -459,8 +459,12 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
             {"kind": "Selectbox", "key": "vl_selected_moment_Restarts", "label": "Moment", "options": [f"m{n}" for n in range(23)],
              "values": ids, "value": controls.get("vl_selected_moment_Restarts") or ids[0]},
             {"kind": "Markdown", "value": "", "html": True},
-            {"kind": "MomentList", "rows": [{"id": ids[n], "time": f"{n}'00\" 1H", "player": f"Player {n}",
-                                             "moment": "Pass | Corner", "score": 1 - n / 100} for n in range(23)]}])
+            {"kind": "MomentList", "rows": [{"id": ids[n], "pick": f"0-{n}", "time": f"{n}'00\" 1H", "player": f"Player {n}",
+                                             "moment": "Pass | Corner", "score": 1 - n / 100} for n in range(23)]},
+            {"kind": "Slider", "key": "vl_before", "label": "Before clip", "min": 0, "max": 30, "value": 8},
+            {"kind": "Slider", "key": "vl_after", "label": "After clip", "min": 4, "max": 45, "value": 14},
+            {"kind": "Button", "key": "vl_cut", "label": "Cut Moment", "disabled": False},
+            {"kind": "Button", "key": "vl_reel", "label": "Build Reel", "disabled": True}])
         route.fulfill(json=result)
     page.route("**/api/analysis/tactical/video-lab", video_lab_view)
     page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=video-lab")
@@ -470,11 +474,48 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     expect(moments.locator(".native-moment-rows button").first).to_have_attribute("aria-pressed", "true")
     expect(moments.get_by_role("button", name="Show moments 21–23")).to_be_visible()
     moments.get_by_role("button", name="Show moments 11–20").click()
-    expect(moments.locator(".native-moment-rank").first).to_have_text("11")
+    expect(moments.locator(".native-moment-rows .native-moment-rank").first).to_have_text("11")
     moments.locator(".native-moment-rows button").nth(2).click()
     expect(moments.locator('.native-moment-row[aria-pressed="true"] .native-moment-rank')).to_have_text("13")
     assert picked[-1] == "[1, 12]", picked
     expect(moments.get_by_role("button", name="Show moments 11–20")).to_have_attribute("aria-pressed", "true")
+
+    stage("Video Lab: the reel is the moments ticked in the list")
+    build = page.get_by_role("button", name=re.compile(r"^Build reel"))
+    expect(build).to_have_text("Build reel")
+    expect(build).to_be_disabled()  # nothing ticked yet
+    summary = moments.locator(".native-reel-summary")
+    expect(summary).to_contain_text("Tick moments to add them to the reel")
+    expect(page.get_by_label("Reel moments")).to_have_count(0)  # the old slider is gone
+    moments.get_by_role("checkbox", name="Add moment 13 to the reel").check()
+    moments.get_by_role("checkbox", name="Add moment 11 to the reel").check()
+    expect(build).to_have_text("Build reel · 2")
+    expect(build).to_be_enabled()
+    expect(summary).to_contain_text("2 moments · about 0:44 · plays in match order")
+    expect(moments.locator(".native-moment-rows .native-moment-row[aria-pressed=true] .native-moment-rank")).to_have_text("13")  # ticking does not change the preview
+    expect(moments.get_by_role("button", name="Show moments 11–20, 2 in the reel")).to_be_visible()
+    moments.get_by_role("button", name="Add top 5").click()
+    expect(build).to_have_text("Build reel · 7")
+    expect(moments.get_by_role("button", name="Show moments 1–10, 5 in the reel")).to_be_visible()
+    moments.get_by_role("button", name="Clear").click()
+    expect(build).to_be_disabled()
+    moments.get_by_role("checkbox", name="Add moment 12 to the reel").check()
+    moments.get_by_role("checkbox", name="Add moment 14 to the reel").check()
+    # Picks are saved with the project, so they survive a reload.
+    page.evaluate("import('/projects.js').then((projects) => projects.flushProject())")
+    page.reload()
+    expect(build).to_have_text("Build reel · 2")
+    sent = []
+    def reel_request(route):
+        sent.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(status=400, json={"error": "No video in this test"})
+    page.route("**/api/analysis/tactical/video-lab/clip", reel_request)
+    build.click()
+    expect(page.locator(".native-tactical-media")).to_contain_text("No video in this test")
+    # That refusal was this test's own; the browser logs it as a failed request.
+    console_errors[:] = [text for text in console_errors if "status of 400" not in text]
+    assert sent[-1]["action"] == "vl_reel" and sent[-1]["controls"]["vl_reel_moments_Restarts"] == ["0-11", "0-13"], sent
+    page.unroute("**/api/analysis/tactical/video-lab/clip")
     page.unroute("**/api/analysis/tactical/video-lab")
 
     stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")

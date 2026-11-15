@@ -109,6 +109,17 @@ class SharedUiTests(unittest.TestCase):
             self.assertNotIn("{ ...item.config, responsive: true })", source.replace("plotlyConfig({ ...item.config, responsive: true }", ""), name)
             self.assertNotIn("{ ...element.config, responsive: true })", source.replace("plotlyConfig({ ...element.config, responsive: true }", ""), name)
 
+    def test_video_lab_reel_is_picked_moment_by_moment(self):
+        source = (UI / "analysis" / "tabs" / "tactical.js").read_text(encoding="utf-8")
+        self.assertIn('"vl_selected_moment_", "vl_reel_moments_"', source)  # picks saved per playlist
+        self.assertIn("Add moment ${index + 1} to the reel", source)
+        self.assertIn("Build reel · ${count}", source)
+        self.assertIn("plays in match order", source)
+        self.assertIn("Your reel picks have changed since this reel was built", source)
+        css = (UI / "analysis" / "native.css").read_text(encoding="utf-8")
+        self.assertIn(".native-reel-check", css)
+        self.assertIn("margin: 0", css[css.index(".native-reel-check {"):][:200])  # not the global label margin
+
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
             source = (UI / name).read_text(encoding="utf-8")

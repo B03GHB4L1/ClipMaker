@@ -60,6 +60,8 @@ def normal(element, norm):
         return None
     if kind == "Selectbox" and element["key"].startswith("vl_selected_moment_"):
         return None  # Picked from the moment list instead; see test_video_lab_moment_list_drives_the_picker.
+    if kind == "Slider" and element["key"] == "vl_reel_count":
+        return None  # The reel is the moments ticked in the list now; see test_video_lab_reel_is_the_ticked_moments.
     if kind == "Markdown" and element["value"].lstrip().startswith("<style"):
         return None
     if kind in {"Subheader", "Caption", "Markdown", "Info", "Warning", "Error", "Success"}:
@@ -169,6 +171,60 @@ class TacticalNativeParityTests(unittest.TestCase):
                     self.assertTrue(all(row["time"] and row["moment"] for row in lists[0]["rows"]))
                     checked += 1
             self.assertGreater(checked, 0)
+
+    def test_video_lab_reel_is_the_ticked_moments(self):
+        """Build Reel cuts exactly the moments ticked in the list, in match order."""
+        from unittest.mock import patch
+        from analysis_core import tactical_page
+        with tempfile.TemporaryDirectory() as name, analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            playlist = "xT Passes And Carries"
+            view, _ = tactical.render("video-lab", {"vl_playlist": playlist}, project, projects)
+            rows = next(e for e in view["elements"] if e["kind"] == "MomentList")["rows"]
+            self.assertGreaterEqual(len(rows), 4)
+            self.assertEqual(len({row["pick"] for row in rows}), len(rows), "every moment has its own pick key")
+            self.assertFalse(any(e["kind"] == "Slider" and e["key"] == "vl_reel_count" for e in view["elements"]))
+            build = next(e for e in view["elements"] if e["kind"] == "Button" and e["key"] == "vl_reel")
+            self.assertTrue(build["disabled"], "nothing ticked, nothing to build")
+
+            cut = []
+            reel = Path(name) / "reel.mp4"
+            reel.write_bytes(b"reel")
+
+            def fake_cut(moment, before=0, after=0):
+                cut.append(moment)
+                return str(reel)
+
+            # Ranked 4th, 1st and 3rd, plus a pick from another playlist and junk that must be ignored.
+            picks = [rows[3]["pick"], rows[0]["pick"], rows[2]["pick"], "9-999999", {"x": 1}]
+            controls = {"vl_playlist": playlist, f"vl_reel_moments_{playlist}": picks}
+            with (patch.object(tactical_page, "_video_ready", lambda *a, **k: True),
+                  patch.object(tactical_page, "_cut_tactical_clip", fake_cut),
+                  patch.object(tactical_page, "_concat_tactical_clips", lambda made: str(reel))):
+                path, file_name = tactical.clip("video-lab", controls, project, projects, "vl_reel")
+            self.assertEqual(path, str(reel))
+            self.assertTrue(file_name.endswith("_reel.mp4"))
+            chosen = {rows[i]["pick"] for i in (0, 2, 3)}
+            self.assertEqual(sorted(f"{m.get('match_id', 0)}-{m['event_id']}" for m in cut), sorted(chosen))
+            clock = [(m.get("period"), m.get("event_seconds", m.get("minute", 0) * 60 + m.get("second", 0))) for m in cut]
+            self.assertEqual(clock, sorted(clock), "the reel plays in match order")
+
+    def test_reel_picks_only_take_short_text_lists(self):
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            key = "vl_reel_moments_Restarts"
+            _, state = tactical.render("video-lab", {key: ["0-1", "0-1", 7] + [f"0-{n}" for n in range(100)],
+                                                     "vl_reel_moments_../x": ["0-1"]}, projects[0], projects)
+            self.assertEqual(state[key][:3], ["0-1", "7", "0-0"])
+            self.assertEqual(len(state[key]), tactical.MAX_REEL)
+            self.assertNotIn("vl_reel_moments_../x", state)
+            _, state = tactical.render("video-lab", {key: "0-1"}, projects[0], projects)
+            self.assertNotIn(key, state)
 
     def test_unknown_control_keys_never_reach_the_session(self):
         with tempfile.TemporaryDirectory() as name, analysis_golden.fixture_inputs() as (csvs, data):
