@@ -10,9 +10,9 @@
     <link rel="stylesheet" href="filters.css?v=2" />
     <link rel="stylesheet" href="compact.css?v=11" />
     <link rel="stylesheet" href="design.css?v=5" />
-    <link rel="stylesheet" href="editor.css?v=3" />
+    <link rel="stylesheet" href="editor.css?v=4" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-    <script type="module" src="filters.js?v=9"></script>
+    <script type="module" src="filters.js?v=10"></script>
     <script type="module" src="update.js?v=1"></script>
   </head>
   <body class="filter-page">
@@ -202,18 +202,20 @@
                 <div class="correction-list" data-correction-list></div>
                 <div class="control-grid correction-grid">
                   <label><span>Period</span><select data-correction-period>
+                    <option value="" selected>Choose period</option>
                     <option value="1">P1</option>
                     <option value="2">P2</option>
                     <option value="3">P3</option>
                     <option value="4">P4</option>
                     <option value="5">P5</option>
                   </select></label>
-                  <label><span>From match clock</span><input type="text" value="25:52" placeholder="MM:SS" data-correction-clock /></label>
+                  <label><span>From match clock</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-clock /></label>
                   <label class="wide"><span>Recording problem</span><select data-correction-direction>
+                    <option value="" selected>Choose what happened</option>
                     <option value="subtract">Recording is shorter; move later clips earlier</option>
                     <option value="add">Recording has extra time; move later clips later</option>
                   </select></label>
-                  <label><span>Shift by</span><input type="text" value="00:30" placeholder="MM:SS" data-correction-amount /></label>
+                  <label><span>Shift by</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-amount /></label>
                   <label><span>Note</span><input type="text" placeholder="Optional" data-correction-note /></label>
                   <button type="button" data-add-correction>Add correction</button>
                 </div>
