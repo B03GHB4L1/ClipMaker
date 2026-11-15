@@ -161,6 +161,40 @@ class AutomationContracts(unittest.TestCase):
                          Path("/x/new"))
         self.assertEqual(bootstrap.runtime_root({"CLIPMAKER_RUNTIME_DIR": "/x/old"}), Path("/x/old"))
 
+    def test_homebrew_builds_a_native_mac_app_that_runs_the_formula_engine(self):
+        formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")
+        for line in ('depends_on "rust" => :build', 'depends_on "node" => :build', '"--bundles", "app"',
+                     'ENV["VIZORPLAY_ENGINE_LAUNCHER"] = "#{opt_libexec}/vizorplay-engine"',
+                     '(libexec/"vizorplay-engine").write', '"resources": null', '"signingIdentity": "-"',
+                     'prefix.install "src-tauri/target/release/bundle/macos/VizorPlay.app"',
+                     'exec open "#{opt_prefix}/VizorPlay.app"', 'exec "#{opt_libexec}/vizorplay-engine" "$@"'):
+            self.assertIn(line, formula)
+        # Only macOS builds the app; Linux installs the .deb, not Homebrew's app.
+        self.assertIn("if OS.mac?", formula)
+        lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn('option_env!("VIZORPLAY_ENGINE_LAUNCHER")', lib)
+        self.assertIn('command.args(["--no-browser", "--port", &port.to_string()]);', lib)
+        self.assertIn('command.arg("--data-dir").arg(data_dir);', lib)
+        # The launcher accepts exactly what the app passes it.
+        bootstrap_source = (ROOT / "packaging/clipmaker_bootstrap.py").read_text(encoding="utf-8")
+        for flag in ("--port", "--data-dir", "--no-browser"):
+            self.assertIn(f'"{flag}"', bootstrap_source)
+        workflow = (ROOT / ".github/workflows/e2e.yml").read_text(encoding="utf-8")
+        self.assertIn('python tests/macos_app_smoke.py --app "$(brew --prefix)/opt/vizorplay/VizorPlay.app"', workflow)
+        self.assertIn("--evidence build/macos-app-evidence/result.json", workflow)
+
+    def test_macos_app_test_finds_the_engine_started_by_that_app(self):
+        from tests.macos_app_smoke import engine_port
+        listing = """  PID  PPID COMMAND
+          1     0 /sbin/launchd
+        500     1 /opt/homebrew/opt/vizorplay/VizorPlay.app/Contents/MacOS/vizorplay
+        501   500 /opt/homebrew/opt/python@3.12/bin/python3.12 /opt/homebrew/opt/vizorplay/libexec/clipmaker_bootstrap.py --no-browser --port 50123
+        502   501 /Users/me/Library/Application Support/VizorPlay/runtime/venv/bin/python /opt/homebrew/opt/vizorplay/libexec/clipmaker_api_server.py --port 50123 --data-dir /tmp/d
+        700     1 python clipmaker_api_server.py --port 8611 --data-dir /elsewhere
+        """
+        self.assertEqual(engine_port(listing, 500), 50123)
+        self.assertIsNone(engine_port(listing, 1234))  # another engine on the machine is not the app's
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
         formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")

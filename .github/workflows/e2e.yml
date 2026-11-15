@@ -255,9 +255,10 @@ jobs:
           if-no-files-found: warn
 
   homebrew:
-    name: Installed Homebrew launch (macOS)
+    name: Installed Homebrew app and launch (macOS)
     runs-on: macos-latest
-    timeout-minutes: 60
+    # The formula builds VizorPlay.app on the Mac, once per install and upgrade.
+    timeout-minutes: 100
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
@@ -281,7 +282,7 @@ jobs:
           brew test local/vizorplay/vizorplay
           python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 "$sha256" --source-url "file://$archive" --output build/homebrew-candidate/upgrade.rb
       - name: Upgrade installed Homebrew formula and preserve local project
-        timeout-minutes: 22
+        timeout-minutes: 40
         env:
           VIZORPLAY_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
         run: python tests/homebrew_upgrade.py --formula "$(brew --repository local/vizorplay)/Formula/vizorplay.rb" --candidate build/homebrew-candidate/upgrade.rb --launcher "$(brew --prefix)/bin/vizorplay"
@@ -290,8 +291,13 @@ jobs:
         env:
           VIZORPLAY_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
         run: python tests/browser_smoke.py --launcher "$(brew --prefix)/bin/vizorplay" --timeout-seconds 1200 --evidence build/homebrew-evidence
+      - name: Open the installed VizorPlay.app; its engine starts and stops with it
+        timeout-minutes: 25
+        env:
+          VIZORPLAY_RUNTIME_DIR: ${{ runner.temp }}/vizorplay-runtime
+        run: python tests/macos_app_smoke.py --app "$(brew --prefix)/opt/vizorplay/VizorPlay.app" --evidence build/macos-app-evidence
       - name: Retain the exact source archive tested by Homebrew
-        run: python packaging/release_candidate.py receipt --platform macOS --payload build/homebrew-candidate/vizorplay-1.0.0-source.tar.gz --evidence build/homebrew-evidence/result.json --evidence build/homebrew-upgrade/result.json --output build/release-packages
+        run: python packaging/release_candidate.py receipt --platform macOS --payload build/homebrew-candidate/vizorplay-1.0.0-source.tar.gz --evidence build/homebrew-evidence/result.json --evidence build/homebrew-upgrade/result.json --evidence build/macos-app-evidence/result.json --output build/release-packages
       - uses: actions/upload-artifact@v4
         with:
           name: tested-package-macOS
@@ -305,6 +311,7 @@ jobs:
           path: |
             build/homebrew-evidence/
             build/homebrew-upgrade/
+            build/macos-app-evidence/
           retention-days: 7
           if-no-files-found: warn
 

@@ -43,9 +43,12 @@ and RPM packages are outside the verified candidate scope.
 
 ## macOS Homebrew
 
-The shared app opens in your default browser on macOS. No Apple Developer
-membership is required for this source-launcher route. It does not promise that
-every macOS security warning disappears or disable Gatekeeper.
+On macOS, Homebrew builds the VizorPlay app on your Mac during `brew install`,
+so VizorPlay opens in its own window like the Windows and Linux apps. No Apple
+Developer membership is involved: the app is not notarized by Apple. It opens
+because it was built on your Mac rather than downloaded, so macOS does not
+quarantine it. This is not a way around Gatekeeper, and it does not promise that
+no macOS security prompt will ever appear.
 
 After the source release and public tap have been authorized and published:
 
@@ -55,10 +58,18 @@ brew install vizorplay
 vizorplay
 ```
 
-Keep the terminal open while using the app. The first launch downloads its
-private Python environment, dependencies and scraper browser; it needs internet
-access and may take several minutes. Later launches reuse that environment.
-Press Control-C in the terminal when finished.
+Installing takes several minutes because Homebrew compiles the app (it
+installs Rust and Node.js only for the build). `vizorplay` then opens the
+VizorPlay window. To also see VizorPlay in Finder's Applications folder, run the
+`ln -sfn ...` command that `brew install` prints.
+
+The first launch after installing or upgrading prepares VizorPlay's private
+Python environment; the window says "Preparing VizorPlay" meanwhile. It needs
+internet access and may take a few minutes. Later launches reuse that
+environment. Closing the window stops VizorPlay.
+
+`vizorplay --browser` opens VizorPlay in your default browser instead; keep that
+terminal open and press Control-C when finished.
 
 When a newer version is released, the bottom bar shows the update command.
 Close VizorPlay, then run:
@@ -68,6 +79,9 @@ brew update
 brew upgrade vizorplay
 vizorplay
 ```
+
+Upgrading rebuilds the app, so it takes a few minutes. Projects stay where they
+were. `brew uninstall vizorplay` removes the app and leaves your projects.
 
 The tap is currently private and empty. These public installation commands are
 preparation instructions, not an announcement that the package is available.
@@ -87,8 +101,8 @@ browser's full path to choose one.
 Projects save locally, including match events, kickoff markers, filter settings
 and export settings. Video references may point to files elsewhere on your
 computer: keep those video files in place. Browser-imported video is copied into
-the project. Closing the Windows/Linux desktop window stops its engine and
-active work. On macOS, stop the launcher with Control-C in its terminal;
+the project. Closing the desktop window stops its engine and active work. With
+`vizorplay --browser` on macOS, stop the launcher with Control-C in its terminal;
 closing the browser tab alone leaves the launcher running.
 
 Use the local-project picker to see the data-directory location. Before moving
