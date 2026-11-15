@@ -119,6 +119,9 @@
 .filter-rail .field-note { margin: 0; font-size: 11px; }
 .filter-rail fieldset legend { margin-bottom: 6px; font-size: 11px; }
 .filter-rail .segmented-control span { min-height: 30px; padding: 0 6px; font-size: 11px; }
+/* The rail is one narrow column: the qualifier logic label sits above its full-width toggle. */
+.filter-rail .logic-control { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.filter-rail .segmented-control span { white-space: nowrap; }
 .filter-rail .snapshot-band { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 .filter-rail .snapshot-band > label { grid-column: 1; }
 .filter-rail .snapshot-band > button { grid-column: 2; }

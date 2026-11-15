@@ -839,13 +839,22 @@ def exercise(page, base, root, evidence, errors):
         sizes = page.evaluate("""() => {
           const box = selector => document.querySelector(selector).getBoundingClientRect();
           return {video: box('.viewer-frame'), track: box('.timeline-track'), footer: box('.app-footer').top,
-                  rail: box('.filter-rail'), editor: box('.editor'), inspector: box('.inspector')};
+                  rail: box('.filter-rail'), editor: box('.editor'), inspector: box('.inspector'),
+                  export: box('.export-bar')};
         }""")
         assert sizes["rail"]["right"] <= sizes["editor"]["left"], ("filters stacked above the editor", width, sizes)
         assert sizes["video"]["width"] >= 560, ("video too small", width, sizes)
         if width == 1440:
             assert sizes["track"]["bottom"] <= sizes["footer"] + 1, ("timeline runs under the footer", sizes)
+            assert sizes["export"]["bottom"] <= sizes["footer"] + 1, ("export runs under the footer", sizes)
             assert sizes["inspector"]["left"] >= sizes["video"]["right"], ("clip controls not beside the video", sizes)
+        # Every toggle in the narrow rail keeps room for its words (Match any / Match all was squeezed to 30px).
+        for summary in page.locator('.filter-rail details > summary').all():
+            summary.click()
+        cramped = page.evaluate("""() => [...document.querySelectorAll('.filter-rail .segmented-control span')]
+          .filter((span) => span.offsetParent && (span.scrollWidth > span.clientWidth + 1 || span.clientWidth < 60))
+          .map((span) => span.textContent.trim())""")
+        assert cramped == [], ("rail toggles squeezed", width, cramped)
         page.screenshot(path=str(evidence / f"editor-{width}x{height}.png"))
     stage("check responsive layouts")
     for width, height in ((1021, 572), (614, 542), (390, 700)):
