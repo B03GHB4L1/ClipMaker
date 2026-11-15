@@ -33,38 +33,51 @@ const setEngineState = (label, connected) => {
   engineState.classList.toggle("is-offline", !connected);
 };
 
+// Every column of the event CSV (the API sends {columns, rows, periods}); the table
+// scrolls sideways with the match clock pinned on the left.
 const renderEvents = (
-  events,
+  table,
   eventBody = document.querySelector("[data-event-body]"),
+  eventHead = document.querySelector("[data-event-head]"),
 ) => {
-  eventBody.replaceChildren();
-  events.forEach((event) => {
-    const minute = Number(event.minute || 0);
-    const second = Number(event.second || 0);
-    const time = `${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
-    const values = [
-      time,
-      event.playerName || "—",
-      event.type || "Event",
-      event.team || "—",
-      event.xT ?? "—",
-    ];
-    const row = document.createElement("tr");
-    row.dataset.period = String(event.period || "");
-    values.forEach((value, index) => {
-      const cell = document.createElement("td");
-      if (index === 2) {
-        const pill = document.createElement("span");
-        pill.className = "event-pill";
-        pill.textContent = String(value);
-        cell.appendChild(pill);
-      } else {
-        cell.textContent = String(value);
-      }
-      row.appendChild(cell);
-    });
-    eventBody.appendChild(row);
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const minute = columns.indexOf("minute");
+  const second = columns.indexOf("second");
+  const typeColumn = columns.indexOf("type");
+  const headRow = document.createElement("tr");
+  ["Time", ...columns].forEach((name) => {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = name;
+    headRow.appendChild(cell);
   });
+  eventHead.replaceChildren(...(columns.length ? [headRow] : []));
+  eventBody.replaceChildren(
+    ...rows.map((values, index) => {
+      const row = document.createElement("tr");
+      row.dataset.period = String(table.periods?.[index] ?? "");
+      const clock = (column) => String(Number(values[column] || 0)).padStart(2, "0");
+      const time = minute >= 0 ? `${clock(minute)}:${second >= 0 ? clock(second) : "00"}` : "—";
+      [time, ...values].forEach((value, column) => {
+        const cell = document.createElement(column === 0 ? "th" : "td");
+        if (column === 0) cell.scope = "row";
+        if (column - 1 === typeColumn && value) {
+          const pill = document.createElement("span");
+          pill.className = "event-pill";
+          pill.textContent = String(value);
+          cell.appendChild(pill);
+        } else if (value === true) {
+          cell.textContent = "✓";
+          cell.className = "event-flag";
+        } else if (value !== null && value !== false) {
+          cell.textContent = String(value);
+        }
+        row.appendChild(cell);
+      });
+      return row;
+    }),
+  );
 };
 
 const shortTeamName = (name = "") =>
@@ -116,7 +129,7 @@ const renderMatch = (match) => {
   document.querySelector("[data-row-count]").textContent = `${count} rows`;
   document.querySelector(".ticket-foot span:last-child").textContent = match.csv_path ? "Data saved locally" : "No match loaded";
   document.querySelector(".event-footer span").textContent = match.csv_path ? `${count} saved rows` : "No event data";
-  if (Array.isArray(match.events)) renderEvents(match.events);
+  if (match.events) renderEvents(match.events);
   if (match.markers) {
     document
       .querySelectorAll(".period-selector [data-period]")
@@ -497,7 +510,7 @@ const persistIntake = () => {
 
 const openProject = async (project) => {
   clearFootage();
-  renderEvents([]);
+  renderEvents(null);
   document.querySelector("[data-event-search]").value = "";
   document.querySelector("[data-period-filter]").value = "all";
   document.querySelector(".event-footer span").textContent = "No event data";
@@ -975,7 +988,7 @@ document
         method: "POST",
         body: JSON.stringify({ csv_path: activeMatch.csv_path }),
       });
-      renderEvents(result.events || [], fullEventBody);
+      renderEvents(result.events, fullEventBody, document.querySelector("[data-full-event-head]"));
       filterFullEvents();
       if (result.truncated) showToast("Showing the first 5,000 events");
     } catch (error) {
@@ -1074,7 +1087,7 @@ const initializeBall = async () => {
 };
 renderMatch({ home_team: "", away_team: "", event_count: 0, markers: {} });
 renderHistory([]);
-renderEvents([]);
+renderEvents(null);
 document.querySelector(".event-footer span").textContent = "No event data";
 document.querySelector(".ticket-meta span:first-child").textContent = "No match loaded";
 document.querySelector(".ticket-meta span:last-child").textContent = "";

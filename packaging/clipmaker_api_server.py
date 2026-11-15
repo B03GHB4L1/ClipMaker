@@ -1095,6 +1095,18 @@ def infer_score(frame: Any, home_team: str, away_team: str) -> tuple[int, int]:
     return scores[home_team], scores[away_team]
 
 
+def event_table(frame: Any, limit: int) -> dict[str, Any]:
+    """Every column of the event CSV, as compact rows for the intake tables, with each
+    row's period number alongside so the tables can filter by half."""
+    head = frame.head(limit)
+    periods = head["period"] if "period" in head.columns else [None] * len(head)
+    return {
+        "columns": [str(column) for column in head.columns],
+        "rows": [[json_value(value) for value in row] for row in head.itertuples(index=False, name=None)],
+        "periods": [normalize_period(json_value(value) or "") for value in periods],
+    }
+
+
 def load_event_rows(csv_path: str) -> dict[str, Any]:
     import pandas as pd
 
@@ -1102,15 +1114,7 @@ def load_event_rows(csv_path: str) -> dict[str, Any]:
     if not path.is_file():
         raise ValueError("The saved event table is no longer available.")
     frame = pd.read_csv(path, low_memory=False)
-    preferred_columns = ["minute", "second", "playerName", "type", "team", "period", "xT"]
-    columns = [column for column in preferred_columns if column in frame.columns]
-    rows = []
-    for row in frame[columns].head(5000).to_dict(orient="records"):
-        clean = {key: json_value(value) for key, value in row.items()}
-        if "period" in clean:
-            clean["period"] = normalize_period(clean["period"])
-        rows.append(clean)
-    return {"events": rows, "event_count": len(frame), "truncated": len(frame) > 5000}
+    return {"events": event_table(frame, 5000), "event_count": len(frame), "truncated": len(frame) > 5000}
 
 
 def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
@@ -1269,12 +1273,7 @@ def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
         str(output_dir),
         source=result.get("source", source),
     )
-    preferred_columns = ["minute", "second", "playerName", "type", "team", "period", "xT"]
-    columns = [column for column in preferred_columns if column in frame.columns]
-    preview = [
-        {key: json_value(value) for key, value in row.items()}
-        for row in frame[columns].head(200).to_dict(orient="records")
-    ]
+    preview = event_table(frame, 200)
     return {
         "home_team": home_team,
         "away_team": away_team,

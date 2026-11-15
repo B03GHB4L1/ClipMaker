@@ -194,9 +194,9 @@ class SharedApiTests(unittest.TestCase):
     def test_full_event_table_reads_saved_csv(self):
         csv_path = Path(self.temporary.name) / "events.csv"
         csv_path.write_text(
-            "minute,second,type,period,playerName,team,xT\n"
-            "12,30,Goal,1,Player One,Home,0.5\n"
-            "68,5,SavedShot,2,Player Two,Away,0.2\n",
+            "minute,second,type,period,playerName,team,xT,is_header,pitch_zone\n"
+            "12,30,Goal,FirstHalf,Player One,Home,0.5,True,Centre\n"
+            "68,5,SavedShot,SecondHalf,Player Two,Away,0.2,False,\n",
             encoding="utf-8",
         )
         self.server.match_store.upsert({"id": "table-test", "csv_path": str(csv_path)})
@@ -207,8 +207,14 @@ class SharedApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(result["event_count"], 2)
-        self.assertEqual(result["events"][1]["playerName"], "Player Two")
-        self.assertEqual(result["events"][1]["period"], 2)
+        # Every CSV column comes through (qualifiers included) as compact rows,
+        # with each row's normalized period for the half filter.
+        table = result["events"]
+        self.assertEqual(table["columns"], ["minute", "second", "type", "period", "playerName",
+                                            "team", "xT", "is_header", "pitch_zone"])
+        self.assertEqual(table["rows"][0], [12, 30, "Goal", "FirstHalf", "Player One", "Home", 0.5, True, "Centre"])
+        self.assertEqual(table["rows"][1][-2:], [False, None])
+        self.assertEqual(table["periods"], [1, 2])
 
     def test_filter_options_follow_the_saved_scrape(self):
         csv_path = Path(self.temporary.name) / "filter-options.csv"

@@ -45,9 +45,23 @@ class SharedUiTests(unittest.TestCase):
         self.assertEqual(asset[:4], b"glTF")
         scene = json.loads(asset[20:20 + int.from_bytes(asset[12:16], "little")])
         nodes = [node.get("name", "") for node in scene["nodes"]]
-        self.assertIn("Emerald chrome VizorPlay", nodes)
-        self.assertNotIn("Emerald chrome 1.3", nodes)
+        # The ball carries the glasses mark, not the wordmark.
+        self.assertIn("Embossed VizorPlay visor", nodes)
+        self.assertIn("Embossed VizorPlay play mark", nodes)
+        self.assertNotIn("Emerald chrome VizorPlay", nodes)
         self.assertTrue((UI / "assets/vizorplay-football.png").is_file())
+
+    def test_app_icon_is_the_mark_on_a_transparent_background_with_white_lenses(self):
+        from PIL import Image
+        icon = Image.open(UI.parent / "src-tauri/icons/icon.png").convert("RGBA")
+        width, height = icon.size
+        self.assertEqual(icon.getpixel((4, 4))[3], 0)
+        self.assertEqual(icon.getpixel((width // 2, height - 4))[3], 0)
+        # Centre of the left lens is opaque white.
+        self.assertEqual(icon.getpixel((width // 4, height // 2)), (255, 255, 255, 255))
+        sizes = Image.open(UI.parent / "src-tauri/icons/icon.ico").info["sizes"]
+        self.assertIn((256, 256), sizes)
+        self.assertIn((16, 16), sizes)
 
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
