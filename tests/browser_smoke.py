@@ -2,6 +2,7 @@
 import json
 import re
 import argparse
+import os
 import struct
 from pathlib import Path
 import sys
@@ -272,6 +273,15 @@ def exercise_clip_editor(page, evidence):
         page.get_by_role("button", name="Export reel", exact=True).click()
     assert started.value.request.post_data_json["options"]["clip_windows"][0]["end"] == 3.5
     page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
+    # The finished card names the folder (Videos/VizorPlay by default), offers to open it,
+    # lists each file with its size and keeps the engine log folded away.
+    job = page.locator(".export-job")
+    expect(job.locator("[data-job-detail]")).to_have_text("1 file saved")
+    folder = page.locator("[data-export-folder]").text_content()
+    assert Path(folder) == Path(os.environ["VIZORPLAY_EXPORT_DIR"]).resolve(), folder  # a reel goes straight in
+    expect(job.get_by_role("button", name="Open folder")).to_be_visible()
+    expect(job.locator(".export-file span").first).to_have_text(re.compile(r"\d+(\.\d)? (B|KB|MB)$"))
+    assert job.locator("[data-job-log]").evaluate("element => !element.open")
     with page.expect_download() as download:
         page.locator('[data-export-files] a').first.click()
     exported = evidence / "export.mp4"
@@ -544,6 +554,8 @@ def main():
                [str(args.launcher.resolve()), "--no-browser"] if args.launcher else
                [sys.executable, str(ROOT / "packaging" / "clipmaker_api_server.py")])
     with tempfile.TemporaryDirectory() as directory:
+        # The engine defaults exports to the user's Videos/VizorPlay; keep test exports out of it.
+        os.environ["VIZORPLAY_EXPORT_DIR"] = str(Path(directory) / "Videos" / "VizorPlay")
         stage("starting isolated backend")
         with backend(command, Path(directory) / "data", evidence, startup_timeout=600 if args.launcher else 90) as base:
             stage("backend ready; launching Chromium")

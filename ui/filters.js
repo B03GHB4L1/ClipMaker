@@ -914,6 +914,29 @@ const renderClip = async () => {
 // Find clips and export
 // ---------------------------------------------------------------------------
 
+const formatDuration = (seconds) => {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+const formatSize = (bytes) => {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const power = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** power).toFixed(power > 1 ? 1 : 0)} ${units[power]}`;
+};
+// What the engine is doing right now, in words, from its progress report.
+const exportStage = (progress) => {
+  if (!progress) return "Getting the footage ready";
+  const clipTotal = progress.clip_total;
+  if (progress.phase === "clips" && clipTotal) return `Cut ${Math.min(progress.current, clipTotal)} of ${clipTotal} clip${clipTotal === 1 ? "" : "s"}`;
+  if (progress.phase === "files" && progress.total) return `Saved ${progress.current} of ${progress.total} clip${progress.total === 1 ? "" : "s"}`;
+  if (progress.phase === "concat") return "Joining the clips into one reel";
+  if (progress.phase === "assembly") return "Building the reel";
+  if (progress.phase === "done") return "Finishing up";
+  return progress.total ? `Step ${progress.current} of ${progress.total}` : "Working";
+};
+
+let finishedJobId;
 const renderJob = (job) => {
   const labels = {
     queued: "Queued",
@@ -923,26 +946,51 @@ const renderJob = (job) => {
     cancelled: "Export cancelled",
   };
   const finished = ["complete", "failed", "cancelled"].includes(job.status);
+  const logs = job.logs || [];
+  planOutput.dataset.jobStatus = job.status;
   jobState.textContent = labels[job.status] || job.status;
-  jobLogs.textContent = (job.logs || []).join("\n") || "Preparing clips...";
+  jobLogs.textContent = logs.join("\n") || "Preparing clips...";
   jobLogs.scrollTop = jobLogs.scrollHeight;
   const progress = job.progress;
-  const ratio = progress?.total ? progress.current / progress.total : 0;
-  jobProgress.style.width = `${job.status === "complete" ? 100 : Math.min(100, ratio * 100)}%`;
+  const ratio = job.status === "complete" ? 1 : progress?.total ? Math.min(1, progress.current / progress.total) : 0;
+  const percent = Math.round(ratio * 100);
+  jobProgress.style.width = `${Math.max(finished ? 0 : 3, percent)}%`;
+  field("job-bar").setAttribute("aria-valuenow", String(percent));
+  field("job-percent").textContent = finished ? "" : `${percent}%`;
+  const elapsed = Number(progress?.elapsed || 0);
+  const remaining = ratio > 0.05 && ratio < 1 ? elapsed / ratio - elapsed : null;
+  field("job-meta").textContent = finished || !elapsed ? "" :
+    `${formatDuration(elapsed)} elapsed${remaining === null ? "" : ` · about ${formatDuration(remaining)} left`}`;
+  const files = job.files || [];
+  field("job-detail").textContent =
+    job.status === "complete" ? (files.length === 1 ? "1 file saved" : `${files.length} files saved`) :
+    job.status === "failed" ? (logs[logs.length - 1] || "The engine stopped before finishing.") :
+    job.status === "cancelled" ? "Stopped before it finished." :
+    job.status === "queued" ? "Waiting for the engine" : exportStage(progress);
+  if (job.status === "failed") field("job-log").open = true;
   cancelJobButton.hidden = finished;
   if (!finished) return;
   activeJobId = undefined;
   setExportBusy(false);
   refreshExportState();
   if (job.status !== "complete") return;
+  finishedJobId = job.id;
+  field("export-folder").textContent = job.output_dir || "";
+  field("export-folder").title = job.output_dir || "";
+  field("export-done").hidden = false;
   const list = field("export-files");
   list.replaceChildren();
-  (job.files || []).forEach((file) => {
+  files.forEach((file) => {
+    const row = document.createElement("div");
+    row.className = "export-file";
     const link = document.createElement("a");
     link.href = file.url;
     link.download = file.name;
     link.textContent = file.name;
-    list.append(link);
+    const size = document.createElement("span");
+    size.textContent = formatSize(file.size);
+    row.append(link, size);
+    list.append(row);
   });
   const previous = activeMatch.export_history || [];
   activeMatch.export_history = [...previous, { id: job.id, finished_at: job.finished_at, files: job.files || [] }].slice(-50);
@@ -958,6 +1006,7 @@ const pollJob = async (jobId) => {
     }
   } catch (error) {
     jobState.textContent = "Connection interrupted";
+    field("job-detail").textContent = "Reconnecting to the engine...";
     jobLogs.textContent = error.message;
     setTimeout(() => pollJob(jobId), 2000);
   }
@@ -979,9 +1028,15 @@ const startExport = async () => {
   setExportBusy(true);
   cancelJobButton.hidden = false;
   exportButton.disabled = true;
+  planOutput.dataset.jobStatus = "queued";
   jobState.textContent = "Starting export";
+  field("job-detail").textContent = "Getting the footage ready";
+  field("job-percent").textContent = "";
+  field("job-meta").textContent = "";
+  field("job-log").open = false;
   jobLogs.textContent = "Preparing clips...";
-  jobProgress.style.width = "4%";
+  jobProgress.style.width = "3%";
+  field("export-done").hidden = true;
   field("export-files").replaceChildren();
   try {
     await persistFilters();
@@ -1000,7 +1055,9 @@ const startExport = async () => {
     activeJobId = undefined;
     setExportBusy(false);
     cancelJobButton.hidden = true;
+    planOutput.dataset.jobStatus = "failed";
     jobState.textContent = "Setup needs attention";
+    field("job-detail").textContent = error.message;
     jobLogs.textContent = error.message;
     jobProgress.style.width = "0%";
     refreshExportState();
@@ -1463,11 +1520,23 @@ cancelJobButton.addEventListener("click", async () => {
   }
 });
 
+field("reveal-export").onclick = async () => {
+  if (!finishedJobId) return;
+  try {
+    await apiRequest(`/api/jobs/${finishedJobId}/reveal`, { method: "POST", body: "{}" });
+  } catch (error) {
+    showToast(error.message);
+  }
+};
+// Exports go to Videos/VizorPlay (Movies/VizorPlay on macOS) unless a folder is chosen.
+apiRequest("/api/folders/output/default")
+  .then((result) => { if (result.path) field("output-dir").placeholder = result.path; })
+  .catch(() => {});
 field("browse-output").onclick = async () => {
   try {
     const result = await apiRequest("/api/folders/output", {
       method: "POST",
-      body: JSON.stringify({ initial_dir: field("output-dir").value }),
+      body: JSON.stringify({ initial_dir: field("output-dir").value || field("output-dir").placeholder }),
     });
     if (!result.cancelled) field("output-dir").value = result.path;
     persistFilters();

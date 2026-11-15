@@ -10,9 +10,9 @@
     <link rel="stylesheet" href="filters.css?v=2" />
     <link rel="stylesheet" href="compact.css?v=13" />
     <link rel="stylesheet" href="design.css?v=5" />
-    <link rel="stylesheet" href="editor.css?v=8" />
+    <link rel="stylesheet" href="editor.css?v=9" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-    <script type="module" src="filters.js?v=12"></script>
+    <script type="module" src="filters.js?v=13"></script>
     <script type="module" src="update.js?v=1"></script>
   </head>
   <body class="filter-page">
@@ -358,7 +358,7 @@
                 <summary>File name, folder and quality</summary>
                 <div class="export-settings-body">
                   <div class="folder-control">
-                    <label><span>Output folder</span><input type="text" placeholder="VizorPlay local exports folder" data-output-dir /></label>
+                    <label><span>Output folder</span><input type="text" placeholder="Videos/VizorPlay" data-output-dir /></label>
                     <button type="button" data-browse-output>Browse</button>
                   </div>
                   <div class="control-grid four-up export-grid">
@@ -399,14 +399,31 @@
                 </div>
               </details>
 
-              <div class="plan-output filter-job-output" data-plan-output hidden aria-live="polite">
-                <div class="plan-output-head">
-                  <span data-job-state>Calculating</span><button type="button" class="text-button" data-cancel-job hidden>Cancel</button>
+              <section class="export-job" data-plan-output data-job-status="queued" hidden aria-label="Export progress">
+                <div class="export-job-head">
+                  <span class="export-job-icon" aria-hidden="true"></span>
+                  <div class="export-job-title" aria-live="polite">
+                    <strong data-job-state>Calculating</strong>
+                    <span data-job-detail></span>
+                  </div>
+                  <span class="export-job-percent" data-job-percent></span>
+                  <button type="button" class="text-button" data-cancel-job hidden>Cancel</button>
                 </div>
-                <div class="plan-progress"><i data-job-progress></i></div>
-                <pre data-job-logs></pre>
-                <div class="export-files" data-export-files></div>
-              </div>
+                <div class="export-job-bar" role="progressbar" aria-label="Export progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-job-bar><i data-job-progress></i></div>
+                <p class="export-job-meta" data-job-meta></p>
+                <div class="export-done" data-export-done hidden>
+                  <div class="export-folder">
+                    <span class="export-folder-label">Saved to</span>
+                    <span class="export-folder-path" data-export-folder></span>
+                    <button type="button" data-reveal-export>Open folder</button>
+                  </div>
+                  <div class="export-files" data-export-files></div>
+                </div>
+                <details class="export-log" data-job-log>
+                  <summary>Engine log</summary>
+                  <pre data-job-logs></pre>
+                </details>
+              </section>
             </div>
           </div>
         </section>

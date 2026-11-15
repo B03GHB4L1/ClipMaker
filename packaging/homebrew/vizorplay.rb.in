@@ -14,6 +14,7 @@ class Vizorplay < Formula
     libexec.install "packaging/clipmaker_api_server.py"
     libexec.install "packaging/process_owner.py"
     libexec.install "packaging/update_check.py"
+    libexec.install "packaging/user_folders.py"
 
     (bin/"vizorplay").write <<~SH
       #!/bin/bash
