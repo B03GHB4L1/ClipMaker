@@ -497,10 +497,47 @@ def readable_name(text: str, fallback: str = "VizorPlay export") -> str:
     return name or fallback
 
 
-def clip_folder_name(label: str, count: int, when: datetime) -> str:
-    """e.g. "Reims v Strasbourg - 3 clips - 2026-11-15 17h42" (no colons: Windows forbids them)."""
+_NAME_PARTICLES = {"van", "von", "de", "da", "di", "del", "della", "dos", "das", "du", "le", "la", "ter", "ten", "der", "den"}
+
+
+def surname(name: str) -> str:
+    """"Ismael Doukoure" -> "Doukoure"; keeps "van Dijk" and one-word names whole."""
+    words = str(name or "").split()
+    if len(words) < 2:
+        return " ".join(words)
+    kept = [words[-1]]
+    for word in reversed(words[1:-1]):
+        if word.lower() not in _NAME_PARTICLES:
+            break
+        kept.insert(0, word)
+    return " ".join(kept)
+
+
+def players_label(players: list[str]) -> str:
+    names = list(dict.fromkeys(surname(player) for player in players if str(player or "").strip()))
+    if len(names) <= 3:
+        return ", ".join(names)
+    return f"{', '.join(names[:2])} and {len(names) - 2} more"
+
+
+def clip_folder_name(label: str, count: int) -> str:
+    """e.g. "Doukoure - 3 clips" or "Doukoure, Nanasi - 8 clips"."""
     clips = "1 clip" if count == 1 else f"{count} clips"
-    return f"{readable_name(label)} - {clips} - {when.strftime('%Y-%m-%d %Hh%M')}"
+    return f"{readable_name(label)} - {clips}"
+
+
+def export_label(match: dict[str, Any], options: dict[str, Any], clip_windows: list[dict[str, Any]]) -> str:
+    """Who the exported clips are of: the players in them (clip labels read
+    "Player - Type @ mm:ss", joined by " + " when clips merge), else the player
+    filter, else the team, else the match."""
+    in_clips = [part.split(" - ", 1)[0] for window in clip_windows
+                for part in str(window.get("label") or "").split(" + ") if " - " in part]
+    chosen = options.get("player_filters") if isinstance(options.get("player_filters"), list) else []
+    return (players_label(in_clips) or players_label([str(item) for item in chosen])
+            or str(options.get("team_filter") or "").strip()
+            or str(match.get("project_name") or "").strip()
+            or " v ".join(team for team in (str(match.get("home_team") or "").strip(),
+                                             str(match.get("away_team") or "").strip()) if team))
 
 
 def numbered(path: Path, taken: Callable[[Path], bool], folder: bool = False) -> Path:
@@ -533,7 +570,7 @@ class JobManager:
                 if config.get("individual_clips"):
                     # A set of clips gets its own folder, named so a person can tell sets apart.
                     folder = numbered(output.parent / clip_folder_name(
-                        config.get("export_label") or "", len(config.get("clip_windows") or []), datetime.now()), taken, folder=True)
+                        config.get("export_label") or "", len(config.get("clip_windows") or [])), taken, folder=True)
                     config["output_dir"] = str(folder)
                     self._reserved_outputs.add(str(folder.resolve()))
                 else:
@@ -1030,8 +1067,7 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         "output_dir": str(output_dir),
         "output_filename": readable_name(Path(str(options.get("output_filename") or "Highlights")).stem, "Highlights") + output_format,
         # Names the folder a set of separate clips is saved in.
-        "export_label": str(match.get("project_name") or "").strip() or " v ".join(
-            team for team in (str(match.get("home_team") or "").strip(), str(match.get("away_team") or "").strip()) if team),
+        "export_label": export_label(match, options, clip_windows),
         "output_format": output_format,
         "video_crf": max(16, min(30, int(options.get("video_crf", 20)))),
         "encoder_preset": encoder_preset,
