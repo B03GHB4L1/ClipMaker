@@ -156,13 +156,24 @@ class ProjectStoreTests(unittest.TestCase):
                 self.assertIn("finished_at", manager.get(job["id"]))
 
     def test_separate_clips_go_in_a_folder_named_for_people(self):
-        from datetime import datetime
-        from packaging.clipmaker_api_server import clip_folder_name, readable_name
+        from packaging.clipmaker_api_server import clip_folder_name, export_label, readable_name, surname
 
-        when = datetime(2026, 11, 15, 17, 42)
-        self.assertEqual(clip_folder_name("Reims v Strasbourg", 3, when), "Reims v Strasbourg - 3 clips - 2026-11-15 17h42")
-        self.assertEqual(clip_folder_name("", 1, when), "VizorPlay export - 1 clip - 2026-11-15 17h42")
+        self.assertEqual(clip_folder_name("Doukouré", 3), "Doukouré - 3 clips")
+        self.assertEqual(clip_folder_name("", 1), "VizorPlay export - 1 clip")
         self.assertEqual(readable_name('Wing: attacks / "best" '), "Wing attacks best")
+        self.assertEqual([surname(name) for name in ("Ismaël Doukouré", "Virgil van Dijk", "Neymar", "Luis de la Fuente")],
+                         ["Doukouré", "van Dijk", "Neymar", "de la Fuente"])
+        clips = [{"label": "Ismaël Doukouré - Pass @ 12:30 (P1)"},
+                 {"label": "Sebastian Nanasi - Shot @ 40:02 (P1) + Ismaël Doukouré - Pass @ 40:05 (P1)"}]
+        match = {"project_name": "Reims v Strasbourg"}
+        self.assertEqual(export_label(match, {}, clips), "Doukouré, Nanasi")
+        many = [{"label": f"Player P{n} - Pass @ 1:00 (P1)"} for n in range(5)]
+        self.assertEqual(export_label(match, {}, many), "P0, P1 and 3 more")
+        # Clips without a player fall back to the player filter, the team, then the match.
+        edited = [{"label": "Edited clip"}]
+        self.assertEqual(export_label(match, {"player_filters": ["Mory Gbane"]}, edited), "Gbane")
+        self.assertEqual(export_label(match, {"team_filter": "Reims"}, edited), "Reims")
+        self.assertEqual(export_label(match, {}, edited), "Reims v Strasbourg")
 
         def blocked_engine(config, logs, progress, cancellation):
             cancellation.wait(timeout=5)
@@ -170,20 +181,14 @@ class ProjectStoreTests(unittest.TestCase):
 
         manager = JobManager()
         config = {"dry_run": False, "individual_clips": True, "output_dir": str(self.root), "output_filename": "Highlights.mp4",
-                  "export_label": "St. Pauli v Mainz", "clip_windows": [{"start": 0, "end": 1}] * 2}
-        class Fixed(datetime):  # both sets start "in the same minute", whatever the clock does
-            @classmethod
-            def now(cls, tz=None):
-                return datetime(2026, 11, 15, 17, 42, tzinfo=tz)
-
-        with patch("clipmaker_core.run_clip_maker", side_effect=blocked_engine), \
-                patch("packaging.clipmaker_api_server.datetime", Fixed):
+                  "export_label": "St. Juste", "clip_windows": [{"start": 0, "end": 1}] * 2}
+        with patch("clipmaker_core.run_clip_maker", side_effect=blocked_engine):
             first, second = manager.start(config), manager.start(config)
             names = [Path(job["output_dir"]).name for job in (first, second)]
             for job in (first, second):
                 manager.cancel(job["id"])
-        self.assertEqual(names[0], "St. Pauli v Mainz - 2 clips - 2026-11-15 17h42")
-        # Same minute, same match: the second set is numbered on the whole folder name.
+        self.assertEqual(names[0], "St. Juste - 2 clips")
+        # Same players again: the second set is numbered on the whole folder name.
         self.assertEqual(names[1], f"{names[0]} (2)")
         self.assertTrue(all(Path(job["output_dir"]).parent == self.root for job in (first, second)))
 
