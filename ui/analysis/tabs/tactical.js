@@ -122,6 +122,20 @@ export async function renderTactical(panel, context) {
   // Video Lab: which ten-moment page is showing, per playlist (the Moment control's key).
   const momentPages = {};
   const MOMENTS_PER_PAGE = 10;
+  // Video Lab reel: the moments ticked in the list (saved per playlist), and the
+  // pieces that show how many are ticked, redrawn without reloading the tab.
+  const reel = { key: null, rows: [], refreshers: [] };
+  const reelPicks = () => {
+    const known = new Set(reel.rows.map((row) => row.pick));
+    return (Array.isArray(controls[reel.key]) ? controls[reel.key] : []).filter((pick) => known.has(pick));
+  };
+  const setReelPicks = (picks) => {
+    controls[reel.key] = picks;
+    context.save({ ...controls });
+    reel.refreshers.forEach((refresh) => refresh());
+  };
+  const clipSeconds = () => Number(controls.vl_before ?? reel.before ?? 8) + Number(controls.vl_after ?? reel.after ?? 14);
+  const formatLength = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
 
   const scope = el("details", { class: "native-controls", open: true }, el("summary", { text: "Match and team" }));
   const scopeBody = el("div", { class: "native-control-grid" });
@@ -167,7 +181,7 @@ export async function renderTactical(panel, context) {
 
   const cut = async (action) => {
     const slot = action === "vl_reel" ? media.reel : media.cut;
-    Object.assign(slot, { busy: true, error: null, file: null });
+    Object.assign(slot, { busy: true, error: null, file: null, picks: action === "vl_reel" ? JSON.stringify(reelPicks()) : null });
     renderMedia();
     try {
       const { file } = await projectRequest(`/api/analysis/${context.view}/${context.slug}/clip`, {
@@ -188,8 +202,16 @@ export async function renderTactical(panel, context) {
       if (slot.busy) blocks.push(el("p", { class: "native-inline-message", role: "status", text: `Cutting ${title.toLowerCase()}...` }));
       else if (slot.error) blocks.push(el("p", { class: "native-inline-error", role: "alert", text: `Could not cut ${title.toLowerCase()}: ${slot.error}` }));
       else if (slot.file) {
+        const stale = slot === media.reel && el("p", { class: "native-inline-message native-reel-stale", role: "status", hidden: true,
+          text: "Your reel picks have changed since this reel was built. Build it again to include them." });
+        if (stale) {
+          const check = () => { stale.hidden = slot.picks === JSON.stringify(reelPicks()); };
+          reel.refreshers.push(check);
+          check();
+        }
         blocks.push(el("div", { class: "native-watch" }, el("h4", { text: title }),
           el("video", { controls: true, preload: "metadata", src: slot.file.url, "aria-label": title }),
+          ...(stale ? [stale] : []),
           el("div", { class: "native-actions" }, saveClipButton(slot.file, title === "Moment" ? "Clip" : "Reel"))));
       }
     }
@@ -213,7 +235,8 @@ export async function renderTactical(panel, context) {
     return el("div", { class: "native-field" }, el("label", { for: fieldId, class: "native-field-label", text: element.label }), select);
   };
 
-  // Video Lab's ranked moments as a list you pick from directly, ten at a time.
+  // Video Lab's ranked moments as a list. Clicking a row picks it for preview and
+  // Cut Moment; its tick box adds it to the reel. Ten at a time.
   const momentList = (element, select) => {
     const rows = element.rows;
     const key = select ? select.key : "moments";
@@ -222,38 +245,92 @@ export async function renderTactical(panel, context) {
     if (momentPages[key] === undefined) momentPages[key] = Math.floor(Math.max(chosen, 0) / MOMENTS_PER_PAGE);
     momentPages[key] = Math.min(momentPages[key], pages - 1);
     const section = el("section", { class: "native-moment-list", "aria-label": "Moments" });
+    const canPick = Boolean(reel.key);
+
+    const toggle = (pick, on) => {
+      const picks = reelPicks().filter((value) => value !== pick);
+      setReelPicks(on ? [...picks, pick] : picks);
+    };
+
+    const reelBar = () => {
+      const picks = reelPicks();
+      const count = picks.length;
+      const summary = el("p", { class: "native-reel-summary", role: "status", "aria-live": "polite" },
+        el("strong", { text: "Reel" }),
+        count
+          ? el("span", { text: `${count} moment${count === 1 ? "" : "s"} · about ${formatLength(count * clipSeconds())} · plays in match order` })
+          : el("span", { class: "native-muted", text: "Tick moments to add them to the reel" }));
+      const top = Math.min(5, rows.length);
+      const actions = el("div", { class: "native-reel-actions" },
+        el("button", { type: "button", class: "text-button", text: `Add top ${top}`,
+          disabled: rows.slice(0, top).every((row) => picks.includes(row.pick)),
+          onclick: () => setReelPicks([...new Set([...picks, ...rows.slice(0, top).map((row) => row.pick)])]) }),
+        el("button", { type: "button", class: "text-button", text: "Clear", disabled: !count, onclick: () => setReelPicks([]) }));
+      return el("div", { class: "native-reel-bar" }, summary, actions);
+    };
+
     const draw = () => {
+      const picks = new Set(reelPicks());
       const first = momentPages[key] * MOMENTS_PER_PAGE;
-      const head = el("div", { class: "native-moment-row native-moment-head", "aria-hidden": "true" },
-        ...["#", "Time", "Player", "Moment", "Score"].map((text) => el("span", { text })));
+      const head = el("div", { class: `native-moment-line native-moment-head${canPick ? " has-reel" : ""}`, "aria-hidden": "true" },
+        ...(canPick ? [el("span", { class: "native-reel-head", text: "Reel" })] : []),
+        el("div", { class: "native-moment-row" }, ...[["#", "native-moment-rank"], ["Time", ""], ["Player", "native-moment-player"],
+          ["Moment", "native-moment-what"], ["Score", "native-moment-score"]].map(([text, className]) => el("span", { class: className, text }))));
       const list = el("ol", { class: "native-moment-rows", start: String(first + 1) });
       rows.slice(first, first + MOMENTS_PER_PAGE).forEach((row, offset) => {
         const index = first + offset;
+        const described = `Moment ${index + 1}: ${row.time}, ${row.player}, ${row.moment}, score ${row.score.toFixed(2)}`;
         const button = el("button", { type: "button", class: "native-moment-row", "aria-pressed": String(index === chosen),
-          "aria-label": `Moment ${index + 1}: ${row.time}, ${row.player}, ${row.moment}, score ${row.score.toFixed(2)}`,
+          "aria-label": described, title: "Preview this moment",
           onclick: () => { if (select && index !== chosen) update({ [select.key]: select.values[index] }); } },
           el("span", { class: "native-moment-rank", text: String(index + 1) }), el("span", { text: row.time }),
           el("span", { class: "native-moment-player", text: row.player }), el("span", { class: "native-moment-what", text: row.moment }),
           el("span", { class: "native-moment-score", text: row.score.toFixed(2) }));
-        list.append(el("li", {}, button));
+        const picked = picks.has(row.pick);
+        const line = el("li", { class: `native-moment-line${canPick ? " has-reel" : ""}${picked ? " is-in-reel" : ""}` });
+        if (canPick) {
+          const box = el("input", { type: "checkbox", checked: picked, "aria-label": `Add moment ${index + 1} to the reel` });
+          box.addEventListener("change", () => toggle(row.pick, box.checked));
+          line.append(el("label", { class: "native-reel-check", title: picked ? "Remove from the reel" : "Add to the reel" }, box));
+        }
+        line.append(button);
+        list.append(line);
       });
       const pager = el("div", { class: "native-pager", role: "group", "aria-label": "Moment pages" });
       if (pages > 1) {
         for (let page = 0; page < pages; page += 1) {
           const label = `${page * MOMENTS_PER_PAGE + 1}–${Math.min(rows.length, (page + 1) * MOMENTS_PER_PAGE)}`;
-          pager.append(el("button", { type: "button", text: label, "aria-pressed": String(page === momentPages[key]),
-            "aria-label": `Show moments ${label}`, onclick: () => { momentPages[key] = page; draw(); } }));
+          const inReel = rows.slice(page * MOMENTS_PER_PAGE, (page + 1) * MOMENTS_PER_PAGE).filter((row) => picks.has(row.pick)).length;
+          pager.append(el("button", { type: "button", class: inReel ? "has-picks" : "", text: label,
+            "aria-pressed": String(page === momentPages[key]),
+            "aria-label": `Show moments ${label}${inReel ? `, ${inReel} in the reel` : ""}`,
+            onclick: () => { momentPages[key] = page; draw(); } }));
         }
       }
       pager.append(el("span", { class: "native-muted", text: `${rows.length} moment${rows.length === 1 ? "" : "s"}` }));
-      section.replaceChildren(pager, head, list);
+      section.replaceChildren(pager, ...(canPick ? [reelBar()] : []), head, list);
     };
+    if (canPick) reel.refreshers.push(() => {
+      // Keep focus on the control the user just used.
+      const focused = section.contains(document.activeElement) ? document.activeElement.getAttribute("aria-label") : null;
+      draw();
+      if (focused) section.querySelector(`[aria-label="${CSS.escape(focused)}"]`)?.focus();
+    });
     draw();
     return section;
   };
 
   const renderElements = async () => {
     const momentSelect = view.elements.find((element) => element.kind === "Selectbox" && /^vl_selected_moment_/.test(element.key || ""));
+    const momentRows = view.elements.find((element) => element.kind === "MomentList");
+    reel.key = momentSelect && momentRows ? momentSelect.key.replace("vl_selected_moment_", "vl_reel_moments_") : null;
+    reel.rows = momentRows ? momentRows.rows : [];
+    reel.refreshers = [];
+    for (const element of view.elements) {
+      if (element.kind === "Slider" && element.key === "vl_before") reel.before = element.value;
+      if (element.kind === "Slider" && element.key === "vl_after") reel.after = element.value;
+    }
+    const cutReady = !view.elements.some((element) => element.kind === "Button" && element.key === "vl_cut" && element.disabled);
     const nodes = [];
     const figures = [];
     let metrics = null;
@@ -297,6 +374,20 @@ export async function renderTactical(panel, context) {
           break;
         case "Button":
           if (!actions) { actions = el("div", { class: "native-actions" }); nodes.push(actions); }
+          if (element.key === "vl_reel" && reel.key) {
+            // Enabled once moments are ticked (and the footage is ready, as for Cut Moment).
+            const build = el("button", { type: "button", class: "native-button", onclick: () => cut(element.key) });
+            const refresh = () => {
+              const count = reelPicks().length;
+              build.textContent = count ? `Build reel · ${count}` : "Build reel";
+              build.disabled = !count || !cutReady;
+              build.title = count ? "" : "Tick moments in the list to add them to the reel";
+            };
+            reel.refreshers.push(refresh);
+            refresh();
+            actions.append(build);
+            break;
+          }
           actions.append(el("button", { type: "button", class: "native-button", text: element.label,
             disabled: element.disabled, onclick: () => cut(element.key) }));
           break;

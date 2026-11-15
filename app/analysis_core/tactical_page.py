@@ -1005,7 +1005,7 @@ def _moment_list_html(rows):
 def render_video_lab(df, team):
     st.subheader("Video Lab")
     df = _match_scope_df(df, "vl_match_scope", "Clip source match")
-    vc1, vc2, vc3, vc4 = st.columns([1, 1, 1, 1])
+    vc1, vc2, vc3 = st.columns([1, 1, 1])
     with vc1:
         playlist = st.selectbox("Playlist", [
             "Defensive Transition",
@@ -1018,8 +1018,6 @@ def render_video_lab(df, team):
         before = st.slider("Before clip", 0, 30, 8, key="vl_before")
     with vc3:
         after = st.slider("After clip", 4, 45, 14, key="vl_after")
-    with vc4:
-        reel_count = st.slider("Reel moments", 2, 10, 5, key="vl_reel_count")
 
     rows = _playlist_rows(
         df,
@@ -1039,13 +1037,21 @@ def render_video_lab(df, team):
 
     # Stable: tied moments keep chronological order on every platform.
     current = current.sort_values("score", ascending=False, kind="stable").head(40).reset_index(drop=True)
+    # A moment's own identity for reel picks; event ids repeat across matches.
+    current["reel_pick"] = [f"{match}-{event}" for match, event in zip(
+        current["match_id"] if "match_id" in current.columns else [0] * len(current), current["event_id"])]
     selected_id = st.selectbox(
         "Moment", current["event_id"].tolist(),
         format_func=lambda event_id: current.loc[current["event_id"].eq(event_id), "moment"].iloc[0],
         key=f"vl_selected_moment_{playlist}",
     )
     selected = current[current["event_id"].eq(selected_id)].iloc[0].to_dict()
-    reel_rows = current.head(reel_count)
+    # The reel is the moments the user ticked, played in match order.
+    picks = [str(pick) for pick in st.multiselect("Reel moments", current["reel_pick"].tolist(),
+                                                   key=f"vl_reel_moments_{playlist}")]
+    reel_rows = current[current["reel_pick"].isin(picks)]
+    order = [column for column in ("match_id", "period", "event_seconds", "minute", "second") if column in reel_rows.columns]
+    reel_rows = reel_rows.sort_values(order, kind="stable") if order else reel_rows
 
     def _video_identity(moment):
         try:
@@ -1058,7 +1064,7 @@ def render_video_lab(df, team):
     # Session caches must change with the CSV, video mapping, markers and saved
     # corrections, including when selection order reuses the same event IDs.
     clip_key = f"{team}|{playlist}|{before}|{after}|{_video_identity(selected)}"
-    reel_key = f"{team}|{playlist}|{before}|{after}|{reel_count}|" + repr([
+    reel_key = f"{team}|{playlist}|{before}|{after}|" + repr([
         _video_identity(moment) for moment in reel_rows.to_dict("records")
     ])
     readiness_errors = []
@@ -1073,7 +1079,7 @@ def render_video_lab(df, team):
             return False
 
     clip_ready = _ready(selected)
-    reel_ready = all([_ready(moment) for moment in reel_rows.to_dict("records")])
+    reel_ready = not reel_rows.empty and all([_ready(moment) for moment in reel_rows.to_dict("records")])
 
     detail, trace = st.columns([1, 1.35], gap="large")
     with detail:

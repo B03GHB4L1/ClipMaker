@@ -36,6 +36,7 @@ def _moment_list(rows):
     ten), keyed like the Moment selectbox so the page can pick and page through them."""
     page.st.elements.append({"kind": "MomentList", "rows": [{
         "id": _json(row.get("event_id")),
+        "pick": str(row.get("reel_pick", "")),
         "time": f"{row.get('time', '')} {row.get('period_label', '')}".strip(),
         "player": str(row.get("playerName", "") or ""),
         "moment": f"{row.get('type', '')} | {row.get('why', '')}",
@@ -50,6 +51,9 @@ page._moment_list_html = _moment_list
 CONTROL_KEY = re.compile(r"^(dt_seconds|dt_events|at_seconds|at_events|[a-z]{2,5}_match_scope|"
                          r"vl_playlist|vl_before|vl_after|vl_reel_count|style_trend_dim|"
                          r"vl_selected_moment_[A-Za-z ]{1,40})$")
+# Video Lab reel picks: the moments ticked for the reel, per playlist.
+REEL_KEY = re.compile(r"^vl_reel_moments_[A-Za-z ]{1,40}$")
+MAX_REEL = 40  # the most moments a playlist lists
 _lock = threading.Lock()
 _prepared: OrderedDict = OrderedDict()
 
@@ -128,6 +132,9 @@ def render(tab, controls, project, projects, action=None):
         for key, value in controls.items():
             if CONTROL_KEY.match(str(key)) and (value is None or isinstance(value, (str, int, float, bool))):
                 state[key] = value
+            elif REEL_KEY.match(str(key)) and isinstance(value, list):
+                state[key] = list(dict.fromkeys(str(pick)[:40] for pick in value
+                                                if isinstance(pick, (str, int))))[:MAX_REEL]
         recorder = Recorder(state)
         if action:
             original = recorder.button

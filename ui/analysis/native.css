@@ -127,6 +127,37 @@ button.native-moment-row[aria-pressed="true"] { background: #eef8cf; box-shadow:
   .native-moment-row { grid-template-columns: 24px 70px minmax(0, 1fr) 40px; }
   .native-moment-row .native-moment-what { display: none; }
 }
+/* Reel picks: a tick box beside each moment adds it to the reel; the bar above
+   says how many are in it and how long it will run. */
+.native-moment-line { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.native-moment-line.has-reel { grid-template-columns: 40px minmax(0, 1fr); }
+.native-moment-head { padding-inline: 1px; }
+.native-moment-head .native-moment-row { padding-block: 0; color: inherit; font-size: inherit; cursor: default; }
+.native-reel-head { align-self: end; text-align: center; }
+.native-reel-check { display: grid; place-items: center; margin: 0; border-right: 1px solid var(--cm-rule); cursor: pointer; }
+.native-reel-check:hover { background: #f6f7f2; }
+.native-reel-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--cm-ink); cursor: pointer; }
+.native-reel-check:has(input:focus-visible) { outline: 2px solid #6e8f12; outline-offset: -3px; }
+.native-moment-line.is-in-reel .native-reel-check { background: #f3f4ef; }
+.native-reel-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px;
+  min-height: 40px; padding: 6px 8px 6px 12px; border: 1px solid var(--cm-rule); border-radius: 4px; background: #fafaf7; }
+.native-reel-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; margin: 0;
+  font-size: 12px; font-variant-numeric: tabular-nums; }
+.native-reel-summary strong { font-weight: 600; }
+.native-reel-actions { display: flex; gap: 2px; }
+.native-reel-actions button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--cm-ink); font: inherit; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.native-reel-actions button:hover:not(:disabled) { background: #eef0e8; }
+.native-reel-actions button:disabled { color: var(--cm-muted); text-decoration: none; cursor: default; opacity: .6; }
+.native-reel-actions button:focus-visible { outline: 2px solid #6e8f12; outline-offset: 1px; }
+.native-pager button.has-picks { position: relative; padding-right: 18px; }
+.native-pager button.has-picks::after { content: ""; position: absolute; top: 50%; right: 7px; width: 6px; height: 6px;
+  margin-top: -3px; border-radius: 50%; background: currentColor; }
+.native-reel-stale { padding: 6px 10px; border-left: 3px solid #6e8f12; background: #f6f7f2; color: var(--cm-ink); }
+@media (max-width: 560px) {
+  .native-moment-line.has-reel { grid-template-columns: 36px minmax(0, 1fr); }
+  .native-reel-bar { padding-left: 10px; }
+}
 
 .native-tactical { display: grid; gap: 10px; align-content: start; }
 .native-section-title { margin: 6px 0 0; font-size: 15px; font-weight: 600; }
