@@ -170,6 +170,8 @@ class AutomationContracts(unittest.TestCase):
                      'exec open "#{opt_prefix}/VizorPlay.app"', 'exec "#{opt_libexec}/vizorplay-engine" "$@"'):
             self.assertIn(line, formula)
         # Only macOS builds the app; Linux installs the .deb, not Homebrew's app.
+        # The app build reads ui/, so it must run before ui/ moves into libexec.
+        self.assertLess(formula.index('"--bundles", "app"'), formula.index('libexec.install "app", "ui"'))
         self.assertIn("if OS.mac?", formula)
         lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertIn('option_env!("VIZORPLAY_ENGINE_LAUNCHER")', lib)
