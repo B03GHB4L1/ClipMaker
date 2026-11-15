@@ -144,7 +144,8 @@ class ProjectStoreTests(unittest.TestCase):
         config = {"dry_run": False, "output_dir": str(self.root), "output_filename": "reel.mp4"}
         with patch("clipmaker_core.run_clip_maker", side_effect=blocked_engine):
             first, second = manager.start(config), manager.start(config)
-            self.assertNotEqual(first["output_filename"], second["output_filename"])
+            # A second reel with the same name sits beside the first, numbered for people.
+            self.assertEqual([first["output_filename"], second["output_filename"]], ["reel.mp4", "reel (2).mp4"])
             for job in (first, second):
                 self.assertTrue(manager.cancel(job["id"]))
             deadline = time.monotonic() + 5
@@ -153,6 +154,38 @@ class ProjectStoreTests(unittest.TestCase):
             for job in (first, second):
                 self.assertEqual(manager.get(job["id"])["status"], "cancelled")
                 self.assertIn("finished_at", manager.get(job["id"]))
+
+    def test_separate_clips_go_in_a_folder_named_for_people(self):
+        from datetime import datetime
+        from packaging.clipmaker_api_server import clip_folder_name, readable_name
+
+        when = datetime(2026, 11, 15, 17, 42)
+        self.assertEqual(clip_folder_name("Reims v Strasbourg", 3, when), "Reims v Strasbourg - 3 clips - 2026-11-15 17h42")
+        self.assertEqual(clip_folder_name("", 1, when), "VizorPlay export - 1 clip - 2026-11-15 17h42")
+        self.assertEqual(readable_name('Wing: attacks / "best" '), "Wing attacks best")
+
+        def blocked_engine(config, logs, progress, cancellation):
+            cancellation.wait(timeout=5)
+            logs.put({"type": "cancelled"})
+
+        manager = JobManager()
+        config = {"dry_run": False, "individual_clips": True, "output_dir": str(self.root), "output_filename": "Highlights.mp4",
+                  "export_label": "St. Pauli v Mainz", "clip_windows": [{"start": 0, "end": 1}] * 2}
+        class Fixed(datetime):  # both sets start "in the same minute", whatever the clock does
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 11, 15, 17, 42, tzinfo=tz)
+
+        with patch("clipmaker_core.run_clip_maker", side_effect=blocked_engine), \
+                patch("packaging.clipmaker_api_server.datetime", Fixed):
+            first, second = manager.start(config), manager.start(config)
+            names = [Path(job["output_dir"]).name for job in (first, second)]
+            for job in (first, second):
+                manager.cancel(job["id"])
+        self.assertEqual(names[0], "St. Pauli v Mainz - 2 clips - 2026-11-15 17h42")
+        # Same minute, same match: the second set is numbered on the whole folder name.
+        self.assertEqual(names[1], f"{names[0]} (2)")
+        self.assertTrue(all(Path(job["output_dir"]).parent == self.root for job in (first, second)))
 
     def test_export_cannot_succeed_without_completion_and_output(self):
         for reports_done in (False, True):
