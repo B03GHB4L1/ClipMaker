@@ -24,6 +24,32 @@ def stage(message):
     print(f"E2E: {message}", flush=True)
 
 
+class SavedPicture:
+    """A chart picture the engine saved in Videos/VizorPlay, shaped like a Playwright download."""
+
+    def __init__(self, path):
+        self.path = path
+        self.suggested_filename = path.name
+
+    def failure(self):
+        return None if self.path.is_file() else f"{self.path} was not saved"
+
+    def save_as(self, destination):
+        shutil.copyfile(self.path, destination)
+
+
+def saved_picture(page, timeout=30000):
+    """Wait for the "Picture saved" pop-up and return the file it names."""
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Picture saved", timeout=timeout)
+    name = popup.locator("[data-saved-file]").text_content()
+    folder = Path(os.environ["VIZORPLAY_EXPORT_DIR"])
+    assert Path(popup.locator("[data-saved-folder]").get_attribute("title")) == folder.resolve(), "saved outside Videos/VizorPlay"
+    popup.get_by_role("button", name="Close").click()
+    expect(page.locator(".saved-popup.is-visible")).to_have_count(0)
+    return SavedPicture(folder / name)
+
+
 def validate_chart_download(download, destination, image_format):
     """Accept a real browser download, including decoding when Pillow is installed."""
     assert download.failure() is None, f"{image_format} download failed"
@@ -501,15 +527,15 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.screenshot(path=str(evidence / "clip-saved-390.png"))
     page.set_viewport_size({"width": 1280, "height": 800})
     popup.get_by_role("button", name="Close").click()
-    with page.expect_download(timeout=30000) as downloaded:
-        component.locator('[data-export="png"]').click()
-    downloads = [validate_chart_download(downloaded.value, evidence / "native-shot-map.png", "PNG")]
+    # Chart pictures are saved by the engine into Videos/VizorPlay (the desktop
+    # windows ignore browser downloads); a pop-up says where they went.
+    component.locator('[data-export="png"]').click()
+    downloads = [validate_chart_download(saved_picture(page), evidence / "native-shot-map.png", "PNG")]
     # Build exercises the worker encoder and frame capture through the actual UI.
     component.locator('[data-export-animation]').select_option("build")
     gif_button = component.locator('[data-export="gif"]')
-    with page.expect_download(timeout=90000) as downloaded:
-        gif_button.click()
-    downloads.append(validate_chart_download(downloaded.value, evidence / "native-shot-map.gif", "GIF"))
+    gif_button.click()
+    downloads.append(validate_chart_download(saved_picture(page, timeout=90000), evidence / "native-shot-map.gif", "GIF"))
     expect(gif_button).to_be_enabled()
     expect(gif_button).to_have_text("GIF")
     (evidence / "analyst-downloads.json").write_text(json.dumps(downloads, indent=2), encoding="utf-8")
@@ -527,6 +553,15 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     rank_as = page.locator(".native-moments").get_by_text("Rank moments as")
     assert rank_as.count() <= 2, rank_as.count()  # one per non-goalkeeper column
     page.screenshot(path=str(evidence / "native-comparison.png"))
+    # Plotly's camera button (it downloads) is replaced by one that saves through the engine.
+    expect(page.locator('.native-figure [data-title="Download plot as a png"]')).to_have_count(0)
+    radar_save = page.locator('.native-figure [data-title="Save as PNG"]').first
+    radar_save.scroll_into_view_if_needed()
+    page.locator(".native-figure").first.hover()
+    radar_save.click()
+    radar = saved_picture(page)
+    radar.save_as(str(evidence / "native-radar.png"))
+    assert (evidence / "native-radar.png").read_bytes().startswith(b"\x89PNG"), radar.suggested_filename
 
     stage("native workspace at narrow width")
     page.set_viewport_size({"width": 390, "height": 700})

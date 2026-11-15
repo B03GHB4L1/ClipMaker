@@ -964,26 +964,44 @@ def video_for_period(match: dict[str, Any], period: int) -> str:
     return str(match.get("video_path") or "")
 
 
-def save_clip_copy(source: Path, folder: Path, name: str) -> Path:
-    """Copy a watched clip into the user's folder under a readable name.
+def save_to_user_folder(folder: Path, name: str, suffix: str, write: Callable[[str], None],
+                        fallback: str = "VizorPlay clip") -> Path:
+    """Write a file into the user's folder under a readable name, atomically.
     Never replaces a file already there: "Saka 34' (2).mp4" and so on."""
-    import shutil
     folder.mkdir(parents=True, exist_ok=True)
-    stem = readable_name(re.sub(r"\.mp4$", "", str(name or ""), flags=re.IGNORECASE), "VizorPlay clip")
-    destination = folder / f"{stem}.mp4"
+    stem = readable_name(re.sub(rf"{re.escape(suffix)}$", "", str(name or ""), flags=re.IGNORECASE), fallback)
+    destination = folder / f"{stem}{suffix}"
     number = 2
     while destination.exists():
-        destination = folder / f"{stem} ({number}).mp4"
+        destination = folder / f"{stem} ({number}){suffix}"
         number += 1
     fd, temporary_name = tempfile.mkstemp(dir=folder, prefix="saving-", suffix=".tmp")
     os.close(fd)
     try:
-        shutil.copyfile(source, temporary_name)
+        write(temporary_name)
         os.replace(temporary_name, destination)
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
     return destination
+
+
+def save_clip_copy(source: Path, folder: Path, name: str) -> Path:
+    """Copy a watched clip into the user's folder."""
+    import shutil
+    return save_to_user_folder(folder, name, ".mp4", lambda temporary: shutil.copyfile(source, temporary))
+
+
+IMAGE_SIGNATURES = {b"\x89PNG\r\n\x1a\n": ".png", b"GIF87a": ".gif", b"GIF89a": ".gif"}
+IMAGE_LIMIT = 50_000_000
+
+
+def image_suffix(data: bytes) -> str:
+    """".png" or ".gif" from the file's own bytes; anything else is refused."""
+    for signature, suffix in IMAGE_SIGNATURES.items():
+        if data.startswith(signature):
+            return suffix
+    raise ValueError("Only PNG and GIF chart pictures can be saved.")
 
 
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
@@ -1612,6 +1630,29 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if temporary.exists():
                 temporary.unlink()
 
+    def save_image(self) -> None:
+        """A chart picture (PNG or GIF) made in the page, saved to the user's folder.
+        The desktop windows ignore <a download>, so the page sends the bytes here."""
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > IMAGE_LIMIT:
+            raise ValueError("Chart pictures must be under 50 MB.")
+        data = self.rfile.read(length)
+        self._body_read = getattr(self, "_body_read", 0) + len(data)
+        if len(data) != length:
+            raise ValueError("The picture did not arrive in full; nothing was saved.")
+        suffix = image_suffix(data)
+        name = Path(unquote(self.headers.get("X-File-Name", ""))).name
+        folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+
+        def write(temporary: str) -> None:
+            with open(temporary, "wb") as output:
+                output.write(data)
+
+        saved = save_to_user_folder(folder, name, suffix, write, fallback="VizorPlay chart")
+        token = uuid.uuid4().hex
+        self.server.saved_clips[token] = saved  # type: ignore[attr-defined]
+        self.send_json(HTTPStatus.OK, {"saved": {"name": saved.name, "folder": str(saved.parent), "id": token}})
+
     def send_media(self, token: str) -> None:
         media_path = self.media_files.get(token)
         if media_path is None or not media_path.is_file():
@@ -1751,6 +1792,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             self.validate_local_request()
             if path == "/api/files/upload":
                 self.receive_upload()
+                return
+            if path == "/api/images/save":
+                self.save_image()
                 return
             body = self.read_json()
             if path == "/api/update/open-release":

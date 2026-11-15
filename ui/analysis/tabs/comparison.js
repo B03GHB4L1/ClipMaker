@@ -1,7 +1,7 @@
 // Native Player Comparison: radar and zone charts (Plotly, bundled with the
 // map component), Top 5 Moments tables and highlight reels cut server-side.
 import { projectRequest } from "../../projects.js";
-import { saveClipButton } from "../../save-clip.js";
+import { saveClipButton, plotlyConfig } from "../../save-clip.js";
 
 const el = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -85,7 +85,7 @@ export async function renderComparison(panel, context) {
     const Plotly = await loadPlotly();
     await Promise.all(view.figures.map((item, index) => {
       const target = targets[index];
-      return Plotly.react(target, item.figure.data, item.figure.layout, { ...item.config, responsive: true });
+      return Plotly.react(target, item.figure.data, item.figure.layout, plotlyConfig({ ...item.config, responsive: true }, Plotly));
     }));
   };
 

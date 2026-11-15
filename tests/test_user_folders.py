@@ -174,5 +174,48 @@ class SavedClipApiTests(ExportFolderApiTests):
             self.assertEqual(self.request(f"/api/saved/{saved['id']}/reveal", {}), (200, {"opened": True}))
             reveal.assert_called_once_with(Path(self.temporary.name) / "Videos" / "VizorPlay")
 
+
+class SavedPictureApiTests(ExportFolderApiTests):
+    """Chart PNG/GIF buttons send the picture to the engine, which saves it in
+    Videos/VizorPlay (the desktop windows ignore <a download>)."""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + bytes(64)
+    GIF = b"GIF89a" + bytes(64)
+
+    def send(self, data, name):
+        request = Request(self.base + "/api/images/save", data=data, method="POST",
+                          headers={"Content-Type": "application/octet-stream", "X-File-Name": name})
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            with error:
+                return error.code, json.loads(error.read())
+
+    def test_png_and_gif_pictures_are_saved_under_their_names(self):
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        status, result = self.send(self.PNG, "shot_map_saka.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(Path(result["saved"]["folder"]), folder)
+        self.assertEqual((folder / "shot_map_saka.png").read_bytes(), self.PNG)
+        self.assertEqual(self.send(self.PNG, "shot_map_saka.png")[1]["saved"]["name"], "shot_map_saka (2).png")
+        self.assertEqual(self.send(self.GIF, "build%20up.gif")[1]["saved"]["name"], "build up.gif")
+        with patch("packaging.user_folders.reveal_folder") as reveal:
+            self.assertEqual(self.request(f"/api/saved/{result['saved']['id']}/reveal", {}), (200, {"opened": True}))
+            reveal.assert_called_once_with(folder)
+
+    def test_the_file_type_comes_from_the_picture_not_the_name(self):
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(self.send(self.GIF, "chart.png")[1]["saved"]["name"], "chart.png.gif")
+        status, result = self.send(b"MZ not a picture", "run.exe")
+        self.assertEqual(status, 400)
+        self.assertIn("PNG and GIF", result["error"])
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["chart.png.gif"])
+
+    def test_names_cannot_leave_the_folder(self):
+        saved = self.send(self.PNG, "..%2F..%2FWindows%2Fevil.png")[1]["saved"]
+        self.assertEqual(Path(saved["folder"]), Path(self.temporary.name) / "Videos" / "VizorPlay")
+        self.assertEqual(saved["name"], "evil.png")
+
 if __name__ == "__main__":
     unittest.main()
