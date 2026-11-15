@@ -119,6 +119,12 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 
 const START_FAILED: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>VizorPlay could not start</h1><p>The local engine stopped or did not answer. Close this window and open VizorPlay again. If it keeps happening, reinstall VizorPlay; security software may have blocked or quarantined part of it.</p></main>';";
 
+const PREPARING: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>Preparing VizorPlay</h1><p>The first launch after installing or upgrading sets up VizorPlay&#39;s engine. This can take a few minutes and needs internet access. VizorPlay opens here when it is ready.</p></main>';";
+
+/// Set when Homebrew builds the macOS app on the Mac: the formula's engine
+/// launcher, used instead of a frozen engine bundled in the app.
+const ENGINE_LAUNCHER: Option<&str> = option_env!("VIZORPLAY_ENGINE_LAUNCHER");
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -126,25 +132,42 @@ pub fn run() {
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;
-            let data_dir = std::env::var_os("VIZORPLAY_DATA_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or(app.path().app_local_data_dir()?);
-            std::fs::create_dir_all(&data_dir)?;
-            let executable = if cfg!(windows) {
-                "backend/vizorplay-engine.exe"
-            } else {
-                "backend/vizorplay-engine"
+            let data_override = std::env::var_os("VIZORPLAY_DATA_DIR").map(std::path::PathBuf::from);
+            let (mut command, startup_limit) = match ENGINE_LAUNCHER {
+                // Homebrew's launcher prepares the Python engine (minutes on a
+                // first launch) and keeps projects where `vizorplay` keeps them.
+                Some(launcher) => {
+                    let mut command = Command::new(launcher);
+                    command.args(["--no-browser", "--port", &port.to_string()]);
+                    if let Some(data_dir) = &data_override {
+                        command.arg("--data-dir").arg(data_dir);
+                    }
+                    (command, Duration::from_secs(20 * 60))
+                }
+                None => {
+                    let data_dir = match data_override {
+                        Some(data_dir) => data_dir,
+                        None => app.path().app_local_data_dir()?,
+                    };
+                    std::fs::create_dir_all(&data_dir)?;
+                    let executable = if cfg!(windows) {
+                        "backend/vizorplay-engine.exe"
+                    } else {
+                        "backend/vizorplay-engine"
+                    };
+                    let server = app.path().resolve(executable, BaseDirectory::Resource)?;
+                    let mut command = Command::new(server);
+                    command.args(["--port", &port.to_string()]).current_dir(data_dir);
+                    (command, Duration::from_secs(90))
+                }
             };
-            let server = app.path().resolve(executable, BaseDirectory::Resource)?;
-            let mut command = Command::new(server);
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
                 command.creation_flags(0x08000000);
             }
-            let child = command.args(["--port", &port.to_string()])
+            let child = command
                 .env("VIZORPLAY_OWNER_PID", std::process::id().to_string())
-                .current_dir(data_dir)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -188,8 +211,14 @@ pub fn run() {
                 .build()?;
             let handle = app.handle().clone();
             thread::spawn(move || {
-                let deadline = Instant::now() + Duration::from_secs(90);
+                let started = Instant::now();
+                let deadline = started + startup_limit;
+                let mut told_preparing = false;
                 loop {
+                    if ENGINE_LAUNCHER.is_some() && !told_preparing && started.elapsed() > Duration::from_secs(3) {
+                        told_preparing = true;
+                        let _ = window.eval(PREPARING);
+                    }
                     if backend_ready(port, pid) {
                         let url = Url::parse(&format!("http://127.0.0.1:{port}"))
                             .expect("valid VizorPlay URL");

@@ -5,6 +5,8 @@ class Vizorplay < Formula
   sha256 "@SHA256@"
   license "MIT"
 
+  depends_on "node" => :build
+  depends_on "rust" => :build
   depends_on "ffmpeg"
   depends_on "python@3.12"
 
@@ -16,14 +18,60 @@ class Vizorplay < Formula
     libexec.install "packaging/update_check.py"
     libexec.install "packaging/user_folders.py"
 
-    (bin/"vizorplay").write <<~SH
+    # The engine: VizorPlay.app starts it, and so does `vizorplay --browser`.
+    (libexec/"vizorplay-engine").write <<~SH
       #!/bin/bash
       exec "#{Formula["python@3.12"].opt_bin}/python3.12" "#{libexec}/clipmaker_bootstrap.py" "$@"
+    SH
+    (libexec/"vizorplay-engine").chmod 0755
+
+    if OS.mac?
+      # Built here on the Mac, so the app is not quarantined like a download.
+      # Homebrew provides the engine, so the app bundles none.
+      system "npm", "ci", "--no-audit", "--no-fund"
+      (buildpath/"homebrew-app.json").write <<~JSON
+        {"bundle": {"resources": null, "createUpdaterArtifacts": false, "macOS": {"signingIdentity": "-"}}}
+      JSON
+      ENV["VIZORPLAY_ENGINE_LAUNCHER"] = "#{opt_libexec}/vizorplay-engine"
+      system "npm", "run", "tauri", "--", "build", "--bundles", "app", "--config", buildpath/"homebrew-app.json"
+      prefix.install "src-tauri/target/release/bundle/macos/VizorPlay.app"
+    end
+
+    # `vizorplay` opens the app window; `vizorplay --browser` opens VizorPlay in
+    # the default browser; engine options (--no-browser, --port, --data-dir) run the engine.
+    (bin/"vizorplay").write <<~SH
+      #!/bin/bash
+      if [ "$#" -eq 0 ] && [ -d "#{opt_prefix}/VizorPlay.app" ]; then
+        exec open "#{opt_prefix}/VizorPlay.app"
+      fi
+      if [ "$1" = "--browser" ]; then
+        shift
+      fi
+      exec "#{opt_libexec}/vizorplay-engine" "$@"
     SH
     (bin/"vizorplay").chmod 0755
   end
 
+  def caveats
+    <<~EOS
+      Open VizorPlay with:
+        vizorplay
+      To also see it in Finder's Applications folder:
+        ln -sfn "#{opt_prefix}/VizorPlay.app" ~/Applications/VizorPlay.app
+      The first launch after installing or upgrading prepares VizorPlay's engine.
+      It needs internet access and can take a few minutes.
+    EOS
+  end
+
   test do
     assert_predicate bin/"vizorplay", :executable?
+    assert_predicate libexec/"vizorplay-engine", :executable?
+    if OS.mac?
+      plist = prefix/"VizorPlay.app/Contents/Info.plist"
+      assert_predicate plist, :exist?
+      executable = Utils.safe_popen_read("/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", plist).strip
+      assert_predicate prefix/"VizorPlay.app/Contents/MacOS"/executable, :executable?
+      system "codesign", "--verify", "--strict", prefix/"VizorPlay.app"
+    end
   end
 end

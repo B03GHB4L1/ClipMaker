@@ -55,8 +55,11 @@ def record_receipt(platform, payload, evidence, output, commit, signature=None):
                    and result.get("shutdown_verified") and result.get("reinstall_and_uninstall")
                    for result in results):
             raise ValueError("Native upgrade, reinstall, uninstall and shutdown evidence is required")
-    elif not any(result.get("installed_versions") == ["0.9.0", "1.0.0"] for result in results):
-        raise ValueError("Homebrew upgrade evidence is required")
+    else:
+        if not any(result.get("installed_versions") == ["0.9.0", "1.0.0"] for result in results):
+            raise ValueError("Homebrew upgrade evidence is required")
+        if not any(result.get("engine_stopped") and all(result["engine_stopped"].values()) for result in results):
+            raise ValueError("Evidence that the Homebrew-built VizorPlay.app starts and stops its engine is required")
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(payload, output / payload.name)
     receipt = {"schema": 1, "platform": platform, "version": "1.0.0", "commit": commit,
@@ -116,7 +119,7 @@ def assemble(directory, output, commit, repository):
                 "repository": repository, "artifacts": receipts,
                 "limits": ["Controlled predecessor uses the same source, not a historical binary",
                            "Unsigned Windows installer may show a security warning",
-                           "macOS is a Homebrew source launcher opening the default browser",
+                           "macOS: Homebrew builds VizorPlay.app on the Mac (not notarized; opens because it is built locally)",
                            "In-app updates install on Windows only; Linux and macOS show a notice",
                            "Public Homebrew tap and WinGet submissions are separate publication steps",
                            "Linux support verified on Ubuntu 22.04 DEB; RPM is not included",

@@ -42,7 +42,7 @@ Version 1.0 is being prepared and is not published yet.
 |---|---|
 | Windows 10 and 11 | Run `VizorPlay_1.0.0_x64-setup.exe`. It installs for your user only. The installer is not code-signed, so Windows may say "Windows protected your PC": choose **More info**, then **Run anyway**. |
 | Ubuntu, Debian, Linux Mint | `sudo apt install ./VizorPlay_1.0.0_amd64.deb`, then start **VizorPlay** from the app menu or run `vizorplay`. |
-| macOS | Through Homebrew once the tap is published: `brew tap B03GHB4L1/vizorplay`, `brew install vizorplay`, then run `vizorplay`. It opens in your default browser. There is no Apple-signed app, so no promise that every macOS security prompt is avoided. |
+| macOS | Through Homebrew once the tap is published: `brew tap B03GHB4L1/vizorplay`, `brew install vizorplay`, then run `vizorplay`. Homebrew builds the VizorPlay app on your Mac, so it opens in its own window. It is not notarized by Apple, so there is no promise that every macOS security prompt is avoided. |
 
 You only install once. When a new version comes out, the bar at the bottom of
 the app says so: on Windows, **Update and restart** installs it for you; on

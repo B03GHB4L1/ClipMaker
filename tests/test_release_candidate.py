@@ -22,9 +22,20 @@ class ReleaseCandidateTests(unittest.TestCase):
         payload.write_bytes((platform + " tested payload").encode())
         result = {"status": "passed", "installed_versions": ["0.9.0", "1.0.0"] if platform == "macOS"
                   else ["0.9.0", "1.0.0", "1.0.0"], "shutdown_verified": True, "reinstall_and_uninstall": True}
+        if platform == "macOS":  # tests/macos_app_smoke.py: the Homebrew-built app ran its engine
+            result["engine_stopped"] = {"pid": True, "parent_pid": True}
         evidence = self.root / f"{platform}.json"
         evidence.write_text(json.dumps(result))
         return payload, evidence
+
+    def test_macos_needs_the_homebrew_app_launch_evidence(self):
+        payload, evidence = self.fixture("macOS")
+        result = json.loads(evidence.read_text())
+        for stopped in (None, {"pid": True, "parent_pid": False}):
+            result["engine_stopped"] = stopped
+            evidence.write_text(json.dumps(result))
+            with self.assertRaisesRegex(ValueError, "VizorPlay.app"):
+                record_receipt("macOS", payload, [evidence], self.receipts, self.commit)
 
     def updater(self, passed=True):
         signature = self.root / "VizorPlay_1.0.0_x64-setup.exe.sig"

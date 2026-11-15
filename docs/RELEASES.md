@@ -44,11 +44,15 @@ Edge or Google Chrome (Edge ships with Windows 10 and 11); no browser is bundled
 
 ## macOS
 
-macOS uses a Homebrew formula rather than an unsigned application bundle. The
-formula installs the shared source and a `vizorplay` launcher. On its first run,
-the launcher creates a private Python environment under the user's Library,
-installs the pinned dependencies (no browser download), then opens the
-local VizorPlay interface in the default browser.
+macOS uses a Homebrew formula rather than a downloaded, unsigned application
+bundle. The formula installs the shared source and builds `VizorPlay.app` on the
+Mac (Rust and Node.js are build-only dependencies), ad hoc signed and never
+quarantined because nothing was downloaded as an app. The app has no frozen
+engine inside: it starts the formula's engine launcher, which creates a private
+Python environment under the user's Library on first run and installs the pinned
+dependencies (no browser download). `vizorplay` opens the app;
+`vizorplay --browser` keeps the older default-browser route. The app is not
+notarized; acceptance records Gatekeeper's assessment rather than claiming it passes.
 The formula includes the process-owner adapter. Video and CSV selection use
 browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
@@ -94,8 +98,12 @@ Acceptance installs a 0.9.0 predecessor built from the last commit before the
 program rename (so it is `clipmaker.exe` / `/usr/bin/clipmaker`), saves
 project data, upgrades to 1.0.0, checks the old program and engine are gone, relaunches and renders/exports, reinstalls,
 then uninstalls while preserving the isolated project. macOS likewise upgrades
-a local test formula from 0.9.0 to 1.0.0 and reopens the project. These checks
-exercise different-version package lifecycle; they do not certify migration
+a local test formula from 0.9.0 to 1.0.0 and reopens the project, then opens the
+Homebrew-built VizorPlay.app, checks its signature and lack of quarantine, that it
+starts its own engine with the projects folder it was given, and that closing it
+stops the engine (tests/macos_app_smoke.py). macOS has no WebDriver for app
+windows, so the screens are exercised against the same engine in a browser.
+These checks exercise different-version package lifecycle; they do not certify migration
 from every historical ClipMaker binary/schema or the public package channels.
 
 ## Verification

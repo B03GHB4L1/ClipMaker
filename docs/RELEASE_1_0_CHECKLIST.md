@@ -25,12 +25,13 @@ This checklist records evidence, not a guarantee that software has no bugs.
 | Public Mac install/update | Prepared formula still needs release asset plus authorized tap publication; tap currently private/empty |
 | Public Windows package updates | WinGet manifests prepared; community submission/acceptance still needed |
 | Linux updates | Download and install newer DEB; no automatic update repository configured |
-| Unsigned installation expectations | Windows security warnings possible; Homebrew source launcher is not a Gatekeeper bypass guarantee |
+| Unsigned installation expectations | Windows security warnings possible; the Homebrew-built macOS app is not notarized and is not a Gatekeeper bypass guarantee |
 | Release notes / support / licenses | Existing license and bundled font licenses; final candidate limitations must accompany publication |
 
-Candidate scope: Windows x64 NSIS, Ubuntu 22.04 x64 DEB, and macOS Homebrew
-source launcher with the shared frontend in the default browser. Native macOS
-app bundles, RPM packages, in-app automatic updates, and certification across
+Candidate scope: Windows x64 NSIS, Ubuntu 22.04 x64 DEB, and a macOS Homebrew
+formula that builds VizorPlay.app on the Mac (ad hoc signed, not notarized; its
+launch test is tests/macos_app_smoke.py in the Homebrew CI job). Downloaded or
+notarized macOS app bundles, RPM packages, in-app automatic updates, and certification across
 all Linux distributions are not implied by these tests.
 
 Do not mark remaining gates passed based only on unit tests or a successful
