@@ -66,6 +66,11 @@ class SharedUiTests(unittest.TestCase):
         sizes = Image.open(UI.parent / "src-tauri/icons/icon.ico").info["sizes"]
         self.assertIn((256, 256), sizes)
         self.assertIn((16, 16), sizes)
+        # The Mac app needs its own .icns (Tauri cannot make one from a 1024px PNG).
+        self.assertIn("icons/icon.icns", bundle["icon"])
+        mac = Image.open(UI.parent / "src-tauri/icons/icon.icns")
+        self.assertIn((512, 512, 2), mac.info["sizes"])
+        self.assertEqual(mac.convert("RGBA").getpixel((4, 4))[3], 0)
 
     def test_removed_progress_has_no_markup_or_handlers(self):
         for name in ("index.html", "app.js", "styles.css", "compact.css"):
