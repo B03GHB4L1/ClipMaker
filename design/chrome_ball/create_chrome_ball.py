@@ -6,7 +6,7 @@ from pathlib import Path
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--brand', default='CM')
@@ -33,6 +33,7 @@ def metal(name, color, roughness):
 silver = metal('Satin-polished silver chrome', (0.72, 0.77, 0.79), 0.28)
 green = metal('ClipMaker emerald chrome', (0.055, 0.48, 0.006), 0.32)
 seam = metal('Recessed graphite silver seams', (0.09, 0.115, 0.12), 0.29)
+graphite = metal('Graphite chrome visor', (0.05, 0.055, 0.06), 0.3)
 
 bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1)
 seed = bpy.context.object
@@ -126,6 +127,11 @@ def lettering(body, size, x, z):
     obj.select_set(True)
     bpy.ops.object.convert(target='MESH')
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    obj.select_set(False)
+    return wrap(obj)
+
+
+def wrap(obj):
     # Tessellate before wrapping so long letter strokes follow the sphere.
     letter_mesh = bmesh.new()
     letter_mesh.from_mesh(obj.data)
@@ -140,17 +146,51 @@ def lettering(body, size, x, z):
         vertex.co.y = -math.sqrt(max(0.01, 1 - px * px - pz * pz)) + (py + 1) - 0.008
     for polygon in obj.data.polygons:
         polygon.use_smooth = True
-    obj.select_set(False)
     return obj
 
 
+def emblem(svg, width, z):
+    """Emboss the VizorPlay mark across the front of the ball, centred and `width`
+    wide: the visor frame in graphite chrome, the play triangle in emerald chrome."""
+    before = set(bpy.context.scene.objects)
+    bpy.ops.import_curve.svg(filepath=str(svg))
+    parts = [o for o in bpy.context.scene.objects if o not in before and o.type == 'CURVE']
+    corners = [o.matrix_world @ Vector(c) for o in parts for c in o.bound_box]
+    min_x, max_x = min(v.x for v in corners), max(v.x for v in corners)
+    min_y, max_y = min(v.y for v in corners), max(v.y for v in corners)
+    scale = width / (max_x - min_x)
+    meshes = []
+    for obj in parts:
+        frame = obj.dimensions.x > 0.5 * (max_x - min_x)  # the small part is the play triangle
+        obj.data.extrude = 0.006 / scale
+        obj.data.bevel_depth = 0.0018 / scale
+        obj.data.bevel_resolution = 2
+        obj.data.resolution_u = 8
+        obj.data.materials.clear()
+        obj.data.materials.append(graphite if frame else green)
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.convert(target='MESH')
+        obj.select_set(False)
+        obj.name = 'Embossed VizorPlay ' + ('visor' if frame else 'play mark')
+        world = obj.matrix_world.copy()
+        for vertex in obj.data.vertices:
+            x, y, depth = world @ vertex.co
+            vertex.co = Vector(((x - (min_x + max_x) / 2) * scale, -1 - depth * scale,
+                                (y - (min_y + max_y) / 2) * scale + z))
+        obj.matrix_world = Matrix.Identity(4)
+        meshes.append(wrap(obj))
+    return meshes
+
+
 if args.brand == 'VizorPlay':
-    lettering('VizorPlay', 0.37, -0.78, -0.12)
+    emblem(Path(__file__).resolve().parents[2] / 'ui' / 'assets' / 'brand' / 'vizorplay-mark.svg', 1.5, 0.02)
 else:
     lettering('CM', 1.02, -0.73, -0.27)
     lettering('1.3', 0.36, 0.29, 0.20)
 
-asset_objects = [football, core] + [o for o in bpy.context.scene.objects if o.name.startswith('Emerald chrome')]
+asset_objects = [football, core] + [o for o in bpy.context.scene.objects
+                                     if o.name.startswith(('Emerald chrome', 'Embossed VizorPlay'))]
 root = bpy.data.objects.new(args.brand + ' chrome football', None)
 bpy.context.collection.objects.link(root)
 for obj in asset_objects:

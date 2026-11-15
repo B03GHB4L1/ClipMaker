@@ -515,7 +515,11 @@ const renderCorrections = () => {
   corrections.forEach((correction, index) => {
     const row = document.createElement("div");
     const label = document.createElement("span");
-    label.textContent = `P${correction.period} from ${correction.clock || correction.at_seconds + "s"}: ${correction.seconds ?? correction.amount_seconds}s ${correction.note || ""}`;
+    const shift = Number(correction.seconds ?? correction.amount_seconds ?? 0);
+    const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+    const from = correction.clock || clock(Number(correction.at_seconds || 0));
+    label.textContent = `P${correction.period} from ${from}: ${shift < 0 ? "missing footage" : "extra footage"}, ` +
+      `later clips ${clock(Math.abs(shift))} ${shift < 0 ? "earlier" : "later"}${correction.note ? ` (${correction.note})` : ""}`;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Remove";
@@ -1253,7 +1257,7 @@ field("add-correction").onclick = () => {
     if (!field("correction-period").value) throw new Error("Choose the period the recording problem is in.");
     if (!field("correction-clock").value.trim()) throw new Error("Enter the match clock where the problem starts, as MM:SS.");
     if (!field("correction-direction").value) throw new Error("Choose what happened to the recording.");
-    if (!field("correction-amount").value.trim()) throw new Error("Enter how much to shift later clips, as MM:SS.");
+    if (!field("correction-amount").value.trim()) throw new Error("Enter how much footage is missing or extra, as MM:SS.");
     const at = clockSeconds(field("correction-clock").value);
     const amount = clockSeconds(field("correction-amount").value);
     if (!amount) throw new Error("Enter a non-zero correction.");

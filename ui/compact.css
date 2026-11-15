@@ -400,3 +400,12 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
   height: 100%;
   margin: 0;
 }
+
+/* Event tables carry every CSV column: scroll sideways, with the clock pinned left. */
+.event-table-wrap { overflow: auto; overscroll-behavior-x: contain; }
+.event-table-wrap:focus-visible { outline: 2px solid #6e8f12; outline-offset: -2px; }
+.event-table-wrap table { width: max-content; min-width: 100%; }
+.event-table-wrap :is(th, td) { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.event-table-wrap tr > :first-child { position: sticky; left: 0; z-index: 1; background: #fbfbf9; font-weight: 400; box-shadow: inset -1px 0 0 #e3e5df; }
+.event-table-wrap thead tr > :first-child { z-index: 2; background: #f2f3ee; }
+.event-table-wrap .event-flag { color: #4f6b0c; text-align: center; }
