@@ -259,7 +259,9 @@ class InstalledBrowserIntegrationTests(unittest.TestCase):
                 f"http://127.0.0.1:{server.server_address[1]}/",
                 lambda url: scoresway.performfeeds_kind(url.replace(f"127.0.0.1:{server.server_address[1]}",
                                                                     "api.performfeeds.com"), "mid"),
-                browser=browser, timeout=60, settle=1, expected={"match", "matchevent"})
+                # The app's own quiet period: a busy runner can run the page's 200 ms timer more
+                # than a second late, and a 1 s settle then ended the capture before the feeds.
+                browser=browser, timeout=60, settle=3, expected={"match", "matchevent"})
         self.assertEqual(set(captured), {"match", "matchevent"})
         self.assertTrue(captured["match"].startswith('{"feed": "/soccerdata/match/key/mid"}'))
         self.assertEqual(len(captured["matchevent"]), len('{"feed": "/soccerdata/matchevent/key/mid"}') + 200_000)
