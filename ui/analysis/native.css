@@ -50,7 +50,7 @@
 .native-button { display: inline-block; padding: 7px 12px; border: 1px solid var(--cm-ink); background: var(--cm-ink); color: var(--cm-paper); font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; }
 .native-button.native-secondary { background: transparent; color: var(--cm-ink); }
 .native-button:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
-.native-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
+.native-detail { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 24px; padding-top: 10px; border-top: 1px solid var(--cm-rule); }
 .native-shot-panel h3 { margin: 0 0 2px; font-size: 16px; }
 .native-shot-panel dl { margin: 12px 0 0; font-size: 12px; }
 .native-shot-panel dt { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--cm-muted); }
@@ -70,7 +70,18 @@
 .native-slider { grid-template-columns: 1fr auto; align-items: center; }
 .native-slider .native-field-label { grid-column: 1 / -1; }
 .native-slider output { font-size: 12px; min-width: 3ch; text-align: right; }
-.native-watch video { width: 100%; max-height: 320px; background: #000; }
+/* Clip players keep the footage's own shape (16:9 until it loads), so there are no black bars;
+   the height stays within the screen so the controls below remain visible. */
+.native-watch video,
+.native-moment video {
+  display: block;
+  width: min(100%, calc((100vh - 240px) * 16 / 9));
+  width: min(100%, calc((100svh - 240px) * 16 / 9));
+  height: auto;
+  aspect-ratio: auto 16 / 9;
+  border-radius: 4px;
+  background: transparent;
+}
 .native-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .native-inline-message { margin: 0; font-size: 12px; color: var(--cm-muted); }
 .native-inline-error { margin: 0; font-size: 12px; color: #ac302e; }

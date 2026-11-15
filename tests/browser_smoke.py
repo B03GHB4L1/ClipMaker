@@ -280,7 +280,11 @@ def exercise_clip_editor(page, evidence):
     assert abs(duration_of(exported) - 2.5) < 0.3, duration_of(exported)
 
     stage("export a ticked set as separate files, named by timeline number")
+    # With nothing ticked, "Selected" has nothing to export and cannot be chosen.
+    expect(page.locator('input[name="export-scope"][value="selected"]')).to_be_disabled()
+    expect(page.locator('[data-scope-all] .seg-count')).to_have_text("1")
     page.get_by_role("checkbox", name="Select clip 1").check()
+    expect(page.locator('[data-scope-selected] .seg-count')).to_have_text("1")
     expect(page.locator('input[name="export-scope"][value="selected"]')).to_be_checked()
     page.locator('.export-bar label').filter(has_text="Separate files").click()
     page.get_by_role("button", name="Export 1 clip", exact=True).click()
@@ -416,6 +420,8 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
         }
         throw new Error('Fixture goal missing from the native shot map');
     }""")
+    # Before anything is picked there is no Clear button, and nothing else (it used to print "null").
+    expect(page.locator(".native-picker:visible").first).not_to_contain_text("null")
     plot.click(position=position)
     detail = page.locator(".native-detail")
     expect(detail).to_contain_text("One")
@@ -426,6 +432,12 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.wait_for_function("document.querySelector('.native-watch video')?.duration > 0", timeout=120000)
     duration = page.evaluate("document.querySelector('.native-watch video').duration")
     assert 1.5 <= duration <= 2.6, duration  # 1 s before + 1 s after the 0'02" goal
+    # The clip player keeps the footage's shape (no black bars) and gets the wide column.
+    player = page.evaluate("""() => { const v = document.querySelector('.native-watch video'); const r = v.getBoundingClientRect();
+        return {width: r.width, bars: Math.abs(r.width - r.height * v.videoWidth / v.videoHeight),
+                panel: document.querySelector('.native-detail').getBoundingClientRect().width}; }""")
+    assert player["bars"] <= 2, player
+    assert player["width"] >= player["panel"] * 0.6 or player["width"] >= 640, player
     expect(page.get_by_role("link", name="Download clip")).to_have_attribute("download", "One_0.mp4")
     with page.expect_download(timeout=30000) as downloaded:
         component.locator('[data-export="png"]').click()
@@ -762,6 +774,7 @@ def exercise(page, base, root, evidence, errors):
     assert page.evaluate('document.fonts.check(\'400 13px "Geist Mono"\')')
     assert "Geist Mono" in page.locator('body').evaluate('(element) => getComputedStyle(element).fontFamily')
     assert page.locator('#nav-drawer').get_attribute('inert') is not None
+    expect(page.locator('#nav-drawer')).not_to_contain_text("No cloud upload")
     page.get_by_role("button", name="New project", exact=True).click()
     page.locator('[data-toast]').filter(has_text="New local project created").wait_for()
     page.get_by_role("textbox", name="Project name").fill("Browser test project")
@@ -840,9 +853,12 @@ def exercise(page, base, root, evidence, errors):
           const box = selector => document.querySelector(selector).getBoundingClientRect();
           return {video: box('.viewer-frame'), track: box('.timeline-track'), footer: box('.app-footer').top,
                   rail: box('.filter-rail'), editor: box('.editor'), inspector: box('.inspector'),
-                  export: box('.export-bar')};
+                  export: box('.export-bar'), transport: box('.transport')};
         }""")
         assert sizes["rail"]["right"] <= sizes["editor"]["left"], ("filters stacked above the editor", width, sizes)
+        # The play controls sit right under a true 16:9 video, with no gap or overlap.
+        assert abs(sizes["transport"]["top"] - sizes["video"]["bottom"] - 8) <= 1, ("gap under the video", width, sizes)
+        assert abs(sizes["video"]["width"] / sizes["video"]["height"] - 16 / 9) < 0.02, ("video not 16:9", width, sizes)
         assert sizes["video"]["width"] >= 560, ("video too small", width, sizes)
         if width == 1440:
             assert sizes["track"]["bottom"] <= sizes["footer"] + 1, ("timeline runs under the footer", sizes)

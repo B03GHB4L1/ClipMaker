@@ -131,7 +131,7 @@ export function eventTab(slug, title) {
       choice.addEventListener("change", () => (choice.value === "" ? select(null) : onPick(Number(choice.value))));
       const clear = controls.selected === null || controls.selected === undefined ? null
         : el("button", { type: "button", class: "native-button native-secondary", text: "Clear selection", onclick: () => select(null) });
-      pickerRow.replaceChildren(choice, clear);
+      pickerRow.replaceChildren(...[choice, clear].filter(Boolean));
     };
 
     const clipKey = () => `${controls.selected}:${clip.before}:${clip.after}`;

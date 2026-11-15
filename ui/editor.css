@@ -155,7 +155,7 @@
 .editor-empty h2 { margin: 0; font-size: 18px; font-weight: 550; }
 .editor-empty p { max-width: 52ch; margin: 0; color: var(--cm-muted); font-size: 12px; line-height: 1.7; }
 
-.editor { min-width: 0; container-type: inline-size; }
+.editor { min-width: 0; container: editor / inline-size; }
 .editor-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -175,7 +175,7 @@
 
 /* Wide editors: the video leads, clip and export controls sit beside it, and
    the trim bar and timeline run full width underneath, all in one view. */
-@container (min-width: 860px) {
+@container editor (min-width: 860px) {
   .editor-body {
     grid-template-columns: minmax(0, 1fr) 316px;
     grid-template-rows: auto minmax(0, 1fr);
@@ -242,12 +242,28 @@
 .transport .play-toggle { width: 44px; border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
 .transport .play-toggle:hover:not(:disabled) { background: #2c2f29; }
 .transport svg { width: 14px; height: 14px; fill: currentColor; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
-.play-all { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 11px; color: var(--cm-muted); cursor: pointer; }
-.play-all input { accent-color: var(--cm-ink); }
+.play-all { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 8px; font-size: 11px; color: var(--cm-muted); cursor: pointer; }
+.play-all input { width: 14px; height: 14px; min-height: 0; margin: 0; accent-color: var(--cm-ink); }
 .clip-clock { margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 
+/* Wide editors: the viewer is as tall as the clip column beside it (or as tall as the screen
+   allows), and the video fills that height, so no gap opens under the play controls.
+   Inside .viewer, 100cqw is the editor's width; the video column is about 356px narrower.
+   The query names the editor, because .viewer is itself a (narrower) size container. */
+@container editor (min-width: 860px) {
+  .viewer {
+    container-type: size;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: min(calc(100vh - 452px), calc((100cqw - 356px) * 9 / 16 + 44px));
+    min-height: min(calc(100svh - 452px), calc((100cqw - 356px) * 9 / 16 + 44px));
+  }
+  .viewer-frame, .transport { flex: none; width: min(100%, calc((100cqh - 44px) * 16 / 9)); min-width: min(100%, 480px); }
+}
+
 /* A single-column editor scrolls anyway, so let the video take the width. */
-@container (max-width: 859px) {
+@container editor (max-width: 859px) {
   .viewer-frame, .transport {
     width: min(100%, calc((100vh - 240px) * 16 / 9));
     width: min(100%, calc((100svh - 240px) * 16 / 9));
@@ -334,7 +350,7 @@
 .trim-length span { color: var(--cm-muted); font-size: 10px; }
 .trim-length strong { min-height: 32px; display: flex; align-items: center; font-weight: 600; font-variant-numeric: tabular-nums; }
 .trim-actions { display: flex; gap: 14px; margin-left: auto; min-height: 32px; align-items: center; }
-@container (min-width: 860px) {
+@container editor (min-width: 860px) {
   .trim-edge input { flex: 1; min-width: 0; }
   .trim-edge { width: 100%; }
 }
@@ -465,8 +481,42 @@
   padding-top: 12px;
   border-top: 1px solid var(--cm-rule);
 }
-.export-bar fieldset legend { margin-bottom: 4px; color: var(--cm-muted); font-size: 10px; font-weight: 500; }
-.export-bar .segmented-control span { min-height: 32px; font-size: 11px; white-space: nowrap; }
+/* Export choices: the label sits beside a light segmented track that matches the button's height.
+   A floated legend joins the flex row instead of sitting on the fieldset border. */
+.export-bar fieldset { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.export-bar fieldset legend { float: left; margin: 0; padding: 0; color: var(--cm-muted); font-size: 11px; font-weight: 500; }
+.export-bar .segmented-control { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 2px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; }
+.export-bar .segmented-control span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: transparent;
+  color: #5d6058;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: background-color 140ms var(--cm-settle), color 140ms var(--cm-settle);
+}
+.export-bar .segmented-control label:hover input:not(:checked, :disabled) + span { background: #f3f4ef; color: var(--cm-ink); }
+.export-bar .segmented-control input:checked + span { background: var(--cm-ink); color: #fff; box-shadow: none; }
+.export-bar .segmented-control input:disabled + span { color: #a3a69e; cursor: not-allowed; }
+.export-bar .segmented-control input:focus-visible + span { outline: 2px solid #6e8f12; outline-offset: 1px; }
+.seg-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #eceee8;
+  color: var(--cm-ink);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+.export-bar input:checked + span .seg-count { background: #ffffff2e; color: #fff; }
+.export-bar input:disabled + span .seg-count { background: #f1f2ee; color: inherit; }
 .export-bar .export-button {
   min-height: 40px;
   padding: 0 20px;
