@@ -80,3 +80,6 @@ jobs:
             release-artifacts/INSTALL.md
           fail_on_unmatched_files: true
           generate_release_notes: true
+          # Installed copies read their update feed from the Latest release. VizorPlay's
+          # v1.0.0 tag sorts below ClipMaker's old v1.2, so mark it Latest explicitly.
+          make_latest: 'true'

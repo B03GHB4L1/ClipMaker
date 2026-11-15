@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import Mock
 from urllib.request import Request, urlopen
 
+import yaml
+
 from packaging import update_check
 from packaging.clipmaker_api_server import INSTALL_UPDATE_PATH, create_server
 
@@ -168,6 +170,11 @@ class UpdaterWiringTests(unittest.TestCase):
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("secrets: inherit", release)
         self.assertIn("release-artifacts/latest.json", release)
+        # The feed is read from the Latest release, which must be VizorPlay's even though
+        # its v1.0.0 tag sorts below ClipMaker's older v1.2.
+        publish = yaml.safe_load(release)["jobs"]["publish"]["steps"]
+        gh_release = next(step for step in publish if "action-gh-release" in step.get("uses", ""))
+        self.assertEqual(gh_release["with"]["make_latest"], "true")
         self.assertTrue(re.search(r"releases/latest/download/latest\.json", update_check.DEFAULT_FEED))
 
 
