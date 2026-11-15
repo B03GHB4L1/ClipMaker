@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse, parse_qs, unquote
 
 if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
@@ -487,6 +487,33 @@ def choose_output_folder(initial_dir: str = "") -> Path | None:
     return Path(selected).resolve() if selected else None
 
 
+_UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def readable_name(text: str, fallback: str = "VizorPlay export") -> str:
+    """A file or folder name every OS accepts, kept close to what the user typed."""
+    name = _UNSAFE_NAME.sub(" ", str(text or "")).strip(" .")
+    name = re.sub(r"\s+", " ", name)[:80].strip(" .")
+    return name or fallback
+
+
+def clip_folder_name(label: str, count: int, when: datetime) -> str:
+    """e.g. "Reims v Strasbourg - 3 clips - 2026-11-15 17h42" (no colons: Windows forbids them)."""
+    clips = "1 clip" if count == 1 else f"{count} clips"
+    return f"{readable_name(label)} - {clips} - {when.strftime('%Y-%m-%d %Hh%M')}"
+
+
+def numbered(path: Path, taken: Callable[[Path], bool], folder: bool = False) -> Path:
+    """path, or "name (2)", "name (3)"... beside it when that name is already used.
+    A folder is numbered on its whole name (club names can contain dots)."""
+    stem, suffix = (path.name, "") if folder else (path.stem, path.suffix)
+    candidate, number = path, 2
+    while taken(candidate):
+        candidate = path.with_name(f"{stem} ({number}){suffix}")
+        number += 1
+    return candidate
+
+
 class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
@@ -501,12 +528,17 @@ class JobManager:
         config = dict(config)
         if not config["dry_run"]:
             output = Path(config["output_dir"]) / config["output_filename"]
-            if config.get("individual_clips"):
-                config["output_dir"] = str(output.parent / f"clips-{job_id}")
-            else:
-                with self._lock:
-                    if output.exists() or str(output.resolve()) in self._reserved_outputs:
-                        config["output_filename"] = f"{output.stem}-{job_id}{output.suffix}"
+            with self._lock:
+                taken = lambda path: path.exists() or str(path.resolve()) in self._reserved_outputs
+                if config.get("individual_clips"):
+                    # A set of clips gets its own folder, named so a person can tell sets apart.
+                    folder = numbered(output.parent / clip_folder_name(
+                        config.get("export_label") or "", len(config.get("clip_windows") or []), datetime.now()), taken, folder=True)
+                    config["output_dir"] = str(folder)
+                    self._reserved_outputs.add(str(folder.resolve()))
+                else:
+                    # Never overwrite an earlier reel: "Highlights (2).mp4" sits beside it.
+                    config["output_filename"] = numbered(output, taken).name
                     self._reserved_outputs.add(str((output.parent / config["output_filename"]).resolve()))
         job = {
             "id": job_id,
@@ -522,8 +554,10 @@ class JobManager:
         worker = threading.Thread(target=self._run, args=(job_id, config, cancellation), daemon=True)
         with self._lock:
             if self._closing:
-                if not config["dry_run"] and not config.get("individual_clips"):
-                    self._reserved_outputs.discard(str((Path(config["output_dir"]) / config["output_filename"]).resolve()))
+                if not config["dry_run"]:
+                    reserved = Path(config["output_dir"]) if config.get("individual_clips") else \
+                        Path(config["output_dir"]) / config["output_filename"]
+                    self._reserved_outputs.discard(str(reserved.resolve()))
                 raise ValueError("The local engine is shutting down")
             self._jobs[job_id] = job
             self._cancellations[job_id] = cancellation
@@ -576,10 +610,11 @@ class JobManager:
             self._update(job_id, status="failed", files=[], finished_at=datetime.now(timezone.utc).isoformat())
         finally:
             self._cleanup_temporary_data(config)
-            if not config["dry_run"] and not config.get("individual_clips"):
-                output = str((Path(config["output_dir"]) / config["output_filename"]).resolve())
+            if not config["dry_run"]:
+                output = Path(config["output_dir"]) if config.get("individual_clips") else \
+                    Path(config["output_dir"]) / config["output_filename"]
                 with self._lock:
-                    self._reserved_outputs.discard(output)
+                    self._reserved_outputs.discard(str(output.resolve()))
 
     def _execute(self, job_id: str, config: dict[str, Any], cancellation: threading.Event) -> None:
         try:
@@ -993,7 +1028,10 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         "after_buffer": max(0, min(60, int(options.get("after_buffer", 8)))),
         "min_gap": max(0, min(60, int(options.get("min_gap", 6)))),
         "output_dir": str(output_dir),
-        "output_filename": Path(str(options.get("output_filename") or "Highlights")).stem + output_format,
+        "output_filename": readable_name(Path(str(options.get("output_filename") or "Highlights")).stem, "Highlights") + output_format,
+        # Names the folder a set of separate clips is saved in.
+        "export_label": str(match.get("project_name") or "").strip() or " v ".join(
+            team for team in (str(match.get("home_team") or "").strip(), str(match.get("away_team") or "").strip()) if team),
         "output_format": output_format,
         "video_crf": max(16, min(30, int(options.get("video_crf", 20)))),
         "encoder_preset": encoder_preset,
