@@ -1,4 +1,5 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
+import { saveClip } from "./save-clip.js";
 import {
   duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
   restoreSelection, totalDuration, trimClip,
@@ -898,10 +899,9 @@ const renderClip = async () => {
     if (version !== renderRevision || generation !== previewRevision) return;
     video.dataset.src = result.file.url;
     video.src = result.file.url;
-    const download = field("render-download");
-    download.href = result.file.url;
-    download.download = `clip-${focusIndex + 1}.mp4`;
-    download.hidden = false;
+    const save = field("render-download");
+    save.onclick = () => saveClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, save);
+    save.hidden = false;
     field("render-status").textContent = "Clip ready";
   } catch (error) {
     field("render-status").textContent = error.message;

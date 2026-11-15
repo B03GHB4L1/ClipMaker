@@ -2,6 +2,7 @@
 // recorder (analysis_core.tactical) and returns its elements in order; this
 // draws them and turns recorded controls back into inputs.
 import { projectRequest } from "../../projects.js";
+import { saveClipButton } from "../../save-clip.js";
 
 const el = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -189,7 +190,7 @@ export async function renderTactical(panel, context) {
       else if (slot.file) {
         blocks.push(el("div", { class: "native-watch" }, el("h4", { text: title }),
           el("video", { controls: true, preload: "metadata", src: slot.file.url, "aria-label": title }),
-          el("div", { class: "native-actions" }, el("a", { class: "native-button", href: slot.file.url, download: slot.file.name, text: `Download ${title.toLowerCase()}` }))));
+          el("div", { class: "native-actions" }, saveClipButton(slot.file, title === "Moment" ? "Clip" : "Reel"))));
       }
     }
     clips.replaceChildren(...blocks);

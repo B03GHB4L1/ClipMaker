@@ -118,5 +118,61 @@ class ExportFolderApiTests(unittest.TestCase):
             reveal.assert_called_once_with(folder)
 
 
+
+class SavedClipApiTests(ExportFolderApiTests):
+    """"Save clip" copies a clip VizorPlay cut for watching into Videos/VizorPlay.
+    The desktop windows ignore <a download>, so the engine does the saving."""
+
+    def watched_clip(self, folder="analysis-clips", data=b"clip-bytes"):
+        clip = Path(self.temporary.name) / folder / "preview-abc123.mp4"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(data)
+        self.server.media_files["tok1"] = clip
+        return clip
+
+    def test_save_copies_the_clip_into_the_videos_folder_under_its_name(self):
+        clip = self.watched_clip()
+        status, result = self.request("/api/media/tok1/save", {"name": "Bukayo Saka 34'.mp4"})
+        self.assertEqual(status, 200)
+        saved = result["saved"]
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(Path(saved["folder"]), folder)
+        self.assertEqual(saved["name"], "Bukayo Saka 34'.mp4")
+        self.assertEqual((folder / saved["name"]).read_bytes(), b"clip-bytes")
+        self.assertTrue(clip.is_file(), "the watched clip keeps playing in the page")
+        self.assertEqual([p.name for p in folder.iterdir()], [saved["name"]], "no temporary files left behind")
+
+    def test_saving_again_never_replaces_an_earlier_clip(self):
+        self.watched_clip()
+        names = [self.request("/api/media/tok1/save", {"name": "Saka 34'"})[1]["saved"]["name"] for _ in range(3)]
+        self.assertEqual(names, ["Saka 34'.mp4", "Saka 34' (2).mp4", "Saka 34' (3).mp4"])
+
+    def test_names_cannot_leave_the_folder(self):
+        self.watched_clip(folder="previews")
+        saved = self.request("/api/media/tok1/save", {"name": "../../Windows/evil:name"})[1]["saved"]
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(Path(saved["folder"]), folder)
+        self.assertTrue((folder / saved["name"]).is_file())
+        self.assertNotIn("/", saved["name"])
+        self.assertNotIn(":", saved["name"])
+
+    def test_only_clips_cut_for_watching_can_be_saved(self):
+        # The user's match video is also served by the engine; it is not a clip to copy.
+        match_video = Path(self.temporary.name) / "match.mp4"
+        match_video.write_bytes(b"whole match")
+        self.server.media_files["video"] = match_video
+        self.assertEqual(self.request("/api/media/video/save", {"name": "x"})[0], 404)
+        self.assertEqual(self.request("/api/media/unknown/save", {"name": "x", "path": str(match_video)})[0], 404)
+        self.assertFalse((Path(self.temporary.name) / "Videos").exists())
+
+    def test_open_folder_shows_where_the_clip_was_saved(self):
+        self.watched_clip()
+        saved = self.request("/api/media/tok1/save", {"name": "Saka"})[1]["saved"]
+        with patch("packaging.user_folders.reveal_folder") as reveal:
+            self.assertEqual(self.request("/api/saved/nope/reveal", {"path": "C:/Windows"})[0], 404)
+            reveal.assert_not_called()
+            self.assertEqual(self.request(f"/api/saved/{saved['id']}/reveal", {}), (200, {"opened": True}))
+            reveal.assert_called_once_with(Path(self.temporary.name) / "Videos" / "VizorPlay")
+
 if __name__ == "__main__":
     unittest.main()

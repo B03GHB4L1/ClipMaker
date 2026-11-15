@@ -964,6 +964,28 @@ def video_for_period(match: dict[str, Any], period: int) -> str:
     return str(match.get("video_path") or "")
 
 
+def save_clip_copy(source: Path, folder: Path, name: str) -> Path:
+    """Copy a watched clip into the user's folder under a readable name.
+    Never replaces a file already there: "Saka 34' (2).mp4" and so on."""
+    import shutil
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = readable_name(re.sub(r"\.mp4$", "", str(name or ""), flags=re.IGNORECASE), "VizorPlay clip")
+    destination = folder / f"{stem}.mp4"
+    number = 2
+    while destination.exists():
+        destination = folder / f"{stem} ({number}).mp4"
+        number += 1
+    fd, temporary_name = tempfile.mkstemp(dir=folder, prefix="saving-", suffix=".tmp")
+    os.close(fd)
+    try:
+        shutil.copyfile(source, temporary_name)
+        os.replace(temporary_name, destination)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return destination
+
+
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
                       default_output_dir: Path | None = None) -> dict[str, Any]:
     csv_path = str(match.get("csv_path") or "").strip()
@@ -1490,13 +1512,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         # Same encoder settings as the classic Watch panel (libx264 ultrafast, default CRF).
         clip = render_preview_clip(video_for_period(project, period), start, start + duration,
                                    folder, 23, "ultrafast", "128k")
-        return self.publish_clip(clip, f"{event['player']}_{event['minute']}.mp4", before, after, folder)
+        return self.publish_clip(clip, f"{event['player']} {event['minute']}'.mp4", before, after, folder)
 
     def publish_clip(self, clip: Path, name: str, before: int, after: int, folder: Path) -> dict[str, Any]:
         prune_files(folder, keep=20)
         token = uuid.uuid4().hex
         self.media_files[token] = clip
-        return {"name": re.sub(r"[^\w\-.]", "_", name), "size": clip.stat().st_size,
+        return {"name": f"{readable_name(name[:-4] if name.endswith('.mp4') else name)}.mp4", "size": clip.stat().st_size,
                 "url": f"/api/media/{token}", "before": before, "after": after}
 
     def tactical_request(self, tab, project, controls, body, is_clip) -> dict[str, Any]:
@@ -1938,6 +1960,27 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 job = self.jobs.start(config)
                 self.send_json(HTTPStatus.ACCEPTED, {"job": job})
                 return
+            if path.startswith("/api/media/") and path.endswith("/save"):
+                # Only a clip the engine cut for watching; the request names no paths.
+                source = self.media_files.get(path.split("/")[-2])
+                scratch = {(self.store.data_dir / "previews").resolve(), (self.store.data_dir / "analysis-clips").resolve()}
+                if source is None or not source.is_file() or source.resolve().parent not in scratch:
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "That clip is no longer available. Watch it again, then save it."})
+                    return
+                folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+                saved = save_clip_copy(source, folder, str(body.get("name") or ""))
+                token = uuid.uuid4().hex
+                self.server.saved_clips[token] = saved  # type: ignore[attr-defined]
+                self.send_json(HTTPStatus.OK, {"saved": {"name": saved.name, "folder": str(saved.parent), "id": token}})
+                return
+            if path.startswith("/api/saved/") and path.endswith("/reveal"):
+                saved = self.server.saved_clips.get(path.split("/")[-2])  # type: ignore[attr-defined]
+                if saved is None:
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "No saved clip to show"})
+                    return
+                user_folders.reveal_folder(saved.parent)
+                self.send_json(HTTPStatus.OK, {"opened": True})
+                return
             if path.startswith("/api/jobs/") and path.endswith("/reveal"):
                 # Only a finished job's own output folder; no paths come from the request.
                 job = self.jobs.get(path.split("/")[-2])
@@ -2002,6 +2045,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.jobs = JobManager()  # type: ignore[attr-defined]
     server.update_status = update_check.UpdateStatus(desktop=False)  # type: ignore[attr-defined]
     server.media_files = {}  # type: ignore[attr-defined]
+    server.saved_clips = {}  # type: ignore[attr-defined]  # id -> clip saved to the user's folder
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     server.default_export_dir = None  # type: ignore[attr-defined]  # main() sets the user's videos folder
     return server

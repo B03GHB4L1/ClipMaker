@@ -3,6 +3,7 @@
 // selected-event details and a Watch panel that cuts clips server-side.
 import { projectRequest } from "../../projects.js";
 import { ComponentHost } from "../component-host.js";
+import { saveClipButton } from "../../save-clip.js";
 
 const el = (tag, attributes = {}, ...children) => {
   const node = document.createElement(tag);
@@ -180,7 +181,7 @@ export function eventTab(slug, title) {
       } else if (clip.file && clip.key === clipKey()) {
         watch.append(el("video", { controls: true, preload: "metadata", src: clip.file.url, "aria-label": `Clip of ${item.title}` }),
           el("div", { class: "native-actions" },
-            el("a", { class: "native-button", href: clip.file.url, download: clip.file.name, text: "Download clip" }),
+            saveClipButton(clip.file),
             el("button", { type: "button", class: "native-button native-secondary", text: "Clear preview", onclick: () => { resetClip(); renderDetail(); } })));
       } else if (clip.error) {
         watch.append(el("p", { class: "native-inline-error", role: "alert", text: `Could not cut clip: ${clip.error}` }),
