@@ -399,6 +399,39 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.screenshot(path=str(evidence / "tactical-transitions.png"))
     page.unroute("**/api/analysis/tactical/*-transitions")
 
+    stage("Video Lab: pick a moment straight from the list, ten per page")
+    # The two-event fixture ranks no moments, so the engine's view is given 23 of them
+    # in the shape it sends (test_tactical_native checks the real rows and ids).
+    picked = []
+    def video_lab_view(route):
+        controls = json.loads(route.request.post_data or "{}").get("controls", {})
+        picked.append(controls.get("vl_selected_moment_Restarts"))
+        ids = [f"[1, {n}]" for n in range(23)]
+        result = route.fetch().json()
+        result["view"].update(empty=None, elements=[
+            {"kind": "Subheader", "value": "Video Lab"},
+            {"kind": "Selectbox", "key": "vl_playlist", "label": "Playlist", "options": ["Restarts"], "values": ["Restarts"], "value": "Restarts"},
+            {"kind": "Selectbox", "key": "vl_selected_moment_Restarts", "label": "Moment", "options": [f"m{n}" for n in range(23)],
+             "values": ids, "value": controls.get("vl_selected_moment_Restarts") or ids[0]},
+            {"kind": "Markdown", "value": "", "html": True},
+            {"kind": "MomentList", "rows": [{"id": ids[n], "time": f"{n}'00\" 1H", "player": f"Player {n}",
+                                             "moment": "Pass | Corner", "score": 1 - n / 100} for n in range(23)]}])
+        route.fulfill(json=result)
+    page.route("**/api/analysis/tactical/video-lab", video_lab_view)
+    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=video-lab")
+    moments = page.locator(".native-moment-list")
+    expect(moments.locator(".native-moment-rows button")).to_have_count(10)
+    expect(page.get_by_label("Moment", exact=True)).to_have_count(0)  # no separate dropdown
+    expect(moments.locator(".native-moment-rows button").first).to_have_attribute("aria-pressed", "true")
+    expect(moments.get_by_role("button", name="Show moments 21–23")).to_be_visible()
+    moments.get_by_role("button", name="Show moments 11–20").click()
+    expect(moments.locator(".native-moment-rank").first).to_have_text("11")
+    moments.locator(".native-moment-rows button").nth(2).click()
+    expect(moments.locator('.native-moment-row[aria-pressed="true"] .native-moment-rank')).to_have_text("13")
+    assert picked[-1] == "[1, 12]", picked
+    expect(moments.get_by_role("button", name="Show moments 11–20")).to_have_attribute("aria-pressed", "true")
+    page.unroute("**/api/analysis/tactical/video-lab")
+
     stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
     page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=shot-map")
     expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
@@ -460,6 +493,10 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 3", timeout=60000)
     expect(page.locator(".native-table").first).to_be_visible()
     expect(page.get_by_role("button", name="Show top moments").first).to_be_visible()
+    # Role only ranks the Top 5 Moments, so its picker sits in each moment column, not the filters.
+    expect(page.locator(".native-comparison-controls").get_by_text("Role", exact=False)).to_have_count(0)
+    rank_as = page.locator(".native-moments").get_by_text("Rank moments as")
+    assert rank_as.count() <= 2, rank_as.count()  # one per non-goalkeeper column
     page.screenshot(path=str(evidence / "native-comparison.png"))
 
     stage("native workspace at narrow width")
@@ -788,6 +825,10 @@ def exercise(page, base, root, evidence, errors):
     csv = root / "fixture.csv"
     csv.write_bytes(fixture_csv())
     stage("upload CSV and footage")
+    # A quiet OR separates pasting a match link from importing a CSV, just above the import.
+    divider = page.get_by_role("separator", name="or")
+    expect(divider).to_be_visible()
+    assert divider.evaluate("e => e.nextElementSibling.classList.contains('csv-import')")
     page.locator('[data-csv-input]').set_input_files(str(csv))
     page.get_by_text("2 events found", exact=True).wait_for()
     page.locator('[data-video-input]').set_input_files(str(video))

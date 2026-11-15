@@ -80,6 +80,8 @@ def _entry_dict(idx, row, step, entry_label):
         "playerName": str(row.get("playerName", "")), "minute": int(row.get("minute", 0) or 0),
         "second": int(row.get("second", 0) or 0), "x": _float(row, "x"), "y": _float(row, "y"),
         "endX": _float(row, "_end_x", _end_coord(row, "x")), "endY": _float(row, "_end_y", _end_coord(row, "y")),
+        # Drives the map's blue (successful) / red (unsuccessful) colouring.
+        "outcome": "Unsuccessful" if str(row.get("outcomeType", "") or "") == "Unsuccessful" else "Successful",
     }
 
 

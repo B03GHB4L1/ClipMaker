@@ -17,6 +17,9 @@ body { padding-bottom: 30px; }
 .analysis-page .filter-topbar nav { display: flex; gap: 14px; }
 .analysis-page [data-analysis-status] { justify-self: end; font-size: 12px; color: #64675f; }
 @media (max-width: 560px) { .analysis-page .filter-topbar { gap: 8px; padding: 8px; } .analysis-page .filter-topbar nav { gap: 8px; font-size: 11px; } .analysis-page [data-analysis-status] { display: none; } }
+/* Quiet OR between pasting a match link and importing a CSV. */
+.source-or { display: flex; align-items: center; gap: 10px; margin: 2px 0 10px; color: var(--cm-muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.source-or::before, .source-or::after { content: ""; flex: 1; border-top: 1px solid var(--cm-rule, #e3e5df); }
 .csv-import { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 12px; margin: 8px 0 14px; }
 .csv-import input { width: 100%; min-width: 0; font-size: 12px; }
 .period-files { margin-top: 12px; border-top: 1px solid #ddd; padding-top: 8px; font-size: 12px; }

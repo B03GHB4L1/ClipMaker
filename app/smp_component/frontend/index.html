@@ -2722,6 +2722,11 @@
     const isEntryMap = entryMode === "final_third" || entryMode === "box";
     const teamColor = isLight ? lightModeAccent(isHome ? HOME_HEX : AWAY_HEX) : (isHome ? HOME_HEX : AWAY_HEX);
     const [tr, tg, tb] = isHome ? HOME_RGB : AWAY_RGB;
+    // Entry maps colour each entry by outcome, like the pass map: blue successful, red unsuccessful.
+    const failed = (a) => a.outcome === "Unsuccessful";
+    const outcomeHex = (a) => (failed(a) ? FAIL_HEX : SUCC_HEX);
+    const outcomeColor = (a) => (isLight ? lightModeAccent(outcomeHex(a)) : outcomeHex(a));
+    const _legendFont = isLight ? LIGHT_LEGEND_FONT : "#adaaaa";
 
     const plotEl = document.getElementById("plot");
     document.getElementById("no-data").style.display = "none";
@@ -2733,8 +2738,8 @@
     const annotations = [];
     const traces      = [];
 
-    const carryX = [], carryY = [];
-    const stepX  = [], stepY  = [], stepText = [], stepHover = [];
+    const carryX = [], carryY = [], failCarryX = [], failCarryY = [];
+    const stepX  = [], stepY  = [], stepText = [], stepHover = [], stepColor = [], stepLine = [];
     const endX = [], endY = [], endHover = [], endCustom = [], endSize = [], endLine = [], endColor = [];
     const plotPoint = (x, y) => {
       if (isEntryMap) return { x: 100 - y, y: 100 - x };
@@ -2781,6 +2786,9 @@
 
       stepX.push(sx);
       stepY.push(sy);
+      stepColor.push(isEntryMap ? rgbaFromHex(outcomeHex(a), isLight ? 0.42 : 0.28, isLight)
+                                : rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight));
+      stepLine.push(isEntryMap ? outcomeColor(a) : teamColor);
       stepText.push(isEntryMap ? "" : String(a.step));
       stepHover.push(
         `${a.step}. ${a.playerName}<br>${a.minute}'${String(a.second).padStart(2,"0")}" (${a.type})`
@@ -2791,10 +2799,12 @@
         endCustom.push(dfIdx);
         endSize.push(isSelected ? 18 : 12);
         endLine.push(isSelected ? 3 : 1.5);
-        endColor.push(entryKind === "Carry" ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.90 : 0.78, isLight) : teamColor);
+        endColor.push(isEntryMap ? outcomeColor(a)
+          : entryKind === "Carry" ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.90 : 0.78, isLight) : teamColor);
         endHover.push(
           `<b>${a.entry_label || "Entry"}</b><br>${a.playerName}<br>` +
-          `${a.minute}'${String(a.second).padStart(2,"0")}" (${entryKind})`
+          `${a.minute}'${String(a.second).padStart(2,"0")}" (${entryKind})` +
+          (isEntryMap ? `<br>${failed(a) ? "Unsuccessful" : "Successful"}` : "")
         );
       }
 
@@ -2804,9 +2814,12 @@
           xref: "x", yref: "y", axref: "x", ayref: "y",
           showarrow: true,
           arrowhead: 2, arrowsize: 1.2, arrowwidth: 2,
-          arrowcolor: teamColor,
+          arrowcolor: isEntryMap ? outcomeColor(a) : teamColor,
           text: "",
         });
+      } else if (isEntryMap && failed(a)) {
+        failCarryX.push(sx, ex, null);
+        failCarryY.push(sy, ey, null);
       } else {
         // Carry — dashed line
         carryX.push(sx, ex, null);
@@ -2816,11 +2829,27 @@
 
     // Carry lines
     if (carryX.length) {
+      const carryHex = isEntryMap ? SUCC_HEX : (isHome ? HOME_HEX : AWAY_HEX);
       traces.push({
         x: carryX, y: carryY, mode: "lines",
-        line: { dash: "dot", width: isLight ? 3 : 2.5, color: rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.88 : 0.70, isLight) },
+        line: { dash: "dot", width: isLight ? 3 : 2.5, color: rgbaFromHex(carryHex, isLight ? 0.88 : 0.70, isLight) },
         hoverinfo: "skip", showlegend: false,
       });
+    }
+    if (failCarryX.length) {
+      traces.push({
+        x: failCarryX, y: failCarryY, mode: "lines",
+        line: { dash: "dot", width: isLight ? 3 : 2.5, color: rgbaFromHex(FAIL_HEX, isLight ? 0.88 : 0.70, isLight) },
+        hoverinfo: "skip", showlegend: false,
+      });
+    }
+    if (isEntryMap) {
+      // Legend-only entries: the key for the outcome colours.
+      [["Successful", SUCC_HEX], ["Unsuccessful", FAIL_HEX]].forEach(([name, hex]) => traces.push({
+        x: [null], y: [null], mode: "markers", name: name,
+        marker: { symbol: "circle", size: 10, color: isLight ? lightModeAccent(hex) : hex },
+        hoverinfo: "skip", showlegend: true,
+      }));
     }
 
     // Terminal end-point dot (last action's end position)
@@ -2864,8 +2893,8 @@
         textfont: { size: 9, color: "#ffffff", bgcolor: "rgba(0,0,0,0)", family: "Geist Mono, monospace" },
         marker: {
           symbol: "circle", size: isEntryMap ? 7 : 20,
-          color: isEntryMap ? rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, isLight ? 0.42 : 0.28, isLight) : rgbaFromHex(isHome ? HOME_HEX : AWAY_HEX, 0.9, isLight),
-          line: { color: teamColor, width: isEntryMap ? 0.7 : 1.5 },
+          color: stepColor,
+          line: { color: stepLine, width: isEntryMap ? 0.7 : 1.5 },
         },
         hovertext: stepHover,
         hovertemplate: "%{hovertext}<extra></extra>",
@@ -2896,9 +2925,10 @@
         scaleratio: isEntryMap ? 1.54 : HORIZONTAL_PITCH_SCALERATIO,
       },
       shapes: shapes, annotations: annotations,
-      dragmode: false, showlegend: false,
+      dragmode: false, showlegend: isEntryMap,
+      legend: { orientation: "h", y: -0.02, x: 0.5, xanchor: "center", bgcolor: "rgba(0,0,0,0)", font: { size: 11, color: _legendFont } },
       height: height,
-      margin: { l: 8, r: 8, t: 8, b: 8 },
+      margin: { l: 8, r: 8, t: 8, b: isEntryMap ? 30 : 8 },
     };
 
     cmNewPlot(plotEl, traces, layout, args).then(() => {

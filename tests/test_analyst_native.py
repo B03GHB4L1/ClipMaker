@@ -32,6 +32,18 @@ def classic_args(args):
         y_axis = {k: v for k, v in option["yAxis"].items() if k != "inverse"}
         args = {**args, "option": {**option, "yAxis": y_axis}}
     return args
+
+
+def native_args(args):
+    """The native component's args without VizorPlay's deliberate additions: entry maps
+    carry each entry's outcome so they can colour it blue (successful) or red."""
+    if args.get("component_type") != "build_up_map":
+        return args
+    outcomes = {action["outcome"] for action in args["actions"] if "outcome" in action}
+    assert outcomes <= {"Successful", "Unsuccessful"}, outcomes
+    return {**args, "actions": [{k: v for k, v in action.items() if k != "outcome"} for action in args["actions"]]}
+
+
 SPECS = {
     "◉ Shot Map": {
         "build": shot_map.build_view,
@@ -154,7 +166,7 @@ class AnalystNativeParityTests(unittest.TestCase):
         if result["empty"]:
             self.assertIn(result["empty"], infos)
         self.assertEqual([classic_args(e["args"]) for e in elements if e["kind"] == "component"],
-                         [component["args"] for component in result["components"]], "components")
+                         [native_args(component["args"]) for component in result["components"]], "components")
 
         pickers = [by_key[key] for key in spec["pickers"] if key in by_key]
         buttons = [e["label"] for e in elements if e["kind"] == "Button" and spec.get("button_picker")
@@ -232,6 +244,13 @@ class AnalystNativeParityTests(unittest.TestCase):
                 keeper_vs_keeper += all(m["is_gk"] for m in result["moments"]) and len(result["moments"]) == 2
         self.assertGreaterEqual(len(records), 15)
         self.assertGreater(keeper_vs_keeper, 0, "no keeper-vs-keeper scenario recorded")
+
+    def test_entry_maps_mark_each_entry_successful_or_not(self):
+        import pandas as pd
+        for outcome_type, expected in (("Successful", "Successful"), ("Unsuccessful", "Unsuccessful"), ("", "Successful")):
+            row = pd.Series({"type": "Pass", "outcomeType": outcome_type, "playerName": "A", "minute": 3})
+            with self.subTest(outcome_type=outcome_type):
+                self.assertEqual(build_up._entry_dict(4, row, 1, "Box Entry")["outcome"], expected)
 
     def test_invalid_controls_fall_back_safely(self):
         for tab, spec in SPECS.items():
