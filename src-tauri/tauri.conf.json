@@ -35,7 +35,7 @@
         "depends": ["gstreamer1.0-plugins-good", "gstreamer1.0-libav"]
       }
     },
-    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
