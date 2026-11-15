@@ -35,6 +35,8 @@ export async function renderComparison(panel, context) {
   const id = `comparison-${++uid}`;
   let view = null;
   let request = 0;
+  // Role only ranks each player's Top 5 Moments, so its picker lives in that column.
+  let roleFilters = new Map();
 
   const filters = el("details", { class: "native-controls", open: true }, el("summary", { text: "Players" }));
   const filterBody = el("div", { class: "native-control-grid native-comparison-controls" });
@@ -108,7 +110,9 @@ export async function renderComparison(panel, context) {
     const columns = view.moments.map((moment) => {
       const reel = reels[moment.reel];
       const heading = el("h4", { class: moment.reel === 1 ? "is-home" : "is-away", text: `${moment.player} · ${moment.role}` });
-      if (moment.empty) return el("div", { class: "native-moment" }, heading, el("p", { class: "native-muted", text: moment.empty }));
+      const role = roleFilters.get(`role${moment.reel}`);
+      const rolePicker = role ? field({ ...role, label: "Rank moments as" }) : null;
+      if (moment.empty) return el("div", { class: "native-moment" }, heading, rolePicker, el("p", { class: "native-muted", text: moment.empty }));
       const table = el("table", { class: "native-table" },
         el("thead", {}, el("tr", {}, ...moment.columns.map((column) => el("th", { scope: "col", text: column })))),
         el("tbody", {}, ...moment.rows.map((row) => el("tr", {}, ...row.map((cell) => el("td", { text: String(cell) }))))));
@@ -126,7 +130,7 @@ export async function renderComparison(panel, context) {
       } else {
         actions.append(el("button", { type: "button", class: "native-button", text: "Show top moments", onclick: () => generate(moment.reel) }));
       }
-      return el("div", { class: "native-moment" }, heading, el("div", { class: "native-table-wrap" }, table), actions);
+      return el("div", { class: "native-moment" }, heading, rolePicker, el("div", { class: "native-table-wrap" }, table), actions);
     });
     moments.querySelector(".native-moments").replaceChildren(...columns);
   };
@@ -139,7 +143,9 @@ export async function renderComparison(panel, context) {
       if (ticket !== request) return;
       view = result.view;
       Object.assign(controls, view.controls);
-      filterBody.replaceChildren(...view.filters.map(field));
+      const isRole = (item) => /^role\d$/.test(item.key);
+      roleFilters = new Map(view.filters.filter(isRole).map((item) => [item.key, item]));
+      filterBody.replaceChildren(...view.filters.filter((item) => !isRole(item)).map(field));
       const text = view.empty || view.notice;
       message.hidden = !text;
       message.textContent = text || "";

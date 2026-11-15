@@ -18,7 +18,7 @@ from . import tactical_fast
 from . import tactical_page as page
 from .frames import FrameCache
 from .plotly_theme import streamlit_palette
-from .st_shim import Recorder, StopRender
+from .st_shim import Recorder, StopRender, _json
 
 TABS = {
     "defensive-transitions": page.render_defensive_transitions,
@@ -29,6 +29,22 @@ TABS = {
 }
 MAX_MATCHES = 20
 tactical_fast.install()  # Identical results, computed without per-event full-match scans.
+
+
+def _moment_list(rows):
+    """Video Lab's moment table as data: every ranked moment (the classic table showed
+    ten), keyed like the Moment selectbox so the page can pick and page through them."""
+    page.st.elements.append({"kind": "MomentList", "rows": [{
+        "id": _json(row.get("event_id")),
+        "time": f"{row.get('time', '')} {row.get('period_label', '')}".strip(),
+        "player": str(row.get("playerName", "") or ""),
+        "moment": f"{row.get('type', '')} | {row.get('why', '')}",
+        "score": round(float(row.get("score", 0) or 0), 2),
+    } for _, row in rows.iterrows()]})
+    return ""
+
+
+page._moment_list_html = _moment_list
 # Only the classic tab widgets' keys may reach the session, never its
 # internal state (video setups, clip paths).
 CONTROL_KEY = re.compile(r"^(dt_seconds|dt_events|at_seconds|at_events|[a-z]{2,5}_match_scope|"

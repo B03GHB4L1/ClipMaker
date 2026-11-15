@@ -118,6 +118,9 @@ export async function renderTactical(panel, context) {
   let view = null;
   let request = 0;
   let resizeWatch = null;
+  // Video Lab: which ten-moment page is showing, per playlist (the Moment control's key).
+  const momentPages = {};
+  const MOMENTS_PER_PAGE = 10;
 
   const scope = el("details", { class: "native-controls", open: true }, el("summary", { text: "Match and team" }));
   const scopeBody = el("div", { class: "native-control-grid" });
@@ -209,7 +212,47 @@ export async function renderTactical(panel, context) {
     return el("div", { class: "native-field" }, el("label", { for: fieldId, class: "native-field-label", text: element.label }), select);
   };
 
+  // Video Lab's ranked moments as a list you pick from directly, ten at a time.
+  const momentList = (element, select) => {
+    const rows = element.rows;
+    const key = select ? select.key : "moments";
+    const chosen = select ? select.values.findIndex((value) => JSON.stringify(value) === JSON.stringify(select.value)) : -1;
+    const pages = Math.max(1, Math.ceil(rows.length / MOMENTS_PER_PAGE));
+    if (momentPages[key] === undefined) momentPages[key] = Math.floor(Math.max(chosen, 0) / MOMENTS_PER_PAGE);
+    momentPages[key] = Math.min(momentPages[key], pages - 1);
+    const section = el("section", { class: "native-moment-list", "aria-label": "Moments" });
+    const draw = () => {
+      const first = momentPages[key] * MOMENTS_PER_PAGE;
+      const head = el("div", { class: "native-moment-row native-moment-head", "aria-hidden": "true" },
+        ...["#", "Time", "Player", "Moment", "Score"].map((text) => el("span", { text })));
+      const list = el("ol", { class: "native-moment-rows", start: String(first + 1) });
+      rows.slice(first, first + MOMENTS_PER_PAGE).forEach((row, offset) => {
+        const index = first + offset;
+        const button = el("button", { type: "button", class: "native-moment-row", "aria-pressed": String(index === chosen),
+          "aria-label": `Moment ${index + 1}: ${row.time}, ${row.player}, ${row.moment}, score ${row.score.toFixed(2)}`,
+          onclick: () => { if (select && index !== chosen) update({ [select.key]: select.values[index] }); } },
+          el("span", { class: "native-moment-rank", text: String(index + 1) }), el("span", { text: row.time }),
+          el("span", { class: "native-moment-player", text: row.player }), el("span", { class: "native-moment-what", text: row.moment }),
+          el("span", { class: "native-moment-score", text: row.score.toFixed(2) }));
+        list.append(el("li", {}, button));
+      });
+      const pager = el("div", { class: "native-pager", role: "group", "aria-label": "Moment pages" });
+      if (pages > 1) {
+        for (let page = 0; page < pages; page += 1) {
+          const label = `${page * MOMENTS_PER_PAGE + 1}–${Math.min(rows.length, (page + 1) * MOMENTS_PER_PAGE)}`;
+          pager.append(el("button", { type: "button", text: label, "aria-pressed": String(page === momentPages[key]),
+            "aria-label": `Show moments ${label}`, onclick: () => { momentPages[key] = page; draw(); } }));
+        }
+      }
+      pager.append(el("span", { class: "native-muted", text: `${rows.length} moment${rows.length === 1 ? "" : "s"}` }));
+      section.replaceChildren(pager, head, list);
+    };
+    draw();
+    return section;
+  };
+
   const renderElements = async () => {
+    const momentSelect = view.elements.find((element) => element.kind === "Selectbox" && /^vl_selected_moment_/.test(element.key || ""));
     const nodes = [];
     const figures = [];
     let metrics = null;
@@ -222,7 +265,10 @@ export async function renderTactical(panel, context) {
       switch (element.kind) {
         case "Subheader": nodes.push(el("h3", { class: "native-section-title", text: element.value })); break;
         case "Caption": nodes.push(el("p", { class: "native-muted", text: element.value })); break;
-        case "Markdown": nodes.push(element.html ? el("div", { class: "native-html" }, sanitize(element.value)) : markdown(element.value)); break;
+        case "Markdown":
+          if (!String(element.value).trim()) break;
+          nodes.push(element.html ? el("div", { class: "native-html" }, sanitize(element.value)) : markdown(element.value)); break;
+        case "MomentList": nodes.push(momentList(element, momentSelect)); break;
         case "Info": case "Success": nodes.push(el("p", { class: "native-inline-message native-info", role: "status", text: element.value })); break;
         case "Warning": case "Error": nodes.push(el("p", { class: "native-inline-error native-warning", role: "alert", text: element.value })); break;
         case "Metric": {
@@ -244,6 +290,7 @@ export async function renderTactical(panel, context) {
             el("tbody", {}, ...element.rows.map((row) => el("tr", {}, ...row.map((cell) => el("td", { text: cell === null ? "" : String(cell) }))))))));
           break;
         case "Slider": case "Selectbox":
+          if (element === momentSelect) break; // Picked from the moment list instead.
           if (!controlsRow) { controlsRow = el("div", { class: "native-control-grid native-tab-controls" }); nodes.push(controlsRow); }
           controlsRow.append(control(element));
           break;

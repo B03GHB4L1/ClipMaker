@@ -4,7 +4,9 @@ The native tabs run the classic tab code (copied verbatim into
 analysis_core.tactical_page) against a recorder; this checks the recorded
 output matches what Streamlit showed for every recorded scenario.
 """
+import html
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -42,8 +44,22 @@ def deliberate_fixes(figure):
     return figure
 
 
+MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
+
+
 def normal(element, norm):
     kind = element["kind"]
+    # Video Lab's ten-row HTML table became a pickable, paged list of every moment;
+    # its first ten rows must still be the classic table's rows.
+    if kind == "MomentList":
+        return ("Moments", [[row["time"], row["player"], row["moment"], f"{row['score']:.2f}"] for row in element["rows"][:10]])
+    if kind == "Markdown" and 'grid-template-columns:72px 1.4fr 1fr 58px' in element["value"]:
+        cells = [html.unescape(cell).strip() for cell in MOMENT_CELL.findall(element["value"])][4:]
+        return ("Moments", [cells[i:i + 4] for i in range(0, len(cells), 4)])
+    if kind == "Markdown" and not element["value"].strip():
+        return None
+    if kind == "Selectbox" and element["key"].startswith("vl_selected_moment_"):
+        return None  # Picked from the moment list instead; see test_video_lab_moment_list_drives_the_picker.
     if kind == "Markdown" and element["value"].lstrip().startswith("<style"):
         return None
     if kind in {"Subheader", "Caption", "Markdown", "Info", "Warning", "Error", "Success"}:
@@ -131,6 +147,28 @@ class TacticalNativeParityTests(unittest.TestCase):
                             pd.testing.assert_frame_equal(expected.reset_index(drop=True), actual.reset_index(drop=True))
                             checked += 1
         self.assertGreater(checked, 40)
+
+    def test_video_lab_moment_list_drives_the_picker(self):
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            checked = 0
+            for playlist in ("Restarts", "Attacking Transition", "xT Passes And Carries"):
+                view, _ = tactical.render("video-lab", {"vl_playlist": playlist}, project, projects)
+                lists = [e for e in view["elements"] if e["kind"] == "MomentList"]
+                select = next((e for e in view["elements"] if e["kind"] == "Selectbox"
+                               and e["key"].startswith("vl_selected_moment_")), None)
+                if select is None:
+                    continue
+                with self.subTest(playlist=playlist):
+                    self.assertEqual(len(lists), 1)
+                    # Every ranked moment (not just ten), in the picker's order, so a row picks it.
+                    self.assertEqual([row["id"] for row in lists[0]["rows"]], select["values"])
+                    self.assertTrue(all(row["time"] and row["moment"] for row in lists[0]["rows"]))
+                    checked += 1
+            self.assertGreater(checked, 0)
 
     def test_unknown_control_keys_never_reach_the_session(self):
         with tempfile.TemporaryDirectory() as name, analysis_golden.fixture_inputs() as (csvs, data):
