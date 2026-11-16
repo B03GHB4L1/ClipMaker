@@ -1488,6 +1488,145 @@ def detect_strengths_weaknesses(dims, raw):
     return strengths[:4], weaknesses[:4]
 
 
+PITCH_LENGTH_M = 105
+PITCH_WIDTH_M = 68
+PASS_DIRECTIONS = ["Forward", "Sideways", "Backward"]
+PASS_LENGTHS = ["Short (<15m)", "Medium (15-30m)", "Long (30m+)"]
+POSSESSION_BANDS = ["1-2 passes", "3-5 passes", "6-9 passes", "10+ passes"]
+
+
+def pass_directness(team_df):
+    """Share of the team's passes going forward, sideways and backward, and how long
+    they are. A pass is forward or backward when it travels more than 45 degrees
+    towards either goal, measured in metres on a 105 x 68 pitch."""
+    passes = team_df[team_df["type"].eq("Pass") & team_df["endX"].notna() & team_df["x"].notna()].copy()
+    if passes.empty:
+        return None
+    dx = (passes["endX"] - passes["x"]) * PITCH_LENGTH_M / 100
+    dy = (passes["endY"] - passes["y"]) * PITCH_WIDTH_M / 100
+    length = (dx ** 2 + dy ** 2) ** 0.5
+    passes["direction"] = "Sideways"
+    passes.loc[dx > dy.abs(), "direction"] = "Forward"
+    passes.loc[-dx > dy.abs(), "direction"] = "Backward"
+    passes["length_band"] = PASS_LENGTHS[1]
+    passes.loc[length < 15, "length_band"] = PASS_LENGTHS[0]
+    passes.loc[length >= 30, "length_band"] = PASS_LENGTHS[2]
+    passes["completed"] = _str_series(passes, "outcomeType").eq("Successful")
+    total = len(passes)
+
+    def rows(column, order):
+        out = []
+        for label in order:
+            group = passes[passes[column].eq(label)]
+            out.append({"group": label, "count": len(group), "share": len(group) / total * 100,
+                        "completion": group["completed"].mean() * 100 if len(group) else 0.0})
+        return out
+
+    return {
+        "passes": total,
+        "avg_length": float(length.mean()),
+        "forward_share": float((passes["direction"] == "Forward").mean() * 100),
+        "direction": rows("direction", PASS_DIRECTIONS),
+        "length": rows("length_band", PASS_LENGTHS),
+    }
+
+
+def possession_lengths(df, team):
+    """The team's possessions, split by how many passes each lasted, and how often
+    each kind ended in a shot. A possession is an unbroken run of the team's on-ball
+    actions; it ends when the opponent has the ball or the period changes."""
+    on_ball = df[df["type"].isin(IN_POSSESSION_ACTION_TYPES)].copy()
+    if on_ball.empty:
+        return None
+    keys = ["period_order"] + (["match_id"] if "match_id" in on_ball.columns else [])
+    team_col = on_ball["team"].astype(str)
+    changed = team_col.ne(team_col.shift())
+    for key in keys:
+        changed |= on_ball[key].ne(on_ball[key].shift())
+    on_ball["possession"] = changed.cumsum()
+    own = on_ball[team_col.eq(str(team))]
+    if own.empty:
+        return None
+    summary = own.groupby("possession").agg(
+        passes=("type", lambda types: int((types == "Pass").sum())),
+        shot=("type", lambda types: bool(types.isin(SHOT_TYPES).any())),
+    )
+    summary = summary[summary["passes"] > 0]
+    if summary.empty:
+        return None
+    bands = pd.cut(summary["passes"], bins=[0, 2, 5, 9, float("inf")], labels=POSSESSION_BANDS)
+    total = len(summary)
+    rows = []
+    for label in POSSESSION_BANDS:
+        group = summary[bands == label]
+        rows.append({"group": label, "count": len(group), "share": len(group) / total * 100,
+                     "shot_rate": group["shot"].mean() * 100 if len(group) else 0.0})
+    return {"possessions": total, "median_passes": float(summary["passes"].median()), "bands": rows}
+
+
+def _drop_note_below_axis(fig):
+    """Move the explanatory note under the x-axis labels instead of over them."""
+    for note in fig.layout.annotations or []:
+        if note.yref == "paper" and note.y is not None and note.y < 0:
+            note.yshift = -24
+    return fig
+
+
+def _directness_chart(profile):
+    light = _is_light()
+    colors = {"Forward": _pitch_accent(ACCENT), "Sideways": "#9aa29a" if light else "#6f776f",
+              "Backward": AWAY_COLOR, PASS_LENGTHS[0]: "#cfe0f5" if light else "#3d5d80",
+              PASS_LENGTHS[1]: HOME_COLOR, PASS_LENGTHS[2]: "#2f6fb8" if light else "#bcd8ff"}
+    fig = go.Figure()
+    for row_label, items in (("Length", profile["length"]), ("Direction", profile["direction"])):
+        for item in items:
+            fig.add_trace(go.Bar(
+                y=[row_label], x=[item["share"]], orientation="h", name=item["group"],
+                marker=dict(color=colors[item["group"]], line=dict(width=0)),
+                text=[f"{item['group'].split(' ')[0]} {item['share']:.0f}%" if item["share"] >= 9 else ""],
+                textposition="inside", insidetextanchor="middle",
+                textfont=dict(color="#111111", family="Geist Mono, monospace", size=11),
+                hovertemplate=(f"<b>{item['group']}</b><br>{item['count']} passes ({item['share']:.1f}%)"
+                               f"<br>Completed: {item['completion']:.0f}%<extra></extra>"),
+            ))
+    fig.update_layout(
+        barmode="stack", bargap=0.38, showlegend=False,
+        title=f"Pass Directness - {profile['forward_share']:.0f}% forward, avg {profile['avg_length']:.1f}m",
+        xaxis=dict(range=[0, 100], ticksuffix="%", title=None),
+        yaxis=dict(title=None),
+    )
+    return _drop_note_below_axis(_brand_fig(fig, 320, note=f"{profile['passes']} passes. Forward/backward = more than 45 degrees towards either goal. Hover for completion rates."))
+
+
+def _possession_length_chart(profile):
+    fig = go.Figure()
+    bands = profile["bands"]
+    fig.add_trace(go.Bar(
+        x=[band["group"] for band in bands], y=[band["share"] for band in bands],
+        marker=dict(color=HOME_COLOR, line=dict(width=0)), name="Share of possessions",
+        text=[f"{band['share']:.0f}%" for band in bands], textposition="inside", insidetextanchor="end",
+        textfont=dict(color="#111111", family="Geist Mono, monospace", size=11),
+        customdata=[[band["count"], band["shot_rate"]] for band in bands],
+        hovertemplate="<b>%{x}</b><br>%{customdata[0]} possessions (%{y:.1f}%)<br>Ended in a shot: %{customdata[1]:.0f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[band["group"] for band in bands], y=[band["shot_rate"] for band in bands], yaxis="y2",
+        mode="lines+markers", name="Ended in a shot", line=dict(color=_pitch_accent(ACCENT), width=2.4),
+        marker=dict(size=9, color=_pitch_accent(ACCENT), line=dict(color="#111111", width=1)),
+        hovertemplate="<b>%{x}</b><br>Ended in a shot: %{y:.0f}%<extra></extra>",
+    ))
+    top = max([band["share"] for band in bands] + [10])
+    fig.update_layout(
+        title=f"Possession Length - median {profile['median_passes']:.0f} passes",
+        xaxis=dict(title=None),
+        yaxis=dict(title="Share of possessions", ticksuffix="%", range=[0, top * 1.22]),
+        yaxis2=dict(title="Ended in a shot", ticksuffix="%", overlaying="y", side="right", showgrid=False,
+                    range=[0, max(max(band["shot_rate"] for band in bands) * 1.25, 10)]),
+        legend=dict(orientation="h", x=0, y=1.02, yanchor="bottom"),
+    )
+    return _drop_note_below_axis(_brand_fig(fig, 360, note=f"{profile['possessions']} possessions with at least one pass. A possession ends when the opponent has the ball."))
+
+
 def render_style_profile(df, team):
     st.subheader("Style Profile")
     team_df = df[df["team"].astype(str).eq(team)].copy()
@@ -1587,6 +1726,31 @@ def render_style_profile(df, team):
             width="stretch",
             config=_plotly_export_config("territory_heatmap", team, _export_scope_label()),
         )
+
+    # How the team moves the ball: how direct the passing is, and how long possessions last.
+    d1, d2 = st.columns([1, 1])
+    with d1:
+        directness = pass_directness(team_df)
+        if directness:
+            st.plotly_chart(
+                _directness_chart(directness),
+                width="stretch",
+                config=_plotly_export_config("pass_directness", team, _export_scope_label()),
+                key="style_pass_directness",
+            )
+        else:
+            st.caption("No passes with end locations for this team.")
+    with d2:
+        lengths = possession_lengths(df, team)
+        if lengths:
+            st.plotly_chart(
+                _possession_length_chart(lengths),
+                width="stretch",
+                config=_plotly_export_config("possession_length", team, _export_scope_label()),
+                key="style_possession_length",
+            )
+        else:
+            st.caption("No possessions found for this team.")
 
     if "match_id" in df.columns and df["match_id"].nunique() > 1:
         trend_df = _per_match_trends(df, team, [str(x) for x in df.groupby("match_id")["match_label"].first().tolist()])
