@@ -32,6 +32,15 @@
       cursor: pointer;
     }
     .cm-export-controls button:hover { border-color: rgba(142,255,113,0.72); }
+    .cm-export-controls button[aria-pressed="true"] { background: #dfff00; color: #071008; border-color: #dfff00; }
+    .cm-export-controls button:disabled { opacity: .5; cursor: default; }
+    .cm-export-controls button:focus-visible, .cm-export-controls select:focus-visible { outline: 2px solid #dfff00; outline-offset: 1px; }
+    body.cm-light .cm-export-controls button[aria-pressed="true"] { background: #2f5d16; color: #f8f6f0; border-color: #2f5d16; }
+    /* Narrow frames: the export bar sits above the chart instead of over its title. */
+    @media (max-width: 520px) {
+      .cm-chart-wrap { display: flex; flex-direction: column; }
+      .cm-export-controls { position: static; order: -1; justify-content: flex-end; flex-wrap: wrap; padding: 0 0 6px; }
+    }
     .cm-export-controls select {
       border: 1px solid rgba(142,255,113,0.22);
       background: rgba(7,16,8,0.72);
@@ -126,6 +135,9 @@
       );
     },
     setHeight(h) {
+      // On narrow frames the export bar sits above the chart; make room for it.
+      const bar = document.querySelector(".cm-export-controls");
+      if (bar && getComputedStyle(bar).position === "static") h += bar.offsetHeight + 6;
       window.parent.postMessage(
         { isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: Math.ceil(h) }, "*"
       );
@@ -1277,58 +1289,45 @@
     return `clipmaker:gif-animation:${parts.join(":") || "chart"}`;
   }
 
+  // GIF animations. Match Clock plays the events in match order against a running
+  // clock; Shot Flight sends each shot to goal in match order. Saved choices that
+  // no longer exist (Build, Pulse, Still) fall back to the first option.
   function animationOptionsForArgs(args) {
     const component = args && args.component_type;
-    const simple = [
-      ["build", "Build"],
-      ["pulse", "Pulse"],
-      ["still", "Still"],
-    ];
-    const flow = [
-      ["build", "Build"],
-      ["arrow", "Arrow Flow"],
-      ["pulse", "Pulse"],
-      ["still", "Still"],
-    ];
-    const sequence = [
-      ["build", "Build"],
-      ["sequence", "Sequence"],
-      ["arrow", "Arrow Flow"],
-      ["pulse", "Pulse"],
-      ["still", "Still"],
-    ];
-    if (component === "pass_map" && args && args.mode === "network") {
-      return [
-        ["network", "Network Grow"],
-        ["pulse", "Pulse"],
-        ["still", "Still"],
-      ];
-    }
-    if (component === "pass_map") return flow;
-    if (component === "build_up_map") return sequence;
-    if (component === "defensive_map") return simple;
-    if (component === "dribble_carry_map") return simple;
-    if (component === "goalkeeper_map") return simple;
-    if (component === "shot_map") return simple;
-    if (component === "penalty_shootout") return simple;
-    if (component === "echarts_option") return simple;
-    return simple;
+    const clock = ["clock", "Match Clock"];
+    if (component === "pass_map" && args && args.mode === "network") return [["network", "Network Grow"]];
+    if (component === "pass_map") return [clock, ["arrow", "Arrow Flow"]];
+    if (component === "build_up_map") return [["sequence", "Sequence"], ["arrow", "Arrow Flow"]];
+    if (component === "shot_map") return [["flight", "Shot Flight"], clock];
+    return [clock];
   }
 
   function exportControlsHtml(defaultMode, args) {
     const options = animationOptionsForArgs(args || {});
-    const fallbackMode = options.length ? options[0][0] : "build";
+    const fallbackMode = options[0][0];
     const selectedMode = options.some(([value]) => value === defaultMode) ? defaultMode : fallbackMode;
     return [
-      '<button type="button" data-export="png">PNG</button>',
-      '<select data-export-animation title="GIF animation">',
+      '<button type="button" data-export="png" title="Save as PNG">PNG</button>',
+      '<select data-export-animation title="GIF animation" aria-label="GIF animation">',
       ...options.map(([value, label]) => `<option value="${value}"${selectedMode === value ? " selected" : ""}>${label}</option>`),
       '</select>',
-      '<button type="button" data-export="gif">GIF</button>',
+      '<button type="button" data-export="preview" title="Play the animation here before saving">Preview</button>',
+      '<button type="button" data-export="gif" title="Make the GIF and save it">GIF</button>',
     ].join("");
   }
 
+  // Only one animation plays at a time; a redraw or a new choice stops it.
+  let _cmPlaying = null;
+  function stopAnimation(restoreChart = true) {
+    const run = _cmPlaying;
+    _cmPlaying = null;
+    if (!run) return;
+    run.stopped = true;
+    if (restoreChart && run.onStop) run.onStop();
+  }
+
   function prepareExportControls(wrap, args) {
+    stopAnimation(false);
     let controls = wrap.querySelector(".cm-export-controls");
     if (!controls) {
       controls = document.createElement("div");
@@ -1337,23 +1336,424 @@
     }
     const key = exportAnimationKey(args || {});
     const options = animationOptionsForArgs(args || {});
-    const saved = localStorage.getItem(key) || "build";
-    const fallbackMode = options.length ? options[0][0] : "build";
-    const mode = options.some(([value]) => value === saved) ? saved : fallbackMode;
+    const saved = localStorage.getItem(key);
+    const mode = options.some(([value]) => value === saved) ? saved : options[0][0];
     if (mode !== saved) localStorage.setItem(key, mode);
     controls.innerHTML = exportControlsHtml(mode, args || {});
     const selector = controls.querySelector("[data-export-animation]");
-    selector.onchange = () => localStorage.setItem(key, selector.value);
+    selector.onchange = () => {
+      stopAnimation();
+      localStorage.setItem(key, selector.value);
+    };
     return controls;
   }
 
-  function exportHighlightSeriesIndexes(chart) {
-    const series = chart.getOption().series || [];
-    const indexes = [];
-    series.forEach((item, index) => {
-      if (item && item.type !== "custom" && item.name !== "__pitch_shapes") indexes.push(index);
+  // ── Match time ──────────────────────────────────────────────────────────
+  function eventSeconds(event) {
+    const minute = Number(event && event.minute);
+    const second = Number(event && event.second);
+    if (!Number.isFinite(minute)) return null;
+    return minute * 60 + (Number.isFinite(second) ? second : 0);
+  }
+
+  // Hover text carries the time as 63'07"; read it when a trace has no cmTime.
+  function secondsFromText(text) {
+    const match = /(\d{1,3})'\s*(\d{1,2})?/.exec(stripHtml(String(text == null ? "" : text)));
+    return match ? Number(match[1]) * 60 + Number(match[2] || 0) : null;
+  }
+
+  function timesForPoints(count, own, text) {
+    if (own != null) return Array.from({ length: count }, (_, i) => {
+      const value = Array.isArray(own) ? own[i] : own;
+      return value == null || !Number.isFinite(Number(value)) ? null : Number(value);
     });
-    return indexes.length ? indexes : [0];
+    if (text == null) return null;
+    const times = Array.from({ length: count }, (_, i) => secondsFromText(Array.isArray(text) ? text[i] : text));
+    return times.some((value) => value != null) ? times : null;
+  }
+
+  // groups: one array of times (or null: always shown) per trace or series.
+  // Charts without a usable spread of times (a shoot-out, one minute of play)
+  // play their points in the order they were drawn instead.
+  function buildTimeline(groups) {
+    const all = [];
+    groups.forEach((times) => times && times.forEach((value) => { if (value != null) all.push(value); }));
+    const low = all.length ? Math.min(...all) : 0;
+    const high = all.length ? Math.max(...all) : 0;
+    if (all.length >= 2 && high - low >= 60) {
+      const start = low > 20 * 60 ? Math.floor(low / 300) * 300 : 0;
+      const end = Math.max(high, start === 0 ? 90 * 60 : high);
+      return { groups, start, end, ordinal: false };
+    }
+    let order = 0;
+    const ordered = groups.map((times) => times && times.map((value) => (value == null ? null : order++)));
+    return { groups: ordered, start: 0, end: Math.max(1, order), ordinal: true };
+  }
+
+  function clockLabel(timeline, now) {
+    if (timeline.ordinal) return "";
+    const minute = Math.max(0, Math.floor(now / 60));
+    return `${minute}'`;
+  }
+
+  function withAlpha(color, alpha) {
+    const text = String(color || "");
+    if (/^#[0-9a-f]{6}$/i.test(text)) return hexToRgba(text, alpha);
+    const rgb = /^rgba?\(([^)]+)\)$/i.exec(text);
+    if (rgb) {
+      const [r, g, b] = rgb[1].split(",").map((part) => part.trim());
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+    return text || `rgba(255,255,255,${alpha})`;
+  }
+
+  const POINT_KEYS = ["x", "y", "text", "hovertext", "customdata", "cmTime", "cmShot"];
+  // A copy of a trace that keeps only the points at `keep` (marker styles too).
+  function pickPoints(trace, keep) {
+    const count = (trace.x || []).length;
+    const pick = (value) => (Array.isArray(value) && value.length === count ? keep.map((i) => value[i]) : value);
+    const out = Object.assign({}, trace);
+    POINT_KEYS.forEach((key) => { if (trace[key] !== undefined) out[key] = pick(trace[key]); });
+    if (trace.marker) {
+      out.marker = Object.assign({}, trace.marker);
+      ["color", "size", "symbol", "opacity"].forEach((key) => { out.marker[key] = pick(trace.marker[key]); });
+      if (trace.marker.line) {
+        out.marker.line = Object.assign({}, trace.marker.line);
+        ["color", "width", "dash"].forEach((key) => { out.marker.line[key] = pick(trace.marker.line[key]); });
+      }
+    }
+    return out;
+  }
+
+  const easeOut = (t) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
+
+  // The traces as they stand at `now`: points that have happened, the newest
+  // drawn larger for a moment, and the newest lines still drawing out.
+  function tracesAtTime(traces, timeline, now, fresh) {
+    return traces.map((trace, k) => {
+      const times = timeline.groups[k];
+      if (!times) return trace;
+      const x = trace.x || [];
+      const y = trace.y || [];
+      const line = isLineOnlyTrace(trace);
+      const keep = [];
+      for (let i = 0; i < x.length; i++) {
+        if (x[i] == null || y[i] == null) {
+          if (line) keep.push(i);
+          continue;
+        }
+        if (times[i] == null || times[i] <= now) keep.push(i);
+      }
+      const out = pickPoints(trace, keep);
+      if (line) {
+        out.x = out.x.slice();
+        out.y = out.y.slice();
+        for (let j = 1; j < keep.length; j++) {
+          const i = keep[j];
+          const prev = keep[j - 1];
+          if (x[i] == null || x[prev] == null || times[i] == null) continue;
+          const grown = easeOut((now - times[i]) / fresh);
+          if (grown >= 1) continue;
+          out.x[j] = x[prev] + (x[i] - x[prev]) * grown;
+          out.y[j] = y[prev] + (y[i] - y[prev]) * grown;
+        }
+      } else if (out.marker) {
+        const base = trace.marker.size;
+        const sizes = keep.map((i) => {
+          const size = Number(Array.isArray(base) ? base[i] : base) || 12;
+          const age = times[i] == null ? fresh : now - times[i];
+          return age < fresh ? size * (1 + 0.8 * (1 - age / fresh)) : size;
+        });
+        out.marker.size = sizes;
+      }
+      return out;
+    });
+  }
+
+  // The running clock (bottom left) and a progress bar along the bottom edge.
+  function clockGraphic(size, label, fraction, isLight) {
+    const accent = isLight ? "#2f5d16" : "#dfff00";
+    const items = [
+      { type: "rect", left: 0, bottom: 0, z: 100, silent: true,
+        shape: { width: size.width, height: 4 }, style: { fill: isLight ? "rgba(47,93,22,0.14)" : "rgba(255,255,255,0.12)" } },
+      { type: "rect", left: 0, bottom: 0, z: 101, silent: true,
+        shape: { width: Math.round(size.width * Math.max(0, Math.min(1, fraction))), height: 4 }, style: { fill: accent } },
+    ];
+    // Bottom left: the VizorPlay mark sits bottom right and the legend in the middle.
+    if (label) items.push({ type: "text", left: 16, bottom: 12, z: 102, silent: true,
+      style: { text: label, fill: isLight ? "#1f3214" : "#f4f7f2", font: "600 24px 'Geist Mono', monospace",
+        stroke: isLight ? "rgba(248,246,240,0.9)" : "rgba(7,16,8,0.85)", lineWidth: 4 } });
+    return items;
+  }
+
+  const CLOCK_FRAMES = 72;
+  const CLOCK_DELAY = 80;
+  const FINAL_HOLD = 1600;
+
+  function matchClockSteps(traces, show) {
+    const timeline = buildTimeline(traces.map((trace) => {
+      const own = trace.cmTime;
+      return timesForPoints((trace.x || []).length, own, own == null ? (trace.hovertext || trace.text) : null);
+    }));
+    const span = Math.max(1, timeline.end - timeline.start);
+    const fresh = span / CLOCK_FRAMES * 4;
+    const steps = [];
+    for (let frame = 0; frame <= CLOCK_FRAMES; frame++) {
+      const now = timeline.start + span * frame / CLOCK_FRAMES;
+      steps.push({
+        delay: frame === CLOCK_FRAMES ? FINAL_HOLD : CLOCK_DELAY,
+        render: () => show(tracesAtTime(traces, timeline, now, fresh), { label: clockLabel(timeline, now), fraction: frame / CLOCK_FRAMES }),
+      });
+    }
+    return steps;
+  }
+
+  // Shot Flight: each shot leaves its spot in match order and travels to where it
+  // crossed the goal line (blocked shots stop short); goals flash in the net.
+  // On the goal-frame view the shots land in their spot in the goal instead.
+  function shotFlightSteps(traces, show, isLight) {
+    const shots = [];
+    traces.forEach((trace, k) => {
+      const meta = trace.cmShot;
+      if (!Array.isArray(meta)) return;
+      const times = timesForPoints((trace.x || []).length, trace.cmTime, trace.text) || [];
+      meta.forEach((shot, i) => shots.push({ k, i, t: times[i] == null ? i : times[i], shot }));
+    });
+    if (!shots.length) return matchClockSteps(traces, show);
+    shots.sort((a, b) => a.t - b.t);
+    const flight = 5;
+    const flash = 4;
+    const gap = Math.max(1, Math.min(5, Math.round(64 / shots.length)));
+    const total = (shots.length - 1) * gap + flight + flash;
+    const launch = new Map(shots.map((s, n) => [`${s.k}:${s.i}`, n * gap]));
+    const accent = isLight ? "#2f5d16" : "#dfff00";
+    const ball = isLight ? "#101510" : "#ffffff";
+    const steps = [];
+    for (let frame = 0; frame <= total; frame++) {
+      const extra = [];
+      let latest = null;
+      const shown = traces.map((trace, k) => {
+        if (!Array.isArray(trace.cmShot)) return trace;
+        const keep = [];
+        const sizes = [];
+        (trace.x || []).forEach((x, i) => {
+          const age = frame - launch.get(`${k}:${i}`);
+          if (age < 0) return;
+          keep.push(i);
+          const base = Number(Array.isArray(trace.marker.size) ? trace.marker.size[i] : trace.marker.size) || 13;
+          const shot = trace.cmShot[i];
+          const ox = x;
+          const oy = trace.y[i];
+          const line = trace.marker.line || {};
+          const team = Array.isArray(line.color) ? line.color[i] : line.color;
+          const hasTarget = shot.tx != null && shot.ty != null;
+          let tx = shot.tx;
+          let ty = shot.ty;
+          if (hasTarget && shot.type === "BlockedShot") {
+            const length = Math.hypot(tx - ox, ty - oy) || 1;
+            const reach = Math.min(1, 7 / length);
+            tx = ox + (tx - ox) * reach;
+            ty = oy + (ty - oy) * reach;
+          }
+          const progress = easeOut((age + 1) / flight);
+          if (!latest || age < latest.age) latest = { age, t: shots.find((s) => s.k === k && s.i === i).t };
+          if (hasTarget) {
+            const hx = ox + (tx - ox) * progress;
+            const hy = oy + (ty - oy) * progress;
+            extra.push({ x: [ox, hx], y: [oy, hy], mode: "lines", hoverinfo: "skip", showlegend: false,
+              line: { color: withAlpha(team, age < flight ? 0.9 : 0.28), width: age < flight ? 2.4 : 1.4 } });
+            if (age < flight) extra.push({ x: [hx], y: [hy], mode: "markers", hoverinfo: "skip", showlegend: false,
+              marker: { size: 8, color: ball, line: { color: withAlpha(team, 0.9), width: 1.5 } } });
+          }
+          sizes.push(!hasTarget && age < flight ? base * (2.2 - 1.2 * progress) : base);
+          const landed = age - flight;
+          if (shot.type === "Goal" && landed >= 0 && landed < flash) {
+            const fade = 1 - landed / flash;
+            extra.push({ x: [hasTarget ? tx : ox], y: [hasTarget ? ty : oy], mode: "markers", hoverinfo: "skip", showlegend: false,
+              marker: { size: 16 + 26 * (landed + 1) / flash, symbol: "circle-open", color: "rgba(0,0,0,0)",
+                line: { color: withAlpha(accent, 0.25 + 0.75 * fade), width: 3 } } });
+          }
+        });
+        const out = pickPoints(trace, keep);
+        out.marker.size = sizes;
+        return out;
+      });
+      const label = latest && shots.some((s) => s.t > 200) ? `${Math.floor(latest.t / 60)}'` : "";
+      steps.push({
+        delay: frame === total ? FINAL_HOLD : CLOCK_DELAY,
+        render: () => show(extra.length ? [...shown, ...extra] : shown, { label, fraction: frame / total }),
+      });
+    }
+    return steps;
+  }
+
+  // The frames of the chosen animation, each a render() and how long it shows.
+  function chartAnimationSteps(chart, traces, layout, args, mode) {
+    const isLight = contextFromArgs(args || {}).isLight;
+    const lineCount = Math.max(1, (traces || []).filter(isLineOnlyTrace).length);
+    const traceCount = Math.max(1, (traces || []).length);
+    const size = () => ({ width: chart.getWidth(), height: chart.getHeight() });
+    const set = (frameTraces, extra, clock) => {
+      const option = echartsOptionFromPlotly(frameTraces, layout, args, Object.assign({ chartSize: size(), exporting: true }, extra || {}));
+      if (clock) option.graphic = [].concat(option.graphic || [], clockGraphic(size(), clock.label, clock.fraction, isLight));
+      chart.setOption(option, true);
+    };
+    const reveal = (frames, delay, extraFor) => {
+      const steps = [];
+      for (let frame = 1; frame <= frames; frame++) {
+        steps.push({ delay: frame === frames ? 1000 : delay, render: () => set(traces, extraFor(frame / frames, frame)) });
+      }
+      return steps;
+    };
+    if (mode === "flight") return shotFlightSteps(traces, (shown, clock) => set(shown, null, clock), isLight);
+    if (mode === "arrow") {
+      const frames = Math.min(54, Math.max(16, lineCount * 3));
+      return reveal(frames, lineCount > 24 ? 95 : 125, (fraction) => ({ revealFraction: fraction, revealMode: "arrow" }));
+    }
+    if (mode === "sequence") {
+      const frames = Math.min(48, Math.max(10, traceCount));
+      return reveal(frames, traceCount > 30 ? 110 : 170, (fraction) => ({ visibleTraceCount: Math.ceil(traceCount * fraction), revealFraction: 1 }));
+    }
+    if (mode === "network") {
+      const frames = Math.min(42, Math.max(14, lineCount));
+      return [{ delay: lineCount > 28 ? 100 : 150, render: () => set(traces, { networkLineFraction: 0, revealFraction: 1 }) }]
+        .concat(reveal(frames, lineCount > 28 ? 100 : 150, (fraction) => ({ networkLineFraction: fraction, revealFraction: 1 })));
+    }
+    return matchClockSteps(traces, (shown, clock) => set(shown, null, clock));
+  }
+
+  // Match Clock for charts drawn straight from an ECharts option (pressing wins):
+  // each data point's tooltip carries its time.
+  function optionAnimationSteps(chart, option, args) {
+    const isLight = contextFromArgs(args || {}).isLight;
+    const series = Array.isArray(option.series) ? option.series : option.series ? [option.series] : [];
+    const timeline = buildTimeline(series.map((item) => {
+      if (!Array.isArray(item.data) || item.type === "custom") return null;
+      const tips = item.data.map((point) => point && typeof point === "object" && !Array.isArray(point)
+        ? point.tooltip || point.tooltipText || point.name || "" : "");
+      return timesForPoints(item.data.length, null, tips);
+    }));
+    const span = Math.max(1, timeline.end - timeline.start);
+    const fresh = span / CLOCK_FRAMES * 4;
+    const steps = [];
+    for (let frame = 0; frame <= CLOCK_FRAMES; frame++) {
+      const now = timeline.start + span * frame / CLOCK_FRAMES;
+      steps.push({
+        delay: frame === CLOCK_FRAMES ? FINAL_HOLD : CLOCK_DELAY,
+        render: () => {
+          const shown = series.map((item, k) => {
+            const times = timeline.groups[k];
+            if (!times) return item;
+            const data = [];
+            item.data.forEach((point, i) => {
+              const t = times[i];
+              if (t != null && t > now) return;
+              const age = t == null ? fresh : now - t;
+              const base = Number(point && point.symbolSize != null ? point.symbolSize : item.symbolSize);
+              if (age < fresh && Number.isFinite(base) && point && typeof point === "object" && !Array.isArray(point)) {
+                data.push(Object.assign({}, point, { symbolSize: base * (1 + 0.8 * (1 - age / fresh)) }));
+              } else data.push(point);
+            });
+            return Object.assign({}, item, { data, animation: false });
+          });
+          const size = { width: chart.getWidth(), height: chart.getHeight() };
+          chart.setOption(Object.assign({}, option, {
+            animation: false,
+            series: shown,
+            graphic: [].concat(option.graphic || [], clockGraphic(size, clockLabel(timeline, now), frame / CLOCK_FRAMES, isLight)),
+          }), true);
+        },
+      });
+    }
+    return steps;
+  }
+
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Runs the frames; `onFrame` captures each one (GIF) or just waits (preview).
+  async function playSteps(steps, run, onFrame) {
+    for (const step of steps) {
+      if (run.stopped) return false;
+      step.render();
+      await pause(50);
+      if (run.stopped) return false;
+      await onFrame(step);
+    }
+    return !run.stopped;
+  }
+
+  // PNG / animation / Preview / GIF for one chart. `stepsFor(mode)` gives the
+  // frames; `restore()` puts the full chart back afterwards.
+  function wireExportControls(controls, chart, args, stepsFor, restore) {
+    const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+    const selector = controls.querySelector("[data-export-animation]");
+    const previewButton = controls.querySelector('[data-export="preview"]');
+    const gifButton = controls.querySelector('[data-export="gif"]');
+    const idle = () => {
+      previewButton.textContent = "Preview";
+      previewButton.setAttribute("aria-pressed", "false");
+      previewButton.disabled = false;
+      gifButton.textContent = "GIF";
+      gifButton.disabled = false;
+    };
+    const finish = (run) => {
+      if (_cmPlaying === run) _cmPlaying = null;
+      restore();
+      idle();
+    };
+    controls.querySelector('[data-export="png"]').onclick = () => {
+      stopAnimation();
+      downloadDataUrl(chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg }), `${exportFilenameFromArgs(args || {})}.png`);
+    };
+    previewButton.onclick = async () => {
+      if (_cmPlaying && _cmPlaying.kind === "preview" && _cmPlaying.controls === controls) {
+        stopAnimation();
+        return;
+      }
+      stopAnimation();
+      const run = { kind: "preview", controls, stopped: false };
+      _cmPlaying = run;
+      previewButton.textContent = "Stop";
+      previewButton.setAttribute("aria-pressed", "true");
+      gifButton.disabled = true;
+      // Stopping restores the chart straight away, not at the end of a frame.
+      run.onStop = () => finish(run);
+      await playSteps(stepsFor(selector.value), run, (step) => pause(Math.max(0, step.delay - 50)));
+      if (!run.stopped) finish(run);
+    };
+    gifButton.onclick = async () => {
+      if (typeof GIF === "undefined") {
+        gifButton.textContent = "NO GIF";
+        setTimeout(() => { gifButton.textContent = "GIF"; }, 1200);
+        return;
+      }
+      stopAnimation();
+      const run = { kind: "gif", controls, stopped: false };
+      _cmPlaying = run;
+      run.onStop = () => finish(run);
+      gifButton.textContent = "MAKING";
+      gifButton.disabled = true;
+      previewButton.disabled = true;
+      const gif = new GIF({
+        workers: 2,
+        quality: 10,
+        width: chart.getWidth(),
+        height: chart.getHeight(),
+        workerScript: "gif.worker.js",
+        background: bg,
+      });
+      const done = await playSteps(stepsFor(selector.value), run, (step) => {
+        gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: step.delay });
+      });
+      if (!done) return;
+      gif.on("finished", (blob) => {
+        if (_cmPlaying === run) _cmPlaying = null;
+        downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
+        idle();
+      });
+      restore();
+      gif.render();
+    };
   }
 
   function installExportControls(plotEl, chart, traces, layout, args) {
@@ -1364,169 +1764,15 @@
       plotEl.parentNode.insertBefore(wrap, plotEl);
       wrap.appendChild(plotEl);
     }
-    let controls = prepareExportControls(wrap, args);
-    controls.querySelector('[data-export="png"]').onclick = () => {
-      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
-      const url = chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg, excludeComponents: [] });
-      downloadDataUrl(url, `${exportFilenameFromArgs(args || {})}.png`);
-    };
-    controls.querySelector('[data-export="gif"]').onclick = () => makeChartGif(
-      chart, traces, layout, args,
-      controls.querySelector('[data-export="gif"]'),
-      controls.querySelector('[data-export-animation]').value
-    );
+    const controls = prepareExportControls(wrap, args);
+    wireExportControls(controls, chart, args,
+      (mode) => chartAnimationSteps(chart, traces, layout, args, mode),
+      () => chart.setOption(echartsOptionFromPlotly(traces, layout, args, {
+        chartSize: { width: chart.getWidth(), height: chart.getHeight() },
+      }), true));
   }
 
-  function makeChartGif(chart, traces, layout, args, button, animationMode) {
-    if (typeof GIF === "undefined") {
-      button.textContent = "NO GIF";
-      setTimeout(() => { button.textContent = "GIF"; }, 1200);
-      return;
-    }
-    const old = button.textContent;
-    button.textContent = "MAKING";
-    button.disabled = true;
-    const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
-    const gif = new GIF({
-      workers: 2,
-      quality: 10,
-      width: chart.getWidth(),
-      height: chart.getHeight(),
-      workerScript: "gif.worker.js",
-      background: bg,
-    });
-    const mode = animationMode || "build";
-    const lineCount = Math.max(1, (traces || []).filter(isLineOnlyTrace).length);
-    const traceCount = Math.max(1, (traces || []).length);
-
-    function framePolicy(modeName) {
-      if (modeName === "still") return { frames: 2, delay: 1400, finalHold: 0 };
-      if (modeName === "pulse") return { frames: Math.min(20, Math.max(8, exportHighlightSeriesIndexes(chart).length * 2)), delay: 160, finalHold: 900 };
-      if (modeName === "arrow") return { frames: Math.min(54, Math.max(16, lineCount * 3)), delay: lineCount > 24 ? 95 : 125, finalHold: 1000 };
-      if (modeName === "sequence") return { frames: Math.min(48, Math.max(10, traceCount)), delay: traceCount > 30 ? 110 : 170, finalHold: 1100 };
-      if (modeName === "network") return { frames: Math.min(42, Math.max(14, lineCount)), delay: lineCount > 28 ? 100 : 150, finalHold: 1000 };
-      return { frames: Math.min(36, Math.max(18, lineCount)), delay: 115, finalHold: 1000 };
-    }
-
-    function setMapOption(extra) {
-      chart.setOption(echartsOptionFromPlotly(traces, layout, args, Object.assign({
-        chartSize: { width: chart.getWidth(), height: chart.getHeight() },
-        exporting: true,
-      }, extra || {})), true);
-    }
-
-    function addCanvasFrame(delay) {
-      gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay });
-    }
-
-    function finishGif(finalDelay) {
-      setMapOption();
-      setTimeout(() => {
-        if (finalDelay !== 0) addCanvasFrame(finalDelay || framePolicy(mode).finalHold || 900);
-        gif.render();
-      }, 80);
-    }
-
-    if (mode === "still") {
-      setMapOption();
-      setTimeout(() => {
-        const policy = framePolicy("still");
-        addCanvasFrame(policy.delay);
-        addCanvasFrame(policy.delay);
-        gif.render();
-      }, 80);
-    } else if (mode === "pulse") {
-      setMapOption();
-      const policy = framePolicy("pulse");
-      const seriesIndexes = exportHighlightSeriesIndexes(chart);
-      let frame = 0;
-      function pulseTick() {
-        chart.dispatchAction({ type: "downplay" });
-        chart.dispatchAction({ type: "highlight", seriesIndex: seriesIndexes[frame % seriesIndexes.length] });
-        setTimeout(() => {
-          addCanvasFrame(frame === policy.frames - 1 ? policy.finalHold : policy.delay);
-          frame += 1;
-          if (frame < policy.frames) pulseTick();
-          else {
-            chart.dispatchAction({ type: "downplay" });
-            finishGif(0);
-          }
-        }, 80);
-      }
-      pulseTick();
-    } else if (mode === "arrow") {
-      const policy = framePolicy("arrow");
-      let frame = 1;
-      function arrowTick() {
-        const fraction = frame / policy.frames;
-        setMapOption({ revealFraction: fraction, revealMode: "arrow" });
-        setTimeout(() => {
-          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
-          frame += 1;
-          if (frame <= policy.frames) arrowTick();
-          else finishGif(0);
-        }, 50);
-      }
-      arrowTick();
-    } else if (mode === "sequence") {
-      const policy = framePolicy("sequence");
-      let frame = 1;
-      function sequenceTick() {
-        const visibleTraceCount = Math.ceil(traceCount * (frame / policy.frames));
-        setMapOption({ visibleTraceCount, revealFraction: 1 });
-        setTimeout(() => {
-          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
-          frame += 1;
-          if (frame <= policy.frames) sequenceTick();
-          else finishGif(0);
-        }, 50);
-      }
-      sequenceTick();
-    } else if (mode === "network") {
-      const policy = framePolicy("network");
-      let frame = 1;
-      setMapOption({ networkLineFraction: 0, revealFraction: 1 });
-      setTimeout(() => addCanvasFrame(policy.delay), 80);
-      function networkTick() {
-        setMapOption({ networkLineFraction: frame / policy.frames, revealFraction: 1 });
-        setTimeout(() => {
-          addCanvasFrame(frame === policy.frames ? policy.finalHold : policy.delay);
-          frame += 1;
-          if (frame <= policy.frames) networkTick();
-          else finishGif(0);
-        }, 50);
-      }
-      setTimeout(networkTick, 180);
-    } else {
-      const policy = framePolicy("build");
-      const frames = policy.frames;
-      let i = 1;
-      function renderFraction(fraction) {
-        setMapOption({ revealFraction: fraction });
-      }
-      function addNextFrame() {
-        const fraction = i / frames;
-        renderFraction(fraction);
-        setTimeout(() => {
-          addCanvasFrame(i === frames ? policy.finalHold : policy.delay);
-          i += 1;
-          if (i <= frames) addNextFrame();
-          else finishGif(0);
-        }, 40);
-      }
-      addNextFrame();
-    }
-    gif.on("finished", (blob) => {
-      chart.setOption(echartsOptionFromPlotly(traces, layout, args, {
-        chartSize: { width: chart.getWidth(), height: chart.getHeight() },
-      }), true);
-      downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
-      button.textContent = old;
-      button.disabled = false;
-    });
-  }
-
-  function installOptionExportControls(plotEl, chart, args) {
+  function installOptionExportControls(plotEl, chart, args, currentOption) {
     let wrap = plotEl.parentElement;
     if (!wrap || !wrap.classList.contains("cm-chart-wrap")) {
       wrap = document.createElement("div");
@@ -1534,64 +1780,10 @@
       plotEl.parentNode.insertBefore(wrap, plotEl);
       wrap.appendChild(plotEl);
     }
-    let controls = prepareExportControls(wrap, args);
-    controls.querySelector('[data-export="png"]').onclick = () => {
-      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
-      downloadDataUrl(chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg }), `${exportFilenameFromArgs(args || {})}.png`);
-    };
-    controls.querySelector('[data-export="gif"]').onclick = () => {
-      if (typeof GIF === "undefined") {
-        const btn = controls.querySelector('[data-export="gif"]');
-        btn.textContent = "NO GIF";
-        setTimeout(() => { btn.textContent = "GIF"; }, 1200);
-        return;
-      }
-      const btn = controls.querySelector('[data-export="gif"]');
-      const old = btn.textContent;
-      const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
-      const mode = controls.querySelector('[data-export-animation]').value || "build";
-      const gif = new GIF({
-        workers: 2,
-        quality: 10,
-        width: chart.getWidth(),
-        height: chart.getHeight(),
-        workerScript: "gif.worker.js",
-        background: bg,
-      });
-      btn.textContent = "MAKING";
-      btn.disabled = true;
-      if (mode === "still") {
-        setTimeout(() => {
-          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: 1400 });
-          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: 1400 });
-          gif.render();
-        }, 80);
-      } else {
-      let frame = 0;
-      const maxFrames = mode === "pulse" ? 20 : mode === "still" ? 2 : mode === "network" ? 18 : mode === "sequence" ? 18 : 24;
-      const frameDelay = mode === "arrow" ? 120 : mode === "sequence" ? 155 : mode === "network" ? 145 : 140;
-      const finalHold = mode === "arrow" || mode === "network" || mode === "sequence" ? 1000 : 900;
-      const seriesIndexes = exportHighlightSeriesIndexes(chart);
-      function tick() {
-        chart.dispatchAction({ type: "highlight", seriesIndex: seriesIndexes[frame % seriesIndexes.length] });
-        setTimeout(() => {
-          gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: frame === maxFrames - 1 ? finalHold : frameDelay });
-          chart.dispatchAction({ type: "downplay" });
-          frame += 1;
-          if (frame < maxFrames) tick();
-          else {
-            gif.render();
-          }
-        }, 90);
-      }
-      tick();
-      }
-      gif.on("finished", (blob) => {
-        downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
-        btn.textContent = old;
-        btn.disabled = false;
-      });
-    };
+    const controls = prepareExportControls(wrap, args);
+    wireExportControls(controls, chart, args,
+      () => optionAnimationSteps(chart, currentOption(), args),
+      () => chart.setOption(currentOption(), true));
   }
 
   function numericBoxValue(value, fallback) {
@@ -1683,7 +1875,7 @@
           Streamlit.setHeight(plotEl.offsetHeight + 4);
         }
       });
-      installOptionExportControls(plotEl, _cmChart, args);
+      installOptionExportControls(plotEl, _cmChart, args, () => option);
       Streamlit.setHeight(plotEl.offsetHeight + 4);
     });
   }
@@ -1779,6 +1971,8 @@
     return { x:xs, y:ys, mode:"markers", name:teamName, type:"scatter",
       text:texts, hovertemplate:"%{text}<extra></extra>", customdata:cd,
       marker:{ size:sizes, color:colors, symbol:symbols, line:{color:lineColors,width:lineWidths,dash:lineDashes} },
+      cmTime: shotList.map(eventSeconds),
+      cmShot: shotList.map(s => ({ type: s.type, tx: s._tx, ty: s._ty })),
       showlegend:true };
   }
 
@@ -1807,15 +2001,23 @@
     if (isGF) toPlot = shots.filter(s => s.goal_mouth_y != null && s.goal_mouth_z != null);
 
     for (const s of toPlot) {
+      // Where the shot crossed the goal line (the goal's centre when unknown), for Shot Flight.
+      const mouthY = s.goal_mouth_y != null && Number.isFinite(Number(s.goal_mouth_y)) ? Number(s.goal_mouth_y) : 50;
       if (isGF) {
         s._px = 100 - s.goal_mouth_y;
         s._py = s.goal_mouth_z;
+        s._tx = null;
+        s._ty = null;
       } else if (isHPV) {
         s._px = 100 - s.y;
         s._py = 100 - s.x;
+        s._tx = 100 - mouthY;
+        s._ty = 0;
       } else {
         s._px = s.x;
         s._py = 100 - s.y;
+        s._tx = 100;
+        s._ty = 100 - mouthY;
       }
     }
 
@@ -1926,7 +2128,7 @@
       const sx=p.x, sy=100-p.y, ex=p.endX, ey=100-p.endY;
 
       traces.push({
-        x:[sx,ex], y:[sy,ey], mode:"lines",
+        x:[sx,ex], y:[sy,ey], mode:"lines", cmTime: eventSeconds(p),
         line:{color:hexToRgba(col,lineAlpha),width:isSelected?4:2.2},
         hoverinfo:"none", showlegend:false,
       });
@@ -2258,6 +2460,7 @@
       stackConnectorTraces.push({
         x: ordered.map(a => a._plotX),
         y: ordered.map(a => a._plotY),
+        cmTime: ordered.map(actionSecond),
         mode: "lines",
         name: "Stack link",
         line: { color: isLight ? "rgba(126,82,0,0.90)" : "rgba(255,225,0,0.95)", width: isLight ? 3.4 : 3 },
@@ -2630,13 +2833,14 @@
     // ── Carry lines (null-separated, not clickable) ──────────────────────────
     if (carries.length) {
       const lineAlpha = dimmed ? (isLight ? 0.32 : 0.18) : (isLight ? 0.82 : 0.68);
-      const cxs = [], cys = [];
+      const cxs = [], cys = [], cts = [];
       carries.forEach(c => {
         cxs.push(c.x, c.endX, null);
         cys.push(100 - c.y, 100 - c.endY, null);
+        cts.push(eventSeconds(c), eventSeconds(c), null);
       });
       traces.push({
-        x: cxs, y: cys, mode: "lines",
+        x: cxs, y: cys, mode: "lines", cmTime: cts,
         line: { dash: "dot", width: isLight ? 2.4 : 2, color: rgbaFromHex("#e0c860", lineAlpha, isLight) },
         hoverinfo: "skip", showlegend: false, name: "Carry line",
       });
@@ -2646,7 +2850,7 @@
         const sel = carries.find(c => c.df_idx === selectedIdx);
         if (sel) {
           traces.push({
-            x: [sel.x, sel.endX],
+            x: [sel.x, sel.endX], cmTime: eventSeconds(sel),
             y: [100 - sel.y, 100 - sel.endY],
             mode: "lines",
             line: { dash: "dot", width: isLight ? 3.6 : 3, color: rgbaFromHex("#e0c860", 1.0, isLight) },
