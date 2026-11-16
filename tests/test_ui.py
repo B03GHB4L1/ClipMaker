@@ -185,6 +185,14 @@ class SharedUiTests(unittest.TestCase):
         for name in ("index.html", "app.js"):
             self.assertNotIn("annotate", (UI / name).read_text(encoding="utf-8").lower(), name)
 
+    def test_annotate_page_scrolls_past_the_window(self):
+        # The editor shares the analysis shell, which locks the page to the window
+        # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.
+        self.assertIn('class="analysis-page annotate-page"', (UI / "annotate.html").read_text(encoding="utf-8"))
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        self.assertIn("body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }", css)
+        self.assertIn(".annotate-page .annotate-main { flex: 1 0 auto; }", css)
+
     def test_intake_has_no_sample_kickoff_markers(self):
         source = (UI / "index.html").read_text(encoding="utf-8")
         self.assertEqual(re.findall(r'data-marker="([^"]+)"', source), ["00:00:00"] * 5)

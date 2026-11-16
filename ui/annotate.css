@@ -1,4 +1,7 @@
 /* Analyst editor (annotate.html). Light theme, design.css tokens. */
+/* The analysis shell locks the page to the window; the editor is taller than that, so let it scroll. */
+body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
+.annotate-page .annotate-main { flex: 1 0 auto; } /* grow with the content so the page padding clears the footer */
 .annotate-main { gap: 6px; }
 .annotate-back { color: var(--cm-ink); font-size: 11px; text-decoration: none; white-space: nowrap; }
 .annotate-back:hover, .annotate-back:focus-visible { text-decoration: underline; }
