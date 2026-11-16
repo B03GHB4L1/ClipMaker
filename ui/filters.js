@@ -14,6 +14,7 @@ const playerOptions = document.querySelector("[data-player-options]");
 const actionOptions = document.querySelector("[data-action-options]");
 const qualifierGroups = document.querySelector("[data-qualifier-groups]");
 const exportButton = document.querySelector("[data-export-button]");
+const annotateButton = document.querySelector("[data-annotate-focused]");
 const planOutput = document.querySelector("[data-plan-output]");
 const jobState = document.querySelector("[data-job-state]");
 const jobLogs = document.querySelector("[data-job-logs]");
@@ -845,6 +846,7 @@ const refreshExportState = () => {
     : scope === "selected" ? `Export reel of ${count}` : "Export reel";
   exportButton.disabled = !clips.length || !count || Boolean(activeJobId) || !hasFootage();
   exportButton.title = hasFootage() ? "" : "Add match footage in Intake before exporting.";
+  annotateButton.disabled = !clips.length || !hasFootage();
 };
 
 const showClips = (windows, savedSelection) => {
@@ -1510,6 +1512,28 @@ document.querySelector(".editor").addEventListener("keydown", (event) => {
 });
 
 exportButton.addEventListener("click", startExport);
+
+// Annotate (export line): cut the clip in the player, then open it in the analyst editor.
+annotateButton.addEventListener("click", async () => {
+  const clip = focused();
+  if (!clip || !activeMatch) return;
+  const label = annotateButton.textContent;
+  annotateButton.disabled = true;
+  annotateButton.textContent = "Preparing clip...";
+  try {
+    const result = await apiRequest("/api/previews/render", {
+      method: "POST",
+      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+    });
+    annotateButton.textContent = label;
+    // annotateClip reports its own errors and leaves the page only once the clip is in the project.
+    await annotateClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, annotateButton, activeMatch.id);
+  } catch (error) {
+    field("summary-note").textContent = `Could not prepare the clip for annotating: ${error.message}`;
+    annotateButton.textContent = label;
+    annotateButton.disabled = false;
+  }
+});
 
 cancelJobButton.addEventListener("click", async () => {
   if (!activeJobId) return;

@@ -220,6 +220,18 @@ class SharedUiTests(unittest.TestCase):
         for name in ("index.html", "app.js"):
             self.assertNotIn("annotate", (UI / name).read_text(encoding="utf-8").lower(), name)
 
+    def test_export_line_offers_annotate_for_the_clip_in_the_player(self):
+        # User request: Annotate sits on the Clips screen's export line, not only behind "Render this clip".
+        html = (UI / "filters.html").read_text(encoding="utf-8")
+        bar = html[html.index('<div class="export-bar">'):html.index("data-export-button")]
+        self.assertIn("data-annotate-focused", bar)
+        script = (UI / "filters.js").read_text(encoding="utf-8")
+        self.assertIn("annotateButton.disabled = !clips.length || !hasFootage();", script)
+        handler = script[script.index('annotateButton.addEventListener("click"'):]
+        self.assertIn("const clip = focused();", handler)
+        self.assertIn('apiRequest("/api/previews/render"', handler)
+        self.assertIn("annotateClip(result.file.url", handler)
+
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
         # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.
