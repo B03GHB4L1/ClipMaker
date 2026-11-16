@@ -945,6 +945,17 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
             "score": float(row.get("xT", 0)),
             "why": f"+{float(row.get('xT', 0)):.3f} xT",
         })
+    shots = team_df[team_df["type"].isin(SHOT_TYPES)].copy()
+    if "xG" in shots.columns:
+        shots["shot_xg"] = pd.to_numeric(shots["xG"], errors="coerce")
+        shots = shots[shots["shot_xg"].notna()]
+        for _, row in shots.sort_values("shot_xg", ascending=False, kind="stable").head(30).iterrows():
+            rows.append({
+                **row.to_dict(),
+                "playlist": "Shots By xG",
+                "score": float(row["shot_xg"]),
+                "why": f"xG {float(row['shot_xg']):.2f}" + (" · Goal" if row.get("type") == "Goal" else ""),
+            })
     box_entries = team_df[_box_entry_mask(team_df)].copy()
     if not box_entries.empty:
         box_entries["entry_score"] = box_entries["xT"].clip(lower=0) + box_entries["type"].isin(SHOT_TYPES).astype(int)
@@ -1025,6 +1036,7 @@ def render_video_lab(df, team):
             "Defensive Transition",
             "Attacking Transition",
             "xT Passes And Carries",
+            "Shots By xG",
             "Box Entries",
             "Restarts",
         ], key="vl_playlist")
@@ -1627,6 +1639,15 @@ def _possession_length_chart(profile):
     return _drop_note_below_axis(_brand_fig(fig, 360, note=f"{profile['possessions']} possessions with at least one pass. A possession ends when the opponent has the ball."))
 
 
+def xg_per_shot(team_df):
+    """Mean VizorPlay xG of a team's non-penalty shots (None without any)."""
+    shots = team_df[team_df["type"].isin(SHOT_TYPES)]
+    if "is_penalty" in shots:
+        shots = shots[~_str_series(shots, "is_penalty").str.lower().isin({"true", "1", "1.0"})]
+    values = pd.to_numeric(shots["xG"], errors="coerce").dropna() if "xG" in shots else pd.Series(dtype=float)
+    return float(values.mean()) if len(values) else None
+
+
 def render_style_profile(df, team):
     st.subheader("Style Profile")
     team_df = df[df["team"].astype(str).eq(team)].copy()
@@ -1642,6 +1663,8 @@ def render_style_profile(df, team):
         ("Transition Threat", _fmt_metric(raw["transition_threat_pct"], "%"), "Recoveries leading to a shot or box entry."),
         ("Direct Passes", _fmt_metric(raw["direct_passes_pct"], "%"), "Long balls, launches and diagonals as a share of passes."),
         ("xT / Pass", _fmt_metric(raw["xT_per_pass"], decimals=4), "Mean positive xT created by passes."),
+        ("xG / Shot", _fmt_metric(xg_per_shot(team_df), decimals=2),
+         "Average VizorPlay xG of the team's non-penalty shots: how good its chances are. Data: StatsBomb."),
     ])
 
     t1, t2 = st.columns([1, 1])

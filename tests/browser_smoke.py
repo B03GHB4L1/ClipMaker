@@ -524,10 +524,15 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     panel = page.locator(".native-panel")
     expect(panel.get_by_role("radiogroup", name="Team")).to_be_visible()
     expect(page.locator(".native-stats")).to_contain_text("Goals")
-    component = page.frame_locator(".native-map-box iframe")
+    # The shot map comes first; the xG race sits under it.
+    component = page.frame_locator(".native-map-box .native-component:nth-child(1) iframe")
     plot = component.locator("#plot")
     expect(plot.locator("canvas")).not_to_have_count(0, timeout=60000)
     page.wait_for_function("parseInt(document.querySelector('.native-map-box iframe').style.height) > 200")
+    expect(page.locator(".native-stats")).to_contain_text("xG")
+    race = page.frame_locator(".native-map-box .native-component:nth-child(2) iframe").locator("#plot")
+    expect(race.locator("canvas")).not_to_have_count(0, timeout=60000)
+    assert "xG" in race.evaluate("element => window.echarts.getInstanceByDom(element).getOption().title[0].text")
     position = plot.evaluate("""element => {
         const chart = window.echarts.getInstanceByDom(element);
         for (const [seriesIndex, series] of chart.getOption().series.entries()) {

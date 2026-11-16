@@ -29,11 +29,29 @@ for you.
   video.
 - **Look deeper.** See shot maps, pass maps and other charts for a match, and
   how a team plays across several matches.
+- **See how good each chance was.** VizorPlay xG gives every shot a value from
+  0 to 1: the chance it is scored, from where and how it was taken. It shows on
+  the shot map, an xG race chart, player comparisons, team style and the Video
+  Lab.
 
 Everything stays on your computer. Your work is saved as you go, and starting
 a new project never deletes an old one.
 
 VizorPlay used to be called ClipMaker.
+
+### About VizorPlay xG
+
+VizorPlay xG was trained on free match data published by StatsBomb
+([StatsBomb open data](https://github.com/statsbomb/open-data)). Only the
+finished model ships with the app, so nothing is downloaded and your matches
+never leave your computer. It looks at the distance and angle to goal, headers,
+volleys, free kicks, set pieces, counter-attacks, through balls, crosses,
+one-on-ones and Opta's "big chance" flag. The match data doesn't say where
+defenders and the goalkeeper were, so a single shot's value can be off; totals
+over a match or a season are much steadier. Penalties count as 0.76; own goals
+have no xG.
+
+Data: StatsBomb.
 
 ---
 
@@ -101,6 +119,7 @@ Updating never deletes your projects.
 - A brand-new app for Windows, Mac and Linux, under a new name
 - Smaller download, and it updates itself on Windows
 - Much faster video saving on computers with an NVIDIA graphics card
+- VizorPlay xG: how good every chance was, on the shot map, an xG race and more
 - Your projects are saved and reopen exactly as you left them
 - The AI filter from older versions has been removed
 

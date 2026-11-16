@@ -36,6 +36,86 @@ def _zone_figure(ev, player_name, color, match_context, light):
     return helpers.brand_plotly_export(fig, light=light)
 
 
+SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
+XG_NOTE = ("VizorPlay xG, fitted on StatsBomb open data (Data: StatsBomb). Minutes come from substitutions; "
+           "per-90 values from short spells swing a lot. Penalties count; own goals do not.")
+
+
+COUNTS = {"Minutes", "Shots", "Goals"}
+
+
+def minutes_played(ev, df_all):
+    """Minutes on the pitch, from the player's substitution events (whole match otherwise)."""
+    import pandas as pd
+    minutes = pd.to_numeric(df_all.get("minute"), errors="coerce")
+    match_end = max(90.0, float(minutes.max()) if minutes.notna().any() else 90.0)
+    types = ev["type"].astype(str)
+    on = pd.to_numeric(ev.loc[types == "SubstitutionOn", "minute"], errors="coerce").dropna()
+    off = pd.to_numeric(ev.loc[types == "SubstitutionOff", "minute"], errors="coerce").dropna()
+    start = float(on.min()) if len(on) else 0.0
+    end = float(off.max()) if len(off) else match_end
+    if end <= start:  # inconsistent substitution events: count from kick-off
+        start = 0.0
+    return max(1.0, end - start)
+
+
+def shooting_profile(ev, df_all):
+    """Shots, goals and xG for one player in this match."""
+    import pandas as pd
+    shots = ev[ev["type"].isin(SHOT_TYPES)]
+    if "is_own_goal" in shots:
+        shots = shots[~shots["is_own_goal"].astype(str).str.lower().isin({"true", "1", "1.0"})]
+    xg = float(pd.to_numeric(shots.get("xG"), errors="coerce").fillna(0).sum()) if len(shots) else 0.0
+    goals = int((shots["type"] == "Goal").sum())
+    minutes = minutes_played(ev, df_all)
+    return {
+        "Minutes": round(minutes),
+        "Shots": int(len(shots)),
+        "Goals": goals,
+        "xG": round(xg, 2),
+        "xG per 90": round(xg / minutes * 90, 2),
+        "Goals - xG": round(goals - xg, 2),
+        "xG per shot": round(xg / len(shots), 2) if len(shots) else 0.0,
+    }
+
+
+def _xg_figure(profile1, profile2, player1, player2, match_context, light):
+    """Mirrored bars: player 1 to the left, player 2 to the right, each row scaled to its larger value."""
+    import plotly.graph_objects as go
+    metrics = list(profile1)[::-1]
+    def scaled(value, other):
+        top = max(abs(value), abs(other))
+        return 0 if top == 0 else abs(value) / top
+    left = [-scaled(profile1[m], profile2[m]) for m in metrics]
+    right = [scaled(profile2[m], profile1[m]) for m in metrics]
+    def shown(metric, value):
+        if metric == "Goals - xG":
+            return f"{value:+.2f}"
+        return str(value) if metric in COUNTS else f"{value:.2f}"
+    text1 = [shown(m, profile1[m]) for m in metrics]
+    text2 = [shown(m, profile2[m]) for m in metrics]
+    ink = "#1f241b" if light else "#e8e8e8"
+    colors = ("#9bb81f" if light else "#E8FF4D", AWAY_COLOR)
+    fig = go.Figure([
+        go.Bar(y=metrics, x=values, orientation="h", name=name, marker=dict(color=color),
+               customdata=texts, hovertemplate="%{y}: %{customdata}<extra>" + name + "</extra>")
+        for values, texts, name, color in ((left, text1, player1, colors[0]), (right, text2, player2, colors[1]))
+    ])
+    # Values sit in a column at each edge, so zeros never pile up in the middle.
+    font = dict(color=ink, family="Geist Mono, monospace", size=12)
+    for metric, first, second in zip(metrics, text1, text2):
+        fig.add_annotation(x=-1.58, y=metric, text=first, xanchor="left", showarrow=False, font=font)
+        fig.add_annotation(x=1.58, y=metric, text=second, xanchor="right", showarrow=False, font=font)
+    fig.update_layout(barmode="overlay", bargap=0.35, height=400, margin=dict(t=118, b=40, l=110, r=24),
+                      xaxis=dict(range=[-1.6, 1.6], showticklabels=False, zeroline=True, showgrid=False),
+                      # A spare row at the bottom keeps the VizorPlay mark off the last values.
+                      yaxis=dict(title=None, range=[-1.4, len(metrics) - 0.5]),
+                      legend=dict(orientation="h", x=1, xanchor="right", y=1.01, yanchor="bottom"))
+    helpers._plotly_header(fig, f"Shooting & xG - {player1} vs {player2}", subtitle=match_context, note=XG_NOTE,
+                           light=light, height=400)
+    return helpers.brand_plotly_export(fig, light=light)
+
+
 def top_moments(ev, role, is_gk):
     scored = helpers._score_gk_moments(ev) if is_gk else helpers._score_moments(ev, role)
     scored = scored[scored["moment_score"] > 0]
@@ -109,6 +189,10 @@ def build_view(frames, controls, light_mode=True):
          "config": helpers.plotly_clean_static_config("pitch_zone_activity", player1, context)},
         {"section": "Pitch Zone Activity", "figure": _figure_json(_zone_figure(p2_ev, player2, AWAY_COLOR, context, light_mode)),
          "config": helpers.plotly_clean_static_config("pitch_zone_activity", player2, context)},
+        # Index 3 (drawn into the section under the radar).
+        {"section": "Shooting & xG", "figure": _figure_json(_xg_figure(
+            shooting_profile(p1_ev, df_all), shooting_profile(p2_ev, df_all), player1, player2, context, light_mode)),
+         "config": helpers.plotly_export_config("shooting_xg", player1, "vs", player2, context)},
     ]
     for side, ev, is_gk in (("1", p1_ev, p1_gk), ("2", p2_ev, p2_gk)):
         player = chosen[side]["player"]

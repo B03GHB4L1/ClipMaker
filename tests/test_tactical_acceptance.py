@@ -237,7 +237,8 @@ class TacticalNumericalAcceptance(unittest.TestCase):
             event("foreign-team", 62, team="Away", xT=9),
         ])
         rows = self.lab._playlist_rows(frame, "Home", 8, 8, 10, 8)
-        self.assertEqual(set(rows.playlist), {"Attacking Transition", "xT Passes And Carries", "Box Entries", "Restarts"})
+        self.assertEqual(set(rows.playlist), {"Attacking Transition", "xT Passes And Carries", "Shots By xG",
+                                              "Box Entries", "Restarts"})
         threat = rows[rows.playlist.eq("xT Passes And Carries")]
         self.assertEqual(threat.id.tolist(), ["high", "entry"])
         self.assertEqual(threat.score.tolist(), [.8, .2])

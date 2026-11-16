@@ -46,13 +46,15 @@ export async function renderComparison(panel, context) {
   const warning = el("p", { class: "native-inline-error native-warning", role: "alert", hidden: true });
   const radar = el("section", { class: "native-figure-section", "aria-label": "Performance radar" },
     el("h3", { text: "Performance Radar" }), el("div", { class: "native-figure", "data-figure": "0" }));
+  const shooting = el("section", { class: "native-figure-section", "aria-label": "Shooting and xG" },
+    el("h3", { text: "Shooting & xG" }), el("div", { class: "native-figure", "data-figure": "3" }));
   const zones = el("section", { class: "native-figure-section", "aria-label": "Pitch zone activity" },
     el("h3", { text: "Pitch Zone Activity" }),
     el("div", { class: "native-figure-pair" }, el("div", { class: "native-figure", "data-figure": "1" }),
       el("div", { class: "native-figure", "data-figure": "2" })));
   const moments = el("section", { class: "native-figure-section", "aria-label": "Top 5 moments" },
     el("h3", { text: "Top 5 Moments" }), el("div", { class: "native-moments" }));
-  panel.replaceChildren(filters, message, warning, radar, zones, moments);
+  panel.replaceChildren(filters, message, warning, radar, shooting, zones, moments);
 
   const change = (key, value) => {
     controls[key] = value;
@@ -84,7 +86,9 @@ export async function renderComparison(panel, context) {
     if (!view.figures.length) { targets.forEach((target) => target.replaceChildren()); return; }
     const Plotly = await loadPlotly();
     await Promise.all(view.figures.map((item, index) => {
-      const target = targets[index];
+      // Figures go by their index, not page order (Shooting & xG sits under the radar).
+      const target = panel.querySelector(`[data-figure="${index}"]`);
+      if (!target) return null;
       return Plotly.react(target, item.figure.data, item.figure.layout, plotlyConfig({ ...item.config, responsive: true }, Plotly));
     }));
   };

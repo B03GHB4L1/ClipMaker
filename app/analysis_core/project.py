@@ -26,7 +26,8 @@ def analysis_frame(frame):
                 frame[key] = pd.to_numeric(frame[coordinate], errors="coerce").map(lambda value: resolver(value) if pd.notna(value) else "")
             else:
                 frame[key] = ""
-    return frame
+    import xg_model
+    return xg_model.add_xg(frame)
 
 
 def project_session(project: dict) -> dict:

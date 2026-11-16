@@ -237,7 +237,8 @@ class AnalysisApiTests(unittest.TestCase):
         _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": project_id, "controls": {"team": "Southport"}})
         view = json.loads(body)["view"]
         self.assertEqual(view["controls"]["team"], "Southport")
-        self.assertEqual(view["components"][-1]["args"]["component_type"], "shot_map")
+        self.assertEqual([c["args"].get("filename_hint", c["args"]["component_type"]) for c in view["components"]],
+                         ["shot_map", "xg_race"])
         self.assertEqual(view["clip_defaults"], {"before": 5, "after": 8})
         selected = view["picker"]["items"][0]["id"]
         clip = "/api/analysis/analyst/shot-map/clip"
@@ -267,7 +268,8 @@ class AnalysisApiTests(unittest.TestCase):
                                       "markers": {"1H": "00:00:30", "2H": "00:00:30"}})
         _, body = self.request("/api/analysis/analyst/shot-map", {"project_id": self.project["id"], "controls": {}})
         # A first-half shot well inside the 25-minute test video.
-        shot = next({"id": item["df_idx"]} for item in json.loads(body)["view"]["components"][-1]["args"]["shots"]
+        shot_map = next(c for c in json.loads(body)["view"]["components"] if c["args"]["component_type"] == "shot_map")
+        shot = next({"id": item["df_idx"]} for item in shot_map["args"]["shots"]
                     if item["period"] == "FirstHalf" and 1 <= item["minute"] < 20)
         code, payload = self.error("/api/analysis/analyst/shot-map/clip",
                                    {"project_id": self.project["id"], "controls": {"selected": None}, "before": 3, "after": 4})

@@ -45,6 +45,7 @@ def deliberate_fixes(figure):
 
 
 ATTACK_LABEL = "ATTACK ->"
+XG_PLAYLIST = "Shots By xG"
 NEW_STYLE_CHARTS = re.compile(r"Pass Directness - |Possession Length - median")
 NEW_STYLE_CAPTIONS = {"No passes with end locations for this team.", "No possessions found for this team."}
 MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
@@ -69,6 +70,10 @@ def normal(element, norm):
         return None
     if kind in {"Subheader", "Caption", "Markdown", "Info", "Warning", "Error", "Success"}:
         return (kind, norm.text(element["value"]))
+    if kind == "Metric" and element["label"] == "xG / Shot":
+        return None  # VizorPlay xG is new; see test_style_profile_shows_xg_per_shot.
+    if kind == "Selectbox" and element["key"] == "vl_playlist":
+        element = {**element, "options": [o for o in element["options"] if o != XG_PLAYLIST]}
     if kind == "Metric":
         return (kind, element["label"], norm.text(element["value"]), element.get("delta") or "")
     if kind == "plotly" and NEW_STYLE_CHARTS.search(json.dumps(element["figure"].get("layout", {}))):
