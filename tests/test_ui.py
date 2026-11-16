@@ -94,6 +94,19 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("Open folder", helper)
         self.assertIn(".saved-popup", (UI / "design.css").read_text(encoding="utf-8"))
 
+    def test_intake_brand_screen_lingers_then_peels_away(self):
+        app = (UI / "app.js").read_text(encoding="utf-8")
+        styles = (UI / "styles.css").read_text(encoding="utf-8")
+        hold = int(re.search(r"const WIPE_HOLD_MS = (\d+);", app).group(1))
+        self.assertGreaterEqual(hold, 1000)  # stays up a moment longer than the page load
+        self.assertLessEqual(hold, 2000)
+        # The engine connects straight away; only the reveal waits.
+        self.assertRegex(app, r'addEventListener\("load", \(\) => \{\s*connectApi\(\);\s*setTimeout')
+        self.assertIn("transform: translateY(-100%);", styles)  # peels up rather than snapping shut
+        self.assertIn("page-wipe-name 0.6s ease-out backwards", styles)  # the name can fade out again
+        reduced = styles[styles.index("@media (prefers-reduced-motion"):]
+        self.assertRegex(reduced, r"\.page-wipe \{\s*display: none;")
+
     def test_chart_pictures_are_saved_by_the_engine_not_browser_downloads(self):
         component = (UI.parent / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
         self.assertIn('fetch("/api/images/save"', component)

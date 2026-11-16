@@ -44,6 +44,7 @@ def deliberate_fixes(figure):
     return figure
 
 
+ATTACK_LABEL = "ATTACK ->"
 MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
 
 
@@ -73,6 +74,11 @@ def normal(element, norm):
         # light palette in the browser; compare the colours users saw.
         figure = replace_placeholders(analysis_golden._round(deliberate_fixes(element["figure"])))
         layout = {k: v for k, v in figure.get("layout", {}).items() if k != "template"}
+        # The attack-direction label is new on the pitch maps; see test_pitch_maps_show_the_attack_direction.
+        # The label also takes a little more room at the top (118px, not 92px).
+        if any(a.get("text") == ATTACK_LABEL for a in layout.get("annotations") or []):
+            layout["annotations"] = [a for a in layout["annotations"] if a.get("text") != ATTACK_LABEL]
+            layout["margin"] = {**layout["margin"], "t": 92}
         return (kind, norm.data({**figure, "layout": layout}))
     if kind == "Dataframe":
         return (kind, element["columns"], norm.data(analysis_golden._round(element["rows"])))
@@ -149,6 +155,32 @@ class TacticalNativeParityTests(unittest.TestCase):
                             pd.testing.assert_frame_equal(expected.reset_index(drop=True), actual.reset_index(drop=True))
                             checked += 1
         self.assertGreater(checked, 40)
+
+    def test_pitch_maps_show_the_attack_direction(self):
+        """Transition maps, the restart map and the event trace say which way the team attacks."""
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            wanted = {"Loss Locations By Transition Outcome": "defensive-transitions",
+                      "Recovery Locations By Attack Outcome": "attacking-transitions",
+                      "Restart Delivery Map": "set-pieces", "Event Trace": "video-lab"}
+            for title, slug in wanted.items():
+                controls = {"vl_playlist": "Restarts"} if slug == "video-lab" else {}
+                view, _ = tactical.render(slug, controls, project, projects)
+                figures = [e["figure"] for e in view["elements"] if e["kind"] == "plotly" and title in json.dumps(e["figure"])]
+                with self.subTest(map=title):
+                    self.assertTrue(figures, title)
+                    labels = [a for a in figures[0]["layout"].get("annotations", []) if a.get("text") == ATTACK_LABEL]
+                    self.assertEqual(len(labels), 1)
+                    # Just above the pitch's top-left corner, in pitch coordinates.
+                    self.assertEqual((labels[0]["x"], labels[0]["y"], labels[0]["xanchor"], labels[0]["yanchor"]),
+                                     (0, 100, "left", "bottom"))
+                    self.assertEqual(figures[0]["layout"]["margin"]["t"], 118)  # clear of the subtitle
+            # Other pitch charts are unchanged.
+            view, _ = tactical.render("style-profile", {}, project, projects)
+            self.assertNotIn(ATTACK_LABEL, json.dumps(view))
 
     def test_video_lab_moment_list_drives_the_picker(self):
         with analysis_golden.fixture_inputs() as (csvs, data):

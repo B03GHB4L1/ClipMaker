@@ -23,6 +23,8 @@ textarea {
 button {
   color: inherit;
 }
+/* The VizorPlay screen: the name fades in, holds, lifts away, then the screen
+   peels up from the bottom with a soft curved edge. */
 .page-wipe {
   position: fixed;
   inset: 0;
@@ -31,17 +33,33 @@ button {
   place-items: center;
   background: #11130f;
   color: #f4f4f0;
-  transform-origin: top;
-  transition: transform 0.5s cubic-bezier(0.835, 0.12, 0.225, 0.77);
+  border-radius: 0;
+  transition:
+    transform 0.95s cubic-bezier(0.76, 0, 0.24, 1) 0.18s,
+    border-radius 0.95s cubic-bezier(0.76, 0, 0.24, 1) 0.18s,
+    visibility 0s linear 1.2s;
   pointer-events: none;
+  will-change: transform;
 }
 .page-wipe span {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+  animation: page-wipe-name 0.6s ease-out backwards;
+  transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes page-wipe-name {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 .is-loaded .page-wipe {
-  transform: scaleY(0);
+  transform: translateY(-100%);
+  border-radius: 0 0 50% 50% / 0 0 14vh 14vh;
+  visibility: hidden;
+}
+.is-loaded .page-wipe span {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 .topbar {
   position: fixed;
