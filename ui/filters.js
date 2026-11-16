@@ -1517,7 +1517,7 @@ exportButton.addEventListener("click", startExport);
 annotateButton.addEventListener("click", async () => {
   const clip = focused();
   if (!clip || !activeMatch) return;
-  const label = annotateButton.textContent;
+  const content = [...annotateButton.childNodes]; // icon and label, put back after the busy text
   annotateButton.disabled = true;
   annotateButton.textContent = "Preparing clip...";
   try {
@@ -1525,12 +1525,12 @@ annotateButton.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
     });
-    annotateButton.textContent = label;
     // annotateClip reports its own errors and leaves the page only once the clip is in the project.
-    await annotateClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, annotateButton, activeMatch.id);
+    const opened = await annotateClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, annotateButton, activeMatch.id);
+    if (!opened) annotateButton.replaceChildren(...content);
   } catch (error) {
     field("summary-note").textContent = `Could not prepare the clip for annotating: ${error.message}`;
-    annotateButton.textContent = label;
+    annotateButton.replaceChildren(...content);
     annotateButton.disabled = false;
   }
 });

@@ -169,7 +169,7 @@ const showTime = () => {
   const scrub = $("[data-scrub]");
   scrub.max = String(total());
   if (document.activeElement !== scrub) scrub.value = String(outTime);
-  $("[data-play]").textContent = playing ? "Pause" : "Play";
+  $("[data-play]").classList.toggle("is-playing", playing);
   $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
   $("[data-lane-head]").style.left = `${(outTime / total()) * 100}%`;
   document.querySelectorAll("[data-players] [data-head]").forEach((head) => { head.style.left = `${(outTime / total()) * 100}%`; });
@@ -730,8 +730,8 @@ function renderPlayers() {
   const box = $("[data-players]");
   box.replaceChildren(...tracks().map((track) => {
     const row = document.createElement("div");
-    row.className = "annotate-player";
-    const name = Object.assign(document.createElement("span"), { textContent: playerName(track), title: playerName(track) });
+    row.className = "annotate-row annotate-player";
+    const name = Object.assign(document.createElement("span"), { className: "annotate-row-name", textContent: playerName(track), title: playerName(track) });
     const lane = document.createElement("div");
     lane.className = "annotate-lane";
     lane.setAttribute("aria-hidden", "true");
@@ -759,6 +759,7 @@ function renderPlayers() {
     });
     const action = document.createElement("button");
     action.type = "button";
+    action.className = job ? "annotate-row-action is-busy" : "annotate-row-action";
     if (job) {
       action.textContent = `Cancel ${Math.round(job.progress * 100)}%`;
       action.onclick = () => cancelTracking(track.id);
@@ -806,7 +807,8 @@ const renderFreezes = () => {
       if (Number.isFinite(value) && value >= 0.04 && value <= 60) changeFreeze(freeze.atFrame, value);
       else seconds.value = String(freeze.seconds);
     };
-    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", textContent: "×", title: "Remove this freeze" });
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", title: "Remove this freeze",
+      innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' });
     remove.setAttribute("aria-label", `Remove the freeze at frame ${freeze.atFrame + 1}`);
     remove.onclick = () => changeFreeze(freeze.atFrame, 0);
     entry.append(go, seconds, Object.assign(document.createElement("span"), { textContent: "s" }), remove);
@@ -1202,7 +1204,7 @@ const start = async () => {
     document.title = `VizorPlay - Annotate ${clip.name}`;
     $("[data-annotate-title]").textContent = clip.name;
     $("[data-annotate-changed]").hidden = !opened.changed;
-    stage.style.setProperty("--clip-ratio", String(clip.width / clip.height));
+    $("[data-annotate-workspace]").style.setProperty("--clip-ratio", String(clip.width / clip.height));
     await new Promise((resolve, reject) => {
       video.addEventListener("loadeddata", resolve, { once: true });
       video.addEventListener("error", () => reject(new Error("The clip's video could not be played.")), { once: true });

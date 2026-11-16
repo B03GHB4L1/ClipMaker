@@ -232,6 +232,20 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn('apiRequest("/api/previews/render"', handler)
         self.assertIn("annotateClip(result.file.url", handler)
 
+    def test_annotate_markup_keeps_every_hook_the_editor_script_uses(self):
+        # The editor's markup was redesigned; annotate.js finds its controls by data attribute.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        built = {"data-head", "data-lane-freeze", "data-freeze-seconds"}  # made by the script itself
+        hooks = set(re.findall(r'\$\("\[(data-[a-z-]+)', script)) | set(re.findall(r'querySelector(?:All)?\("\[(data-[a-z-]+)', script))
+        self.assertGreater(len(hooks), 20)
+        for hook in sorted(hooks - built):
+            self.assertIn(hook, html, hook)
+        # Drawn icons, not Unicode glyphs, on the transport and freeze list.
+        self.assertNotIn("&#9664;", html)
+        self.assertNotIn('textContent: "×"', script)
+        self.assertIn('classList.toggle("is-playing", playing)', script)
+
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
         # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.
