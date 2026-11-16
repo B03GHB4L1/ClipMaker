@@ -13,6 +13,7 @@ hiddenimports = [
     "browser_capture",
     "scoresway_scraper",
     "whoscored_scraper",
+    "xg_model",
     "team_names",
     "analysis_core",
     "analysis_core.frames",

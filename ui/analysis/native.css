@@ -1,5 +1,5 @@
 /* Native analysis workspace (Phase 1 shell). Uses the shared design tokens. */
-.native-workspace { display: grid; grid-template-rows: auto auto 1fr; align-content: start; gap: 8px; padding-bottom: 12px; height: calc(100vh - 119px); overflow: auto; font-family: var(--cm-font); }
+.native-workspace { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; align-content: start; gap: 8px; padding-bottom: 12px; height: calc(100vh - 119px); overflow: auto; font-family: var(--cm-font); }
 .native-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 12px; color: var(--cm-muted); }
 .native-summary strong { color: var(--cm-ink); font-size: 14px; }
 .native-tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--cm-rule); scrollbar-width: thin; }
@@ -21,7 +21,8 @@
 @media (max-width: 560px) { .native-workspace { height: auto; min-height: calc(100vh - 119px); } .native-tabs [role=tab] { padding: 8px; font-size: 11px; } }
 
 /* Shot Map and shared tab controls (Phase 2) */
-.native-panel { display: grid; gap: 10px; align-content: start; }
+/* minmax(0, 1fr): charts fit the column on phones instead of widening it past the screen. */
+.native-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start; }
 .native-controls { border: 1px solid var(--cm-rule); padding: 0 10px; }
 .native-controls > summary { padding: 8px 0; font-size: 12px; cursor: pointer; color: var(--cm-ink); }
 .native-control-grid { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 0 0 10px; }

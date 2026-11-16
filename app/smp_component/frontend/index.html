@@ -1921,6 +1921,13 @@
   // ════════════════════════════════════════════════════════════════════════════
   // SHOT MAP — based on working Shot Map Parlour
   // ════════════════════════════════════════════════════════════════════════════
+  // Shot markers grow with the shot's xG (area tracks the chance), so big chances stand out.
+  function shotMarkerSize(shot, selected, isGF) {
+    if (isGF || typeof shot.xG !== "number") return selected ? 22 : 13;
+    const size = 9 + 30 * Math.sqrt(Math.max(0, Math.min(1, shot.xG)));
+    return Math.round((selected ? size + 7 : size) * 10) / 10;
+  }
+
   function buildShotTrace(shotList, isHome, teamName, selectedIdx, isGF) {
     if (!shotList.length) {
       return { x:[], y:[], mode:"markers", name:teamName, type:"scatter",
@@ -1962,10 +1969,11 @@
         lineWidths.push(2);
         lineDashes.push("solid");
       }
-      sizes.push(s.df_idx === selectedIdx ? 22 : 13);
+      sizes.push(shotMarkerSize(s, s.df_idx === selectedIdx, isGF));
       const sec = String(s.second).padStart(2,"0");
       const et = (s.period||"").includes("ExtraTime") ? " ET" : "";
-      texts.push(`<b>${s.playerName||""}</b><br>${s.minute}'${sec}"${et}<br>${s.type}`);
+      const xg = typeof s.xG === "number" ? `<br>xG ${s.xG.toFixed(2)}` : "";
+      texts.push(`<b>${s.playerName||""}</b><br>${s.minute}'${sec}"${et}<br>${s.type}${xg}`);
       cd.push(s.df_idx);
     }
     return { x:xs, y:ys, mode:"markers", name:teamName, type:"scatter",

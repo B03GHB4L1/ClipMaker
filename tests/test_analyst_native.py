@@ -44,6 +44,36 @@ def native_args(args):
     return {**args, "actions": [{k: v for k, v in action.items() if k != "outcome"} for action in args["actions"]]}
 
 
+XG_SUFFIX = re.compile(r"  · xG \d+\.\d\d$")
+
+
+def without_xg(result):
+    """The native view without VizorPlay xG, which the classic workspace never had: the xG
+    race, the xG stat, each shot's xG value, its picker suffix and its detail field.
+    test_shot_map_shows_vizorplay_xg covers these."""
+    result = dict(result)
+    components = []
+    for component in result.get("components") or []:
+        args = component["args"]
+        if args.get("filename_hint") == "xg_race":
+            continue
+        if isinstance(args.get("shots"), list):
+            args = {**args, "shots": [{k: v for k, v in shot.items() if k != "xG"} for shot in args["shots"]]}
+        components.append({**component, "args": args})
+    result["components"] = components
+    if result.get("stats"):
+        result["stats"] = [cell for cell in result["stats"] if cell.get("label") != "xG"]
+    if result.get("picker"):
+        result["picker"] = {**result["picker"], "items": [
+            {**item, "label": XG_SUFFIX.sub("", item["label"])} for item in result["picker"]["items"]]}
+    if result.get("selected") and result["selected"].get("fields"):
+        result["selected"] = {**result["selected"], "fields": [
+            field for field in result["selected"]["fields"] if field.get("label") != "VizorPlay xG"]}
+    if result.get("legend"):
+        result["legend"] = result["legend"].replace(" · Bigger marker = higher xG", "")
+    return result
+
+
 SPECS = {
     "◉ Shot Map": {
         "build": shot_map.build_view,
@@ -122,14 +152,14 @@ class AnalystNativeParityTests(unittest.TestCase):
                 controls["selected"] = index
         chosen = next((record["controls"][key] for key in spec["pickers"] if key in record["controls"]), None)
         if chosen and not chosen.startswith("—"):
-            listing = spec["build"](self.frames, {**controls, "selected": None})["picker"]["items"]
+            listing = without_xg(spec["build"](self.frames, {**controls, "selected": None}))["picker"]["items"]
             controls["selected"] = next(item["id"] for item in listing if item["label"] == chosen)
         return controls
 
     def check(self, tab, spec, record):
         elements = record["elements"]
         by_key = {element.get("key"): element for element in elements if element.get("key")}
-        result = analysis_golden._round(spec["build"](self.frames, self.native_controls(spec, record)))
+        result = without_xg(analysis_golden._round(spec["build"](self.frames, self.native_controls(spec, record))))
 
         # Filters: same options as the classic widgets, in order.
         reverse = {(target[0] if isinstance(target, tuple) else target): key for key, target in spec["controls"].items()}
@@ -224,7 +254,9 @@ class AnalystNativeParityTests(unittest.TestCase):
                 # Templates differ by design: Streamlit's is a placeholder its browser code replaces.
                 strip = lambda figure: {**figure, "layout": {k: v for k, v in figure["layout"].items() if k != "template"}}
                 figures = [strip(e["figure"]) for e in elements if e["kind"] == "plotly"]
-                self.assertEqual(figures, [strip(analysis_golden._round(f["figure"])) for f in result["figures"]], "figures")
+                # Shooting & xG is new (VizorPlay xG); test_comparison_shows_shooting_and_xg covers it.
+                self.assertEqual(figures, [strip(analysis_golden._round(f["figure"])) for f in result["figures"]
+                                           if f["section"] != "Shooting & xG"], "figures")
                 tables = [(e["columns"], e["rows"]) for e in elements if e["kind"] == "Dataframe"]
                 self.assertEqual(tables, [(m["columns"], m["rows"]) for m in result["moments"] if not m["empty"]], "top 5")
                 captions = [e["value"] for e in elements if e["kind"] == "Caption"]
