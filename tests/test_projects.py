@@ -67,6 +67,28 @@ class ProjectStoreTests(unittest.TestCase):
                 self.assertEqual(changed_project["preview_range"], {})
                 self.assertEqual(changed_project["filter_settings"], {"filter_types": ["Goal"]})
 
+    def test_delete_moves_only_that_project_to_the_trash(self):
+        keep, gone = self.store.create("Keep"), self.store.create("Gone")
+        video = self.root / "match.mp4"
+        video.write_bytes(b"video")
+        self.store.upsert({"id": gone["id"], "video_path": str(video)})
+        trash = self.store.delete(gone["id"])
+        self.assertEqual([item["id"] for item in MatchStore(self.root).list()], [keep["id"]])
+        self.assertEqual(json.loads((trash / "project.json").read_text())["id"], gone["id"])  # recoverable
+        self.assertTrue(trash.is_relative_to(self.root / "project-trash"))
+        self.assertEqual(video.read_bytes(), b"video")  # the footage is never touched
+        with self.assertRaisesRegex(ValueError, "not found"):
+            self.store.delete(gone["id"])
+        with self.assertRaisesRegex(ValueError, "Invalid project id"):
+            self.store.delete("../matches")
+
+    def test_delete_removes_a_legacy_history_entry_without_losing_it(self):
+        self.store.path.write_text(json.dumps([{"id": "old-one", "home_team": "A", "away_team": "B"},
+                                               {"id": "old-two", "home_team": "C", "away_team": "D"}]))
+        trash = self.store.delete("old-one")
+        self.assertEqual([item["id"] for item in self.store.list()], ["old-two"])
+        self.assertEqual(json.loads((trash / "legacy-history.json").read_text())[0]["id"], "old-one")
+
     def test_snapshots_survive_ports_restarts_and_delete_is_recoverable(self):
         self.store.update_snapshot("Goals", {"filter_types": ["Goal"]})
         restarted = MatchStore(self.root)
@@ -236,6 +258,23 @@ class ProjectApiTests(unittest.TestCase):
                           headers={"Content-Type": "application/json", **(headers or {})})
         with urlopen(request, timeout=5) as response:
             return json.loads(response.read())
+
+    def test_delete_project_api(self):
+        keep = self.request("/api/projects", {})["project"]
+        gone = self.request("/api/projects", {})["project"]
+        result = self.request(f"/api/projects/{gone['id']}/delete", {})
+        self.assertEqual(result["deleted"], gone["id"])
+        self.assertEqual([item["id"] for item in result["projects"]], [keep["id"]])
+        for path in (f"/api/projects/{gone['id']}/delete", "/api/projects/a/b/delete"):
+            with self.subTest(path=path), self.assertRaises(HTTPError) as error:
+                self.request(path, {})
+            self.assertEqual(error.exception.code, 400)
+            error.exception.close()
+        with self.assertRaises(HTTPError) as error:
+            self.request(f"/api/projects/{keep['id']}/delete", {}, {"Origin": "https://untrusted.test"})
+        self.assertEqual(error.exception.code, 400)
+        error.exception.close()
+        self.assertEqual(len(self.request("/api/projects")["projects"]), 1)
 
     def test_create_update_reopen_project_api(self):
         project = self.request("/api/projects", {})["project"]
