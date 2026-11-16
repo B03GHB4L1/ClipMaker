@@ -1759,10 +1759,17 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         from telestration.annotations import clean_box
         from telestration import tracker
         box = clean_box(body.get("box"), "The player box")
+        # The player's next keyframe, just after the span: tracked back from there and blended (M5).
+        end_box = None
+        if body.get("to_box") is not None:
+            if end + 1 >= record["frames"]:
+                raise ValueError("The next keyframe must be a frame of the clip.")
+            end_box = clean_box(body.get("to_box"), "The next keyframe's box")
         ffmpeg = _find_ffmpeg()
         tracker.make_tracker()  # refuse now, not in the background, if OpenCV is missing
         job = self.tracking_jobs.start(
-            lambda cancel, progress: tracker.track_span(ffmpeg, video, record, start, end, box, cancel, progress))
+            lambda cancel, progress: tracker.track_span(ffmpeg, video, record, start, end, box, cancel, progress,
+                                                        end_box=end_box))
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
     def tracking_job(self, job_id: str, cancel: bool = False) -> None:

@@ -312,6 +312,16 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("showSaved(job.result.saved, \"Video\")", flow)
         self.assertIn("/api/editor-jobs/${run.job.id}/cancel", script)
 
+    def test_annotate_tracks_towards_the_next_keyframe_and_retracks_before_a_correction(self):
+        # M5: a span with a keyframe after it tracks back from there too, so it arrives without a jump;
+        # correcting a frame re-tracks the span before it once the span after it is done.
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        start = script[script.index("async function startTracking"):script.index("function runQueued")]
+        self.assertIn("to_box: next", start)
+        self.assertIn("runQueued(trackId)", script[script.index("async function pollTracking"):])
+        correct = script[script.index("const correctTrack"):]
+        self.assertIn("queued.set(trackId, [{ start: Math.max(...earlier), limit: frame - 1 }])", correct)
+
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
         # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.
