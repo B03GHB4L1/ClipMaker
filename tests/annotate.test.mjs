@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify } from "../ui/annotate/document.js";
-import { drawItem, handlesFor, hitTest, itemAt, PATTERNS, visibleAt } from "../ui/annotate/shapes.js";
+import { cropDrawn, drawItem, handlesFor, hitTest, itemAt, PATTERNS, visibleAt } from "../ui/annotate/shapes.js";
 
 const W = 1920;
 const H = 1080;
@@ -256,4 +256,22 @@ test("zones shaded with lines are hatched inside the zone, crossed lines both wa
   drawItem(ctx, zone("cross"), W, H);
   assert.ok(Math.abs(Math.max(...strokes) - single * 2) <= 2, "crossed lines run both ways"); // one line either way per direction from rounding
   assert.deepEqual(Object.keys(PATTERNS), ["solid", "lines", "cross"]);
+});
+
+test("export sends only the box of drawn pixels, row by row", () => {
+  const width = 6;
+  const height = 4;
+  const data = new Uint8ClampedArray(width * height * 4);
+  const paint = (x, y, value) => data.set([value, 2, 3, 200], (y * width + x) * 4);
+  assert.equal(cropDrawn(data, width, height), null, "nothing drawn: nothing to send");
+  paint(2, 1, 10);
+  paint(4, 2, 20);
+  paint(3, 2, 30);
+  const crop = cropDrawn(data, width, height);
+  assert.deepEqual([crop.x, crop.y, crop.w, crop.h], [2, 1, 3, 2]);
+  assert.equal(crop.pixels.length, 3 * 2 * 4);
+  assert.deepEqual([...crop.pixels.slice(0, 4)], [10, 2, 3, 200]); // (2, 1)
+  assert.deepEqual([...crop.pixels.slice(16, 20)], [30, 2, 3, 200]); // (3, 2)
+  assert.deepEqual([...crop.pixels.slice(20, 24)], [20, 2, 3, 200]); // (4, 2)
+  assert.deepEqual([...crop.pixels.slice(4, 8)], [0, 0, 0, 0]); // empty inside the box
 });

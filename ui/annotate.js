@@ -2,10 +2,10 @@
 // (docs/TELESTRATION_PLAN.md, M1). Drawings are fixed in place for now;
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
-import { saveImage } from "./save-clip.js";
-import { drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
+import { saveImage, showSaved, showSaveError } from "./save-clip.js";
+import { cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
-import { freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
+import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -1236,6 +1236,160 @@ const screenshot = async (button) => {
 };
 
 // ---------------------------------------------------------------------------
+// Export video (M4). The page draws each overlay with the same code as the
+// preview, at the clip's own size, and sends the drawn pixels wherever the
+// drawings change (raw, cropped: picture encoding stalls in a hidden window); the engine lays them over the frames, holds the freezes (silent)
+// and encodes the clip into the user's VizorPlay folder.
+// ---------------------------------------------------------------------------
+let exporting = null; // {session, job, cancelled}
+const exportPanel = $("[data-export-panel]");
+const exportStatus = (text, share) => {
+  exportPanel.hidden = false;
+  $("[data-export-text]").textContent = text;
+  $("[data-export-progress]").value = Math.max(0, Math.min(1, share));
+};
+const endExport = (text) => {
+  exporting = null;
+  $("[data-export]").disabled = false;
+  $("[data-export-cancel]").disabled = false;
+  if (text) {
+    exportStatus(text, 0);
+    setTimeout(() => { if (!exporting) exportPanel.hidden = true; }, 4000);
+  } else {
+    exportPanel.hidden = true;
+  }
+};
+const DRAWING_SHARE = 0.35; // of the progress bar: drawing overlays, then rendering
+
+/** What the overlay looks like on output frame `n`: a key that changes only when the picture does. */
+const overlayKey = (value, n) => {
+  const t = n / clip.fps;
+  const frame = outputToSource(t, clip, value.freezes).frame;
+  const shown = [];
+  value.items.forEach((item) => {
+    const state = animation(item, t);
+    if (state) shown.push(resolveItem(item, value.tracks || [], frame), state);
+  });
+  return { t, shown, key: JSON.stringify(shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))) };
+};
+
+// Overlays go in batches: every request is a new connection to the engine, and
+// thousands of them in a few seconds can run Windows out of local ports.
+const BATCH_BYTES = 8_000_000;
+const BATCH_FRAMES = 150;
+const sendBatch = async (sessionId, entries) => {
+  const header = new TextEncoder().encode(JSON.stringify(entries.map(({ frame, crop }) => ({
+    frame, box: crop ? [crop.x, crop.y, crop.w, crop.h] : null,
+  }))));
+  const size = new Uint8Array(4);
+  new DataView(size.buffer).setUint32(0, header.length);
+  const body = new Blob([size, header, ...entries.filter((entry) => entry.crop).map((entry) => entry.crop.pixels)]);
+  const response = await fetch(`/api/editor-exports/${sessionId}/overlays`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+};
+
+const exportVideo = async () => {
+  if (exporting) return;
+  if (playing) pause();
+  finishText();
+  await save();
+  if (dirty) {
+    showSaveError("Save the drawings first; the export uses the saved version.", "Video");
+    return;
+  }
+  const run = { session: null, job: null, cancelled: false };
+  exporting = run;
+  $("[data-export]").disabled = true;
+  exportStatus("Starting export...", 0);
+  try {
+    const value = doc.value; // the saved document; edits made during the export are not in it
+    ({ export: run.session } = await projectRequest(`${editorPath()}/export`, {}));
+    const { id, frames, width, height } = run.session;
+    const sheet = document.createElement("canvas");
+    sheet.width = width;
+    sheet.height = height;
+    const context = sheet.getContext("2d", { willReadFrequently: true });
+    let previous = null;
+    let batch = [];
+    let batchBytes = 0;
+    let sending = Promise.resolve();
+    const flush = async () => {
+      if (!batch.length) return;
+      const entries = batch;
+      batch = [];
+      batchBytes = 0;
+      await sending; // one upload at a time, in order; the next batch is drawn meanwhile
+      sending = sendBatch(id, entries);
+    };
+    for (let n = 0; n < frames; n += 1) {
+      if (run.cancelled) return;
+      const { t, shown, key } = overlayKey(value, n);
+      if (key !== previous) {
+        previous = key;
+        let crop = null;
+        if (shown.length) {
+          context.clearRect(0, 0, width, height);
+          for (let index = 0; index < shown.length; index += 2) drawItem(context, shown[index], width, height, shown[index + 1]);
+          crop = cropDrawn(context.getImageData(0, 0, width, height).data, width, height);
+        }
+        batch.push({ frame: n, crop });
+        batchBytes += crop ? crop.pixels.length : 0;
+        if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_FRAMES) await flush();
+      }
+      if (n % 10 === 0) exportStatus(`Drawing overlays: frame ${n + 1} of ${frames}`, (n / frames) * DRAWING_SHARE);
+    }
+    await flush();
+    await sending;
+    if (run.cancelled) return;
+    ({ job: run.job } = await projectRequest(`/api/editor-exports/${id}/render`, { name: `${clip.name} annotated` }));
+    for (;;) {
+      const { job } = await projectRequest(`/api/editor-jobs/${run.job.id}`);
+      if (job.status === "running") {
+        const share = DRAWING_SHARE + job.progress * (1 - DRAWING_SHARE);
+        exportStatus(run.stopping ? "Cancelling..." : `Rendering video: ${Math.round(job.progress * 100)}%`, share);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        continue;
+      }
+      if (job.status === "done") {
+        showSaved(job.result.saved, "Video");
+        endExport();
+      } else if (job.status === "cancelled") {
+        endExport("Export cancelled.");
+      } else {
+        showSaveError(job.error || "The export stopped.", "Video");
+        endExport();
+      }
+      return;
+    }
+  } catch (error) {
+    if (!run.cancelled) {
+      showSaveError(error.message, "Video");
+      if (run.session && !run.job) fetch(`/api/editor-exports/${run.session.id}/cancel`, { method: "POST" }).catch(() => {});
+      endExport();
+    }
+  }
+};
+
+const cancelExport = async () => {
+  const run = exporting;
+  if (!run) return;
+  $("[data-export-cancel]").disabled = true;
+  run.stopping = true;
+  exportStatus("Cancelling...", $("[data-export-progress]").value);
+  if (run.job) {
+    // The render notices within a frame; the poll above then reports it.
+    await projectRequest(`/api/editor-jobs/${run.job.id}/cancel`, {}).catch(() => {});
+    return;
+  }
+  run.cancelled = true;
+  if (run.session) await projectRequest(`/api/editor-exports/${run.session.id}/cancel`, {}).catch(() => {});
+  endExport("Export cancelled.");
+};
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 const wire = () => {
@@ -1257,6 +1411,8 @@ const wire = () => {
   $("[data-undo]").onclick = () => doc.undo();
   $("[data-redo]").onclick = () => doc.redo();
   $("[data-screenshot]").onclick = (event) => screenshot(event.currentTarget);
+  $("[data-export]").onclick = exportVideo;
+  $("[data-export-cancel]").onclick = cancelExport;
   $("[data-from]").onchange = (event) => setTiming("from", Number(event.target.value));
   $("[data-to]").onchange = (event) => setTiming("to", Number(event.target.value));
   $("[data-from-here]").onclick = () => setTiming("from", currentTime());

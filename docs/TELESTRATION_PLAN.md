@@ -174,11 +174,13 @@ identical in both.
   **out-of-frame rule** (box reaching the frame edge and shrinking). Any flag
   → amber review frame with a one-click "still right" or drag-to-fix; a run
   of flags or a scene cut → stop the segment and ask for a new seed.
-- `render.py`: draws every output frame (source frame or held freeze frame plus
-  shapes at their animation state) and pipes it into the existing encoder in
-  `app/video_encoder.py`. Shapes with OpenCV antialiased primitives; text with
-  Pillow and the bundled Geist Sans (OpenCV cannot render TTF fonts). Pillow
-  moves from test-only to a runtime dependency.
+- `export.py` (built in M4, replacing the planned `render.py`): the editor draws
+  each overlay with the preview's own code (`ui/annotate/shapes.js`) at the
+  clip's size and sends the drawn pixels (cropped, raw RGBA, in batches) only
+  where the drawings change; the engine lays them over the source frames,
+  holds freeze frames, inserts silence under freezes and encodes through
+  `app/video_encoder.py`. Export therefore matches the preview by construction,
+  and Pillow and a bundled font are not needed.
 
 ### API (added to `clipmaker_api_server.py`)
 
@@ -193,7 +195,10 @@ filesystem path.
 | `POST /api/tracking/start` | `{clip, trackId, fromFrame, toFrame, box}` → job ID |
 | `GET /api/jobs/<id>` | Existing job polling; adds partial track results |
 | `POST /api/jobs/<id>/cancel` | Existing cancellation |
-| `POST /api/editor/<clip>/export` | Render with drawings and freezes burned in (job) |
+| `POST /api/editor/<project>/<clip>/export` | Open an export of the saved clip → `{id, frames, fps, width, height}` |
+| `POST /api/editor-exports/<id>/overlays` | A batch of overlays: 4-byte header length, JSON `[{frame, box}]`, then RGBA pixels |
+| `POST /api/editor-exports/<id>/render` | Burn in and save to the user's folder (job, polled at `/api/editor-jobs/<id>`) |
+| `POST /api/editor-exports/<id>/cancel` | Drop an export before it renders |
 
 ### Saved data
 
@@ -257,8 +262,8 @@ between players, and zones whose corners follow players.
   (`models/object_tracking_vittrack`, Apache 2.0 per its LICENSE), bundled
   with its licence text. Its README does not state the training data; check
   before release.
-- `Pillow` becomes a runtime dependency (already pinned for tests).
-- Geist Sans font file plus its OFL licence text.
+- (No longer needed after M4: Pillow at runtime and a bundled Geist Sans; the
+  page draws text itself, so exports use the same font as the preview.)
 - All three must work in the PyInstaller builds and the packaged-app launch
   test on Windows, Linux and macOS.
 - The ViT tracker is a small learned model. The user approved bundling it in
@@ -339,6 +344,11 @@ cancel, stop following and a zone corner linked to a player all behaved as plann
 **M4 – Export.** Render frames, freezes, drawings and text through the existing
 encoder; cancellation; save to the user's VizorPlay folder like other clips.
 Check preview and export match at sample frames. Zone fills include hatching (style `pattern`: solid, lines, cross; see ui/annotate/shapes.js), which the encoder must draw the same way.
+Built 2026-11-16 (see `export.py` above). Checked on the 88 s, 50 fps test clip with a
+followed player: overlays 3 s, render 31 s; a sample frame of the export differs
+from the preview by 2.8/255 on average (encoding noise; 22/255 without drawings);
+cancel works in both phases and leaves no files. Sending one request per frame
+ran Windows out of local ports after a few exports, so overlays go in batches.
 
 **M5 – Tracking quality.** Forward-and-backward tracking across each span,
 blended so there is no jump at the next keyframe; short-gap interpolation;

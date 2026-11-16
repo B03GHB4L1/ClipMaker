@@ -1784,6 +1784,75 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         self.send_json(HTTPStatus.OK, {"annotations": saved})
 
+    @property
+    def editor_exports(self) -> Any:
+        """Created on first use, like tracking, so the export code loads only when needed."""
+        server = self.server
+        with server.tracking_lock:  # type: ignore[attr-defined]
+            if server.editor_exports is None:  # type: ignore[attr-defined]
+                from telestration.export import ExportSessions
+                server.editor_exports = ExportSessions(self.store.data_dir / "editor-exports")  # type: ignore[attr-defined]
+            return server.editor_exports  # type: ignore[attr-defined]
+
+    def start_export(self, path: str) -> None:
+        """Open an export of the clip as last saved; the page then sends its overlays."""
+        parts = path.split("/")
+        if len(parts) != 6:
+            raise ValueError("Unknown editor request")
+        try:
+            record, video = self.editor_clips.get(parts[3], parts[4])
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        document = self.editor_clips.load_annotations(parts[3], parts[4])
+        session = self.editor_exports.create(parts[3], parts[4], record, video, document)
+        self.send_json(HTTPStatus.CREATED, {"export": session})
+
+    def receive_overlays(self, session_id: str) -> None:
+        """A batch of overlays the editor drew (telestration.export.unpack_batch)."""
+        from telestration.export import BATCH_LIMIT
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > BATCH_LIMIT:
+            raise ValueError("Send overlays in batches under 64 MB.")
+        data = self.rfile.read(length)
+        self._body_read = getattr(self, "_body_read", 0) + len(data)
+        if len(data) != length:
+            raise ValueError("The overlays did not arrive in full.")
+        try:
+            count = self.editor_exports.add_batch(session_id, data)
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        self.send_json(HTTPStatus.OK, {"received": count})
+
+    def render_export(self, session_id: str, body: dict[str, Any]) -> None:
+        """Burn the drawings into the clip in the background; poll it as an editor job."""
+        from telestration import export
+        try:
+            session = self.editor_exports.take(session_id)
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        ffmpeg = _find_ffmpeg()
+        folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+        name = str(body.get("name") or "")[:160]
+        exports = self.editor_exports
+        saved_clips = self.server.saved_clips  # type: ignore[attr-defined]
+
+        def register(saved: Path) -> str:
+            token = uuid.uuid4().hex
+            saved_clips[token] = saved
+            return token
+
+        def work(cancel: threading.Event, progress: Callable[[int, int], None]) -> dict[str, Any]:
+            try:
+                return export.run_export(ffmpeg, session, folder, name, save_to_user_folder, register, cancel, progress)
+            finally:
+                exports.discard(session_id)
+
+        job = self.tracking_jobs.start(work)
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
     def send_media(self, token: str) -> None:
         media_path = self.media_files.get(token)
         if media_path is None or not media_path.is_file():
@@ -1932,6 +2001,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/images/save":
                 self.save_image()
+                return
+            if path.startswith("/api/editor-exports/") and path.endswith("/overlays"):
+                self.receive_overlays(path.split("/")[-2])
                 return
             body = self.read_json()
             if path == "/api/open-site":
@@ -2157,6 +2229,15 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path.startswith("/api/editor/") and path.endswith("/track"):
                 self.start_tracking(path, body)
                 return
+            if path.startswith("/api/editor/") and path.endswith("/export"):
+                self.start_export(path)
+                return
+            if path.startswith("/api/editor-exports/") and path.endswith("/render"):
+                self.render_export(path.split("/")[-2], body)
+                return
+            if path.startswith("/api/editor-exports/") and path.endswith("/cancel"):
+                self.send_json(HTTPStatus.OK, {"discarded": self.editor_exports.discard(path.split("/")[-2])})
+                return
             if path.startswith("/api/editor-jobs/") and path.endswith("/cancel"):
                 self.tracking_job(path.split("/")[-2], cancel=True)
                 return
@@ -2253,6 +2334,7 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.editor_clips = EditorClips(data_dir, _find_ffmpeg)  # type: ignore[attr-defined]
     server.tracking_jobs = None  # type: ignore[attr-defined]  # see Handler.tracking_jobs
     server.tracking_lock = threading.Lock()  # type: ignore[attr-defined]
+    server.editor_exports = None  # type: ignore[attr-defined]  # see Handler.editor_exports
     return server
 
 
