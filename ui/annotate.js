@@ -3,7 +3,7 @@
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage } from "./save-clip.js";
-import { drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE } from "./annotate/shapes.js";
+import { drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
@@ -378,6 +378,7 @@ const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line:
 const FIELDS = {
   stroke: { label: "Line colour", type: "color" },
   fill: { label: "Fill colour", type: "color" },
+  pattern: { label: "Fill", type: "select", options: PATTERNS },
   color: { label: "Text colour", type: "color" },
   background: { label: "Background", type: "color", transparent: true },
   width: { label: "Thickness", type: "range", min: 1, max: 20, step: 1 },
@@ -411,6 +412,14 @@ const renderInspector = () => {
       const spec = FIELDS[key];
       const label = document.createElement("label");
       label.className = spec.type === "checkbox" ? "annotate-check" : "";
+      if (spec.type === "select") {
+        const choose = document.createElement("select");
+        choose.append(...Object.entries(spec.options).map(([value, text]) => new Option(text, value, false, style[key] === value)));
+        choose.onchange = () => updateStyle(key, choose.value);
+        label.append(`${spec.label} `, choose);
+        fields.append(label);
+        return;
+      }
       const input = document.createElement("input");
       input.type = spec.type;
       if (spec.type === "checkbox") {

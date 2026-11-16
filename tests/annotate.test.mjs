@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify } from "../ui/annotate/document.js";
-import { handlesFor, hitTest, itemAt, visibleAt } from "../ui/annotate/shapes.js";
+import { drawItem, handlesFor, hitTest, itemAt, PATTERNS, visibleAt } from "../ui/annotate/shapes.js";
 
 const W = 1920;
 const H = 1080;
@@ -229,4 +229,31 @@ test("players nothing follows any more are dropped", () => {
   const doc = pruneTracks({ version: 1, freezes: [], items: [item], tracks: [kept, gone] });
   assert.deepEqual(doc.tracks.map((t) => t.id), [kept.id]);
   assert.equal("tracks" in pruneTracks({ ...doc, items: [] }), false);
+});
+
+test("zones shaded with lines are hatched inside the zone, crossed lines both ways", () => {
+  const strokes = [];
+  let clipped = 0;
+  const ctx = new Proxy({ lines: 0 }, {
+    get(target, key) {
+      if (key === "clip") return () => { clipped += 1; };
+      if (key === "moveTo") return () => { target.lines += 1; };
+      if (key === "stroke") return () => { strokes.push(target.lines); target.lines = 0; };
+      if (key in target) return target[key];
+      return () => {};
+    },
+    set(target, key, value) { target[key] = value; return true; },
+  });
+  const zone = (pattern) => newItem("zone", [[0.2, 0.2], [0.6, 0.2], [0.6, 0.7], [0.2, 0.7]], { from: 0, to: 2, style: { pattern } });
+  drawItem(ctx, zone("solid"), W, H);
+  assert.equal(clipped, 0);
+  strokes.length = 0;
+  drawItem(ctx, zone("lines"), W, H);
+  assert.equal(clipped, 1);
+  const single = Math.max(...strokes);
+  assert.ok(single > 20, `a zone this size gets many lines, got ${single}`);
+  strokes.length = 0;
+  drawItem(ctx, zone("cross"), W, H);
+  assert.ok(Math.abs(Math.max(...strokes) - single * 2) <= 2, "crossed lines run both ways"); // one line either way per direction from rounding
+  assert.deepEqual(Object.keys(PATTERNS), ["solid", "lines", "cross"]);
 });

@@ -14,7 +14,29 @@ export const DEFAULT_STYLE = {
   line: { stroke: "#ffffff", width: 4, dashed: true },
   freehand: { stroke: "#ff4d4d", width: 5 },
   text: { color: "#ffffff", background: "#171817", size: 40, bold: false },
-  zone: { stroke: "#2f80ed", fill: "#2f80ed", fillOpacity: 0.25, width: 3 },
+  zone: { stroke: "#2f80ed", fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25, width: 3 },
+};
+
+/** Zone fills: a wash of colour, or lines across the zone (hatching). */
+export const PATTERNS = { solid: "Solid", lines: "Lines", cross: "Crossed lines" };
+
+/** Diagonal lines across the zone's box, clipped to the zone by the caller. Spacing follows the frame height. */
+const hatch = (ctx, points, h, angles) => {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const gap = Math.max(5, h * 0.018);
+  const reach = right - left + bottom - top;
+  ctx.beginPath();
+  angles.forEach((slope) => {
+    // Lines x - slope*y = c, for every c that crosses the box.
+    const low = slope > 0 ? left - slope * bottom : left - slope * top;
+    for (let c = low - gap; c <= low + reach + gap; c += gap) {
+      ctx.moveTo(c + slope * top, top);
+      ctx.lineTo(c + slope * bottom, bottom);
+    }
+  });
+  ctx.stroke();
 };
 
 export const styleOf = (item) => ({ ...DEFAULT_STYLE[item.kind], ...(item.style || {}) });
@@ -179,8 +201,21 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
     case "zone": {
       tracePath(ctx, points);
       ctx.closePath();
-      ctx.fillStyle = rgba(style.fill, style.fillOpacity * state.draw);
-      ctx.fill();
+      if (style.pattern === "lines" || style.pattern === "cross") {
+        // Hatching: a faint wash under lines strong enough to read on grass.
+        ctx.fillStyle = rgba(style.fill, style.fillOpacity * 0.3 * state.draw);
+        ctx.fill();
+        ctx.save();
+        ctx.clip();
+        ctx.strokeStyle = rgba(style.fill, Math.min(1, style.fillOpacity * 2.6) * state.draw);
+        ctx.lineWidth = Math.max(1.5, width * 0.6);
+        ctx.setLineDash([]);
+        hatch(ctx, points, h, style.pattern === "cross" ? [1, -1] : [1]);
+        ctx.restore(); // back to the outline's colour, width and dashes
+      } else {
+        ctx.fillStyle = rgba(style.fill, style.fillOpacity * state.draw);
+        ctx.fill();
+      }
       tracePath(ctx, partialPath(points, state.draw, true));
       ctx.stroke();
       break;
