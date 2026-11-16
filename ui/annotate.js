@@ -5,6 +5,7 @@ import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage } from "./save-clip.js";
 import { drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
+import { freezeStart, outputToSource, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
@@ -59,31 +60,117 @@ document.querySelectorAll(".filter-topbar nav a").forEach((link) => {
 }
 
 // ---------------------------------------------------------------------------
-// Time and frames
+// Time. The playhead is in output time: source frames with freezes inserted
+// (annotate/timeline.js). During a freeze the video waits, silent, on the
+// frozen frame while the drawings keep animating.
 // ---------------------------------------------------------------------------
 const fps = () => clip.fps;
-const frameAt = (time) => Math.min(clip.frames - 1, Math.max(0, Math.floor(time * fps() + 1e-4)));
-const currentTime = () => video.currentTime || 0;
+let outTime = 0;
+let playing = false;
+let run = null; // while playing: {held, next, freeze: {start, end, wall} | null}
+const currentTime = () => outTime;
+const total = () => totalSeconds(clip, doc.freezes);
+const source = () => outputToSource(outTime, clip, doc.freezes);
 const formatTime = (seconds) => {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds - minutes * 60).toFixed(2).padStart(5, "0")}`;
 };
-// Seek to the middle of a frame so the decoder shows that frame, not its neighbour.
-const seekFrame = (frame) => {
-  video.pause();
-  const target = Math.min(clip.frames - 1, Math.max(0, frame));
-  video.currentTime = Math.min(clip.duration, (target + 0.5) / fps());
+const clampTime = (t) => Math.min(total(), Math.max(0, t));
+// Show the frame for output time `outTime`: the middle of that frame, so the decoder shows it and not its neighbour.
+const showFrame = () => {
+  const frame = source().frame;
+  const target = Math.min(clip.duration, (frame + 0.5) / fps());
+  if (Math.abs(video.currentTime - target) > 0.25 / fps()) video.currentTime = target;
 };
-const step = (frames) => seekFrame(frameAt(currentTime()) + frames);
-const togglePlay = () => (video.paused ? video.play().catch(() => {}) : video.pause());
+const pause = () => {
+  playing = false;
+  run = null;
+  video.pause();
+  scheduleRender();
+};
+const seekOutput = (t) => {
+  pause();
+  outTime = clampTime(t);
+  showFrame();
+  scheduleRender();
+};
+// One stop = the start of a frame, or the start or end of a freeze.
+const step = (direction, big = false) => {
+  if (big) return seekOutput(outTime + direction);
+  const list = stops(clip, doc.freezes);
+  const target = direction > 0 ? list.find((t) => t > outTime + 1e-6) : [...list].reverse().find((t) => t < outTime - 1e-6);
+  seekOutput(target ?? (direction > 0 ? list[list.length - 1] : 0));
+};
+
+const sortedFreezes = () => [...doc.freezes].sort((a, b) => a.atFrame - b.atFrame);
+const play = () => {
+  if (outTime >= total() - 1e-3) outTime = 0;
+  const at = source();
+  const freezes = sortedFreezes();
+  if (at.freeze !== null) {
+    const index = freezes.findIndex((f) => f.atFrame === at.freeze);
+    run = { held: freezes.slice(0, index).reduce((sum, f) => sum + f.seconds, 0), next: index,
+      freeze: { start: outTime, end: at.freezeStart + freezes[index].seconds, wall: performance.now() } };
+    video.pause();
+    showFrame();
+  } else {
+    const index = freezes.findIndex((f) => f.atFrame > at.frame);
+    const next = index < 0 ? freezes.length : index;
+    run = { held: freezes.slice(0, next).reduce((sum, f) => sum + f.seconds, 0), next, freeze: null };
+    video.currentTime = at.time;
+    video.play().catch(() => pause());
+  }
+  playing = true;
+  requestAnimationFrame(tick);
+};
+const togglePlay = () => (playing ? pause() : play());
+// A hidden window gets no animation frames, so the clock could not hold a
+// freeze while the video ran on; stop instead.
+document.addEventListener("visibilitychange", () => { if (document.hidden && playing) pause(); });
+
+function tick(now) {
+  if (!playing || !run) return;
+  const freezes = sortedFreezes();
+  if (run.freeze) {
+    outTime = run.freeze.start + (now - run.freeze.wall) / 1000;
+    if (outTime >= run.freeze.end) {
+      outTime = run.freeze.end;
+      run.held += freezes[run.next].seconds;
+      run.next += 1;
+      run.freeze = null;
+      video.play().catch(() => pause());
+    }
+  } else {
+    const next = freezes[run.next];
+    if (next && video.currentTime >= next.atFrame / fps() - 1e-4) {
+      video.pause();
+      outTime = freezeStart(next.atFrame, clip, freezes);
+      run.freeze = { start: outTime, end: outTime + next.seconds, wall: now };
+      video.currentTime = (next.atFrame + 0.5) / fps();
+    } else {
+      outTime = Math.min(total(), video.currentTime + run.held);
+      if (video.ended && !next) {
+        outTime = total();
+        pause();
+      }
+    }
+  }
+  render();
+  showTime();
+  if (playing) requestAnimationFrame(tick);
+}
 
 const showTime = () => {
-  const frame = frameAt(currentTime());
-  $("[data-time]").textContent = `${formatTime(currentTime())} · frame ${frame + 1}/${clip.frames}`;
+  const at = source();
+  const frozen = at.freeze !== null ? ' · <span class="is-frozen">frozen</span>' : "";
+  $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${clip.frames}${frozen}`;
   const scrub = $("[data-scrub]");
-  if (document.activeElement !== scrub) scrub.value = String(frame);
-  $("[data-play]").textContent = video.paused ? "Play" : "Pause";
-  $("[data-play]").setAttribute("aria-label", video.paused ? "Play" : "Pause");
+  scrub.max = String(total());
+  if (document.activeElement !== scrub) scrub.value = String(outTime);
+  $("[data-play]").textContent = playing ? "Pause" : "Play";
+  $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
+  $("[data-lane-head]").style.left = `${(outTime / total()) * 100}%`;
+  document.querySelectorAll("[data-lane-freeze]").forEach((block) => block.classList.toggle("is-current", Number(block.dataset.laneFreeze) === at.freeze));
 };
 
 // ---------------------------------------------------------------------------
@@ -144,11 +231,6 @@ let frameRequest = 0;
 const scheduleRender = () => {
   if (frameRequest) return;
   frameRequest = requestAnimationFrame(() => { frameRequest = 0; render(); showTime(); });
-};
-const playLoop = () => {
-  render();
-  showTime();
-  if (!video.paused && !video.ended) requestAnimationFrame(playLoop);
 };
 
 const fitCanvas = () => {
@@ -317,7 +399,15 @@ const renderInspector = () => {
   if (item) {
     $("[data-from]").value = item.show.from;
     $("[data-to]").value = item.show.to;
-    $("[data-from]").max = $("[data-to]").max = clip.duration;
+    $("[data-from]").max = $("[data-to]").max = total();
+    $("[data-anim-in]").value = item.show.animate || "none";
+    $("[data-anim-out]").value = item.show.animateOut || "none";
+    $("[data-anim-seconds]").value = item.show.animSeconds ?? 0.5;
+    $("[data-ease]").value = item.show.ease || "ease-out";
+    const animated = (item.show.animate || "none") !== "none" || (item.show.animateOut || "none") !== "none";
+    document.querySelectorAll("[data-anim-detail]").forEach((row) => { row.hidden = !animated; });
+    $("[data-pulse-row]").hidden = !["ring", "spotlight", "zone"].includes(item.kind);
+    $("[data-pulse]").checked = Boolean(item.show.pulse);
   }
   renderList();
 };
@@ -334,7 +424,7 @@ const renderList = () => {
     button.textContent = `${label} · ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)}s`;
     button.onclick = () => {
       if (tool !== "select") setTool("select");
-      if (currentTime() < item.show.from || currentTime() > item.show.to) seekFrame(Math.ceil(item.show.from * fps()));
+      if (currentTime() < item.show.from || currentTime() > item.show.to) seekOutput(item.show.from);
       select(item.id);
     };
     entry.append(button);
@@ -342,13 +432,118 @@ const renderList = () => {
   }));
 };
 
+const setAnimation = (patch) => {
+  const item = doc.find(selectedId);
+  if (!item) return;
+  const show = { ...item.show, ...patch };
+  if ((show.animate || "none") === "none" && (show.animateOut || "none") === "none") {
+    delete show.animSeconds;
+    delete show.ease;
+  } else {
+    show.animSeconds = show.animSeconds ?? 0.5;
+    show.ease = show.ease || "ease-out";
+  }
+  if (!show.animateOut || show.animateOut === "none") delete show.animateOut;
+  if (!show.pulse) delete show.pulse;
+  doc.replace({ ...item, show });
+};
+
 const setTiming = (key, value) => {
   const item = doc.find(selectedId);
   if (!item || !Number.isFinite(value)) return renderInspector();
-  const show = { ...item.show, [key]: Math.round(Math.min(clip.duration, Math.max(0, value)) * 1000) / 1000 };
+  const show = { ...item.show, [key]: Math.round(clampTime(value) * 1000) / 1000 };
   if (show.to < show.from) show[key === "from" ? "to" : "from"] = show[key];
   doc.replace({ ...item, show });
 };
+
+// ---------------------------------------------------------------------------
+// Freezes
+// ---------------------------------------------------------------------------
+const changeFreeze = (frame, seconds) => doc.commitDocument((value) => setFreeze(value, clip, frame, seconds));
+const freezeHere = () => {
+  const at = source();
+  if (at.freeze === null && !doc.freezes.some((f) => f.atFrame === at.frame)) changeFreeze(at.frame, 2);
+  seekOutput(freezeStart(at.frame, clip, doc.freezes)); // into the freeze, ready to draw on it
+  document.querySelector(`[data-freeze-seconds="${at.frame}"]`)?.focus();
+};
+
+const renderFreezes = () => {
+  const freezes = sortedFreezes();
+  $("[data-scrub]").max = String(total());
+  $("[data-freeze-count]").textContent = `(${freezes.length})`;
+  $("[data-freeze-empty]").hidden = freezes.length > 0;
+  $("[data-freeze-list]").replaceChildren(...freezes.map((freeze) => {
+    const entry = document.createElement("li");
+    const start = freezeStart(freeze.atFrame, clip, freezes);
+    const go = Object.assign(document.createElement("button"), { type: "button", textContent: `Frame ${freeze.atFrame + 1} · ${formatTime(start)}` });
+    go.onclick = () => seekOutput(start);
+    const seconds = Object.assign(document.createElement("input"), { type: "number", min: "0.04", max: "60", step: "0.1", value: String(freeze.seconds) });
+    seconds.dataset.freezeSeconds = String(freeze.atFrame);
+    seconds.setAttribute("aria-label", `Freeze length in seconds at frame ${freeze.atFrame + 1}`);
+    seconds.onchange = () => {
+      const value = Number(seconds.value);
+      if (Number.isFinite(value) && value >= 0.04 && value <= 60) changeFreeze(freeze.atFrame, value);
+      else seconds.value = String(freeze.seconds);
+    };
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", textContent: "×", title: "Remove this freeze" });
+    remove.setAttribute("aria-label", `Remove the freeze at frame ${freeze.atFrame + 1}`);
+    remove.onclick = () => changeFreeze(freeze.atFrame, 0);
+    entry.append(go, seconds, Object.assign(document.createElement("span"), { textContent: "s" }), remove);
+    return entry;
+  }));
+  const lane = $("[data-lane]");
+  lane.querySelectorAll("[data-lane-freeze]").forEach((block) => block.remove());
+  const length = total();
+  freezes.forEach((freeze) => {
+    const block = document.createElement("span");
+    block.className = "annotate-lane-freeze";
+    block.dataset.laneFreeze = String(freeze.atFrame);
+    block.title = `Freeze at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Drag its right edge to change the length.`;
+    block.style.left = `${(freezeStart(freeze.atFrame, clip, freezes) / length) * 100}%`;
+    block.style.width = `${(freeze.seconds / length) * 100}%`;
+    const edge = document.createElement("span");
+    edge.className = "annotate-lane-edge";
+    edge.dataset.edge = String(freeze.atFrame);
+    block.append(edge);
+    lane.append(block);
+  });
+};
+
+{
+  // Click or drag on the lane to move the playhead; drag a freeze's right edge to resize it.
+  const lane = $("[data-lane]");
+  let drag = null;
+  const timeAt = (event) => {
+    const rect = lane.getBoundingClientRect();
+    return ((event.clientX - rect.left) / rect.width) * total();
+  };
+  lane.addEventListener("pointerdown", (event) => {
+    if (!clip) return;
+    const edge = event.target.closest("[data-edge]");
+    if (edge) {
+      const frame = Number(edge.dataset.edge);
+      const freeze = doc.freezes.find((f) => f.atFrame === frame);
+      drag = { frame, x: event.clientX, seconds: freeze.seconds, length: total(), width: lane.getBoundingClientRect().width, block: edge.parentElement };
+    } else {
+      drag = { seek: true };
+      seekOutput(timeAt(event));
+    }
+    lane.setPointerCapture(event.pointerId);
+  });
+  lane.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (drag.seek) return seekOutput(timeAt(event));
+    drag.next = Math.round(Math.min(60, Math.max(0.04, drag.seconds + ((event.clientX - drag.x) / drag.width) * drag.length)) * 10) / 10;
+    drag.block.style.width = `${(drag.next / drag.length) * 100}%`;
+    drag.block.title = `${drag.next} s`;
+  });
+  const finish = () => {
+    if (drag?.next) changeFreeze(drag.frame, drag.next);
+    drag = null;
+  };
+  lane.addEventListener("pointerup", finish);
+  lane.addEventListener("pointercancel", () => { drag = null; renderFreezes(); });
+}
 
 // ---------------------------------------------------------------------------
 // Text
@@ -382,7 +577,7 @@ function finishText(cancel = false) {
     if (!text.trim()) doc.remove(id);
     else doc.replace({ ...existing, text });
   } else if (text.trim()) {
-    const item = newItem("text", [point], { from: currentTime(), to: clip.duration, style: toolStyle.text, text });
+    const item = newItem("text", [point], { from: currentTime(), to: total(), style: toolStyle.text, text });
     doc.add(item);
     select(item.id);
   }
@@ -411,7 +606,7 @@ const nearHandle = (item, at) => {
 
 const finishZone = () => {
   if (zoneDraft && zoneDraft.length >= 3) {
-    const item = newItem("zone", zoneDraft, { from: currentTime(), to: clip.duration, style: toolStyle.zone });
+    const item = newItem("zone", zoneDraft, { from: currentTime(), to: total(), style: toolStyle.zone });
     doc.add(item);
     select(item.id);
   }
@@ -423,7 +618,7 @@ canvas.addEventListener("pointerdown", (event) => {
   if (!clip || event.button !== 0) return;
   if (textEdit) { finishText(); return; }
   canvas.focus();
-  video.pause();
+  if (playing) pause();
   const at = toFraction(event);
   const [x, y] = toPixels(at);
   const { w, h } = size();
@@ -453,7 +648,7 @@ canvas.addEventListener("pointerdown", (event) => {
     const style = toolStyle[tool];
     const geometry = tool === "spotlight" ? { ...ringGeometry(0.03, aspect()), h: 0.3 } : ringGeometry(0.03, aspect());
     const points = tool === "ring" || tool === "spotlight" ? [at] : tool === "freehand" ? [at] : [at, at];
-    gesture = { type: "draw", start: at, draft: newItem(tool, points, { from, to: clip.duration, style, geometry }), moved: false };
+    gesture = { type: "draw", start: at, draft: newItem(tool, points, { from, to: total(), style, geometry }), moved: false };
   }
   canvas.setPointerCapture(event.pointerId);
   scheduleRender();
@@ -545,8 +740,7 @@ document.addEventListener("keydown", (event) => {
   if (command || event.altKey) return;
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
     event.preventDefault();
-    const direction = event.key === "ArrowLeft" ? -1 : 1;
-    step(direction * (event.shiftKey ? Math.round(fps()) : 1));
+    step(event.key === "ArrowLeft" ? -1 : 1, event.shiftKey);
   } else if (event.key === " " && !event.target.closest("button")) {
     event.preventDefault();
     togglePlay();
@@ -570,7 +764,7 @@ document.addEventListener("keydown", (event) => {
 // Screenshot: the frame at full size with its drawings
 // ---------------------------------------------------------------------------
 const screenshot = async (button) => {
-  video.pause();
+  if (playing) pause();
   const format = $("[data-shot-format]").value;
   const shot = document.createElement("canvas");
   shot.width = video.videoWidth || clip.width;
@@ -580,7 +774,7 @@ const screenshot = async (button) => {
   drawItems(context, doc.items, shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise((resolve) => shot.toBlob(resolve, type, 0.92));
-  const name = `${clip.name} frame ${frameAt(currentTime()) + 1}.${format === "jpeg" ? "jpg" : "png"}`;
+  const name = `${clip.name} frame ${source().frame + 1}.${format === "jpeg" ? "jpg" : "png"}`;
   button.disabled = true;
   try { await saveImage(blob, name); } finally { button.disabled = false; }
 };
@@ -591,10 +785,19 @@ const screenshot = async (button) => {
 const wire = () => {
   document.querySelectorAll("[data-tool]").forEach((button) => { button.onclick = () => setTool(button.dataset.tool); });
   document.querySelectorAll("[data-step]").forEach((button) => { button.onclick = () => step(Number(button.dataset.step)); });
+  $("[data-freeze]").onclick = freezeHere;
+  $("[data-anim-in]").onchange = (event) => setAnimation({ animate: event.target.value });
+  $("[data-anim-out]").onchange = (event) => setAnimation({ animateOut: event.target.value });
+  $("[data-anim-seconds]").onchange = (event) => {
+    const value = Number(event.target.value);
+    if (Number.isFinite(value) && value >= 0.05 && value <= 5) setAnimation({ animSeconds: value });
+    else renderInspector();
+  };
+  $("[data-ease]").onchange = (event) => setAnimation({ ease: event.target.value });
+  $("[data-pulse]").onchange = (event) => setAnimation({ pulse: event.target.checked });
   $("[data-play]").onclick = togglePlay;
   const scrub = $("[data-scrub]");
-  scrub.max = String(clip.frames - 1);
-  scrub.oninput = () => seekFrame(Number(scrub.value));
+  scrub.oninput = () => seekOutput(Number(scrub.value));
   $("[data-undo]").onclick = () => doc.undo();
   $("[data-redo]").onclick = () => doc.redo();
   $("[data-screenshot]").onclick = (event) => screenshot(event.currentTarget);
@@ -603,12 +806,14 @@ const wire = () => {
   $("[data-from-here]").onclick = () => setTiming("from", currentTime());
   $("[data-to-here]").onclick = () => setTiming("to", currentTime());
   $("[data-delete]").onclick = () => { if (selectedId) { doc.remove(selectedId); select(null); } };
-  for (const name of ["seeked", "loadeddata", "pause"]) video.addEventListener(name, scheduleRender);
-  video.addEventListener("play", () => requestAnimationFrame(playLoop));
+  for (const name of ["seeked", "loadeddata"]) video.addEventListener(name, scheduleRender);
   new ResizeObserver(fitCanvas).observe(stage);
   window.addEventListener("resize", fitCanvas);
   doc.onChange(() => {
     if (selectedId && !doc.find(selectedId)) selectedId = null;
+    if (playing) pause();
+    outTime = clampTime(outTime);
+    renderFreezes();
     $("[data-undo]").disabled = !doc.canUndo;
     $("[data-redo]").disabled = !doc.canRedo;
     renderInspector();
@@ -638,7 +843,8 @@ const start = async () => {
     wire();
     fitCanvas();
     setTool("select");
-    seekFrame(0);
+    renderFreezes();
+    seekOutput(0);
     status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
     setSaveStatus("Saved locally");
   } catch (error) {

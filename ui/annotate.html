@@ -5,9 +5,9 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=13" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=1" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=2" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=1"></script>
+  <script type="module" src="annotate.js?v=2"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
@@ -47,9 +47,11 @@
           <button type="button" data-step="-1" title="Back one frame (Left arrow; Shift for 1 second)" aria-label="Back one frame">&#9664;&#9646;</button>
           <button type="button" data-play aria-label="Play">Play</button>
           <button type="button" data-step="1" title="Forward one frame (Right arrow; Shift for 1 second)" aria-label="Forward one frame">&#9646;&#9654;</button>
-          <input type="range" data-scrub min="0" max="1" step="1" value="0" aria-label="Frame" />
+          <input type="range" data-scrub min="0" max="1" step="0.001" value="0" aria-label="Playhead" />
           <span class="annotate-time" data-time>0:00.00 &middot; frame 1</span>
+          <button type="button" data-freeze title="Hold this frame still (silent) while drawings animate">Freeze frame</button>
         </div>
+        <div class="annotate-lane" data-lane aria-hidden="true"><span class="annotate-lane-head" data-lane-head></span></div>
         <div class="annotate-actions">
           <button type="button" class="native-button native-secondary" data-undo disabled title="Ctrl+Z">Undo</button>
           <button type="button" class="native-button native-secondary" data-redo disabled title="Ctrl+Shift+Z">Redo</button>
@@ -64,11 +66,23 @@
           <div class="annotate-fields" data-style-fields></div>
         </details>
         <details open data-timing hidden>
-          <summary>Timing</summary>
+          <summary>Timing and animation</summary>
           <div class="annotate-fields">
             <label>Shows from (s) <span class="annotate-pair"><input type="number" data-from min="0" step="0.04" /><button type="button" data-from-here title="Set to the current frame">Here</button></span></label>
             <label>Until (s) <span class="annotate-pair"><input type="number" data-to min="0" step="0.04" /><button type="button" data-to-here title="Set to the current frame">Here</button></span></label>
+            <label>Comes in <select data-anim-in><option value="none">At once</option><option value="fade">Fade</option><option value="draw">Draw on</option><option value="grow">Grow</option><option value="slide">Slide in</option></select></label>
+            <label>Goes out <select data-anim-out><option value="none">At once</option><option value="fade">Fade</option></select></label>
+            <label data-anim-detail>Animation (s) <input type="number" data-anim-seconds min="0.05" max="5" step="0.05" /></label>
+            <label data-anim-detail>Easing <select data-ease><option value="ease-out">Ease out</option><option value="ease-in-out">Ease in and out</option><option value="linear">Even</option></select></label>
+            <label class="annotate-check" data-pulse-row><input type="checkbox" data-pulse /> Pulse</label>
             <button type="button" class="native-button native-secondary" data-delete>Delete drawing</button>
+          </div>
+        </details>
+        <details open>
+          <summary>Freezes <span data-freeze-count>(0)</span></summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-freeze-empty>Freeze frame holds the picture still, without sound, for as long as you set.</p>
+            <ol class="annotate-list annotate-freezes" data-freeze-list></ol>
           </div>
         </details>
         <details>

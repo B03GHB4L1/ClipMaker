@@ -466,8 +466,11 @@ The analyst can export the current frame, with its drawings, as a picture.
 
 ## Still open
 
-- Animation set: R1 recommends fade, draw-on, grow, slide in, a pulse loop
-  and three easing choices (see METRICA_REVIEW.md section 3); awaiting approval.
+- Animation set: settled in M2 (2026-11-16) as R1 recommended: comes in with
+  fade, draw-on, grow or slide in; goes out with fade; a pulse loop on rings,
+  spotlights and zones; three easings (ease out, ease in and out, even).
+- On-video text font: the user chose Segoe UI. It cannot be bundled (Microsoft
+  licence), so Windows uses it and macOS/Linux fall back to Helvetica/Arial.
 - Previously: animation set beyond draw-on, fade and grow kept as is. Before
   executing the plan, the user may run REA on Metrica Nexus (see R1) and add
   animations, tools or workflow ideas from that review, filtered by the

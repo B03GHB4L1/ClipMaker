@@ -16,7 +16,12 @@ from typing import Any
 
 VERSION = 1
 KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone"}
-ANIMATIONS = {"none"}  # M2 adds draw-on, fade, grow, slide and pulse.
+ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
+EXIT_ANIMATIONS = {"none", "fade"}
+EASES = {"linear", "ease-out", "ease-in-out"}
+PULSE_KINDS = {"ring", "spotlight", "zone"}
+MAX_FREEZES = 50
+FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
 MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40}
 MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3}
@@ -95,10 +100,10 @@ def _geometry(kind: str, value: Any) -> dict[str, float]:
     return clean
 
 
-def _show(value: Any, duration: float) -> dict[str, Any]:
+def _show(value: Any, limit: float, kind: str) -> dict[str, Any]:
+    """`limit` is the output length in seconds: the clip plus its freezes."""
     if not isinstance(value, dict):
         raise ValueError("A drawing needs the time it shows from and to.")
-    limit = duration + 0.5
     start = _number(value.get("from"), 0, limit, "Show-from time")
     end = _number(value.get("to"), 0, limit, "Show-to time")
     if end < start:
@@ -106,10 +111,47 @@ def _show(value: Any, duration: float) -> dict[str, Any]:
     animate = value.get("animate", "none")
     if animate not in ANIMATIONS:
         raise ValueError(f"Unknown animation: {animate}.")
-    return {"from": round(start, 3), "to": round(end, 3), "animate": animate}
+    exit_animation = value.get("animateOut", "none")
+    if exit_animation not in EXIT_ANIMATIONS:
+        raise ValueError(f"Unknown exit animation: {exit_animation}.")
+    ease = value.get("ease", "ease-out")
+    if ease not in EASES:
+        raise ValueError(f"Unknown easing: {ease}.")
+    pulse = value.get("pulse", False)
+    if not isinstance(pulse, bool) or (pulse and kind not in PULSE_KINDS):
+        raise ValueError(f"A {kind} cannot pulse.")
+    extra = set(value) - {"from", "to", "animate", "animateOut", "animSeconds", "ease", "pulse"}
+    if extra:
+        raise ValueError(f"Unknown timing setting: {sorted(extra)[0]}.")
+    clean: dict[str, Any] = {"from": round(start, 3), "to": round(end, 3), "animate": animate}
+    if exit_animation != "none":
+        clean["animateOut"] = exit_animation
+    if animate != "none" or exit_animation != "none":
+        clean["animSeconds"] = round(_number(value.get("animSeconds", 0.5), 0.05, 5, "Animation length"), 3)
+        clean["ease"] = ease
+    if pulse:
+        clean["pulse"] = True
+    return clean
 
 
-def _item(value: Any, duration: float) -> dict[str, Any]:
+def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_FREEZES:
+        raise ValueError(f"A clip can hold up to {MAX_FREEZES} freezes.")
+    clean = []
+    for freeze in value:
+        if not isinstance(freeze, dict) or set(freeze) != {"atFrame", "seconds"}:
+            raise ValueError("Each freeze needs its frame and length only.")
+        frame = freeze["atFrame"]
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
+            raise ValueError("A freeze must be on a frame of the clip.")
+        seconds = _number(freeze["seconds"], *FREEZE_SECONDS, "Freeze length")
+        clean.append({"atFrame": frame, "seconds": round(seconds, 3)})
+    if len({freeze["atFrame"] for freeze in clean}) != len(clean):
+        raise ValueError("Two freezes are on the same frame.")
+    return sorted(clean, key=lambda freeze: freeze["atFrame"])
+
+
+def _item(value: Any, limit: float) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Each drawing must be an object.")
     item_id = value.get("id")
@@ -126,7 +168,7 @@ def _item(value: Any, duration: float) -> dict[str, Any]:
         "kind": kind,
         "points": [_point(p, f"A {kind} point") for p in points],
         "style": _style(value.get("style")),
-        "show": _show(value.get("show"), duration),
+        "show": _show(value.get("show"), limit, kind),
     }
     geometry = _geometry(kind, value.get("geometry"))
     if geometry:
@@ -145,10 +187,11 @@ def _item(value: Any, duration: float) -> dict[str, Any]:
     return clean
 
 
-def clean_document(value: Any, duration: float) -> dict[str, Any]:
+def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     """The document to store, or ValueError explaining what is wrong.
 
-    `duration` is the clip length in seconds; drawings may not be timed past it.
+    `duration` is the clip length in seconds and `frames` its frame count.
+    Drawing times are output seconds, so they may run into the freezes' time.
     """
     if not isinstance(value, dict):
         raise ValueError("Annotations must be an object.")
@@ -157,17 +200,16 @@ def clean_document(value: Any, duration: float) -> dict[str, Any]:
     items = value.get("items")
     if not isinstance(items, list) or len(items) > MAX_ITEMS:
         raise ValueError(f"A clip can hold up to {MAX_ITEMS} drawings.")
-    clean_items = [_item(item, duration) for item in items]
+    freezes = _freezes(value.get("freezes", []), frames)
+    limit = duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
+    clean_items = [_item(item, limit) for item in items]
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")
-    freezes = value.get("freezes", [])
-    if freezes != []:
-        raise ValueError("Freeze frames arrive in a later version of the editor.")
     extra = set(value) - {"version", "items", "freezes"}
     if extra:
         raise ValueError(f"Unknown annotation setting: {sorted(extra)[0]}.")
-    return {"version": VERSION, "items": clean_items, "freezes": []}
+    return {"version": VERSION, "items": clean_items, "freezes": freezes}
 
 
 def empty_document() -> dict[str, Any]:

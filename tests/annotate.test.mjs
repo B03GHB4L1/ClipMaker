@@ -95,3 +95,76 @@ test("freehand strokes are thinned but keep both ends", () => {
   assert.deepEqual(kept[0], points[0]);
   assert.deepEqual(kept.at(-1), points.at(-1));
 });
+
+// ---------------------------------------------------------------------------
+// M2: freezes and animation
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { animation, outputToSource, setFreeze, stops, totalSeconds, freezeStart } from "../ui/annotate/timeline.js";
+import { partialPath } from "../ui/annotate/shapes.js";
+
+const cases = JSON.parse(readFileSync(new URL("./fixtures/timeline_cases.json", import.meta.url), "utf-8"));
+
+test("output time maps to source frames through freezes (shared fixture)", () => {
+  assert.ok(Math.abs(totalSeconds(cases.clip, cases.freezes) - cases.total) < 1e-9);
+  for (const c of cases.mapping) {
+    const at = outputToSource(c.t, cases.clip, cases.freezes);
+    assert.deepEqual([at.frame, at.freeze], [c.frame, c.freeze], `t=${c.t}`);
+  }
+});
+
+test("animation progress matches the engine (shared fixture)", () => {
+  for (const c of cases.animation) {
+    const state = animation(c.item, c.t);
+    if (c.state === null) { assert.equal(state, null); continue; }
+    for (const [key, expected] of Object.entries(c.state)) {
+      if (expected === null) assert.equal(state[key], null, key);
+      else assert.ok(Math.abs(state[key] - expected) < 1e-6, `${key}: ${state[key]} vs ${expected} for ${JSON.stringify(c.item.show)}`);
+    }
+  }
+});
+
+test("frame stepping stops at every frame and at both ends of each freeze", () => {
+  const clip = { fps: 10, duration: 0.5, frames: 5 };
+  const list = stops(clip, [{ atFrame: 2, seconds: 1.5 }]);
+  const expected = [0, 0.1, 0.2, 1.7, 1.8, 1.9];
+  assert.equal(list.length, expected.length);
+  list.forEach((t, i) => assert.ok(Math.abs(t - expected[i]) < 1e-9, `${t} vs ${expected[i]}`));
+});
+
+test("adding, resizing and removing a freeze keeps drawings on the same picture", () => {
+  const clip = { fps: 25, duration: 4, frames: 100 };
+  const at = (from, to) => ({ ...ring(), show: { from, to, animate: "none" } });
+  let doc = { version: 1, freezes: [], items: [at(1, 3), at(0.5, 0.9), at(2, 4)] };
+  doc = setFreeze(doc, clip, 25, 2); // frame 25 starts at 1.0 s
+  assert.deepEqual(doc.freezes, [{ atFrame: 25, seconds: 2 }]);
+  assert.deepEqual(doc.items.map((i) => [i.show.from, i.show.to]), [[1, 5], [0.5, 0.9], [4, 6]]);
+  const inside = { ...ring(), show: { from: 2.5, to: 2.8, animate: "none" } }; // drawn during the freeze
+  doc = { ...doc, items: [...doc.items, inside] };
+  doc = setFreeze(doc, clip, 25, 1); // shrink by 1 s
+  assert.deepEqual(doc.items.map((i) => [i.show.from, i.show.to]), [[1, 4], [0.5, 0.9], [3, 5], [2, 2]]);
+  doc = setFreeze(doc, clip, 25, 0); // remove
+  assert.deepEqual(doc.freezes, []);
+  assert.deepEqual(doc.items.map((i) => [i.show.from, i.show.to]), [[1, 3], [0.5, 0.9], [2, 4], [1, 1]]);
+  assert.equal(freezeStart(25, clip, []), 1);
+});
+
+test("freeze changes are one undo step with the drawings they move", () => {
+  const clip = { fps: 25, duration: 4, frames: 100 };
+  const doc = createDocument();
+  doc.add({ ...ring(), show: { from: 2, to: 4, animate: "none" } });
+  doc.commitDocument((value) => setFreeze(value, clip, 25, 2));
+  assert.equal(doc.items[0].show.from, 4);
+  doc.undo();
+  assert.deepEqual([doc.freezes.length, doc.items[0].show.from], [0, 2]);
+});
+
+test("draw-on traces the first part of a path by length", () => {
+  const path = [[0, 0], [10, 0], [10, 10]];
+  assert.deepEqual(partialPath(path, 0.25), [[0, 0], [5, 0]]);
+  assert.deepEqual(partialPath(path, 0.75), [[0, 0], [10, 0], [10, 5]]);
+  assert.deepEqual(partialPath(path, 1), path);
+  // A closed zone outline runs back to its first corner: perimeter 10 + 10 + 14.14, half way is 7.07 up the second side.
+  const [x, y] = partialPath(path, 0.5, true).at(-1);
+  assert.ok(Math.abs(x - 10) < 1e-9 && Math.abs(y - 7.0710678) < 1e-6, `${x}, ${y}`);
+});

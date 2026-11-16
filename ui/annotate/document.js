@@ -76,21 +76,24 @@ export const createDocument = (saved) => {
   return {
     get value() { return current; },
     get items() { return current.items; },
+    get freezes() { return current.freezes || []; },
     get canUndo() { return past.length > 0; },
     get canRedo() { return future.length > 0; },
     find: (id) => current.items.find((item) => item.id === id) || null,
     onChange: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
-    /** Apply `change(items) -> items` as one undoable step. */
-    commit(change) {
-      const next = change(copy(current.items));
-      if (JSON.stringify(next) === JSON.stringify(current.items)) return false;
+    /** Apply `change(document) -> document` as one undoable step (freezes and drawings together). */
+    commitDocument(change) {
+      const next = change(copy(current));
+      if (JSON.stringify(next) === JSON.stringify(current)) return false;
       past.push(current);
       if (past.length > HISTORY_LIMIT) past.shift();
       future.length = 0;
-      current = { ...current, items: next };
+      current = copy(next);
       emit();
       return true;
     },
+    /** Apply `change(items) -> items` as one undoable step. */
+    commit(change) { return this.commitDocument((value) => ({ ...value, items: change(value.items) })); },
     add(item) { return this.commit((items) => [...items, item]); },
     replace(item) { return this.commit((items) => items.map((each) => (each.id === item.id ? item : each))); },
     remove(id) { return this.commit((items) => items.filter((item) => item.id !== id)); },

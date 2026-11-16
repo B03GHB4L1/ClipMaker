@@ -131,11 +131,11 @@ class EditorClips:
             return annotations.empty_document()
         saved = json.loads(path.read_text(encoding="utf-8"))
         # Re-check what was stored, so a damaged file is reported, not drawn.
-        return annotations.clean_document(saved, record["duration"])
+        return annotations.clean_document(saved, record["duration"], record["frames"])
 
     def save_annotations(self, project_id: str, clip_id: str, document: Any) -> dict[str, Any]:
         record, _ = self.get(project_id, clip_id)
-        clean = annotations.clean_document(document, record["duration"])
+        clean = annotations.clean_document(document, record["duration"], record["frames"])
         _, _, path = self._clip_paths(project_id, clip_id)
         _atomic_json(path, clean)
         return clean
