@@ -25,6 +25,7 @@ parity item.
 | Where the editor opens | A new **Annotate** button on every clip preview except the home page |
 | First-release tools | Player ring/spotlight, arrows and lines, freehand, text, zones, plus freeze frames, animated drawing, and zones whose corners follow linked players |
 | Text | Any text colour; any background colour or transparent; clean, legible, unobtrusive font |
+| Default tracker | **OpenCV ViT tracker** (0.7 MB model, Apache 2.0), bundled in the base app as an approved exception to the model policy; standard OpenCV build, no contrib; MIL as fallback. Decided after M0 ([M0_TRACKING_SPIKE.md](M0_TRACKING_SPIKE.md)) |
 | AI models | User is slightly open to them (2026-11-16). Allowed only under the proposed model policy below; the base app stays model-free through roadmap step 4. Wording for AGENTS.md still to be decided by the user |
 | More Metrica tools | Reviewed in R1 ([METRICA_REVIEW.md](METRICA_REVIEW.md)); slides/board, team shape/offside/minimap and live coding/streaming moved onto the roadmap at the user's request |
 
@@ -152,8 +153,11 @@ identical in both.
 ### Engine (`app/telestration/`)
 
 - `tracker.py`: a `Tracker` adapter interface, `init(frame, box)` and
-  `update(frame) -> (box, confidence)`. First adapter: OpenCV CSRT. A future
-  detector-assisted adapter can slot in without UI or data changes.
+  `update(frame) -> (box, confidence)`. Default adapter: OpenCV ViT tracker
+  (`TrackerVit`, model `vittrack.onnx`, 0.7 MB, bundled). Fallback adapter:
+  OpenCV MIL (no model) if the model file is missing, with a visible notice
+  that tracking quality is reduced. A future detector-assisted adapter can
+  slot in without UI or data changes.
 - `segments.py`: pure logic, no OpenCV. Given keyframes and tracked results,
   works out which spans need re-tracking, merges results, applies review flags
   and smoothing. Most tests live here.
@@ -164,9 +168,12 @@ identical in both.
   already a dependency) at 540 px high, so tracking is fast and
   memory-bounded. Boxes are scaled back to normalised coordinates.
 - `scene.py`: cheap scene-cut detection from frame histogram differences.
-- Confidence: CSRT's success flag plus normalised cross-correlation between the
-  seed patch and the current patch. Below a threshold → review flag; a run of
-  failures → stop the segment.
+- Confidence (validated in M0): ViT's own loss signal, plus a **shirt-colour
+  check** (upper-body colour inside the box, grass masked out, compared with
+  the seed; flag when it stays different for about 0.2 s), plus an
+  **out-of-frame rule** (box reaching the frame edge and shrinking). Any flag
+  → amber review frame with a one-click "still right" or drag-to-fix; a run
+  of flags or a scene cut → stop the segment and ask for a new seed.
 - `render.py`: draws every output frame (source frame or held freeze frame plus
   shapes at their animation state) and pipes it into the existing encoder in
   `app/video_encoder.py`. Shapes with OpenCV antialiased primitives; text with
@@ -243,23 +250,28 @@ between players, and zones whose corners follow players.
 
 ## Dependencies
 
-- `opencv-contrib-python-headless` (Apache 2.0); size increase accepted. CSRT
-  is, as far as I know, in the contrib build; **M0 must confirm** which package
-  and version exposes it. If it is not available, fall back to `TrackerMIL` or
-  template matching + Kalman and measure the quality drop.
+- `opencv-python-headless` (standard build, Apache 2.0); size increase
+  accepted. M0 confirmed CSRT exists only in the contrib build and is not
+  needed, so contrib is not used.
+- `vittrack.onnx` (0.7 MB) from `opencv/opencv_zoo`
+  (`models/object_tracking_vittrack`, Apache 2.0 per its LICENSE), bundled
+  with its licence text. Its README does not state the training data; check
+  before release.
 - `Pillow` becomes a runtime dependency (already pinned for tests).
 - Geist Sans font file plus its OFL licence text.
 - All three must work in the PyInstaller builds and the packaged-app launch
   test on Windows, Linux and macOS.
-- CSRT is classical computer vision, not a learned model, so it does not touch
-  the AI-filtering exclusion.
+- The ViT tracker is a small learned model. The user approved bundling it in
+  the base app as an exception to the model policy (2026-11-16); it is not
+  used for filtering, so it does not touch the AI-filtering exclusion.
 
 ## AI model policy (proposed, awaiting the user's AGENTS.md wording)
 
 The user is slightly open to AI models. To keep the app light and fast, any
 model must follow these rules:
 
-1. **Optional model pack, not in the base installer.** Downloaded on first use
+1. **Optional model pack, not in the base installer.** Exception approved
+   by the user: the 0.7 MB ViT tracker model is bundled in the base app. Downloaded on first use
    with a checksum check. The core app size does not change. When the pack is
    missing, the feature says so clearly and offers to install it; it never
    fails silently (AGENTS.md).
