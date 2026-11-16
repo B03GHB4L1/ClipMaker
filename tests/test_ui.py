@@ -236,7 +236,7 @@ class SharedUiTests(unittest.TestCase):
         # The editor's markup was redesigned; annotate.js finds its controls by data attribute.
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
-        built = {"data-head", "data-lane-freeze", "data-freeze-seconds"}  # made by the script itself
+        built = {"data-head", "data-lane-freeze", "data-freeze-seconds", "data-bar"}  # made by the script itself
         hooks = set(re.findall(r'\$\("\[(data-[a-z-]+)', script)) | set(re.findall(r'querySelector(?:All)?\("\[(data-[a-z-]+)', script))
         self.assertGreater(len(hooks), 20)
         for hook in sorted(hooks - built):
@@ -254,6 +254,46 @@ class SharedUiTests(unittest.TestCase):
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "text"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow"])
+
+    def test_annotate_critique_fixes_hold(self):
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        # The shared control and hover rules must not outrank Play, Save screenshot or pressed tools.
+        self.assertIn(".annotate-main :where(.annotate-command, .annotate-shot,", css)
+        self.assertIn(".annotate-main :where(button, select):where(:hover:not(:disabled))", css)
+        self.assertNotIn(".annotate-main :is(.annotate-command", css)
+        self.assertNotIn(".annotate-main :is(button, select):hover", css)
+        # One meaning per colour: lime is the primary action, ink the active tool.
+        self.assertIn(".annotate-main .annotate-shot { border-color: var(--cm-accent); background: var(--cm-accent);", css)
+        self.assertNotIn('[data-tool="follow"][aria-pressed="true"]', css)
+        # Shortcut hints are readable (muted ink, not pale grey at 9px).
+        self.assertNotIn("#9a9d96", css)
+        self.assertNotIn("font-size: 9px", css)
+        # Narrow windows keep settings beside the video.
+        narrow = css[css.index("@media (max-width: 1100px)"):css.index("@media (max-width: 720px)")]
+        self.assertIn("grid-template-columns: 76px minmax(0, 1fr) 216px", narrow)
+        # Delete sits in the command bar and needs a selection; the page has one h1.
+        bar = html[html.index('<div class="annotate-commands">'):html.index("</div>", html.index('<div class="annotate-commands">'))]
+        self.assertIn('data-delete disabled', bar)
+        self.assertEqual(html.count("data-delete"), 1)
+        self.assertIn('$("[data-delete]").disabled = !item;', script)
+        self.assertIn("<h1 data-annotate-title>", html)
+        # aria-pressed goes on tool buttons, never on the canvas.
+        self.assertIn('querySelectorAll("button[data-tool]")', script)
+        # Freezes start closed and open when the first one is added.
+        self.assertIn("<details data-freeze-panel>", html)
+        self.assertIn('$("[data-freeze-panel]").open = true', script)
+
+    def test_annotate_drawings_lane_sets_timing_by_dragging(self):
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        self.assertIn("data-drawing-lane", html)
+        self.assertIn("data-drawing-head", html)
+        lane = script[script.index('const lane = $("[data-drawing-lane]");\n  let drag'):]
+        self.assertIn("selectDrawing(item)", lane)
+        self.assertIn("setTiming(key,", lane)
+        self.assertIn("renderDrawingLane();", script[script.index("const renderList"):])
 
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window

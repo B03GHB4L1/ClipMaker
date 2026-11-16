@@ -17,14 +17,15 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main svg .is-solid { fill: currentColor; stroke: none; }
 
 /* Shared control: white, hairline border, 6px radius (as .transport button on the Clips screen). */
-.annotate-main :is(.annotate-command, .annotate-shot, .annotate-format, .annotate-transport button, .annotate-pair button,
-  .annotate-row-action, .annotate-primary, .annotate-danger, .annotate-remove) {
+.annotate-main :where(.annotate-command, .annotate-shot, .annotate-format, .annotate-transport button, .annotate-pair button,
+  .annotate-row-action, .annotate-primary, .annotate-remove) {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: var(--annotate-control); padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px;
   background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500;
   white-space: nowrap; cursor: pointer; transition: background-color 150ms var(--cm-settle), border-color 150ms var(--cm-settle);
 }
-.annotate-main :is(button, select):hover:not(:disabled) { background-color: var(--annotate-hover); }
+/* Low specificity on purpose: pressed and coloured buttons keep their own background. */
+.annotate-main :where(button, select):where(:hover:not(:disabled)) { background-color: var(--annotate-hover); }
 .annotate-main :is(button, select, input, a, summary, canvas):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
 .annotate-main button:disabled { color: #a3a69e; cursor: not-allowed; }
 
@@ -34,23 +35,25 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-back:hover { background: var(--annotate-hover); color: var(--cm-ink); }
 .annotate-heading { display: flex; align-items: baseline; gap: 10px; flex: 0 1 auto; min-width: 0; }
 .annotate-bar .annotate-hint { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--cm-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.annotate-heading strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-heading h1 { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .annotate-save { flex: none; color: var(--cm-muted); font-size: 11px; }
 .annotate-commands { display: flex; align-items: center; gap: 6px; }
 .annotate-main .annotate-command { width: var(--annotate-control); padding: 0; }
 .annotate-main .annotate-select { width: auto; padding: 0 10px; }
-.annotate-select kbd { color: #9a9d96; font: inherit; font-size: 9px; }
+.annotate-select kbd { color: var(--cm-muted); font: inherit; font-size: 10px; }
 .annotate-main .annotate-select[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
 .annotate-select[aria-pressed="true"] kbd { color: #b9bcb4; }
 .annotate-divider { width: 1px; height: 20px; margin: 0 4px; background: var(--cm-rule); }
 .annotate-main .annotate-format { padding: 0 6px; }
-.annotate-main .annotate-shot { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
-.annotate-main .annotate-shot:hover:not(:disabled) { background: #2c2f29; }
+.annotate-main .annotate-shot { border-color: var(--cm-accent); background: var(--cm-accent); color: var(--cm-ink); font-weight: 600; }
+.annotate-main .annotate-shot:hover:not(:disabled) { background: #b8e123; }
+.annotate-main .annotate-delete:not(:disabled) { color: #9b2a28; }
+.annotate-main .annotate-delete:hover:not(:disabled) { border-color: #e7b9b7; background: #fdf0ef; }
 .annotate-warning, .annotate-error { margin: 0; padding: 8px 12px; border: 1px solid #ecd39a; border-radius: 6px; background: #fff6df; color: #5c4300; font-size: 12px; }
 .annotate-error { border-color: #e7b9b7; background: #fdf0ef; color: #7d2321; }
 
 /* Workspace: tools | stage and timeline | inspector */
-.annotate-workspace { display: grid; grid-template-columns: 68px minmax(0, 1fr) 256px; grid-template-rows: auto 1fr; gap: 10px 12px; align-items: start; padding-bottom: 12px; }
+.annotate-workspace { display: grid; grid-template-columns: 76px minmax(0, 1fr) 256px; grid-template-rows: auto 1fr; gap: 10px 12px; align-items: start; padding-bottom: 12px; }
 .annotate-tools { grid-column: 1; grid-row: 1 / span 2; }
 .annotate-centre { grid-column: 2; grid-row: 1 / span 2; }
 .annotate-player-tools { grid-column: 3; grid-row: 1; }
@@ -65,13 +68,13 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-tool-group + .annotate-tool-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--cm-rule); }
 .annotate-tools button {
   position: relative; display: grid; justify-items: center; gap: 3px; padding: 8px 2px 6px;
-  border: 0; border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 10px; cursor: pointer;
+  border: 0; border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer;
   transition: background-color 150ms var(--cm-settle), color 150ms var(--cm-settle);
 }
 .annotate-tools button svg { width: 20px; height: 20px; }
-.annotate-tools kbd { position: absolute; top: 3px; right: 4px; color: #9a9d96; font: inherit; font-size: 9px; }
+.annotate-tools kbd { position: absolute; top: 3px; right: 4px; color: var(--cm-muted); font: inherit; font-size: 10px; }
+.annotate-tools button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
 .annotate-tools button[aria-pressed="true"] { background: var(--cm-ink); color: #fff; }
-.annotate-tools button[aria-pressed="true"]:hover { background: var(--cm-ink); }
 .annotate-tools button[aria-pressed="true"] kbd { color: #b9bcb4; }
 /* Players: Ring and Follow work on a player, beside the player settings. */
 .annotate-player-tools { padding: 10px 12px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
@@ -83,17 +86,17 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   font: inherit; font-size: 11px; font-weight: 500; line-height: 1.25; text-align: left; cursor: pointer;
 }
 .annotate-player-buttons button svg { width: 20px; height: 20px; }
-.annotate-player-buttons kbd { position: absolute; top: 3px; right: 5px; color: #9a9d96; font: inherit; font-size: 9px; }
+.annotate-player-buttons kbd { position: absolute; top: 3px; right: 5px; color: var(--cm-muted); font: inherit; font-size: 10px; }
+.annotate-player-buttons button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
 .annotate-player-buttons button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
-.annotate-player-buttons button[data-tool="follow"][aria-pressed="true"] { border-color: var(--cm-accent); background: var(--cm-accent); color: var(--cm-ink); }
-.annotate-player-buttons button[aria-pressed="true"]:hover { background-color: inherit; }
+.annotate-player-buttons button[aria-pressed="true"] kbd { color: #b9bcb4; }
 
 /* The column is as wide as the video, so transport and timeline line up with it.
    The video's height leaves room for the bars, transport and timeline in one window. */
 .annotate-centre {
   display: flex; flex-direction: column; gap: 8px; justify-self: center; min-width: min(100%, 320px);
-  width: min(100%, calc((100vh - 282px) * var(--clip-ratio, 1.7778)));
-  width: min(100%, calc((100svh - 282px) * var(--clip-ratio, 1.7778)));
+  width: min(100%, calc((100vh - 300px) * var(--clip-ratio, 1.7778)));
+  width: min(100%, calc((100svh - 300px) * var(--clip-ratio, 1.7778)));
 }
 /* The stage takes the clip's own shape, so drawing coordinates are the video's. */
 .annotate-stage { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #0d0e0c; aspect-ratio: var(--clip-ratio, 16 / 9); }
@@ -126,7 +129,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 76px; align-items: center; gap: 10px; min-height: 26px; font-size: 11px; }
 .annotate-row-name { overflow: hidden; color: var(--cm-muted); text-overflow: ellipsis; white-space: nowrap; }
 .annotate-player .annotate-row-name { color: var(--cm-ink); font-weight: 500; }
-.annotate-main .annotate-row-action { height: 24px; padding: 0 8px; font-size: 10px; }
+.annotate-main .annotate-row-action { height: 24px; padding: 0 8px; font-size: 11px; }
 .annotate-main .annotate-row-action.is-busy { border-color: var(--cm-ink); font-variant-numeric: tabular-nums; }
 .annotate-lane { position: relative; height: 18px; border-radius: 4px; background: #eff0ec; cursor: pointer; touch-action: none; }
 .annotate-player .annotate-lane { height: 14px; }
@@ -135,8 +138,17 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-lane-freeze.is-current { background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent); }
 .annotate-lane-edge { position: absolute; top: -3px; bottom: -3px; right: -5px; width: 10px; cursor: ew-resize; }
 .annotate-lane-edge::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 2px; border-radius: 1px; background: var(--annotate-freeze); }
+.annotate-drawings .annotate-lane { height: auto; min-height: 18px; }
+.annotate-lane-drawing {
+  position: absolute; height: 6px; min-width: 4px; border-radius: 3px; background: #a9ada2; cursor: pointer;
+}
+.annotate-lane-drawing.is-selected { z-index: 2; height: 8px; background: var(--cm-ink); }
+.annotate-lane-drawing .annotate-lane-grip { position: absolute; top: -5px; bottom: -5px; width: 10px; cursor: ew-resize; }
+.annotate-lane-drawing .annotate-lane-grip[data-grip="from"] { left: -5px; }
+.annotate-lane-drawing .annotate-lane-grip[data-grip="to"] { right: -5px; }
+.annotate-lane-drawing .annotate-lane-grip::after { content: ""; position: absolute; top: 2px; bottom: 2px; left: 3px; width: 4px; border-radius: 2px; background: var(--cm-ink); box-shadow: 0 0 0 1.5px #fff; }
 .annotate-cover { position: absolute; top: 3px; bottom: 3px; border-radius: 2px; background: #c3c6bd; pointer-events: none; }
-.annotate-progress { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--cm-accent); pointer-events: none; }
+.annotate-progress { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--cm-accent); box-shadow: inset 0 0 0 1px #8fae1c; pointer-events: none; }
 .annotate-flag { position: absolute; top: 3px; bottom: 3px; min-width: 2px; pointer-events: none; }
 .annotate-flag.is-review { background: var(--annotate-review); }
 .annotate-flag.is-lost { background: var(--annotate-lost); }
@@ -173,7 +185,9 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-fields select { min-width: 112px; cursor: pointer; }
 .annotate-fields input[type="number"] { width: 72px; font-variant-numeric: tabular-nums; }
 .annotate-fields input[type="text"] { width: 140px; }
-.annotate-fields input[type="range"] { width: 124px; accent-color: var(--cm-ink); }
+.annotate-fields input[type="range"] { width: 96px; accent-color: var(--cm-ink); }
+.annotate-slider { display: inline-flex; align-items: center; gap: 6px; }
+.annotate-slider output { min-width: 3.5ch; color: var(--cm-ink); font-variant-numeric: tabular-nums; text-align: right; }
 .annotate-fields input[type="color"] { width: 32px; height: 24px; padding: 2px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; cursor: pointer; }
 .annotate-fields input[type="color"]:disabled { opacity: 0.35; cursor: not-allowed; }
 .annotate-fields input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--cm-ink); }
@@ -183,11 +197,10 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main .annotate-pair button { height: 28px; padding: 0 8px; }
 .annotate-main .annotate-primary { height: 34px; border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
 .annotate-main .annotate-primary:hover:not(:disabled) { background: #b8e123; }
-.annotate-main .annotate-danger { align-self: flex-start; color: #9b2a28; }
-.annotate-main .annotate-danger:hover:not(:disabled) { border-color: #e7b9b7; background: #fdf0ef; }
 .annotate-muted { margin: 0; color: var(--cm-muted); font-size: 11px; line-height: 1.5; }
 
 .annotate-list { list-style: none; margin: 0; padding: 0 6px 8px; max-height: 260px; overflow: auto; }
+.annotate-list button:hover:not(.is-selected) { background: var(--annotate-hover); }
 .annotate-list button {
   width: 100%; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--cm-ink);
   font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer;
@@ -202,16 +215,10 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main .annotate-remove:hover:not(:disabled) { color: #9b2a28; }
 
 @media (max-width: 1100px) {
-  .annotate-workspace { grid-template-columns: 68px minmax(0, 1fr); grid-template-rows: none; }
-  /* Players stay in view: their own small panel under the drawing rail. */
-  .annotate-tools { grid-row: 1; }
-  .annotate-centre { grid-row: 1 / span 2; }
-  .annotate-player-tools { grid-column: 1; grid-row: 2; padding: 4px; }
-  .annotate-player-tools h2 { margin: 2px 0 4px; font-size: 10px; text-align: center; }
-  .annotate-player-buttons { grid-template-columns: 1fr; gap: 2px; }
-  .annotate-player-buttons button { flex-direction: column; gap: 3px; padding: 8px 2px 6px; border: 0; font-size: 10px; text-align: center; }
-  .annotate-inspector { position: static; max-height: none; grid-column: 1 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .annotate-inspector details + details { border-top: 0; border-left: 1px solid var(--cm-rule); }
+  /* Settings stay beside the video, in a narrower column. */
+  .annotate-workspace { grid-template-columns: 76px minmax(0, 1fr) 216px; gap: 10px; }
+  .annotate-fields select { min-width: 96px; }
+  .annotate-fields input[type="range"] { width: 72px; }
 }
 @media (max-width: 720px) {
   .annotate-bar { flex-wrap: wrap; gap: 8px; }
@@ -220,12 +227,10 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   .annotate-commands .annotate-shot { margin-left: auto; }
   .annotate-workspace { grid-template-columns: minmax(0, 1fr); }
   .annotate-tools, .annotate-centre, .annotate-player-tools, .annotate-inspector { grid-column: 1; grid-row: auto; }
-  .annotate-player-tools { padding: 10px 12px 12px; }
-  .annotate-player-tools h2 { margin: 0 0 8px; font-size: 12px; text-align: left; }
-  .annotate-player-buttons { grid-template-columns: 1fr 1fr; gap: 6px; }
-  .annotate-player-buttons button { flex-direction: row; gap: 8px; padding: 6px 8px; border: 1px solid var(--cm-rule); font-size: 11px; text-align: left; }
   .annotate-bar .annotate-hint { order: 5; flex-basis: 100%; white-space: normal; }
-  .annotate-tools { position: static; flex-direction: row; overflow-x: auto; scrollbar-width: none; }
+  .annotate-tools { position: static; flex-direction: row; overflow-x: auto; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  .annotate-tools::after { content: ""; flex: none; width: 20px; }
   .annotate-tool-group { flex-direction: row; }
   .annotate-tool-group + .annotate-tool-group { margin: 0 0 0 4px; padding: 0 0 0 4px; border-top: 0; border-left: 1px solid var(--cm-rule); }
   .annotate-tools button { min-width: 58px; }
@@ -236,6 +241,5 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   .annotate-time { order: 11; }
   .annotate-row { grid-template-columns: 64px minmax(0, 1fr) 68px; gap: 8px; }
   .annotate-track-status { margin-left: 0; }
-  .annotate-inspector { display: block; }
-  .annotate-inspector details + details { border-left: 0; border-top: 1px solid var(--cm-rule); }
+  .annotate-inspector { position: static; max-height: none; }
 }

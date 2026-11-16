@@ -172,6 +172,7 @@ const showTime = () => {
   $("[data-play]").classList.toggle("is-playing", playing);
   $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
   $("[data-lane-head]").style.left = `${(outTime / total()) * 100}%`;
+  $("[data-drawing-head]").style.left = `${(outTime / total()) * 100}%`;
   document.querySelectorAll("[data-players] [data-head]").forEach((head) => { head.style.left = `${(outTime / total()) * 100}%`; });
   document.querySelectorAll("[data-lane-freeze]").forEach((block) => block.classList.toggle("is-current", Number(block.dataset.laneFreeze) === at.freeze));
 };
@@ -359,7 +360,7 @@ const setTool = (next) => {
   finishText();
   zoneDraft = null;
   tool = next;
-  document.querySelectorAll("[data-tool]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.tool === tool)));
+  document.querySelectorAll("button[data-tool]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.tool === tool)));
   canvas.dataset.tool = tool;
   $("[data-hint]").textContent = HINTS[tool];
   if (tool !== "select") selectedId = null;
@@ -378,12 +379,12 @@ const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line:
 const FIELDS = {
   stroke: { label: "Line colour", type: "color" },
   fill: { label: "Fill colour", type: "color" },
-  pattern: { label: "Fill", type: "select", options: PATTERNS },
+  pattern: { label: "Fill style", type: "select", options: PATTERNS },
   color: { label: "Text colour", type: "color" },
   background: { label: "Background", type: "color", transparent: true },
-  width: { label: "Thickness", type: "range", min: 1, max: 20, step: 1 },
-  fillOpacity: { label: "Fill strength", type: "range", min: 0, max: 1, step: 0.05 },
-  size: { label: "Text size", type: "range", min: 12, max: 120, step: 2 },
+  width: { label: "Thickness", type: "range", min: 1, max: 20, step: 1, show: (v) => `${v}` },
+  fillOpacity: { label: "Fill strength", type: "range", min: 0, max: 1, step: 0.05, show: (v) => `${Math.round(v * 100)}%` },
+  size: { label: "Text size", type: "range", min: 12, max: 120, step: 2, show: (v) => `${v}` },
   dashed: { label: "Dashed", type: "checkbox" },
   bold: { label: "Bold", type: "checkbox" },
 };
@@ -443,6 +444,8 @@ const renderInspector = () => {
         }
       } else {
         Object.assign(input, { min: spec.min, max: spec.max, step: spec.step, value: style[key] });
+        const readout = Object.assign(document.createElement("output"), { textContent: spec.show(Number(input.value)) });
+        input.addEventListener("input", () => { readout.textContent = spec.show(Number(input.value)); });
         input.oninput = () => {
           // Live preview while dragging the slider; one undo step on release.
           const current = doc.find(selectedId);
@@ -452,7 +455,9 @@ const renderInspector = () => {
           }
         };
         input.onchange = () => { gesture = null; updateStyle(key, Number(input.value)); };
-        label.append(`${spec.label} `, input);
+        const slider = Object.assign(document.createElement("span"), { className: "annotate-slider" });
+        slider.append(input, readout);
+        label.append(`${spec.label} `, slider);
       }
       fields.append(label);
     });
@@ -460,6 +465,7 @@ const renderInspector = () => {
   renderFollowPanel(item);
   const timing = $("[data-timing]");
   timing.hidden = !item;
+  $("[data-delete]").disabled = !item;
   if (item) {
     $("[data-from]").value = item.show.from;
     $("[data-to]").value = item.show.to;
@@ -506,6 +512,7 @@ function renderFollowPanel(item) {
 }
 
 const renderList = () => {
+  renderDrawingLane();
   const list = $("[data-list]");
   $("[data-count]").textContent = `(${doc.items.length})`;
   list.replaceChildren(...doc.items.map((item) => {
@@ -515,14 +522,50 @@ const renderList = () => {
     button.className = item.id === selectedId ? "is-selected" : "";
     const label = item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}` : KIND_NAMES[item.kind];
     button.textContent = `${label} · ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)}s`;
-    button.onclick = () => {
-      if (tool !== "select") setTool("select");
-      if (currentTime() < item.show.from || currentTime() > item.show.to) seekOutput(item.show.from);
-      select(item.id);
-    };
+    button.onclick = () => selectDrawing(item);
     entry.append(button);
     return entry;
   }));
+};
+
+// Drawings lane: one bar per drawing in output time, stacked so overlapping drawings stay apart.
+// Click a bar to select it; drag the selected bar's ends to change when it shows.
+const BAR_ROW = 10;
+const renderDrawingLane = () => {
+  const lane = $("[data-drawing-lane]");
+  lane.querySelectorAll("[data-bar]").forEach((bar) => bar.remove());
+  if (!clip) return;
+  const length = total();
+  const rowsEnd = [];
+  [...doc.items].sort((a, b) => a.show.from - b.show.from).forEach((item) => {
+    let row = rowsEnd.findIndex((end) => end <= item.show.from);
+    if (row < 0) row = rowsEnd.push(0) - 1;
+    rowsEnd[row] = item.show.to;
+    const bar = document.createElement("span");
+    bar.className = `annotate-lane-drawing${item.id === selectedId ? " is-selected" : ""}`;
+    bar.dataset.bar = item.id;
+    const name = item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}` : KIND_NAMES[item.kind];
+    bar.title = `${name}, ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)} s`;
+    bar.style.left = `${(item.show.from / length) * 100}%`;
+    bar.style.width = `${(Math.max(0, item.show.to - item.show.from) / length) * 100}%`;
+    bar.style.top = `${4 + row * BAR_ROW}px`;
+    if (item.id === selectedId) {
+      for (const grip of ["from", "to"]) {
+        const handle = document.createElement("span");
+        handle.className = "annotate-lane-grip";
+        handle.dataset.grip = grip;
+        bar.append(handle);
+      }
+    }
+    lane.append(bar);
+  });
+  lane.style.height = `${Math.max(18, rowsEnd.length * BAR_ROW + 6)}px`;
+};
+
+const selectDrawing = (item) => {
+  if (tool !== "select") setTool("select");
+  if (currentTime() < item.show.from || currentTime() > item.show.to) seekOutput(item.show.from);
+  select(item.id);
 };
 
 const removeSelected = () => {
@@ -798,8 +841,11 @@ const freezeHere = () => {
   document.querySelector(`[data-freeze-seconds="${at.frame}"]`)?.focus();
 };
 
+let freezesShown = 0;
 const renderFreezes = () => {
   const freezes = sortedFreezes();
+  if (freezes.length > freezesShown) $("[data-freeze-panel]").open = true;
+  freezesShown = freezes.length;
   $("[data-scrub]").max = String(total());
   $("[data-freeze-count]").textContent = `(${freezes.length})`;
   $("[data-freeze-empty]").hidden = freezes.length > 0;
@@ -875,6 +921,49 @@ const renderFreezes = () => {
   };
   lane.addEventListener("pointerup", finish);
   lane.addEventListener("pointercancel", () => { drag = null; renderFreezes(); });
+}
+
+{
+  const lane = $("[data-drawing-lane]");
+  let drag = null;
+  const timeAt = (event) => {
+    const rect = lane.getBoundingClientRect();
+    return Math.min(total(), Math.max(0, ((event.clientX - rect.left) / rect.width) * total()));
+  };
+  lane.addEventListener("pointerdown", (event) => {
+    if (!clip) return;
+    const bar = event.target.closest("[data-bar]");
+    const grip = event.target.closest("[data-grip]");
+    if (grip && bar) {
+      drag = { key: grip.dataset.grip, bar, item: doc.find(bar.dataset.bar) };
+    } else if (bar) {
+      const item = doc.find(bar.dataset.bar);
+      if (item) selectDrawing(item);
+      return;
+    } else {
+      drag = { seek: true };
+      seekOutput(timeAt(event));
+    }
+    lane.setPointerCapture(event.pointerId);
+  });
+  lane.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    if (drag.seek) return seekOutput(timeAt(event));
+    drag.next = timeAt(event);
+    const from = drag.key === "from" ? Math.min(drag.next, drag.item.show.to) : drag.item.show.from;
+    const to = drag.key === "to" ? Math.max(drag.next, drag.item.show.from) : drag.item.show.to;
+    drag.bar.style.left = `${(from / total()) * 100}%`;
+    drag.bar.style.width = `${((to - from) / total()) * 100}%`;
+    drag.bar.title = `${from.toFixed(2)}–${to.toFixed(2)} s`;
+  });
+  lane.addEventListener("pointerup", () => {
+    if (drag?.next !== undefined && selectedId === drag.item.id) {
+      const { key, item, next } = drag;
+      setTiming(key, key === "from" ? Math.min(next, item.show.to) : Math.max(next, item.show.from));
+    }
+    drag = null;
+  });
+  lane.addEventListener("pointercancel", () => { drag = null; renderDrawingLane(); });
 }
 
 // ---------------------------------------------------------------------------

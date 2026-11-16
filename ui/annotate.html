@@ -5,9 +5,9 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=14" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=16" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=17" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=6"></script>
+  <script type="module" src="annotate.js?v=7"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
@@ -21,7 +21,7 @@
     <div class="annotate-bar">
       <a href="/analysis.html" class="annotate-back" data-annotate-back data-project-navigation><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>Back</a>
       <div class="annotate-heading">
-        <strong data-annotate-title>Annotate</strong>
+        <h1 data-annotate-title>Annotate</h1>
         <span class="annotate-save" data-save-status role="status"></span>
       </div>
       <p class="annotate-hint" data-hint></p>
@@ -30,6 +30,7 @@
         <span class="annotate-divider" aria-hidden="true"></span>
         <button type="button" class="annotate-command" data-undo disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a3.5 3.5 0 010 7H7"/></svg></button>
         <button type="button" class="annotate-command" data-redo disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4l3 3-3 3"/><path d="M13 7H6.5a3.5 3.5 0 000 7H9"/></svg></button>
+        <button type="button" class="annotate-command annotate-delete" data-delete disabled title="Delete the selected drawing (Delete)" aria-label="Delete drawing"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v3.5M9 7v3.5"/></svg></button>
         <span class="annotate-divider" aria-hidden="true"></span>
         <select class="annotate-format" data-shot-format title="Picture format" aria-label="Picture format"><option value="png">PNG</option><option value="jpeg">JPEG</option></select>
         <button type="button" class="annotate-shot" data-screenshot><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5l1-2h3l1 2"/><circle cx="8" cy="9" r="2.3"/></svg>Save<span class="annotate-wide-only"> screenshot</span></button>
@@ -72,6 +73,11 @@
             <div class="annotate-lane" data-lane aria-hidden="true"><span class="annotate-lane-head" data-lane-head></span></div>
             <span class="annotate-row-end"></span>
           </div>
+          <div class="annotate-row annotate-drawings">
+            <span class="annotate-row-name">Drawings</span>
+            <div class="annotate-lane" data-drawing-lane aria-hidden="true"><span class="annotate-lane-head" data-drawing-head></span></div>
+            <span class="annotate-row-end"></span>
+          </div>
           <div class="annotate-players" data-players></div>
           <p class="annotate-track-status" data-track-status role="status" hidden></p>
         </section>
@@ -79,8 +85,8 @@
       <section class="annotate-player-tools" role="toolbar" aria-label="Player tools">
         <h2>Players</h2>
         <div class="annotate-player-buttons">
-          <button type="button" data-tool="ring" title="Player ring (R)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6" r="2.2"/><path d="M10 8.5v4"/><ellipse cx="10" cy="14.5" rx="7" ry="2.6"/></svg><span>Ring a player</span><kbd>R</kbd></button>
-          <button type="button" data-tool="follow" title="Follow a player (P): drag a box around them"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/><circle cx="10" cy="8" r="2"/><path d="M6.8 14c.3-1.9 1.6-3 3.2-3s2.9 1.1 3.2 3"/></svg><span>Follow a player</span><kbd>P</kbd></button>
+          <button type="button" data-tool="ring" title="Ring a player (R)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6" r="2.2"/><path d="M10 8.5v4"/><ellipse cx="10" cy="14.5" rx="7" ry="2.6"/></svg><span>Ring</span><kbd>R</kbd></button>
+          <button type="button" data-tool="follow" title="Follow a player (P): drag a box around them"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/><circle cx="10" cy="8" r="2"/><path d="M6.8 14c.3-1.9 1.6-3 3.2-3s2.9 1.1 3.2 3"/></svg><span>Follow</span><kbd>P</kbd></button>
         </div>
       </section>
       <aside class="annotate-inspector" aria-label="Drawing settings">
@@ -89,7 +95,7 @@
           <div class="annotate-fields" data-style-fields></div>
         </details>
         <details open data-follow-panel hidden>
-          <summary>Player</summary>
+          <summary>Tracked player</summary>
           <div class="annotate-fields">
             <p class="annotate-muted" data-follow-state></p>
             <button type="button" class="annotate-primary" data-follow-start>Follow player</button>
@@ -107,17 +113,16 @@
         <details open data-timing hidden>
           <summary>Timing and animation</summary>
           <div class="annotate-fields">
-            <label>Shows from (s) <span class="annotate-pair"><input type="number" data-from min="0" step="0.04" /><button type="button" data-from-here title="Set to the current frame">Here</button></span></label>
+            <label>From (s) <span class="annotate-pair"><input type="number" data-from min="0" step="0.04" /><button type="button" data-from-here title="Set to the current frame">Here</button></span></label>
             <label>Until (s) <span class="annotate-pair"><input type="number" data-to min="0" step="0.04" /><button type="button" data-to-here title="Set to the current frame">Here</button></span></label>
             <label>Comes in <select data-anim-in><option value="none">At once</option><option value="fade">Fade</option><option value="draw">Draw on</option><option value="grow">Grow</option><option value="slide">Slide in</option></select></label>
             <label>Goes out <select data-anim-out><option value="none">At once</option><option value="fade">Fade</option></select></label>
             <label data-anim-detail>Animation (s) <input type="number" data-anim-seconds min="0.05" max="5" step="0.05" /></label>
             <label data-anim-detail>Easing <select data-ease><option value="ease-out">Ease out</option><option value="ease-in-out">Ease in and out</option><option value="linear">Even</option></select></label>
             <label class="annotate-check" data-pulse-row><input type="checkbox" data-pulse /> Pulse</label>
-            <button type="button" class="annotate-danger" data-delete>Delete drawing</button>
           </div>
         </details>
-        <details open>
+        <details data-freeze-panel>
           <summary>Freezes <span class="annotate-count" data-freeze-count>(0)</span></summary>
           <div class="annotate-fields">
             <p class="annotate-muted" data-freeze-empty>Freeze frame holds the picture still, without sound, for as long as you set.</p>
