@@ -78,6 +78,82 @@ export const newProject = async () => {
   return result.project;
 };
 
+export const projectTitle = (project) =>
+  project.project_name || (project.home_team ? `${project.home_team} vs ${project.away_team}` : "Untitled project");
+
+const TRASH_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5"/></svg>';
+
+export const deleteButton = (project, onDeleted) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "project-delete";
+  button.innerHTML = TRASH_ICON;
+  button.title = "Delete project";
+  button.setAttribute("aria-label", `Delete project ${projectTitle(project)}`);
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const result = await deleteProject(project);
+      if (result) onDeleted?.(result);
+    } catch (error) { showSaveState(error.message, true); }
+  });
+  return button;
+};
+
+const confirmDelete = (project) => new Promise((resolve) => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "projects-dialog confirm-delete";
+  const heading = document.createElement("h2");
+  heading.textContent = `Delete “${projectTitle(project)}”?`;
+  const text = document.createElement("p");
+  text.textContent = "The project leaves your library and moves to the project-trash folder, where it can be recovered. Your video files are not touched.";
+  const actions = document.createElement("div");
+  actions.className = "confirm-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "danger";
+  confirm.textContent = "Delete project";
+  // The buttons answer directly; the close event (Esc) is only a fallback,
+  // since some windows deliver it late or not at all.
+  let settled = false;
+  const finish = (answer) => {
+    if (settled) return;
+    settled = true;
+    if (dialog.open) dialog.close();
+    dialog.remove();
+    resolve(answer);
+  };
+  cancel.onclick = () => finish(false);
+  confirm.onclick = () => finish(true);
+  actions.append(cancel, confirm);
+  dialog.append(heading, text, actions);
+  dialog.addEventListener("close", () => finish(false));
+  document.body.append(dialog);
+  dialog.showModal();
+  cancel.focus();
+});
+
+// Returns the remaining projects, or null when the user cancels.
+export const deleteProject = async (project) => {
+  if (!(await confirmDelete(project))) return null;
+  await flushProject().catch(() => {});
+  const result = await projectRequest(`/api/projects/${encodeURIComponent(project.id)}/delete`, {});
+  // Patches still queued for the deleted project can never land; drop them.
+  for (let index = unsaved.length - 1; index >= 0; index -= 1) {
+    if (unsaved[index].id === project.id) unsaved.splice(index, 1);
+  }
+  if (!unsaved.length) failure = undefined;
+  const wasActive = sessionStorage.getItem("clipmaker.active-match") === project.id;
+  if (wasActive) sessionStorage.removeItem("clipmaker.active-match");
+  document.dispatchEvent(new CustomEvent("vizorplay:project-deleted",
+    { detail: { id: project.id, wasActive, projects: result.projects } }));
+  return result;
+};
+
 export const openProjects = async () => {
   await flushProject();
   const { projects, directory } = await projectRequest("/api/projects");
@@ -101,7 +177,10 @@ export const openProjects = async () => {
     const metadata = document.createElement("small");
     metadata.textContent = `${Number(project.event_count || 0).toLocaleString()} events | ${new Date(project.updated_at).toLocaleString()}`;
     link.append(name, metadata);
-    list.append(link);
+    const row = document.createElement("div");
+    row.className = "project-row";
+    row.append(link, deleteButton(project, () => row.remove()));
+    list.append(row);
   });
   const location = document.createElement("p");
   location.className = "project-location";
@@ -128,6 +207,11 @@ document.addEventListener("click", async (event) => {
   } catch (error) {
     showSaveState(error.message, true);
   }
+});
+
+// Pages without their own project list: leave a deleted open project for Intake.
+document.addEventListener("vizorplay:project-deleted", (event) => {
+  if (event.detail.wasActive && !document.querySelector("[data-recent-list]")) window.location.href = "/";
 });
 
 window.addEventListener("beforeunload", (event) => {

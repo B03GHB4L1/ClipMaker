@@ -1924,7 +1924,8 @@
   // Shot markers grow with the shot's xG (area tracks the chance), so big chances stand out.
   function shotMarkerSize(shot, selected, isGF) {
     if (isGF || typeof shot.xG !== "number") return selected ? 22 : 13;
-    const size = 9 + 30 * Math.sqrt(Math.max(0, Math.min(1, shot.xG)));
+    // Diameter grows linearly with xG, so a 0.94 chance reads clearly bigger than a 0.76 one.
+    const size = 6 + 40 * Math.max(0, Math.min(1, shot.xG));
     return Math.round((selected ? size + 7 : size) * 10) / 10;
   }
 

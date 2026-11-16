@@ -80,19 +80,54 @@ class SharedUiTests(unittest.TestCase):
         # Explorer opens on the engine's behalf; the app lets it take the foreground first.
         shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertIn("AllowSetForegroundWindow(ASFW_ANY)", shell)
-        self.assertIn("generate_handler![allow_foreground]", shell)
+        self.assertIn("generate_handler![allow_foreground, raise_folder_window]", shell)
+        # Explorer can still open behind; the app (in front) raises the window for that folder.
+        self.assertIn('"CabinetWClass"', shell)
+        self.assertIn("SetForegroundWindow(search.found)", shell)
+        # Without an app manifest and a grant, Tauri refused the pages' calls
+        # ("Command allow_foreground not allowed by ACL"), so nothing came to the front.
+        build = (UI.parent / "src-tauri/build.rs").read_text(encoding="utf-8")
+        self.assertIn('commands(&["allow_foreground", "raise_folder_window"])', build)
         config = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
         self.assertTrue(config["app"]["withGlobalTauri"])
         capability = json.loads((UI.parent / "src-tauri/capabilities/engine-pages.json").read_text(encoding="utf-8"))
         self.assertEqual(capability["windows"], ["main"])
         self.assertEqual(capability["remote"]["urls"], ["http://127.0.0.1:*/*"])  # the local engine only
         self.assertNotIn("core:default", capability["permissions"])  # no window or webview APIs
+        self.assertEqual(capability["permissions"],
+                         ["core:app:allow-version", "allow-allow-foreground", "allow-raise-folder-window"])
         helper = (UI / "save-clip.js").read_text(encoding="utf-8")
         self.assertIn('invoke("allow_foreground")', helper)
-        self.assertRegex(helper, r"await allowForeground\(\);\s*await post\(`/api/saved/")
-        self.assertRegex((UI / "filters.js").read_text(encoding="utf-8"),
-                         r"await allowForeground\(\);\s*await apiRequest\(`/api/jobs/\$\{finishedJobId\}/reveal`")
+        self.assertRegex(helper, r"await allowForeground\(\);\s*const \{ folder \} = await post\(apiPath\);")
+        self.assertIn('invoke("raise_folder_window", { folder })', helper)
+        self.assertIn("await revealFolder(`/api/saved/", helper)
+        self.assertIn("await revealFolder(`/api/jobs/${finishedJobId}/reveal`)", (UI / "filters.js").read_text(encoding="utf-8"))
+        # Every Open folder button uses the helper; none calls a reveal endpoint directly.
+        for path in [*UI.glob("*.js"), *UI.glob("*.html"), *(UI / "analysis").rglob("*.js")]:
+            source = path.read_text(encoding="utf-8")
+            if path.name != "save-clip.js":
+                self.assertNotRegex(source, r"(post|apiRequest|fetch)\(`/api/(saved|jobs)/[^`]*/reveal", path.name)
+            if "Open folder" in source and path.name != "save-clip.js":
+                self.assertIn("data-reveal-export", source, path.name)
         self.assertIn('invoke("allow_foreground")', (UI / "update.js").read_text(encoding="utf-8"))
+
+    def test_projects_can_be_deleted_from_intake_and_the_projects_dialog(self):
+        projects = (UI / "projects.js").read_text(encoding="utf-8")
+        self.assertIn("/delete`", projects)
+        self.assertIn("moves to the project-trash folder", projects)  # asks first, says it is recoverable
+        self.assertIn("row.append(link, deleteButton(project", projects)
+        self.assertIn("unsaved.splice(index, 1)", projects)  # no saves queued for a deleted project
+        app = (UI / "app.js").read_text(encoding="utf-8")
+        self.assertIn("item.append(button, deleteButton(match))", app)
+        self.assertIn("if (detail.wasActive) await openProject(projects[0]);", app)
+        self.assertIn("const fresh = await newProject();", app)  # deleting the last one leaves a listed blank project
+        self.assertIn(".project-delete", (UI / "compact.css").read_text(encoding="utf-8"))
+
+    def test_shot_marker_size_grows_linearly_with_xg(self):
+        component = (UI.parent / "app/smp_component/frontend/index.html").read_text(encoding="utf-8")
+        self.assertIn("const size = 6 + 40 * Math.max(0, Math.min(1, shot.xG));", component)
+        size = lambda xg: 6 + 40 * xg
+        self.assertGreaterEqual(size(0.94) - size(0.76), 7)  # a visible step between big chances
 
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")

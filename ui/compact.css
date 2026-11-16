@@ -409,3 +409,21 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
 .event-table-wrap tr > :first-child { position: sticky; left: 0; z-index: 1; background: #fbfbf9; font-weight: 400; box-shadow: inset -1px 0 0 #e3e5df; }
 .event-table-wrap thead tr > :first-child { z-index: 2; background: #f2f3ee; }
 .event-table-wrap .event-flag { color: #4f6b0c; text-align: center; }
+
+/* Deleting a project (Intake recent list and the Projects dialog). */
+.recent-item, .project-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: center; }
+.recent-item { border-top: 1px solid #ced0c8; transition: background 0.2s; }
+.recent-item:last-child { border-bottom: 1px solid #ced0c8; }
+.recent-item:hover { background: #fff; }
+.recent-item .recent-row, .recent-item .recent-row:last-child { border: 0; }
+.project-row { border-bottom: 1px solid #e0e1db; }
+.project-row a { border-bottom: 0; }
+.project-delete { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #81847c; cursor: pointer; opacity: 0.55; transition: opacity 0.15s, color 0.15s, background 0.15s; }
+.recent-item:hover .project-delete, .project-row:hover .project-delete, .project-delete:focus-visible { opacity: 1; }
+.project-delete:hover, .project-delete:focus-visible { color: #b3261e; background: rgba(179, 38, 30, 0.08); }
+.confirm-delete { width: min(420px, calc(100% - 32px)); }
+.confirm-delete h2 { overflow-wrap: anywhere; }
+.confirm-delete p { margin: 0 0 18px; font-size: 13px; line-height: 1.5; color: #45483f; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.confirm-actions button { min-height: 36px; padding: 0 14px; border: 1px solid #c9cbc3; border-radius: 4px; background: #fff; color: #151916; font: inherit; font-size: 13px; cursor: pointer; }
+.confirm-actions .danger { border-color: #b3261e; background: #b3261e; color: #fff; }

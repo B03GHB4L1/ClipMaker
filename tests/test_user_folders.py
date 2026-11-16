@@ -114,7 +114,9 @@ class ExportFolderApiTests(unittest.TestCase):
             self.assertEqual(self.request("/api/jobs/busy1/reveal", {})[0], 404)
             self.assertEqual(self.request("/api/jobs/nope/reveal", {"path": "C:/Windows"})[0], 404)
             reveal.assert_not_called()
-            self.assertEqual(self.request("/api/jobs/done1/reveal", {"path": "C:/Windows"}), (200, {"opened": True}))
+            # The reply names the job's own folder (so the app can raise its window), never the requested path.
+            self.assertEqual(self.request("/api/jobs/done1/reveal", {"path": "C:/Windows"}),
+                             (200, {"opened": True, "folder": str(folder)}))
             reveal.assert_called_once_with(folder)
 
 
@@ -171,7 +173,8 @@ class SavedClipApiTests(ExportFolderApiTests):
         with patch("packaging.user_folders.reveal_folder") as reveal:
             self.assertEqual(self.request("/api/saved/nope/reveal", {"path": "C:/Windows"})[0], 404)
             reveal.assert_not_called()
-            self.assertEqual(self.request(f"/api/saved/{saved['id']}/reveal", {}), (200, {"opened": True}))
+            self.assertEqual(self.request(f"/api/saved/{saved['id']}/reveal", {}),
+                             (200, {"opened": True, "folder": str(Path(self.temporary.name) / "Videos" / "VizorPlay")}))
             reveal.assert_called_once_with(Path(self.temporary.name) / "Videos" / "VizorPlay")
 
 
@@ -201,7 +204,8 @@ class SavedPictureApiTests(ExportFolderApiTests):
         self.assertEqual(self.send(self.PNG, "shot_map_saka.png")[1]["saved"]["name"], "shot_map_saka (2).png")
         self.assertEqual(self.send(self.GIF, "build%20up.gif")[1]["saved"]["name"], "build up.gif")
         with patch("packaging.user_folders.reveal_folder") as reveal:
-            self.assertEqual(self.request(f"/api/saved/{result['saved']['id']}/reveal", {}), (200, {"opened": True}))
+            self.assertEqual(self.request(f"/api/saved/{result['saved']['id']}/reveal", {}),
+                             (200, {"opened": True, "folder": str(folder)}))
             reveal.assert_called_once_with(folder)
 
     def test_the_file_type_comes_from_the_picture_not_the_name(self):

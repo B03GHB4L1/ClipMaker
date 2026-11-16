@@ -370,6 +370,31 @@ class MatchStore:
     def get(self, match_id: str) -> dict[str, Any] | None:
         return next((item for item in self.list() if item.get("id") == match_id), None)
 
+    def delete(self, project_id: str) -> Path:
+        """Move a project out of the library into project-trash/, so it can be put back by hand.
+        Video files the project points at are never touched."""
+        with self._lock:
+            folder = self.project_path(project_id).parent
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+            trash = self.data_dir / "project-trash" / f"{project_id}-{stamp}"
+            found = False
+            if folder.is_dir():
+                trash.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(folder, trash)
+                found = True
+            if self.path.exists():
+                legacy = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(legacy, list):
+                    kept = [item for item in legacy if not (isinstance(item, dict) and item.get("id") == project_id)]
+                    if len(kept) != len(legacy):
+                        removed = [item for item in legacy if isinstance(item, dict) and item.get("id") == project_id]
+                        atomic_json(trash / "legacy-history.json", removed)
+                        atomic_json(self.path, kept)
+                        found = True
+            if not found:
+                raise ValueError("Project not found")
+            return trash
+
 
 FILTER_QUALIFIERS = [
     ("successful_only", "outcomeType", "Successful", "Outcome & movement", "Successful"),
@@ -1953,6 +1978,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 view["has_video"] = bool(str(project.get("video_path") or "").strip())
                 self.send_json(HTTPStatus.OK, {"view": view})
                 return
+            if path.startswith("/api/projects/") and path.endswith("/delete"):
+                parts = path.split("/")
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                self.store.delete(parts[3])
+                self.send_json(HTTPStatus.OK, {"deleted": parts[3], "projects": self.store.list()})
+                return
             if path.startswith("/api/projects/"):
                 project_id = path.rsplit("/", 1)[-1]
                 if self.store.get(project_id) is None:
@@ -2149,7 +2181,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     self.send_json(HTTPStatus.NOT_FOUND, {"error": "No saved clip to show"})
                     return
                 user_folders.reveal_folder(saved.parent)
-                self.send_json(HTTPStatus.OK, {"opened": True})
+                self.send_json(HTTPStatus.OK, {"opened": True, "folder": str(saved.parent)})
                 return
             if path.startswith("/api/jobs/") and path.endswith("/reveal"):
                 # Only a finished job's own output folder; no paths come from the request.
@@ -2158,7 +2190,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     self.send_json(HTTPStatus.NOT_FOUND, {"error": "No finished export to show"})
                     return
                 user_folders.reveal_folder(Path(job["output_dir"]))
-                self.send_json(HTTPStatus.OK, {"opened": True})
+                self.send_json(HTTPStatus.OK, {"opened": True, "folder": str(job["output_dir"])})
                 return
             if path.startswith("/api/jobs/") and path.endswith("/cancel"):
                 job_id = path.split("/")[-2]

@@ -1,5 +1,5 @@
 import * as THREE from "./vendor/three.module.js";
-import { saveProject, flushProject, newProject, rememberProject, projectRequest, beginProjectOperation } from "./projects.js";
+import { saveProject, flushProject, newProject, rememberProject, projectRequest, beginProjectOperation, deleteButton } from "./projects.js";
 
 const body = document.body;
 const drawerButton = document.querySelector("[data-drawer-toggle]");
@@ -206,9 +206,26 @@ const renderHistory = (matches) => {
         .querySelector(".workspace")
         .scrollIntoView({ behavior: "smooth", block: "start" });
     });
-    list.appendChild(button);
+    const item = document.createElement("div");
+    item.className = "recent-item";
+    item.append(button, deleteButton(match));
+    list.appendChild(item);
   });
 };
+
+document.addEventListener("vizorplay:project-deleted", async ({ detail }) => {
+  try {
+    const projects = detail.projects || [];
+    if (detail.wasActive && !projects.length) {
+      // The last project went; start a fresh one so Intake always has one open.
+      const fresh = await newProject();
+      projects.push(fresh);
+    }
+    renderHistory(projects);
+    if (detail.wasActive) await openProject(projects[0]);
+    showToast("Project moved to the project trash");
+  } catch (error) { showToast(error.message); }
+});
 
 const connectApi = async () => {
   try {

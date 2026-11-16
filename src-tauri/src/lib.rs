@@ -22,16 +22,105 @@ extern "system" {
     fn AllowSetForegroundWindow(process_id: u32) -> i32;
 }
 
-/// Called by the page just before the engine opens a folder. Windows only lets
-/// the app the user is using bring a new window to the front; the folder window
-/// is opened by Explorer on the engine's behalf, so without this it only flashes
+/// Called by the page just before the engine opens a folder or a web page.
+/// Windows only lets the app the user is using bring a new window to the front;
+/// those windows open on the engine's behalf, so without this they only flash
 /// on the taskbar. The permission lasts until the next foreground change.
+/// The pages may call it because build.rs lists it and
+/// capabilities/engine-pages.json grants it.
 #[tauri::command]
 fn allow_foreground() {
     #[cfg(windows)]
     unsafe {
         const ASFW_ANY: u32 = u32::MAX;
         AllowSetForegroundWindow(ASFW_ANY);
+    }
+}
+
+/// Called by the page after the engine has opened `folder` in Explorer. Explorer
+/// may still open it behind VizorPlay, so VizorPlay (the app in front, which
+/// Windows lets do this) raises the Explorer window showing that folder. It only
+/// looks for and raises an existing Explorer window; it opens nothing.
+#[tauri::command]
+fn raise_folder_window(folder: String) {
+    #[cfg(windows)]
+    thread::spawn(move || folder_window::raise(&folder));
+    #[cfg(not(windows))]
+    let _ = folder;
+}
+
+#[cfg(windows)]
+mod folder_window {
+    use std::ffi::c_void;
+    use std::time::Duration;
+
+    type Hwnd = *mut c_void;
+    const SW_RESTORE: i32 = 9;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(callback: extern "system" fn(Hwnd, isize) -> i32, data: isize) -> i32;
+        fn GetClassNameW(window: Hwnd, name: *mut u16, capacity: i32) -> i32;
+        fn GetWindowTextW(window: Hwnd, text: *mut u16, capacity: i32) -> i32;
+        fn IsWindowVisible(window: Hwnd) -> i32;
+        fn IsIconic(window: Hwnd) -> i32;
+        fn ShowWindow(window: Hwnd, command: i32) -> i32;
+        fn SetForegroundWindow(window: Hwnd) -> i32;
+    }
+
+    struct Search {
+        titles: Vec<String>,
+        found: Hwnd,
+    }
+
+    fn text(buffer: &[u16], length: i32) -> String {
+        String::from_utf16_lossy(&buffer[..length.clamp(0, buffer.len() as i32) as usize])
+    }
+
+    /// Explorer titles its window with the folder name (Windows 11 adds
+    /// " - File Explorer", localised) or, if the user chose so, the full path.
+    pub(crate) fn title_matches(title: &str, wanted: &[String]) -> bool {
+        let title = title.to_lowercase();
+        wanted.iter().any(|name| title == *name || title.starts_with(&format!("{name} - ")))
+    }
+
+    extern "system" fn visit(window: Hwnd, data: isize) -> i32 {
+        let search = unsafe { &mut *(data as *mut Search) };
+        let mut class = [0u16; 64];
+        let length = unsafe { GetClassNameW(window, class.as_mut_ptr(), class.len() as i32) };
+        if text(&class, length) != "CabinetWClass" || unsafe { IsWindowVisible(window) } == 0 {
+            return 1;
+        }
+        let mut title = [0u16; 1024];
+        let length = unsafe { GetWindowTextW(window, title.as_mut_ptr(), title.len() as i32) };
+        if title_matches(&text(&title, length), &search.titles) {
+            search.found = window;
+            return 0;
+        }
+        1
+    }
+
+    pub(crate) fn raise(folder: &str) {
+        let trimmed = folder.trim_end_matches(['\\', '/']);
+        let mut titles = vec![trimmed.to_lowercase()];
+        if let Some(name) = std::path::Path::new(trimmed).file_name() {
+            titles.push(name.to_string_lossy().to_lowercase());
+        }
+        // Explorer can take a moment to open the window and set its title.
+        for _ in 0..40 {
+            let mut search = Search { titles: titles.clone(), found: std::ptr::null_mut() };
+            unsafe { EnumWindows(visit, &mut search as *mut Search as isize) };
+            if !search.found.is_null() {
+                unsafe {
+                    if IsIconic(search.found) != 0 {
+                        ShowWindow(search.found, SW_RESTORE);
+                    }
+                    SetForegroundWindow(search.found);
+                }
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 
@@ -148,7 +237,7 @@ const ENGINE_LAUNCHER: Option<&str> = option_env!("VIZORPLAY_ENGINE_LAUNCHER");
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![allow_foreground])
+        .invoke_handler(tauri::generate_handler![allow_foreground, raise_folder_window])
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;

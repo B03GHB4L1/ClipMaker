@@ -20,6 +20,15 @@ export const allowForeground = async () => {
   }
 };
 
+// Every "Open folder" button goes through here: the engine opens the folder it
+// owns (by id, never a path from the page) and says which one; the app then
+// raises that Explorer window (src-tauri raise_folder_window).
+export const revealFolder = async (apiPath) => {
+  await allowForeground();
+  const { folder } = await post(apiPath);
+  if (folder) await window.__TAURI__?.core?.invoke("raise_folder_window", { folder }).catch(() => {});
+};
+
 let popup;
 let hideTimer;
 
@@ -85,8 +94,7 @@ export const showSaved = (saved, what = "Clip") => show({
   folder: saved.folder,
   onOpen: async () => {
     try {
-      await allowForeground();
-      await post(`/api/saved/${encodeURIComponent(saved.id)}/reveal`);
+      await revealFolder(`/api/saved/${encodeURIComponent(saved.id)}/reveal`);
       hide();
     } catch (error) {
       show({ title: "Could not open the folder", file: error.message, error: true });
