@@ -358,3 +358,32 @@ export const handlesFor = (item) => {
   }
   return handles;
 };
+
+// ---------------------------------------------------------------------------
+// Export (M4): the drawn part of an overlay, sent to the engine as raw pixels
+// ---------------------------------------------------------------------------
+
+/** The box of pixels that has any drawing in it, as {x, y, w, h, pixels}, or null when nothing is drawn. */
+export const cropDrawn = (data, width, height) => {
+  const words = new Uint32Array(data.buffer, data.byteOffset, width * height); // a pixel is 0 where nothing is drawn
+  let top = -1;
+  let bottom = -1;
+  let left = width;
+  let right = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    let first = -1;
+    for (let x = 0; x < width; x += 1) if (words[row + x]) { first = x; break; }
+    if (first < 0) continue;
+    if (top < 0) top = y;
+    bottom = y;
+    if (first < left) left = first;
+    for (let x = width - 1; x > right; x -= 1) if (words[row + x]) { right = x; break; }
+  }
+  if (top < 0) return null;
+  const w = right - left + 1;
+  const h = bottom - top + 1;
+  const pixels = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y += 1) pixels.set(data.subarray(((top + y) * width + left) * 4, ((top + y) * width + left + w) * 4), y * w * 4);
+  return { x: left, y: top, w, h, pixels };
+};

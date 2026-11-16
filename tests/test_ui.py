@@ -265,7 +265,8 @@ class SharedUiTests(unittest.TestCase):
         self.assertNotIn(".annotate-main :is(.annotate-command", css)
         self.assertNotIn(".annotate-main :is(button, select):hover", css)
         # One meaning per colour: lime is the primary action, ink the active tool.
-        self.assertIn(".annotate-main .annotate-shot { border-color: var(--cm-accent); background: var(--cm-accent);", css)
+        self.assertIn(".annotate-main .annotate-export-button { border-color: var(--cm-accent); background: var(--cm-accent);", css)
+        self.assertNotIn(".annotate-main .annotate-shot { border-color: var(--cm-accent)", css)  # one primary action
         self.assertNotIn('[data-tool="follow"][aria-pressed="true"]', css)
         # Shortcut hints are readable (muted ink, not pale grey at 9px).
         self.assertNotIn("#9a9d96", css)
@@ -294,6 +295,22 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("selectDrawing(item)", lane)
         self.assertIn("setTiming(key,", lane)
         self.assertIn("renderDrawingLane();", script[script.index("const renderList"):])
+
+    def test_annotate_exports_video_with_progress_and_cancel(self):
+        # M4: the page draws overlays with the preview's own code and sends them to the engine.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        bar = html[html.index('<div class="annotate-commands">'):html.index("</div>", html.index('<div class="annotate-commands">'))]
+        self.assertIn("data-export ", bar)
+        for hook in ("data-export-panel", "data-export-text", "data-export-progress", "data-export-cancel"):
+            self.assertIn(hook, html)
+        flow = script[script.index("const exportVideo"):script.index("const cancelExport")]
+        self.assertIn("await save();", flow)  # the engine renders the saved document
+        self.assertIn("drawItem(context,", flow)  # same drawing code as the preview
+        self.assertIn("/overlays`", script)  # batched: thousands of single requests exhaust local ports
+        self.assertIn("key !== previous", flow)  # only frames where the drawings change are sent
+        self.assertIn("showSaved(job.result.saved, \"Video\")", flow)
+        self.assertIn("/api/editor-jobs/${run.job.id}/cancel", script)
 
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window

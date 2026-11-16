@@ -5,9 +5,9 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=14" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=17" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=18" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=7"></script>
+  <script type="module" src="annotate.js?v=8"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
@@ -34,7 +34,13 @@
         <span class="annotate-divider" aria-hidden="true"></span>
         <select class="annotate-format" data-shot-format title="Picture format" aria-label="Picture format"><option value="png">PNG</option><option value="jpeg">JPEG</option></select>
         <button type="button" class="annotate-shot" data-screenshot><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5l1-2h3l1 2"/><circle cx="8" cy="9" r="2.3"/></svg>Save<span class="annotate-wide-only"> screenshot</span></button>
+        <button type="button" class="annotate-export-button" data-export title="Export the clip with its drawings and freezes"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.8 6.8L8 10l3.2-3.2"/><path d="M2.5 11v2.5h11V11"/></svg>Export<span class="annotate-wide-only"> video</span></button>
       </div>
+    </div>
+    <div class="annotate-export" data-export-panel hidden>
+      <span class="annotate-export-text" data-export-text role="status"></span>
+      <progress data-export-progress max="1" value="0" aria-label="Export progress"></progress>
+      <button type="button" class="annotate-export-cancel" data-export-cancel>Cancel</button>
     </div>
     <p class="annotate-warning" data-annotate-changed role="alert" hidden>This clip's video file has changed since it was annotated. Check that the drawings still line up.</p>
     <p class="annotate-error" data-annotate-error role="alert" hidden></p>

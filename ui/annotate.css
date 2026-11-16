@@ -17,7 +17,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main svg .is-solid { fill: currentColor; stroke: none; }
 
 /* Shared control: white, hairline border, 6px radius (as .transport button on the Clips screen). */
-.annotate-main :where(.annotate-command, .annotate-shot, .annotate-format, .annotate-transport button, .annotate-pair button,
+.annotate-main :where(.annotate-command, .annotate-shot, .annotate-export-button, .annotate-export-cancel, .annotate-format, .annotate-transport button, .annotate-pair button,
   .annotate-row-action, .annotate-primary, .annotate-remove) {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: var(--annotate-control); padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px;
@@ -45,8 +45,18 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-select[aria-pressed="true"] kbd { color: #b9bcb4; }
 .annotate-divider { width: 1px; height: 20px; margin: 0 4px; background: var(--cm-rule); }
 .annotate-main .annotate-format { padding: 0 6px; }
-.annotate-main .annotate-shot { border-color: var(--cm-accent); background: var(--cm-accent); color: var(--cm-ink); font-weight: 600; }
-.annotate-main .annotate-shot:hover:not(:disabled) { background: #b8e123; }
+/* Export video is the one primary action (lime, as Export on the Clips screen); a screenshot is secondary. */
+.annotate-main .annotate-export-button { border-color: var(--cm-accent); background: var(--cm-accent); color: var(--cm-ink); font-weight: 600; }
+.annotate-main .annotate-export-button:hover:not(:disabled) { background: #b8e123; }
+.annotate-main .annotate-export-button:disabled { border-color: var(--cm-rule); background: var(--annotate-panel); }
+.annotate-export { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); font-size: 11px; }
+.annotate-export[hidden] { display: none; }
+.annotate-export-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.annotate-export progress { flex: 1; min-width: 80px; height: 6px; border: 0; border-radius: 3px; background: #eff0ec; accent-color: var(--cm-ink); }
+.annotate-export progress::-webkit-progress-bar { border-radius: 3px; background: #eff0ec; }
+.annotate-export progress::-webkit-progress-value { border-radius: 3px; background: var(--cm-ink); }
+.annotate-export progress::-moz-progress-bar { border-radius: 3px; background: var(--cm-ink); }
+.annotate-main .annotate-export-cancel { height: 28px; }
 .annotate-main .annotate-delete:not(:disabled) { color: #9b2a28; }
 .annotate-main .annotate-delete:hover:not(:disabled) { border-color: #e7b9b7; background: #fdf0ef; }
 .annotate-warning, .annotate-error { margin: 0; padding: 8px 12px; border: 1px solid #ecd39a; border-radius: 6px; background: #fff6df; color: #5c4300; font-size: 12px; }
@@ -224,7 +234,8 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   .annotate-bar { flex-wrap: wrap; gap: 8px; }
   .annotate-commands { flex-basis: 100%; }
   .annotate-commands .annotate-divider, .annotate-select kbd, .annotate-wide-only { display: none; }
-  .annotate-commands .annotate-shot { margin-left: auto; }
+  .annotate-commands { flex-wrap: wrap; }
+  .annotate-commands .annotate-format { margin-left: auto; }
   .annotate-workspace { grid-template-columns: minmax(0, 1fr); }
   .annotate-tools, .annotate-centre, .annotate-player-tools, .annotate-inspector { grid-column: 1; grid-row: auto; }
   .annotate-bar .annotate-hint { order: 5; flex-basis: 100%; white-space: normal; }
