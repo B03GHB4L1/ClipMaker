@@ -124,7 +124,7 @@ keeps two clocks:
 A small mapping function converts between them. Both the canvas preview and the
 export renderer use the same mapping.
 
-### UI (`ui/editor.html`, `ui/editor.js`, styles in `ui/editor.css`)
+### UI (`ui/annotate.html`, `ui/annotate.js`, `ui/annotate/`, styles in `ui/annotate.css`)
 
 - `<video>` with a `<canvas>` overlay at the same size. Coordinates are
   normalised 0–1 by frame width and height (Metrica normalises by height only).

@@ -16,7 +16,7 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn('if (reducedMotion.matches && stillRendered) return;', source)
 
     def test_vizorplay_brand_and_footer_version(self):
-        for name in ("index.html", "filters.html", "analysis.html"):
+        for name in ("index.html", "filters.html", "analysis.html", "annotate.html"):
             source = (UI / name).read_text(encoding="utf-8")
             # The brand panel shows the wordmark; the button's label names it.
             self.assertIn('<span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt=""', source)
@@ -169,13 +169,21 @@ class SharedUiTests(unittest.TestCase):
 
     def test_all_screens_use_same_shared_style_versions(self):
         versions = []
-        for name in ("index.html", "filters.html", "analysis.html"):
+        for name in ("index.html", "filters.html", "analysis.html", "annotate.html"):
             source = (UI / name).read_text(encoding="utf-8")
             self.assertIn('class="app-footer"', source)
             self.assertIn("Version 1.0", source)
             versions.append(re.findall(r'href="((?:styles|compact|design)\.css\?v=\d+)"', source))
-        self.assertEqual(versions[0], versions[1])
-        self.assertEqual(versions[0], versions[2])
+        for other in versions[1:]:
+            self.assertEqual(versions[0], other)
+
+    def test_annotate_offered_beside_every_clip_preview_but_not_home(self):
+        # docs/TELESTRATION_PLAN.md: Annotate wherever a clip can be watched, except the Intake (home) page.
+        self.assertIn("Annotate", (UI / "save-clip.js").read_text(encoding="utf-8"))
+        self.assertIn("data-render-annotate", (UI / "filters.html").read_text(encoding="utf-8"))
+        self.assertIn("annotateClip(result.file.url", (UI / "filters.js").read_text(encoding="utf-8"))
+        for name in ("index.html", "app.js"):
+            self.assertNotIn("annotate", (UI / name).read_text(encoding="utf-8").lower(), name)
 
     def test_intake_has_no_sample_kickoff_markers(self):
         source = (UI / "index.html").read_text(encoding="utf-8")

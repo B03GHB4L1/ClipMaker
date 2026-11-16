@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
+  <title>VizorPlay - Annotate</title>
+  <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=13" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=1" />
+  <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
+  <script type="module" src="annotate.js?v=1"></script>
+  <script type="module" src="update.js?v=1"></script>
+</head>
+<body class="analysis-page annotate-page">
+  <header class="filter-topbar">
+    <button type="button" class="filter-brand" data-analysis-menu aria-label="Open navigation" aria-expanded="false" aria-controls="analysis-menu"><span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span><span class="menu-dots" aria-hidden="true">•••</span></button>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-view="analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-view="tactical" data-project-navigation>Tactical</a></nav>
+    <span data-annotate-status role="status">Loading clip...</span>
+  </header>
+  <nav id="analysis-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
+  <main class="analysis-main annotate-main">
+    <div class="project-bar">
+      <a href="/analysis.html" class="annotate-back" data-annotate-back data-project-navigation>&larr; Back</a>
+      <strong data-annotate-title>Annotate</strong>
+      <span data-save-status role="status"></span>
+    </div>
+    <p class="annotate-warning" data-annotate-changed role="alert" hidden>This clip's video file has changed since it was annotated. Check that the drawings still line up.</p>
+    <p data-annotate-error role="alert" hidden></p>
+    <div class="annotate-workspace" data-annotate-workspace hidden>
+      <div class="annotate-tools" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical" data-tools>
+        <button type="button" data-tool="select" title="Select and move (V)" aria-pressed="true">Select</button>
+        <button type="button" data-tool="ring" title="Player ring (R)">Ring</button>
+        <button type="button" data-tool="spotlight" title="Spotlight (S)">Spotlight</button>
+        <button type="button" data-tool="arrow" title="Arrow (A)">Arrow</button>
+        <button type="button" data-tool="line" title="Line (L)">Line</button>
+        <button type="button" data-tool="freehand" title="Freehand (F)">Freehand</button>
+        <button type="button" data-tool="text" title="Text (T)">Text</button>
+        <button type="button" data-tool="zone" title="Zone (Z): click corners, then Enter or click the first corner">Zone</button>
+      </div>
+      <div class="annotate-centre">
+        <div class="annotate-stage" data-stage>
+          <video data-video preload="auto" playsinline></video>
+          <canvas data-canvas aria-label="Drawing area over the clip" tabindex="0"></canvas>
+          <textarea class="annotate-text-input" data-text-input rows="1" aria-label="Text on the clip" hidden></textarea>
+        </div>
+        <p class="annotate-hint" data-hint></p>
+        <div class="annotate-transport">
+          <button type="button" data-step="-1" title="Back one frame (Left arrow; Shift for 1 second)" aria-label="Back one frame">&#9664;&#9646;</button>
+          <button type="button" data-play aria-label="Play">Play</button>
+          <button type="button" data-step="1" title="Forward one frame (Right arrow; Shift for 1 second)" aria-label="Forward one frame">&#9646;&#9654;</button>
+          <input type="range" data-scrub min="0" max="1" step="1" value="0" aria-label="Frame" />
+          <span class="annotate-time" data-time>0:00.00 &middot; frame 1</span>
+        </div>
+        <div class="annotate-actions">
+          <button type="button" class="native-button native-secondary" data-undo disabled title="Ctrl+Z">Undo</button>
+          <button type="button" class="native-button native-secondary" data-redo disabled title="Ctrl+Shift+Z">Redo</button>
+          <span class="annotate-spacer"></span>
+          <label class="annotate-inline">Picture <select data-shot-format><option value="png">PNG</option><option value="jpeg">JPEG</option></select></label>
+          <button type="button" class="native-button" data-screenshot>Save screenshot</button>
+        </div>
+      </div>
+      <aside class="annotate-inspector" aria-label="Drawing settings">
+        <details open>
+          <summary data-inspector-title>New drawing</summary>
+          <div class="annotate-fields" data-style-fields></div>
+        </details>
+        <details open data-timing hidden>
+          <summary>Timing</summary>
+          <div class="annotate-fields">
+            <label>Shows from (s) <span class="annotate-pair"><input type="number" data-from min="0" step="0.04" /><button type="button" data-from-here title="Set to the current frame">Here</button></span></label>
+            <label>Until (s) <span class="annotate-pair"><input type="number" data-to min="0" step="0.04" /><button type="button" data-to-here title="Set to the current frame">Here</button></span></label>
+            <button type="button" class="native-button native-secondary" data-delete>Delete drawing</button>
+          </div>
+        </details>
+        <details>
+          <summary>Drawings <span data-count>(0)</span></summary>
+          <ol class="annotate-list" data-list></ol>
+        </details>
+      </aside>
+    </div>
+  </main>
+  <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
+</body>
+</html>

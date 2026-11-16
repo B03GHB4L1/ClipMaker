@@ -51,6 +51,7 @@ else:
     from process_owner import watch_process_owner
     import update_check
     import user_folders
+from telestration.clips import EditorClips
 
 
 # Navigating here asks the Windows desktop shell to install the update
@@ -992,16 +993,17 @@ def save_clip_copy(source: Path, folder: Path, name: str) -> Path:
     return save_to_user_folder(folder, name, ".mp4", lambda temporary: shutil.copyfile(source, temporary))
 
 
-IMAGE_SIGNATURES = {b"\x89PNG\r\n\x1a\n": ".png", b"GIF87a": ".gif", b"GIF89a": ".gif"}
+IMAGE_SIGNATURES = {b"\x89PNG\r\n\x1a\n": ".png", b"GIF87a": ".gif", b"GIF89a": ".gif",
+                    b"\xff\xd8\xff": ".jpg"}  # JPEG: analyst-editor screenshots
 IMAGE_LIMIT = 50_000_000
 
 
 def image_suffix(data: bytes) -> str:
-    """".png" or ".gif" from the file's own bytes; anything else is refused."""
+    """".png", ".gif" or ".jpg" from the file's own bytes; anything else is refused."""
     for signature, suffix in IMAGE_SIGNATURES.items():
         if data.startswith(signature):
             return suffix
-    raise ValueError("Only PNG and GIF chart pictures can be saved.")
+    raise ValueError("Only PNG and GIF pictures, or JPEG screenshots, can be saved.")
 
 
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
@@ -1631,11 +1633,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 temporary.unlink()
 
     def save_image(self) -> None:
-        """A chart picture (PNG or GIF) made in the page, saved to the user's folder.
+        """A picture made in the page (chart PNG/GIF, editor screenshot PNG/JPEG), saved to the user's folder.
         The desktop windows ignore <a download>, so the page sends the bytes here."""
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0 or length > IMAGE_LIMIT:
-            raise ValueError("Chart pictures must be under 50 MB.")
+            raise ValueError("Pictures must be under 50 MB.")
         data = self.rfile.read(length)
         self._body_read = getattr(self, "_body_read", 0) + len(data)
         if len(data) != length:
@@ -1652,6 +1654,62 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         token = uuid.uuid4().hex
         self.server.saved_clips[token] = saved  # type: ignore[attr-defined]
         self.send_json(HTTPStatus.OK, {"saved": {"name": saved.name, "folder": str(saved.parent), "id": token}})
+
+    @property
+    def editor_clips(self) -> EditorClips:
+        return self.server.editor_clips  # type: ignore[attr-defined]
+
+    def scratch_clip(self, token: str) -> Path | None:
+        """A clip the engine cut for watching (never a path named by the request)."""
+        source = self.media_files.get(token)
+        scratch = {(self.store.data_dir / "previews").resolve(), (self.store.data_dir / "analysis-clips").resolve()}
+        if source is None or not source.is_file() or source.resolve().parent not in scratch:
+            return None
+        return source
+
+    def annotate_clip(self, body: dict[str, Any]) -> None:
+        """Copy a watched clip into the project so the analyst editor can open it."""
+        source = self.scratch_clip(str(body.get("media") or ""))
+        if source is None:
+            self.send_post_error(HTTPStatus.NOT_FOUND, "That clip is no longer available. Watch it again, then annotate it.")
+            return
+        project_id = str(body.get("project_id") or "")
+        if self.store.get(project_id) is None:
+            raise ValueError("Open a saved project before annotating a clip.")
+        clip = self.editor_clips.import_clip(project_id, source, str(body.get("name") or ""))
+        self.send_json(HTTPStatus.CREATED, {"clip": clip})
+
+    def editor_parts(self, path: str) -> tuple[str, str]:
+        parts = path.split("/")
+        if len(parts) != 5:
+            raise ValueError("Unknown editor request")
+        return parts[3], parts[4]
+
+    def editor_clip(self) -> None:
+        """The clip, its video link and its drawings."""
+        project_id, clip_id = self.editor_parts(urlparse(self.path).path)
+        try:
+            record, video = self.editor_clips.get(project_id, clip_id)
+        except LookupError as error:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
+        token = uuid.uuid5(uuid.NAMESPACE_URL, str(video.resolve())).hex
+        self.media_files[token] = video
+        self.send_json(HTTPStatus.OK, {
+            "clip": record,
+            "url": f"/api/media/{token}",
+            "annotations": self.editor_clips.load_annotations(project_id, clip_id),
+            "changed": self.editor_clips.changed(record, video),
+        })
+
+    def save_editor_annotations(self, path: str, body: dict[str, Any]) -> None:
+        project_id, clip_id = self.editor_parts(path)
+        try:
+            saved = self.editor_clips.save_annotations(project_id, clip_id, body.get("annotations"))
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        self.send_json(HTTPStatus.OK, {"annotations": saved})
 
     def send_media(self, token: str) -> None:
         media_path = self.media_files.get(token)
@@ -1767,6 +1825,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path.startswith("/api/media/"):
             self.send_media(path.rsplit("/", 1)[-1])
+            return
+        if path.startswith("/api/editor/"):
+            self.editor_clip()
             return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
@@ -2004,11 +2065,16 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 job = self.jobs.start(config)
                 self.send_json(HTTPStatus.ACCEPTED, {"job": job})
                 return
+            if path == "/api/editor/clips":
+                self.annotate_clip(body)
+                return
+            if path.startswith("/api/editor/"):
+                self.save_editor_annotations(path, body)
+                return
             if path.startswith("/api/media/") and path.endswith("/save"):
                 # Only a clip the engine cut for watching; the request names no paths.
-                source = self.media_files.get(path.split("/")[-2])
-                scratch = {(self.store.data_dir / "previews").resolve(), (self.store.data_dir / "analysis-clips").resolve()}
-                if source is None or not source.is_file() or source.resolve().parent not in scratch:
+                source = self.scratch_clip(path.split("/")[-2])
+                if source is None:
                     self.send_json(HTTPStatus.NOT_FOUND, {"error": "That clip is no longer available. Watch it again, then save it."})
                     return
                 folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
@@ -2092,7 +2158,13 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.saved_clips = {}  # type: ignore[attr-defined]  # id -> clip saved to the user's folder
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     server.default_export_dir = None  # type: ignore[attr-defined]  # main() sets the user's videos folder
+    server.editor_clips = EditorClips(data_dir, _find_ffmpeg)  # type: ignore[attr-defined]
     return server
+
+
+def _find_ffmpeg() -> str:
+    import video_encoder
+    return video_encoder.find_ffmpeg()
 
 
 def main() -> int:

@@ -1,5 +1,5 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
-import { allowForeground, saveClip } from "./save-clip.js";
+import { allowForeground, annotateClip, saveClip } from "./save-clip.js";
 import {
   duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
   restoreSelection, totalDuration, trimClip,
@@ -880,6 +880,7 @@ const resetRenderedClip = () => {
   delete video.dataset.src;
   video.load();
   field("render-download").hidden = true;
+  field("render-annotate").hidden = true;
   field("render-status").textContent = "";
 };
 
@@ -902,6 +903,9 @@ const renderClip = async () => {
     const save = field("render-download");
     save.onclick = () => saveClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, save);
     save.hidden = false;
+    const annotate = field("render-annotate");
+    annotate.onclick = () => annotateClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, annotate, activeMatch.id);
+    annotate.hidden = false;
     field("render-status").textContent = "Clip ready";
   } catch (error) {
     field("render-status").textContent = error.message;

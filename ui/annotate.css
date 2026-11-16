@@ -1,0 +1,75 @@
+/* Analyst editor (annotate.html). Light theme, design.css tokens. */
+.annotate-main { gap: 6px; }
+.annotate-back { color: var(--cm-ink); font-size: 11px; text-decoration: none; white-space: nowrap; }
+.annotate-back:hover, .annotate-back:focus-visible { text-decoration: underline; }
+.annotate-main .project-bar strong { flex: 1; }
+.annotate-warning { margin: 0; padding: 6px 10px; border-left: 3px solid #d08a00; background: #fff6df; font-size: 12px; }
+
+.annotate-workspace { display: grid; grid-template-columns: 92px minmax(0, 1fr) 248px; gap: 14px; align-items: start; padding-bottom: 12px; }
+.annotate-workspace[hidden] { display: none; }
+
+.annotate-tools { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 8px; }
+.annotate-tools button, .annotate-transport button, .annotate-pair button {
+  padding: 6px 8px; border: 1px solid var(--cm-rule); background: transparent; color: var(--cm-ink);
+  font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.annotate-tools button:hover, .annotate-transport button:hover, .annotate-pair button:hover { border-color: var(--cm-ink); }
+.annotate-tools button[aria-pressed="true"] { background: var(--cm-ink); border-color: var(--cm-ink); color: var(--cm-paper); }
+.annotate-tools button:focus-visible, .annotate-transport button:focus-visible, .annotate-transport input:focus-visible,
+.annotate-pair button:focus-visible, .annotate-list button:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 2px; }
+
+.annotate-centre { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* The stage takes the clip's own shape, so drawing coordinates are the video's. */
+.annotate-stage {
+  position: relative; align-self: center; background: #000;
+  aspect-ratio: var(--clip-ratio, 16 / 9);
+  width: min(100%, calc((100vh - 250px) * var(--clip-ratio, 1.7778)));
+  min-width: 240px;
+}
+.annotate-stage video, .annotate-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.annotate-stage canvas { cursor: crosshair; touch-action: none; }
+.annotate-stage canvas:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+.annotate-stage canvas[data-tool="select"] { cursor: default; }
+.annotate-stage canvas[data-tool="select"].is-over { cursor: move; }
+.annotate-stage canvas[data-tool="text"] { cursor: text; }
+.annotate-text-input {
+  position: absolute; z-index: 2; min-width: 60px; max-width: 90%; padding: 0.2em 0.35em; margin: 0;
+  border: 1px dashed var(--cm-accent); outline: none; resize: none; overflow: hidden; line-height: 1.25; white-space: pre;
+}
+
+.annotate-hint { margin: 0; color: var(--cm-muted); font-size: 11px; min-height: 1.4em; }
+.annotate-transport { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.annotate-transport [data-play] { min-width: 58px; text-align: center; }
+.annotate-transport input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--cm-ink); }
+.annotate-time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.annotate-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.annotate-spacer { flex: 1; }
+.annotate-inline { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.annotate-inline select { font: inherit; font-size: 12px; padding: 4px; border: 1px solid var(--cm-rule); background: var(--cm-paper); }
+
+.annotate-inspector { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.annotate-inspector details { border: 1px solid var(--cm-rule); }
+.annotate-inspector summary { padding: 7px 10px; cursor: pointer; font-weight: 500; }
+.annotate-fields { display: flex; flex-direction: column; gap: 9px; padding: 4px 10px 10px; }
+.annotate-fields label { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.annotate-fields input[type="range"] { width: 120px; accent-color: var(--cm-ink); }
+.annotate-fields input[type="color"] { width: 40px; height: 24px; padding: 0; border: 1px solid var(--cm-rule); background: none; }
+.annotate-fields input[type="color"]:disabled { opacity: 0.35; }
+.annotate-fields input[type="number"] { width: 70px; font: inherit; font-size: 12px; padding: 3px 4px; border: 1px solid var(--cm-rule); background: var(--cm-paper); }
+.annotate-fields label.annotate-check, .annotate-check { justify-content: flex-start; gap: 4px; }
+.annotate-pair { display: inline-flex; gap: 4px; }
+.annotate-pair button { padding: 3px 7px; }
+.annotate-pair input, .annotate-pair button { height: 26px; box-sizing: border-box; }
+.annotate-muted { margin: 0; color: var(--cm-muted); }
+.annotate-list { list-style: none; margin: 0; padding: 0 6px 8px; max-height: 260px; overflow: auto; }
+.annotate-list button { width: 100%; padding: 5px 6px; border: 0; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.annotate-list button:hover { background: rgba(23, 24, 23, 0.06); }
+.annotate-list button.is-selected { background: var(--cm-ink); color: var(--cm-paper); }
+
+
+@media (max-width: 980px) {
+  .annotate-workspace { grid-template-columns: minmax(0, 1fr); }
+  .annotate-tools { position: static; flex-direction: row; flex-wrap: wrap; }
+  .annotate-tools button { text-align: center; }
+  .annotate-stage { width: 100%; min-width: 0; }
+}
