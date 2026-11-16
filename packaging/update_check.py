@@ -100,6 +100,17 @@ class UpdateStatus:
             return dict(self._status)
 
 
+# The match sources named on the Intake screen; only these can be opened.
+SOURCE_SITES = {"scoresway": "https://www.scoresway.com/", "whoscored": "https://www.whoscored.com/"}
+
+
+def open_source_site(site: str, opener: Callable[[str], bool] | None = None) -> bool:
+    """Open a match source's home page in the user's browser (never a caller-supplied URL)."""
+    if site not in SOURCE_SITES:
+        raise ValueError("Unknown match source.")
+    return bool((opener or webbrowser.open)(SOURCE_SITES[site]))
+
+
 def open_release_page(opener: Callable[[str], bool] | None = None) -> bool:
     """Open the fixed releases page in the user's browser (never a caller-supplied URL)."""
     return bool((opener or webbrowser.open)(RELEASES_URL))

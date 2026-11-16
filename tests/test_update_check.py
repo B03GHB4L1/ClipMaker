@@ -126,6 +126,30 @@ class EngineRouteTests(unittest.TestCase):
                 self.assertTrue(json.load(response)["opened"])
         opened.assert_called_once_with(update_check.RELEASES_URL)
 
+    def test_source_links_open_only_the_two_match_sites(self):
+        from unittest.mock import patch
+        from urllib.error import HTTPError
+        def post(body, origin=None):
+            headers = {"Content-Type": "application/json", **({"Origin": origin} if origin else {})}
+            return urlopen(Request(self.base + "/api/open-site", data=json.dumps(body).encode(), headers=headers,
+                                   method="POST"), timeout=5)
+        with patch.object(update_check.webbrowser, "open", return_value=True) as opened:
+            for site, url in (("whoscored", "https://www.whoscored.com/"), ("scoresway", "https://www.scoresway.com/")):
+                with post({"site": site, "url": "https://evil.test"}) as response:
+                    self.assertTrue(json.load(response)["opened"])
+                opened.assert_called_with(url)
+            for body, origin in (({"site": "https://evil.test"}, None), ({"site": "whoscored"}, "https://evil.test")):
+                with self.subTest(body=body, origin=origin), self.assertRaises(HTTPError) as caught:
+                    post(body, origin)
+                self.assertEqual(caught.exception.code, 400)
+            self.assertEqual(opened.call_count, 2)
+        page = (ROOT / "ui/index.html").read_text(encoding="utf-8")
+        self.assertIn('<a href="https://www.scoresway.com/" data-source-site="scoresway">Scoresway</a>', page)
+        self.assertIn('<a href="https://www.whoscored.com/" data-source-site="whoscored">WhoScored</a>', page)
+        script = (ROOT / "ui/app.js").read_text(encoding="utf-8")
+        self.assertIn('fetch("/api/open-site"', script)
+        self.assertIn('invoke("allow_foreground")', script)
+
     def test_other_websites_cannot_open_the_release_page(self):
         from urllib.error import HTTPError
         request = Request(self.base + "/api/update/open-release", data=b"{}", method="POST",

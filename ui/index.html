@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="design.css?v=6" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
-    <script type="module" src="app.js?v=17"></script>
+    <script type="module" src="app.js?v=18"></script>
     <script type="module" src="update.js?v=1"></script>
   </head>
   <body>
@@ -105,7 +105,10 @@
             </div>
             <span class="status-tag">Required</span>
           </div>
-          <label for="match-url">Scoresway or WhoScored URL</label>
+          <p class="source-label">
+            <label for="match-url"><a href="https://www.scoresway.com/" data-source-site="scoresway">Scoresway</a> or
+              <a href="https://www.whoscored.com/" data-source-site="whoscored">WhoScored</a> URL</label>
+          </p>
           <div class="url-control">
             <input
               id="match-url"
