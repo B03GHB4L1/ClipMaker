@@ -1,5 +1,5 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
-import { saveClip } from "./save-clip.js";
+import { allowForeground, saveClip } from "./save-clip.js";
 import {
   duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
   restoreSelection, totalDuration, trimClip,
@@ -1523,6 +1523,7 @@ cancelJobButton.addEventListener("click", async () => {
 field("reveal-export").onclick = async () => {
   if (!finishedJobId) return;
   try {
+    await allowForeground();
     await apiRequest(`/api/jobs/${finishedJobId}/reveal`, { method: "POST", body: "{}" });
   } catch (error) {
     showToast(error.message);
