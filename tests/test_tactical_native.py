@@ -45,6 +45,8 @@ def deliberate_fixes(figure):
 
 
 ATTACK_LABEL = "ATTACK ->"
+NEW_STYLE_CHARTS = re.compile(r"Pass Directness - |Possession Length - median")
+NEW_STYLE_CAPTIONS = {"No passes with end locations for this team.", "No possessions found for this team."}
 MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
 
 
@@ -69,6 +71,10 @@ def normal(element, norm):
         return (kind, norm.text(element["value"]))
     if kind == "Metric":
         return (kind, element["label"], norm.text(element["value"]), element.get("delta") or "")
+    if kind == "plotly" and NEW_STYLE_CHARTS.search(json.dumps(element["figure"].get("layout", {}))):
+        return None  # Added to Style Profile; see test_style_profile_directness_and_possession_length.
+    if kind == "Caption" and element["value"] in NEW_STYLE_CAPTIONS:
+        return None
     if kind == "plotly":
         # Classic figures carry Streamlit's placeholder colours, swapped for its
         # light palette in the browser; compare the colours users saw.
@@ -188,6 +194,55 @@ class TacticalNativeParityTests(unittest.TestCase):
             # Other pitch charts are unchanged.
             view, _ = tactical.render("style-profile", {}, project, projects)
             self.assertNotIn(ATTACK_LABEL, json.dumps(view))
+
+    def test_style_profile_directness_and_possession_length(self):
+        import pandas as pd
+        from analysis_core import tactical_page as page
+
+        def event(team, kind, x=50, y=50, end=None, outcome="Successful", second=0):
+            row = {"team": team, "type": kind, "x": x, "y": y, "outcomeType": outcome,
+                   "period_order": 1, "minute": 1, "second": second}
+            row["endX"], row["endY"] = end if end else (None, None)
+            return row
+
+        # Directness: 2 forward (one long), 1 sideways, 1 backward.
+        passes = pd.DataFrame([
+            event("A", "Pass", 20, 50, (60, 50)),              # 42m forward
+            event("A", "Pass", 50, 50, (60, 55)),              # forward (10.5m along, 3.4m across)
+            event("A", "Pass", 50, 20, (52, 60), "Unsuccessful"),  # sideways
+            event("A", "Pass", 50, 50, (40, 50)),              # backward
+        ])
+        profile = page.pass_directness(passes)
+        shares = {row["group"]: row["share"] for row in profile["direction"]}
+        self.assertEqual(shares, {"Forward": 50.0, "Sideways": 25.0, "Backward": 25.0})
+        self.assertEqual({row["group"]: row["count"] for row in profile["length"]},
+                         {"Short (<15m)": 2, "Medium (15-30m)": 1, "Long (30m+)": 1})
+        self.assertEqual(next(r for r in profile["direction"] if r["group"] == "Sideways")["completion"], 0.0)
+        self.assertIsNone(page.pass_directness(passes.iloc[0:0]))
+
+        # Possessions: A passes 3 times and shoots; B touches it; A passes once; period change; A passes once.
+        rows = [event("A", "Pass", second=1), event("A", "Pass", second=2), event("A", "Pass", second=3),
+                event("A", "Goal", second=4), event("B", "Pass", second=5), event("A", "Tackle", second=6),
+                event("A", "Pass", second=7)]
+        later = event("A", "Pass", second=1)
+        later["period_order"] = 2
+        lengths = page.possession_lengths(pd.DataFrame(rows + [later]), "A")
+        self.assertEqual(lengths["possessions"], 3)
+        bands = {row["group"]: (row["count"], row["shot_rate"]) for row in lengths["bands"]}
+        self.assertEqual(bands["1-2 passes"], (2, 0.0))
+        self.assertEqual(bands["3-5 passes"], (1, 100.0))
+        self.assertIsNone(page.possession_lengths(pd.DataFrame(rows), "C"))
+
+        # Both charts appear on the Style Profile tab of a real match.
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            view, _ = tactical.render("style-profile", {}, project, projects)
+            titles = json.dumps([e["figure"]["layout"] for e in view["elements"] if e["kind"] == "plotly"])
+            self.assertRegex(titles, r"Pass Directness - \d+% forward, avg [\d.]+m")
+            self.assertRegex(titles, r"Possession Length - median \d+ passes")
 
     def test_video_lab_moment_list_drives_the_picker(self):
         with analysis_golden.fixture_inputs() as (csvs, data):
