@@ -131,22 +131,28 @@ def to_fractions(box: tuple[float, float, float, float], size: tuple[int, int]) 
     return (x + w / 2) / width, (y + h) / height, w / width, h / height
 
 
-def track_span(ffmpeg: str, video: Path, clip: dict[str, Any], start: int, end: int, seed: list[float],
-               cancel: threading.Event | None = None, progress: Callable[[int, int], None] | None = None,
-               model: Path | None = None) -> dict[str, Any]:
-    """Track from frame `start` (where the player is `seed`) to `end`, inclusive.
+def read_frames_backwards(ffmpeg: str, video: Path, fps: float, first: int, last: int, size: tuple[int, int],
+                          chunk: int = 48) -> Iterator[Any]:
+    """Frames `last` down to `first`, decoded a short chunk at a time so memory stays flat."""
+    top = last
+    while top >= first:
+        bottom = max(first, top - chunk + 1)
+        frames = list(read_frames(ffmpeg, video, fps, bottom, top - bottom + 1, size))
+        if not frames:
+            return
+        yield from reversed(frames)
+        top = bottom - 1
 
-    Returns {"start", "rows", "stopped": {"frame", "reason"} | None, "notice", "tracker"}.
-    """
+
+def _follow(frames: Iterator[Any], seed: list[float], size: tuple[int, int], fps: float, model: Path | None,
+            cancel: threading.Event | None, tick: Callable[[], None]) -> tuple[list[list[float]], str | None, str | None]:
+    """One pass of the tracker over `frames`, seeded on the first: (rows, stop reason or None, notice)."""
     tracker, notice = make_tracker(model)
-    size = tracking_size(clip["width"], clip["height"])
-    total = end - start + 1
-    flagger = segments.Flagger(clip["fps"])
+    flagger = segments.Flagger(fps)
     rows: list[list[float]] = []
-    stopped = None
     reference = previous = None
     seed_area = 1
-    for index, frame in enumerate(read_frames(ffmpeg, video, clip["fps"], start, total, size)):
+    for index, frame in enumerate(frames):
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         scene = _scene_histogram(frame)
@@ -168,16 +174,54 @@ def track_span(ffmpeg: str, video: Path, clip: dict[str, Any], start: int, end: 
             kind, value = flagger.push(to_fractions((x, y, w, h), size), ok=bool(ok), confidence=confidence,
                                        colour=colour, edge=against_edge and w * h < EDGE_SHRINK * seed_area, cut=cut)
         if kind == "stop":
-            stopped = {"frame": start + index, "reason": value}
-            break
+            return rows, value, notice
         rows.append(value)
         previous = scene
+        tick()
+    return rows, None, notice
+
+
+def track_span(ffmpeg: str, video: Path, clip: dict[str, Any], start: int, end: int, seed: list[float],
+               cancel: threading.Event | None = None, progress: Callable[[int, int], None] | None = None,
+               model: Path | None = None, end_box: list[float] | None = None) -> dict[str, Any]:
+    """Track from frame `start` (where the player is `seed`) to `end`, inclusive.
+
+    With `end_box` (the player's keyframe on frame end + 1), the span is also tracked backwards from that
+    keyframe and the two passes are blended (segments.finish), so the drawing reaches the next keyframe
+    without a jump and a stretch one pass lost (a cut, a crowd) can be covered by the other.
+    Returns {"start", "rows", "stopped": {"frame", "reason"} | None, "notice", "tracker"};
+    rows may hold None for frames neither pass could follow.
+    """
+    size = tracking_size(clip["width"], clip["height"])
+    count = end - start + 1
+    work = count * (2 if end_box is not None else 1)
+    done = 0
+
+    def tick() -> None:
+        nonlocal done
+        done += 1
         if progress is not None:
-            progress(index + 1, total)
-    if not rows:
+            progress(min(done, work), work)
+
+    forward, reason, notice = _follow(read_frames(ffmpeg, video, clip["fps"], start, count, size), seed, size,
+                                      clip["fps"], model, cancel, tick)
+    if not forward:
         raise ValueError("This frame could not be read for tracking.")
-    if stopped is None and len(rows) < total:
-        stopped = {"frame": start + len(rows), "reason": "end-of-video"}
+    if reason is None and len(forward) < count:
+        reason = "end-of-video"
+    forward_stop = {"frame": start + len(forward), "reason": reason} if reason else None
+    backward = None
+    if end_box is not None:
+        done = count  # the forward half is over, even if it stopped early
+        frames = read_frames_backwards(ffmpeg, video, clip["fps"], start, end + 1, size)
+        rows, _, _ = _follow(frames, end_box, size, clip["fps"], model, cancel, tick)
+        backward = [None] * count
+        for offset, value in enumerate(rows[1:]):  # rows[0] is the next keyframe itself
+            backward[count - 1 - offset] = value
+    after = segments.row(tuple(end_box), 1.0, segments.KEYFRAME) if end_box is not None else None
+    rows, stopped = segments.finish(start, count, clip["fps"], forward, forward_stop, backward, after)
+    if progress is not None:
+        progress(work, work)
     return {"start": start, "rows": rows, "stopped": stopped, "notice": notice,
             "tracker": "mil" if notice else "vit"}
 

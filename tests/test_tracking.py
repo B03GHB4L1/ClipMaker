@@ -79,6 +79,65 @@ class FlaggerTests(unittest.TestCase):
         self.assertEqual(segments.span_end({10: 0, 40: 0}, 40, 60), 60)
 
 
+def at(frame, dx=0):
+    """The generated player's box on `frame`, optionally shifted `dx` pixels."""
+    return [(40 + 3 * frame + 11 + dx) / W, 150 / H, 22 / W, 50 / H]
+
+
+class QualityTests(unittest.TestCase):
+    """M5: blending passes, bridging holes, smoothing (pure functions)."""
+
+    def rows(self, xs, state=segments.TRACKED):
+        return [segments.row((x, 0.5, 0.02, 0.1), 0.9, state) for x in xs]
+
+    def test_blend_leans_on_the_nearer_keyframe(self):
+        forward = [segments.row((0.10, 0.5, 0.02, 0.1), 1.0, segments.KEYFRAME)] + self.rows([0.10] * 9)
+        backward = self.rows([0.12] * 10)  # the analyst's next keyframe sits 0.02 to the right
+        blended = segments.blend(forward, backward)
+        self.assertEqual(blended[0], forward[0])  # the keyframe stays exactly where it was placed
+        xs = [r[0] for r in blended]
+        self.assertEqual(xs, sorted(xs))  # glides towards the next keyframe...
+        self.assertAlmostEqual(xs[-1], 0.10 + 0.02 * 10 / 11, places=4)  # ...arriving almost on it
+
+    def test_passes_on_different_players_ask_for_review(self):
+        blended = segments.blend(self.rows([0.1] * 4), self.rows([0.5] * 4))
+        self.assertEqual([r[5] for r in blended], [segments.REVIEW] * 4)
+        self.assertEqual([r[0] for r in blended], [0.1, 0.1, 0.5, 0.5])  # each half trusts its own keyframe
+
+    def test_one_pass_covers_what_the_other_lost(self):
+        forward = self.rows([0.1, 0.11]) + [None, None]
+        backward = [None] + self.rows([0.12, 0.13, 0.14])
+        self.assertEqual([r is not None for r in segments.blend(forward, backward)], [True] * 4)
+
+    def test_short_holes_are_bridged_for_review_and_long_ones_left(self):
+        rows = self.rows([0.1]) + [None] * 3 + self.rows([0.5])
+        filled = segments.fill_gaps(rows, fps=10)  # 0.5 s = 5 frames
+        self.assertEqual([round(r[0], 3) for r in filled], [0.1, 0.2, 0.3, 0.4, 0.5])
+        self.assertEqual([r[5] for r in filled[1:4]], [segments.REVIEW] * 3)
+        long = self.rows([0.1]) + [None] * 6 + self.rows([0.5])
+        self.assertEqual(segments.fill_gaps(long, fps=10)[1:7], [None] * 6)
+        self.assertEqual(segments.fill_gaps([None] + self.rows([0.1]), fps=10)[0], None)  # nothing before it
+
+    def test_smoothing_calms_jitter_but_keeps_straight_runs_and_keyframes(self):
+        straight = [segments.row((0.1 + 0.01 * i, 0.5, 0.02, 0.1), 1.0, segments.KEYFRAME if i == 0 else 0) for i in range(30)]
+        self.assertEqual([round(r[0], 4) for r in segments.smooth(straight, 25)], [round(r[0], 4) for r in straight])
+        jitter = [segments.row((0.3 + (0.01 if i % 2 else -0.01), 0.5, 0.02, 0.1), 1.0, 0) for i in range(30)]
+        jitter[0] = segments.row((0.3, 0.5, 0.02, 0.1), 1.0, segments.KEYFRAME)
+        smoothed = segments.smooth(jitter, 25)
+        self.assertEqual(smoothed[0], jitter[0])
+        self.assertEqual(smoothed[-1], jitter[-1])  # the end of a run stays put
+        middle = [abs(r[0] - 0.3) for r in smoothed[8:22]]
+        self.assertLess(max(middle), 0.0025)  # +-0.01 wobble mostly gone
+
+    def test_finish_reports_where_coverage_stops(self):
+        forward = self.rows([0.1, 0.11, 0.12])
+        rows, stopped = segments.finish(20, 10, 25, forward, {"frame": 23, "reason": "scene-cut"})
+        self.assertEqual((len(rows), stopped), (3, {"frame": 23, "reason": "scene-cut"}))
+        backward = [None] * 3 + self.rows([0.2] * 7)
+        rows, stopped = segments.finish(20, 10, 25, forward, {"frame": 23, "reason": "scene-cut"}, backward)
+        self.assertEqual((len(rows), stopped), (10, None))  # the backward pass covered the rest
+
+
 class TrackerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -109,6 +168,26 @@ class TrackerTests(unittest.TestCase):
         result = tracker.track_span(_find_ffmpeg(), self.cut, CLIP, 0, 49, SEED)
         self.assertEqual(len(result["rows"]), 30)
         self.assertEqual(result["stopped"], {"frame": 30, "reason": "scene-cut"})
+
+    def test_arrives_on_the_next_keyframe_without_a_jump(self):
+        result = tracker.track_span(_find_ffmpeg(), self.clip, CLIP, 0, 39, SEED, end_box=at(40))
+        rows = result["rows"]
+        self.assertEqual((len(rows), result["stopped"]), (40, None))
+        self.assertLess(abs(rows[0][0] * W - 51), 1)  # starts on the first keyframe
+        xs = [row[0] * W for row in rows] + [at(40)[0] * W]  # ...and runs on into the next one
+        steps = [xs[i + 1] - xs[i] for i in range(40)]
+        self.assertLess(max(abs(step - 3) for step in steps), 1.5)  # about 3 px a frame throughout, no jump
+
+    def test_smoothing_steadies_the_raw_tracker(self):
+        raw = tracker.track_span(_find_ffmpeg(), self.clip, CLIP, 0, 49, SEED)["rows"]
+        wobble = [abs((raw[i + 1][0] - raw[i][0]) * W - 3) for i in range(49)]
+        self.assertLess(sum(wobble) / len(wobble), 0.8)  # steady steps of 3 px (raw ViT output wobbles 1-2 px)
+
+    def test_tracking_back_covers_the_far_side_of_a_scene_cut(self):
+        result = tracker.track_span(_find_ffmpeg(), self.cut, CLIP, 0, 48, SEED, end_box=at(49))
+        self.assertEqual((len(result["rows"]), result["stopped"]), (49, None))
+        for frame in (10, 29, 30, 45):
+            self.assertLess(abs(result["rows"][frame][0] * W - (51 + 3 * frame)), 5, frame)
 
     def test_missing_model_falls_back_with_a_notice(self):
         result = tracker.track_span(_find_ffmpeg(), self.clip, CLIP, 0, 9, SEED, model=Path("missing.onnx"))
@@ -226,6 +305,8 @@ class TrackingApiTests(unittest.TestCase):
             ({"from_frame": 10, "to_frame": 5, "box": SEED}, 400),
             ({"from_frame": 0, "to_frame": 9, "box": [0.5, 0.5]}, 400),
             ({"from_frame": "0", "to_frame": 9, "box": SEED}, 400),
+            ({"from_frame": 0, "to_frame": 49, "box": SEED, "to_box": SEED}, 400),  # no frame after the last one
+            ({"from_frame": 0, "to_frame": 9, "box": SEED, "to_box": [0.5]}, 400),
         ]
         for body, expected in cases:
             with self.subTest(body=body):

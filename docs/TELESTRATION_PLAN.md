@@ -354,6 +354,18 @@ ran Windows out of local ports after a few exports, so overlays go in batches.
 blended so there is no jump at the next keyframe; short-gap interpolation;
 light smoothing (Metrica's 0.44 s as a starting reference).
 
+Built 2026-11-16 (`segments.blend`, `fill_gaps`, `smooth`, `finish`; `tracker.read_frames_backwards`).
+When a keyframe follows the span, the engine also tracks back from it and blends the two passes,
+weighting the backward pass more towards the end; where they disagree by more than 0.75 box
+heights the nearer pass wins and the frame is marked for review. Holes up to 0.5 s are filled
+linearly (marked for review), and a centred 0.44 s moving average smooths each run, anchored on
+both keyframes so they stay where they were placed. Correcting the player on a frame re-tracks the
+span after it and then the span before it. On the 50 fps test clip a 300-frame span arrives on
+the next keyframe with steps under 0.4 px; a synthetic scene cut is now covered from both sides.
+Costs: a span with a keyframe after it takes about twice as long (7.3 s against 3.7 s for 150
+frames). A correction placed off the player still shows a few pixels' step at the end, because
+the tracker re-centres on the player it sees.
+
 **R1 – Full Metrica Nexus review. Done 2026-11-16: see
 [METRICA_REVIEW.md](METRICA_REVIEW.md); its verdicts await the user's
 approval before they change the milestones below.** Covers everything relevant to the analyst editor, not only

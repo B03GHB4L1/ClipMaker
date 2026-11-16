@@ -604,6 +604,7 @@ const setTiming = (key, value) => {
 // ---------------------------------------------------------------------------
 const editorPath = () => `/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`;
 const jobs = new Map(); // track id -> {id, progress, start, end}
+const queued = new Map(); // track id -> spans to track once the running job ends: [{start, limit}]
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const trackStatus = (text, problem = false) => {
   const line = $("[data-track-status]");
@@ -625,10 +626,16 @@ async function startTracking(trackId, start, box, limit = followLimit(trackId)) 
   const track = trackById(trackId);
   if (!track) return;
   const end = spanEnd(track, start, Math.min(clip.frames - 1, limit));
-  if (end <= start) return renderPlayers();
+  if (end <= start) {
+    renderPlayers();
+    return runQueued(trackId);
+  }
   await cancelTracking(trackId, true);
+  // A keyframe just after the span: the engine also tracks back from it and blends the two (M5),
+  // so the drawing arrives on that keyframe instead of jumping to it.
+  const next = track.keyframes[String(end + 1)];
   try {
-    const { job } = await projectRequest(`${editorPath()}/track`, { from_frame: start, to_frame: end, box });
+    const { job } = await projectRequest(`${editorPath()}/track`, { from_frame: start, to_frame: end, box, ...(next ? { to_box: next } : {}) });
     jobs.set(trackId, { id: job.id, progress: 0, start, end });
     trackStatus("");
     renderPlayers();
@@ -636,6 +643,15 @@ async function startTracking(trackId, start, box, limit = followLimit(trackId)) 
   } catch (error) {
     trackStatus(`Could not follow the player: ${error.message}`, true);
   }
+}
+
+// The next span waiting for this player, if any (see correctTrack).
+function runQueued(trackId) {
+  const following = queued.get(trackId)?.shift();
+  if (!queued.get(trackId)?.length) queued.delete(trackId);
+  const track = following && trackById(trackId);
+  const seed = track && track.keyframes[String(following.start)];
+  if (seed) startTracking(trackId, following.start, seed, following.limit);
 }
 
 async function pollTracking(trackId, jobId) {
@@ -662,6 +678,8 @@ async function pollTracking(trackId, jobId) {
     else trackStatus("Tracking cancelled.");
     renderPlayers();
     renderInspector();
+    if (job.status === "done") runQueued(trackId);
+    else queued.delete(trackId);
     return;
   }
 }
@@ -684,6 +702,7 @@ function applyTracking(trackId, entry, result) {
 }
 
 async function cancelTracking(trackId, quiet = false) {
+  if (!quiet) queued.delete(trackId);
   const entry = jobs.get(trackId);
   if (!entry) return;
   jobs.delete(trackId);
@@ -693,7 +712,7 @@ async function cancelTracking(trackId, quiet = false) {
 }
 
 // The analyst moved the player's drawing on this frame: that frame becomes a
-// keyframe and only the span after it is tracked again.
+// keyframe and the spans on both sides of it are tracked again.
 const correctTrack = (trackId, dx, dy) => {
   const track = trackById(trackId);
   const frame = frameNow();
@@ -702,6 +721,11 @@ const correctTrack = (trackId, dx, dy) => {
   const box = [at.box[0] + dx, at.box[1] + dy, at.box[2], at.box[3]];
   const limit = Math.max(lastFrame(track), followLimit(trackId));
   updateTrack(trackId, (current) => setKeyframe(current, frame, box));
+  // Then track the stretch before the correction again, back from it, so the drawing glides
+  // onto the corrected position instead of jumping there.
+  const earlier = Object.keys(track.keyframes).map(Number).filter((key) => key < frame);
+  if (earlier.length && frame - Math.max(...earlier) > 1) queued.set(trackId, [{ start: Math.max(...earlier), limit: frame - 1 }]);
+  else queued.delete(trackId);
   startTracking(trackId, frame, box, limit);
 };
 
