@@ -14,7 +14,7 @@ export const DEFAULT_STYLE = {
   line: { stroke: "#ffffff", width: 4, dashed: true },
   freehand: { stroke: "#ff4d4d", width: 5 },
   text: { color: "#ffffff", background: "#171817", size: 40, bold: false },
-  zone: { stroke: "#2f80ed", fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25, width: 3 },
+  zone: { stroke: "#2f80ed", width: 3, fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25 },
 };
 
 /** Zone fills: a wash of colour, or lines across the zone (hatching). */
