@@ -42,6 +42,7 @@ STYLE_RULES: dict[str, tuple[str, float, float]] = {
 }
 COLOUR_KEYS = {"stroke", "fill", "color", "background"}
 FLAG_KEYS = {"dashed", "bold"}
+CHOICE_KEYS = {"pattern": {"solid", "lines", "cross"}}  # zone fill: a wash, or hatching
 
 
 def _number(value: Any, low: float, high: float, what: str) -> float:
@@ -134,6 +135,10 @@ def _style(value: Any) -> dict[str, Any]:
         elif key in FLAG_KEYS:
             if not isinstance(item, bool):
                 raise ValueError(f"Style {key} must be true or false.")
+            clean[key] = item
+        elif key in CHOICE_KEYS:
+            if item not in CHOICE_KEYS[key]:
+                raise ValueError(f"Style {key} must be one of {', '.join(sorted(CHOICE_KEYS[key]))}.")
             clean[key] = item
         elif key in STYLE_RULES:
             _, low, high = STYLE_RULES[key]

@@ -246,6 +246,15 @@ class SharedUiTests(unittest.TestCase):
         self.assertNotIn('textContent: "×"', script)
         self.assertIn('classList.toggle("is-playing", playing)', script)
 
+    def test_annotate_drawing_tools_stand_apart_from_select_and_player_tools(self):
+        # User request: the rail holds drawing tools only; Select sits in the command bar; Ring and Follow with Players.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        section = lambda start, end: html[html.index(start):html.index(end, html.index(start))]
+        rail = section('<div class="annotate-tools"', '<div class="annotate-centre">')
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "text"])
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow"])
+
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
         # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.

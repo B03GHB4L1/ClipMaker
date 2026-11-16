@@ -47,6 +47,13 @@ class DocumentTests(unittest.TestCase):
         self.assertIsNone(clean["items"][5]["style"]["background"])  # transparent text background kept
         self.assertEqual(clean["items"][0]["show"]["animate"], "none")
 
+    def test_zones_can_be_shaded_with_lines(self):
+        for pattern in ("solid", "lines", "cross"):
+            zone = {"id": "z", "kind": "zone", "points": [[0.1, 0.1], [0.5, 0.1], [0.4, 0.6]],
+                    "style": {"fill": "#2F80ED", "pattern": pattern}, "show": {"from": 0, "to": 1}}
+            clean = annotations.clean_document(document(zone), duration=2, frames=50)
+            self.assertEqual(clean["items"][0]["style"], {"fill": "#2f80ed", "pattern": pattern})
+
     def test_bad_documents_are_refused_not_repaired(self):
         cases = {
             "wrong version": {"version": 2, "items": []},
@@ -64,6 +71,8 @@ class DocumentTests(unittest.TestCase):
             "not a number": document(ring(geometry={"rx": "wide", "ry": 0.01})),
             "infinite": document(ring(points=[[float("inf"), 0.5]])),
             "unknown animation": document(ring(show={"from": 0, "to": 1, "animate": "spin"})),
+            "unknown zone fill": document({"id": "z", "kind": "zone", "points": [[0, 0], [1, 0], [1, 1]],
+                                           "style": {"pattern": "dots"}, "show": {"from": 0, "to": 1}}),
             "freeze off the clip": {"version": 1, "items": [], "freezes": [{"atFrame": 50, "seconds": 2}]},
             "freeze too long": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 61}]},
             "freeze too short": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 0}]},

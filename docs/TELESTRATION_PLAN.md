@@ -338,7 +338,7 @@ cancel, stop following and a zone corner linked to a player all behaved as plann
 
 **M4 – Export.** Render frames, freezes, drawings and text through the existing
 encoder; cancellation; save to the user's VizorPlay folder like other clips.
-Check preview and export match at sample frames.
+Check preview and export match at sample frames. Zone fills include hatching (style `pattern`: solid, lines, cross; see ui/annotate/shapes.js), which the encoder must draw the same way.
 
 **M5 – Tracking quality.** Forward-and-backward tracking across each span,
 blended so there is no jump at the next keyframe; short-gap interpolation;
