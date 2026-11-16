@@ -16,6 +16,25 @@ struct BackendProcess(Mutex<Option<(Child, u16)>>);
 const INSTALL_UPDATE_PATH: &str = "/__vizorplay__/install-update";
 static UPDATING: AtomicBool = AtomicBool::new(false);
 
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn AllowSetForegroundWindow(process_id: u32) -> i32;
+}
+
+/// Called by the page just before the engine opens a folder. Windows only lets
+/// the app the user is using bring a new window to the front; the folder window
+/// is opened by Explorer on the engine's behalf, so without this it only flashes
+/// on the taskbar. The permission lasts until the next foreground change.
+#[tauri::command]
+fn allow_foreground() {
+    #[cfg(windows)]
+    unsafe {
+        const ASFW_ANY: u32 = u32::MAX;
+        AllowSetForegroundWindow(ASFW_ANY);
+    }
+}
+
 fn available_port() -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
     listener.local_addr().map(|address| address.port()).map_err(|error| error.to_string())
@@ -129,6 +148,7 @@ const ENGINE_LAUNCHER: Option<&str> = option_env!("VIZORPLAY_ENGINE_LAUNCHER");
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![allow_foreground])
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;
@@ -187,6 +207,8 @@ pub fn run() {
                 .ok_or_else(|| std::io::Error::other("main window configuration is missing"))?;
             let updater_handle = app.handle().clone();
             let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+                // Windows apps open filling the screen; Mac and Linux keep the configured size.
+                .maximized(cfg!(windows) || config.maximized)
                 .on_navigation(move |url| {
                     if !is_install_request(url, port) {
                         return true;

@@ -10,6 +10,16 @@ const post = async (path, body) => {
   return payload;
 };
 
+// In the Windows app, the folder window opens on the engine's behalf; the app
+// first lets it come to the front (src-tauri allow_foreground). A no-op in a browser.
+export const allowForeground = async () => {
+  try {
+    await window.__TAURI__?.core?.invoke("allow_foreground");
+  } catch {
+    // Without it the folder still opens; it may only flash on the taskbar.
+  }
+};
+
 let popup;
 let hideTimer;
 
@@ -75,6 +85,7 @@ export const showSaved = (saved, what = "Clip") => show({
   folder: saved.folder,
   onOpen: async () => {
     try {
+      await allowForeground();
       await post(`/api/saved/${encodeURIComponent(saved.id)}/reveal`);
       hide();
     } catch (error) {

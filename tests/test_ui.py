@@ -72,6 +72,28 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn((512, 512, 2), mac.info["sizes"])
         self.assertEqual(mac.convert("RGBA").getpixel((4, 4))[3], 0)
 
+    def test_windows_app_opens_maximized(self):
+        shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn(".maximized(cfg!(windows) || config.maximized)", shell)
+
+    def test_open_folder_brings_the_folder_window_to_the_front(self):
+        # Explorer opens on the engine's behalf; the app lets it take the foreground first.
+        shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn("AllowSetForegroundWindow(ASFW_ANY)", shell)
+        self.assertIn("generate_handler![allow_foreground]", shell)
+        config = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+        self.assertTrue(config["app"]["withGlobalTauri"])
+        capability = json.loads((UI.parent / "src-tauri/capabilities/engine-pages.json").read_text(encoding="utf-8"))
+        self.assertEqual(capability["windows"], ["main"])
+        self.assertEqual(capability["remote"]["urls"], ["http://127.0.0.1:*/*"])  # the local engine only
+        self.assertNotIn("core:default", capability["permissions"])  # no window or webview APIs
+        helper = (UI / "save-clip.js").read_text(encoding="utf-8")
+        self.assertIn('invoke("allow_foreground")', helper)
+        self.assertRegex(helper, r"await allowForeground\(\);\s*await post\(`/api/saved/")
+        self.assertRegex((UI / "filters.js").read_text(encoding="utf-8"),
+                         r"await allowForeground\(\);\s*await apiRequest\(`/api/jobs/\$\{finishedJobId\}/reveal`")
+        self.assertIn('invoke("allow_foreground")', (UI / "update.js").read_text(encoding="utf-8"))
+
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")
         self.assertIn("Clip match footage from event data in one seamless experience.", html)

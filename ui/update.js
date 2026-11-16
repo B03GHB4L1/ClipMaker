@@ -33,6 +33,8 @@ const startInstall = () => {
 };
 const openReleasePage = async () => {
   try {
+    // Let the browser window the engine opens come to the front (Windows app).
+    await window.__TAURI__?.core?.invoke("allow_foreground").catch(() => {});
     const response = await fetch("/api/update/open-release", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
