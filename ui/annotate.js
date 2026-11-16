@@ -5,7 +5,9 @@ import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage } from "./save-clip.js";
 import { drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
-import { freezeStart, outputToSource, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
+import { freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
+import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
+  resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
@@ -170,6 +172,7 @@ const showTime = () => {
   $("[data-play]").textContent = playing ? "Pause" : "Play";
   $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
   $("[data-lane-head]").style.left = `${(outTime / total()) * 100}%`;
+  document.querySelectorAll("[data-players] [data-head]").forEach((head) => { head.style.left = `${(outTime / total()) * 100}%`; });
   document.querySelectorAll("[data-lane-freeze]").forEach((block) => block.classList.toggle("is-current", Number(block.dataset.laneFreeze) === at.freeze));
 };
 
@@ -186,18 +189,66 @@ const toPixels = ([x, y]) => [x * canvas.width, y * canvas.height];
 const handleRadius = () => 7 * (window.devicePixelRatio || 1);
 
 const draftItem = () => (gesture?.draft ? gesture.draft : null);
+// Linked points follow their player: drawings are placed for the frame on screen.
+const tracks = () => doc.value.tracks || [];
+const trackById = (id) => tracks().find((track) => track.id === id) || null;
+const frameNow = () => source().frame;
+const shown = () => doc.items.map((item) => resolveItem(item, tracks(), frameNow()));
+const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(item, tracks(), frameNow()) : null; };
+const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
+
+const boxPixels = ([fx, fy, w, h]) => [(fx - w / 2) * canvas.width, (fy - h) * canvas.height, w * canvas.width, h * canvas.height];
+const drawPlayerBox = (track) => {
+  const at = boxAt(track, frameNow());
+  if (!at) return;
+  const [x, y, w, h] = boxPixels(at.box);
+  ctx.save();
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+  ctx.strokeStyle = at.held || at.state === REVIEW ? "#e8a317" : at.state === 1 ? "#c8f135" : "rgba(255, 255, 255, 0.7)";
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+};
+// Where a point dropped near a followed player's feet links to them.
+const snapPoint = (point) => {
+  const [x, y] = toPixels(point);
+  for (const track of tracks()) {
+    const at = boxAt(track, frameNow());
+    if (!at) continue;
+    const [fx, fy] = toPixels(at.box);
+    if (Math.hypot(fx - x, fy - y) <= handleRadius() * 2.2) return { track: track.id, dx: 0, dy: 0 };
+  }
+  return point;
+};
 
 const render = () => {
   if (!clip) return;
   const { w, h } = size();
   ctx.clearRect(0, 0, w, h);
   const time = currentTime();
-  const items = doc.items.map((item) => (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item));
+  const items = shown().map((item) => (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item));
   drawItems(ctx, items, w, h, time);
+  const original = doc.find(selectedId);
+  if (original) linkedTracks(original).forEach((id) => { const track = trackById(id); if (track) drawPlayerBox(track); });
+  if (["ring", "spotlight", "arrow", "line", "zone"].includes(tool)) {
+    // Feet a new drawing can link to.
+    tracks().forEach((track) => { const at = boxAt(track, frameNow()); if (at) drawHandle([at.box[0], at.box[1]], true); });
+  }
+  if (gesture?.type === "box") {
+    const [x0, y0] = toPixels(gesture.start);
+    const [x1, y1] = toPixels(gesture.end);
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
+    ctx.strokeStyle = "#c8f135";
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
+  }
   const draft = draftItem();
   if (draft) drawItem(ctx, draft, w, h);
   if (zoneDraft) {
-    const points = pointer ? [...zoneDraft, pointer] : zoneDraft;
+    const placed = zoneDraft.map((point) => resolvePoint(point, tracks(), frameNow()));
+    const points = pointer ? [...placed, pointer] : placed;
     ctx.save();
     ctx.strokeStyle = toolStyle.zone.stroke;
     ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
@@ -206,7 +257,7 @@ const render = () => {
     points.forEach((point, index) => { const [x, y] = toPixels(point); index ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
     ctx.restore();
-    zoneDraft.forEach((point, index) => drawHandle(point, index === 0));
+    placed.forEach((point, index) => drawHandle(point, index === 0));
   }
   const selected = items.find((item) => item.id === selectedId);
   if (selected && !draft) {
@@ -299,7 +350,10 @@ const HINTS = {
   freehand: "Hold and draw.",
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line).",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
+  follow: "Drag a box around a player, head to boots. A ring follows them; drag it back if it slips.",
 };
+const FOLLOWABLE = ["ring", "spotlight", "text"];
+let followTarget = null; // the drawing "Follow player" will link, or null for a new ring
 
 const setTool = (next) => {
   finishText();
@@ -338,14 +392,14 @@ const updateStyle = (key, value) => {
   if (item) {
     doc.replace({ ...item, style: { ...item.style, [key]: value } });
   } else {
-    const kind = tool === "select" ? null : tool;
+    const kind = DEFAULT_STYLE[tool] ? tool : null;
     if (kind) toolStyle[kind][key] = value;
   }
 };
 
 const renderInspector = () => {
   const item = selectedId ? doc.find(selectedId) : null;
-  const kind = item ? item.kind : tool === "select" ? null : tool;
+  const kind = item ? item.kind : DEFAULT_STYLE[tool] ? tool : null; // select and follow have no drawing style
   const fields = $("[data-style-fields]");
   fields.replaceChildren();
   $("[data-inspector-title]").textContent = item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : "Nothing selected";
@@ -394,6 +448,7 @@ const renderInspector = () => {
       fields.append(label);
     });
   }
+  renderFollowPanel(item);
   const timing = $("[data-timing]");
   timing.hidden = !item;
   if (item) {
@@ -411,6 +466,35 @@ const renderInspector = () => {
   }
   renderList();
 };
+
+function renderFollowPanel(item) {
+  const panel = $("[data-follow-panel]");
+  const linked = item ? [...linkedTracks(item)] : [];
+  panel.hidden = !item || (!linked.length && !FOLLOWABLE.includes(item.kind));
+  if (panel.hidden) return;
+  const track = linked.length === 1 ? trackById(linked[0]) : null;
+  $("[data-follow-start]").hidden = linked.length > 0;
+  document.querySelectorAll("[data-follow-linked]").forEach((row) => { row.hidden = !track; });
+  const state = $("[data-follow-state]");
+  if (!linked.length) {
+    state.textContent = "Make this drawing follow a player through the clip.";
+  } else if (!track) {
+    state.textContent = `Corners follow ${linked.length} players. Drag a corner to correct that player on this frame.`;
+  } else {
+    const at = boxAt(track, frameNow());
+    const job = jobs.get(track.id);
+    state.textContent = job ? `Following ${playerName(track)}: tracking ${Math.round(job.progress * 100)}%...`
+      : !at ? `Following ${playerName(track)}.`
+        : at.held ? `${playerName(track)}: not tracked on this frame, so the drawing holds its last place. Drag it onto the player to carry on.`
+          : at.state === REVIEW ? `${playerName(track)}: check this frame. Still right, or drag the drawing back onto the player.`
+            : at.state === 1 ? `${playerName(track)}: placed by you on this frame.`
+              : `Following ${playerName(track)}.`;
+    $("[data-follow-label]").value = track.label || "";
+    $("[data-follow-label]").placeholder = playerName(track);
+    $("[data-follow-confirm]").disabled = !at || (!at.held && at.state !== REVIEW);
+    $("[data-follow-next]").disabled = !nextCheck(track);
+  }
+}
 
 const renderList = () => {
   const list = $("[data-list]");
@@ -430,6 +514,13 @@ const renderList = () => {
     entry.append(button);
     return entry;
   }));
+};
+
+const removeSelected = () => {
+  if (!selectedId) return;
+  const id = selectedId;
+  doc.commitDocument((value) => pruneTracks({ ...value, items: value.items.filter((item) => item.id !== id) }));
+  select(null);
 };
 
 const setAnimation = (patch) => {
@@ -455,6 +546,236 @@ const setTiming = (key, value) => {
   if (show.to < show.from) show[key === "from" ? "to" : "from"] = show[key];
   doc.replace({ ...item, show });
 };
+
+// ---------------------------------------------------------------------------
+// Following players: tracking jobs, corrections and lanes
+// ---------------------------------------------------------------------------
+const editorPath = () => `/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`;
+const jobs = new Map(); // track id -> {id, progress, start, end}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const trackStatus = (text, problem = false) => {
+  const line = $("[data-track-status]");
+  line.textContent = text;
+  line.hidden = !text;
+  line.classList.toggle("is-problem", problem);
+};
+const updateTrack = (id, change) => doc.commitDocument((value) => ({
+  ...value, tracks: (value.tracks || []).map((track) => (track.id === id ? change(track) : track)),
+}));
+// The source frame a drawing stops showing on.
+const endFrame = (item) => outputToSource(item.show.to, clip, doc.freezes).frame;
+const followLimit = (trackId) => {
+  const frames = doc.items.filter((item) => linkedTracks(item).has(trackId)).map(endFrame);
+  return Math.min(clip.frames - 1, Math.max(frameNow(), ...frames));
+};
+
+async function startTracking(trackId, start, box, limit = followLimit(trackId)) {
+  const track = trackById(trackId);
+  if (!track) return;
+  const end = spanEnd(track, start, Math.min(clip.frames - 1, limit));
+  if (end <= start) return renderPlayers();
+  await cancelTracking(trackId, true);
+  try {
+    const { job } = await projectRequest(`${editorPath()}/track`, { from_frame: start, to_frame: end, box });
+    jobs.set(trackId, { id: job.id, progress: 0, start, end });
+    trackStatus("");
+    renderPlayers();
+    pollTracking(trackId, job.id);
+  } catch (error) {
+    trackStatus(`Could not follow the player: ${error.message}`, true);
+  }
+}
+
+async function pollTracking(trackId, jobId) {
+  for (;;) {
+    await sleep(250);
+    const entry = jobs.get(trackId);
+    if (!entry || entry.id !== jobId) return; // replaced or cancelled
+    let job;
+    try {
+      ({ job } = await projectRequest(`/api/editor-jobs/${jobId}`));
+    } catch (error) {
+      jobs.delete(trackId);
+      trackStatus(`Tracking stopped: ${error.message}`, true);
+      return renderPlayers();
+    }
+    if (job.status === "running") {
+      entry.progress = job.progress || 0;
+      renderPlayers();
+      continue;
+    }
+    jobs.delete(trackId);
+    if (job.status === "done") applyTracking(trackId, entry, job.result);
+    else if (job.status === "failed") trackStatus(`Tracking failed: ${job.error}`, true);
+    else trackStatus("Tracking cancelled.");
+    renderPlayers();
+    renderInspector();
+    return;
+  }
+}
+
+function applyTracking(trackId, entry, result) {
+  if (!trackById(trackId)) return;
+  updateTrack(trackId, (track) => mergeRows(track, entry.start, entry.end, result.rows));
+  const track = trackById(trackId);
+  const checks = flaggedRuns(track, REVIEW).filter(([first]) => first >= entry.start && first <= entry.end).length;
+  const messages = [];
+  if (result.notice) messages.push(result.notice);
+  if (result.stopped?.reason === "scene-cut") {
+    messages.push(`Scene cut at frame ${result.stopped.frame + 1}: ${playerName(track)} is held in place after it. Drag the drawing onto them after the cut to carry on.`);
+  } else if (result.stopped?.reason === "lost") {
+    messages.push(`Lost ${playerName(track)} at frame ${result.stopped.frame + 1}. Drag the drawing back onto them to carry on.`);
+  }
+  if (checks) messages.push(`${checks} moment${checks === 1 ? "" : "s"} marked amber to check.`);
+  trackStatus(messages.join(" ") || `${playerName(track)} followed to frame ${entry.end + 1}.`,
+    Boolean(result.notice || result.stopped?.reason === "scene-cut" || result.stopped?.reason === "lost" || checks));
+}
+
+async function cancelTracking(trackId, quiet = false) {
+  const entry = jobs.get(trackId);
+  if (!entry) return;
+  jobs.delete(trackId);
+  try { await projectRequest(`/api/editor-jobs/${entry.id}/cancel`, {}); } catch { /* it may have just finished */ }
+  if (!quiet) trackStatus("Tracking cancelled.");
+  renderPlayers();
+}
+
+// The analyst moved the player's drawing on this frame: that frame becomes a
+// keyframe and only the span after it is tracked again.
+const correctTrack = (trackId, dx, dy) => {
+  const track = trackById(trackId);
+  const frame = frameNow();
+  const at = track && boxAt(track, frame);
+  if (!at) return;
+  const box = [at.box[0] + dx, at.box[1] + dy, at.box[2], at.box[3]];
+  const limit = Math.max(lastFrame(track), followLimit(trackId));
+  updateTrack(trackId, (current) => setKeyframe(current, frame, box));
+  startTracking(trackId, frame, box, limit);
+};
+
+function nextCheck(track) {
+  const frame = frameNow();
+  const runs = [...flaggedRuns(track, REVIEW), ...flaggedRuns(track, LOST)].sort((a, b) => a[0] - b[0]);
+  return runs.find(([first]) => first > frame) || null;
+}
+
+const followSelected = (action) => {
+  const item = doc.find(selectedId);
+  const ids = item ? [...linkedTracks(item)] : [];
+  const track = ids.length === 1 ? trackById(ids[0]) : null;
+  if (action === "start") {
+    followTarget = selectedId;
+    setTool("follow");
+    return;
+  }
+  if (!track) return;
+  const frame = frameNow();
+  const at = boxAt(track, frame);
+  if (action === "confirm" && at) updateTrack(track.id, (current) => setKeyframe(current, frame, at.box));
+  if (action === "next") {
+    const run = nextCheck(track);
+    if (run) seekOutput(playStart(run[0], clip, doc.freezes));
+  }
+  if (action === "retrack" && at) {
+    updateTrack(track.id, (current) => setKeyframe(current, frame, at.box));
+    startTracking(track.id, frame, at.box);
+  }
+  if (action === "stop") {
+    cancelTracking(track.id, true);
+    const placed = resolveItem(item, tracks(), frame);
+    doc.commitDocument((value) => pruneTracks({ ...value, items: value.items.map((each) => (each.id === item.id ? { ...each, points: placed.points.map((p) => p.map((v) => Math.round(v * 1e5) / 1e5)) } : each)) }));
+    trackStatus(`${playerName(track)} no longer followed by this drawing.`);
+  }
+};
+
+// A box drawn round a player: follow them with the chosen drawing, or a new ring.
+const followFromBox = (start, end) => {
+  const [x0, x1] = [Math.min(start[0], end[0]), Math.max(start[0], end[0])];
+  const [y0, y1] = [Math.min(start[1], end[1]), Math.max(start[1], end[1])];
+  if ((x1 - x0) * canvas.width < 6 || (y1 - y0) * canvas.height < 10) {
+    trackStatus("Drag a box around the whole player, head to boots.", true);
+    return;
+  }
+  const frame = frameNow();
+  const box = [(x0 + x1) / 2, y1, x1 - x0, y1 - y0].map((v) => Math.round(Math.min(1.5, Math.max(-0.5, v)) * 1e5) / 1e5);
+  const track = newTrack(frame, box);
+  const target = followTarget && doc.find(followTarget);
+  followTarget = null;
+  let itemId;
+  doc.commitDocument((value) => {
+    const next = { ...value, tracks: [...(value.tracks || []), track] };
+    if (target) {
+      const placed = resolveItem(target, value.tracks || [], frame);
+      itemId = target.id;
+      next.items = value.items.map((item) => (item.id === target.id
+        ? { ...item, points: item.points.map((point, index) => (index === 0 ? linkTo(track, placed.points[0], frame) : point)) } : item));
+    } else {
+      const ring = newItem("ring", [{ track: track.id, dx: 0, dy: 0 }], {
+        from: currentTime(), to: total(), style: toolStyle.ring, geometry: ringGeometry(Math.max(0.008, (x1 - x0) * 0.75), aspect()),
+      });
+      itemId = ring.id;
+      next.items = [...value.items, ring];
+    }
+    return next;
+  });
+  setTool("select");
+  select(itemId);
+  startTracking(track.id, frame, box);
+};
+
+const lanePercent = (frame) => `${(playStart(Math.min(frame, clip.frames - 1), clip, doc.freezes) / total()) * 100}%`;
+const laneWidth = (first, last) => `${((playStart(Math.min(last + 1, clip.frames - 1), clip, doc.freezes) - playStart(first, clip, doc.freezes)) / total()) * 100}%`;
+
+function renderPlayers() {
+  const box = $("[data-players]");
+  box.replaceChildren(...tracks().map((track) => {
+    const row = document.createElement("div");
+    row.className = "annotate-player";
+    const name = Object.assign(document.createElement("span"), { textContent: playerName(track), title: playerName(track) });
+    const lane = document.createElement("div");
+    lane.className = "annotate-lane";
+    lane.setAttribute("aria-hidden", "true");
+    const keys = Object.keys(track.keyframes).map(Number);
+    const first = Math.min(track.from, ...keys);
+    const last = lastFrame(track);
+    const add = (className, left, width) => {
+      const mark = document.createElement("span");
+      mark.className = className;
+      mark.style.left = left;
+      if (width) mark.style.width = width;
+      lane.append(mark);
+    };
+    add("annotate-cover", lanePercent(first), laneWidth(first, last));
+    flaggedRuns(track, REVIEW).forEach(([a, b]) => add("annotate-flag is-review", lanePercent(a), laneWidth(a, b)));
+    flaggedRuns(track, LOST).forEach(([a, b]) => add("annotate-flag is-lost", lanePercent(a), laneWidth(a, b)));
+    keys.forEach((frame) => add("annotate-key", lanePercent(frame)));
+    const job = jobs.get(track.id);
+    if (job) add("annotate-progress", lanePercent(job.start), `${(job.progress * (playStart(job.end, clip, doc.freezes) - playStart(job.start, clip, doc.freezes)) / total()) * 100}%`);
+    add("annotate-lane-head", `${(outTime / total()) * 100}%`);
+    lane.lastChild.dataset.head = "";
+    lane.addEventListener("pointerdown", (event) => {
+      const rect = lane.getBoundingClientRect();
+      seekOutput(((event.clientX - rect.left) / rect.width) * total());
+    });
+    const action = document.createElement("button");
+    action.type = "button";
+    if (job) {
+      action.textContent = `Cancel ${Math.round(job.progress * 100)}%`;
+      action.onclick = () => cancelTracking(track.id);
+    } else {
+      action.textContent = "Select";
+      action.title = `Select the drawing following ${playerName(track)}`;
+      action.onclick = () => {
+        const item = doc.items.find((each) => linkedTracks(each).has(track.id));
+        if (item) { setTool("select"); select(item.id); }
+      };
+    }
+    row.append(name, lane, action);
+    return row;
+  }));
+  const item = doc.find(selectedId);
+  if (item) renderFollowPanel(item);
+}
 
 // ---------------------------------------------------------------------------
 // Freezes
@@ -624,21 +945,23 @@ canvas.addEventListener("pointerdown", (event) => {
   const { w, h } = size();
   const from = currentTime();
   if (tool === "select") {
-    const selected = doc.find(selectedId);
+    const selected = shownItem(selectedId);
     const handle = selected && nearHandle(selected, at);
     if (handle) {
-      gesture = { type: "handle", id: selected.id, index: handle.index, preview: selected };
+      gesture = { type: "handle", id: selected.id, index: handle.index, base: selected, preview: selected };
     } else {
-      const hit = itemAt(doc.items, x, y, w, h, from, measure);
+      const hit = itemAt(shown(), x, y, w, h, from, measure);
       select(hit?.id || null);
-      if (hit) gesture = { type: "move", id: hit.id, start: at, preview: hit };
+      if (hit) gesture = { type: "move", id: hit.id, start: at, base: hit, preview: hit };
     }
+  } else if (tool === "follow") {
+    gesture = { type: "box", start: clampPoint(at), end: clampPoint(at) };
   } else if (tool === "zone") {
     if (zoneDraft && zoneDraft.length >= 3) {
       const [fx, fy] = toPixels(zoneDraft[0]);
       if (Math.hypot(fx - x, fy - y) <= handleRadius() * 1.6) { finishZone(); return; }
     }
-    zoneDraft = [...(zoneDraft || []), clampPoint(at)];
+    zoneDraft = [...(zoneDraft || []), snapPoint(clampPoint(at))];
     if (zoneDraft.length >= 40) finishZone();
   } else if (tool === "text") {
     event.preventDefault();
@@ -663,16 +986,18 @@ canvas.addEventListener("pointermove", (event) => {
     if (tool === "select") {
       const [x, y] = toPixels(at);
       const selected = doc.find(selectedId);
-      const over = (selected && nearHandle(selected, at)) || itemAt(doc.items, x, y, canvas.width, canvas.height, currentTime(), measure);
+      const over = (selected && nearHandle(shownItem(selectedId), at)) || itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
       canvas.classList.toggle("is-over", Boolean(over));
     }
     return;
   }
-  const item = doc.find(gesture.id);
+  const item = gesture.base;
   if (gesture.type === "move" && item) {
     gesture.preview = moveItem(item, at[0] - gesture.start[0], at[1] - gesture.start[1]);
   } else if (gesture.type === "handle" && item) {
     gesture.preview = dragHandle(item, gesture.index, at);
+  } else if (gesture.type === "box") {
+    gesture.end = clampPoint(at);
   } else if (gesture.type === "draw") {
     const draft = gesture.draft;
     const dx = (at[0] - gesture.start[0]) * canvas.width;
@@ -705,29 +1030,61 @@ const endGesture = () => {
         draft.points = simplify(draft.points.map(clampPoint), 3 * (window.devicePixelRatio || 1), canvas.width, canvas.height);
         if (draft.points.length < 2) return scheduleRender();
       }
-      const item = newItem(draft.kind, draft.points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry });
+      // Ring, spotlight, arrow and line ends dropped on a followed player's feet follow that player.
+      const points = draft.kind === "freehand" ? draft.points : draft.points.map(snapPoint);
+      const item = newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry });
       doc.add(item);
       select(item.id);
     }
+  } else if (current.type === "box") {
+    followFromBox(current.start, current.end);
   } else if (current.preview) {
-    doc.replace(current.preview);
+    applyEdit(current);
   }
   scheduleRender();
 };
+// A drag on a drawing: plain points move; a point linked to a player corrects
+// that player on this frame (a keyframe), and a fixed point dropped on a
+// followed player's feet starts following them.
+function applyEdit({ type, id, index, base, preview }) {
+  const original = doc.find(id);
+  if (!original) return;
+  if (type === "handle" && (index === "r" || index === "h")) {
+    doc.replace({ ...original, geometry: preview.geometry });
+    return;
+  }
+  if (type === "handle") {
+    const point = original.points[index];
+    const [dx, dy] = [preview.points[index][0] - base.points[index][0], preview.points[index][1] - base.points[index][1]];
+    if (isLinked(point)) return correctTrack(point.track, dx, dy);
+    const snapped = snapPoint(preview.points[index]);
+    doc.replace({ ...original, points: original.points.map((each, i) => (i === index ? snapped : each)) });
+    return;
+  }
+  const linked = [...linkedTracks(original)];
+  if (!linked.length) {
+    doc.replace({ ...original, points: preview.points });
+  } else if (linked.length === 1 && original.points.every(isLinked)) {
+    correctTrack(linked[0], preview.points[0][0] - base.points[0][0], preview.points[0][1] - base.points[0][1]);
+  } else {
+    trackStatus("This drawing's corners follow players. Drag one corner to correct that player on this frame.");
+  }
+}
+
 canvas.addEventListener("pointerup", endGesture);
 canvas.addEventListener("pointercancel", () => { gesture = null; scheduleRender(); });
 canvas.addEventListener("dblclick", (event) => {
   if (tool === "zone") { if (zoneDraft) zoneDraft.pop(); finishZone(); return; } // the second click added a corner
   if (tool !== "select") return;
   const [x, y] = toPixels(toFraction(event));
-  const hit = itemAt(doc.items, x, y, canvas.width, canvas.height, currentTime(), measure);
+  const hit = itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
   if (hit?.kind === "text") openText(hit.points[0], hit);
 });
 
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
-const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone" };
+const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow" };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMenu(false);
   if (!clip) return;
@@ -746,8 +1103,7 @@ document.addEventListener("keydown", (event) => {
     togglePlay();
   } else if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
     event.preventDefault();
-    doc.remove(selectedId);
-    select(null);
+    removeSelected();
   } else if (event.key === "Enter" && zoneDraft) {
     event.preventDefault();
     finishZone();
@@ -771,7 +1127,7 @@ const screenshot = async (button) => {
   shot.height = video.videoHeight || clip.height;
   const context = shot.getContext("2d");
   context.drawImage(video, 0, 0, shot.width, shot.height);
-  drawItems(context, doc.items, shot.width, shot.height, currentTime());
+  drawItems(context, shown(), shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise((resolve) => shot.toBlob(resolve, type, 0.92));
   const name = `${clip.name} frame ${source().frame + 1}.${format === "jpeg" ? "jpg" : "png"}`;
@@ -805,7 +1161,19 @@ const wire = () => {
   $("[data-to]").onchange = (event) => setTiming("to", Number(event.target.value));
   $("[data-from-here]").onclick = () => setTiming("from", currentTime());
   $("[data-to-here]").onclick = () => setTiming("to", currentTime());
-  $("[data-delete]").onclick = () => { if (selectedId) { doc.remove(selectedId); select(null); } };
+  $("[data-delete]").onclick = removeSelected;
+  $("[data-follow-start]").onclick = () => followSelected("start");
+  $("[data-follow-confirm]").onclick = () => followSelected("confirm");
+  $("[data-follow-next]").onclick = () => followSelected("next");
+  $("[data-follow-retrack]").onclick = () => followSelected("retrack");
+  $("[data-follow-stop]").onclick = () => followSelected("stop");
+  $("[data-follow-label]").onchange = (event) => {
+    const item = doc.find(selectedId);
+    const ids = item ? [...linkedTracks(item)] : [];
+    if (ids.length !== 1) return;
+    const label = event.target.value.trim().slice(0, 40);
+    updateTrack(ids[0], (track) => { const next = { ...track }; if (label) next.label = label; else delete next.label; return next; });
+  };
   for (const name of ["seeked", "loadeddata"]) video.addEventListener(name, scheduleRender);
   new ResizeObserver(fitCanvas).observe(stage);
   window.addEventListener("resize", fitCanvas);
@@ -814,6 +1182,7 @@ const wire = () => {
     if (playing) pause();
     outTime = clampTime(outTime);
     renderFreezes();
+    renderPlayers();
     $("[data-undo]").disabled = !doc.canUndo;
     $("[data-redo]").disabled = !doc.canRedo;
     renderInspector();
@@ -844,6 +1213,7 @@ const start = async () => {
     fitCanvas();
     setTool("select");
     renderFreezes();
+    renderPlayers();
     seekOutput(0);
     status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
     setSaveStatus("Saved locally");

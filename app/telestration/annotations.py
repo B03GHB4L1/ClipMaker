@@ -21,6 +21,9 @@ EXIT_ANIMATIONS = {"none", "fade"}
 EASES = {"linear", "ease-out", "ease-in-out"}
 PULSE_KINDS = {"ring", "spotlight", "zone"}
 MAX_FREEZES = 50
+MAX_TRACKS = 40
+MAX_KEYFRAMES = 500
+OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its player's feet
 FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
 MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40}
@@ -49,10 +52,69 @@ def _number(value: Any, low: float, high: float, what: str) -> float:
     return float(value)
 
 
-def _point(value: Any, what: str) -> list[float]:
+def _point(value: Any, what: str, tracks: set[str]) -> list[float] | dict[str, Any]:
+    """A fixed [x, y], or a point linked to a tracked player: {"track", "dx", "dy"}."""
+    if isinstance(value, dict):
+        if set(value) != {"track", "dx", "dy"} or value["track"] not in tracks:
+            raise ValueError(f"{what} is linked to a player that is not tracked.")
+        return {"track": value["track"], "dx": round(_number(value["dx"], -OFFSET, OFFSET, what), 5),
+                "dy": round(_number(value["dy"], -OFFSET, OFFSET, what), 5)}
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError(f"{what} must be an [x, y] pair.")
     return [round(_number(v, COORD_MIN, COORD_MAX, what), 5) for v in value]
+
+
+def clean_box(value: Any, what: str) -> list[float]:
+    """[footX, footY, w, h] as fractions of the frame."""
+    if not isinstance(value, list) or len(value) != 4:
+        raise ValueError(f"{what} must be [footX, footY, width, height].")
+    fx, fy = (_number(v, COORD_MIN, COORD_MAX, what) for v in value[:2])
+    w, h = (_number(v, 0.001, 1.0, what) for v in value[2:])
+    return [round(fx, 5), round(fy, 5), round(w, 5), round(h, 5)]
+
+
+def _tracks(value: Any, frames: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_TRACKS:
+        raise ValueError(f"A clip can follow up to {MAX_TRACKS} players.")
+    clean = []
+    for track in value:
+        if not isinstance(track, dict) or set(track) - {"id", "label", "keyframes", "from", "boxes"}:
+            raise ValueError("A followed player has unknown settings.")
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not ITEM_ID.match(track_id):
+            raise ValueError("Each followed player needs a short id.")
+        label = track.get("label", "")
+        if not isinstance(label, str) or len(label) > 40:
+            raise ValueError("A player label can have up to 40 characters.")
+        keyframes = track.get("keyframes")
+        if not isinstance(keyframes, dict) or not 1 <= len(keyframes) <= MAX_KEYFRAMES:
+            raise ValueError("A followed player needs at least one placed frame.")
+        clean_keys = {}
+        for key, box in keyframes.items():
+            if not isinstance(key, str) or not key.isdigit() or int(key) >= frames:
+                raise ValueError("A placed frame must be a frame of the clip.")
+            clean_keys[str(int(key))] = clean_box(box, "A placed player box")
+        start = track.get("from", 0)
+        boxes = track.get("boxes", [])
+        if isinstance(start, bool) or not isinstance(start, int) or not 0 <= start < frames:
+            raise ValueError("Tracking must start on a frame of the clip.")
+        if not isinstance(boxes, list) or start + len(boxes) > frames:
+            raise ValueError("Tracking runs past the end of the clip.")
+        clean_boxes: list[list[float] | None] = []
+        for row in boxes:
+            if row is None:
+                clean_boxes.append(None)
+                continue
+            if not isinstance(row, list) or len(row) != 6 or row[5] not in (0, 1, 2, 3) or isinstance(row[5], bool):
+                raise ValueError("A tracked frame must be [footX, footY, width, height, confidence, state].")
+            clean_boxes.append(clean_box(row[:4], "A tracked player box") + [round(_number(row[4], 0, 1, "Confidence"), 3), row[5]])
+        entry = {"id": track_id, "keyframes": clean_keys, "from": start, "boxes": clean_boxes}
+        if label:
+            entry["label"] = label
+        clean.append(entry)
+    if len({track["id"] for track in clean}) != len(clean):
+        raise ValueError("Two followed players share the same id.")
+    return clean
 
 
 def _style(value: Any) -> dict[str, Any]:
@@ -151,7 +213,7 @@ def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
     return sorted(clean, key=lambda freeze: freeze["atFrame"])
 
 
-def _item(value: Any, limit: float) -> dict[str, Any]:
+def _item(value: Any, limit: float, tracks: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Each drawing must be an object.")
     item_id = value.get("id")
@@ -166,7 +228,7 @@ def _item(value: Any, limit: float) -> dict[str, Any]:
     clean = {
         "id": item_id,
         "kind": kind,
-        "points": [_point(p, f"A {kind} point") for p in points],
+        "points": [_point(p, f"A {kind} point", tracks) for p in points],
         "style": _style(value.get("style")),
         "show": _show(value.get("show"), limit, kind),
     }
@@ -202,14 +264,19 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
         raise ValueError(f"A clip can hold up to {MAX_ITEMS} drawings.")
     freezes = _freezes(value.get("freezes", []), frames)
     limit = duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
-    clean_items = [_item(item, limit) for item in items]
+    tracks = _tracks(value.get("tracks", []), frames)
+    track_ids = {track["id"] for track in tracks}
+    clean_items = [_item(item, limit, track_ids) for item in items]
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")
-    extra = set(value) - {"version", "items", "freezes"}
+    extra = set(value) - {"version", "items", "freezes", "tracks"}
     if extra:
         raise ValueError(f"Unknown annotation setting: {sorted(extra)[0]}.")
-    return {"version": VERSION, "items": clean_items, "freezes": freezes}
+    clean = {"version": VERSION, "items": clean_items, "freezes": freezes}
+    if tracks:
+        clean["tracks"] = tracks
+    return clean
 
 
 def empty_document() -> dict[str, Any]:

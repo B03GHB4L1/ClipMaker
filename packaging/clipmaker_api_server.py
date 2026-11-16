@@ -993,6 +993,7 @@ def save_clip_copy(source: Path, folder: Path, name: str) -> Path:
     return save_to_user_folder(folder, name, ".mp4", lambda temporary: shutil.copyfile(source, temporary))
 
 
+MAX_TRACK_FRAMES = 120 * 60  # two minutes at 60 fps
 IMAGE_SIGNATURES = {b"\x89PNG\r\n\x1a\n": ".png", b"GIF87a": ".gif", b"GIF89a": ".gif",
                     b"\xff\xd8\xff": ".jpg"}  # JPEG: analyst-editor screenshots
 IMAGE_LIMIT = 50_000_000
@@ -1702,6 +1703,53 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             "changed": self.editor_clips.changed(record, video),
         })
 
+    @property
+    def tracking_jobs(self) -> Any:
+        """Created on first use, so OpenCV is not loaded until someone follows a player."""
+        server = self.server
+        with server.tracking_lock:  # type: ignore[attr-defined]
+            if server.tracking_jobs is None:  # type: ignore[attr-defined]
+                from telestration.tracker import TrackingJobs
+                server.tracking_jobs = TrackingJobs()  # type: ignore[attr-defined]
+            return server.tracking_jobs  # type: ignore[attr-defined]
+
+    def start_tracking(self, path: str, body: dict[str, Any]) -> None:
+        """Follow a player from `from_frame` (where they are `box`) to `to_frame`, in the background."""
+        parts = path.split("/")
+        if len(parts) != 6:
+            raise ValueError("Unknown editor request")
+        try:
+            record, video = self.editor_clips.get(parts[3], parts[4])
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        start, end = body.get("from_frame"), body.get("to_frame")
+        for value in (start, end):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < record["frames"]:
+                raise ValueError("Tracking frames must be frames of the clip.")
+        if end < start:
+            raise ValueError("Tracking cannot end before it starts.")
+        if end - start > MAX_TRACK_FRAMES:
+            raise ValueError("Follow a player for up to 2 minutes at a time.")
+        from telestration.annotations import clean_box
+        from telestration import tracker
+        box = clean_box(body.get("box"), "The player box")
+        ffmpeg = _find_ffmpeg()
+        tracker.make_tracker()  # refuse now, not in the background, if OpenCV is missing
+        job = self.tracking_jobs.start(
+            lambda cancel, progress: tracker.track_span(ffmpeg, video, record, start, end, box, cancel, progress))
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
+    def tracking_job(self, job_id: str, cancel: bool = False) -> None:
+        if not re.fullmatch(r"[a-f0-9]{16}", job_id or ""):
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown tracking job."})
+            return
+        job = self.tracking_jobs.cancel(job_id) if cancel else self.tracking_jobs.get(job_id)
+        if job is None:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown tracking job."})
+            return
+        self.send_json(HTTPStatus.OK, {"job": job})
+
     def save_editor_annotations(self, path: str, body: dict[str, Any]) -> None:
         project_id, clip_id = self.editor_parts(path)
         try:
@@ -1829,6 +1877,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/editor/"):
             self.editor_clip()
             return
+        if path.startswith("/api/editor-jobs/"):
+            self.tracking_job(path.split("/")[-1])
+            return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
             job = self.jobs.get(job_id)
@@ -1858,6 +1909,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 self.save_image()
                 return
             body = self.read_json()
+            if path == "/api/open-site":
+                self.send_json(HTTPStatus.OK, {"opened": update_check.open_source_site(str(body.get("site") or ""))})
+                return
             if path == "/api/update/open-release":
                 self.send_json(HTTPStatus.OK, {"opened": update_check.open_release_page()})
                 return
@@ -2068,6 +2122,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path == "/api/editor/clips":
                 self.annotate_clip(body)
                 return
+            if path.startswith("/api/editor/") and path.endswith("/track"):
+                self.start_tracking(path, body)
+                return
+            if path.startswith("/api/editor-jobs/") and path.endswith("/cancel"):
+                self.tracking_job(path.split("/")[-2], cancel=True)
+                return
             if path.startswith("/api/editor/"):
                 self.save_editor_annotations(path, body)
                 return
@@ -2159,6 +2219,8 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     server.default_export_dir = None  # type: ignore[attr-defined]  # main() sets the user's videos folder
     server.editor_clips = EditorClips(data_dir, _find_ffmpeg)  # type: ignore[attr-defined]
+    server.tracking_jobs = None  # type: ignore[attr-defined]  # see Handler.tracking_jobs
+    server.tracking_lock = threading.Lock()  # type: ignore[attr-defined]
     return server
 
 

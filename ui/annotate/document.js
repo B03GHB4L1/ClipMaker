@@ -20,7 +20,7 @@ export const newItem = (kind, points, { from, to, style, geometry, text } = {}) 
   const item = {
     id: newId(),
     kind,
-    points: points.map((point) => clampPoint(point).map(round)),
+    points: points.map((point) => (Array.isArray(point) ? clampPoint(point).map(round) : { ...point })), // linked points stay linked
     style: { ...DEFAULT_STYLE[kind], ...(style || {}) },
     show: { from: Math.round(from * 1000) / 1000, to: Math.round(to * 1000) / 1000, animate: "none" },
   };
@@ -30,7 +30,10 @@ export const newItem = (kind, points, { from, to, style, geometry, text } = {}) 
 };
 
 /** The item moved by (dx, dy) fractions of the frame. */
-export const moveItem = (item, dx, dy) => ({ ...item, points: item.points.map(([x, y]) => clampPoint([x + dx, y + dy]).map(round)) });
+export const moveItem = (item, dx, dy) => ({
+  ...item,
+  points: item.points.map((point) => (Array.isArray(point) ? clampPoint([point[0] + dx, point[1] + dy]).map(round) : point)),
+});
 
 /** The item with handle `index` dragged to `point` (see shapes.handlesFor). */
 export const dragHandle = (item, index, point) => {

@@ -168,3 +168,65 @@ test("draw-on traces the first part of a path by length", () => {
   const [x, y] = partialPath(path, 0.5, true).at(-1);
   assert.ok(Math.abs(x - 10) < 1e-9 && Math.abs(y - 7.0710678) < 1e-6, `${x}, ${y}`);
 });
+
+// ---------------------------------------------------------------------------
+// M3: followed players and linked points
+// ---------------------------------------------------------------------------
+import { boxAt, flaggedRuns, linkTo, mergeRows, newTrack, pruneTracks, resolveItem, setKeyframe, spanEnd } from "../ui/annotate/tracks.js";
+
+const row = (fx, state = 0) => [fx, 0.8, 0.02, 0.1, 0.9, state];
+
+test("a player's position comes from keyframes first, then tracking, and holds across gaps", () => {
+  let track = newTrack(10, [0.1, 0.8, 0.02, 0.1]);
+  track = mergeRows(track, 10, 14, [row(0.1, 1), row(0.11), row(0.12, 2), null, row(0.14)]);
+  assert.equal(boxAt(track, 11).box[0], 0.11);
+  assert.equal(boxAt(track, 12).state, 2);
+  assert.deepEqual([boxAt(track, 13).box[0], boxAt(track, 13).held], [0.12, true]); // gap: hold the last place
+  assert.deepEqual([boxAt(track, 5).box[0], boxAt(track, 5).held], [0.1, true]); // before tracking: the first place
+  assert.deepEqual([boxAt(track, 40).box[0], boxAt(track, 40).held], [0.14, true]);
+  track = setKeyframe(track, 11, [0.3, 0.8, 0.02, 0.1]);
+  assert.deepEqual([boxAt(track, 11).box[0], boxAt(track, 11).state], [0.3, 1]); // the analyst wins
+});
+
+test("lost frames are not used as positions", () => {
+  const track = mergeRows(newTrack(0, [0.1, 0.8, 0.02, 0.1]), 0, 2, [row(0.1, 1), row(0.2), row(0.9, 3)]);
+  assert.deepEqual([boxAt(track, 2).box[0], boxAt(track, 2).held], [0.2, true]);
+  assert.deepEqual(flaggedRuns(track, 3), [[2, 2]]);
+});
+
+test("re-tracking a span replaces only that span and trims empty ends", () => {
+  let track = mergeRows(newTrack(0, [0.1, 0.8, 0.02, 0.1]), 0, 5, [0, 1, 2, 3, 4, 5].map((i) => row(i / 10)));
+  track = mergeRows(track, 3, 8, [row(0.33), row(0.44)]); // stopped early, after two frames
+  assert.deepEqual(track.boxes.map((r) => r && r[0]), [0, 0.1, 0.2, 0.33, 0.44]);
+  assert.equal(track.from, 0);
+  const later = mergeRows(newTrack(20, [0.5, 0.8, 0.02, 0.1]), 20, 25, [row(0.5, 1), row(0.51)]);
+  assert.deepEqual([later.from, later.boxes.length], [20, 2]);
+});
+
+test("tracking from a keyframe stops before the next one", () => {
+  const track = setKeyframe(newTrack(10, [0.1, 0.8, 0.02, 0.1]), 40, [0.4, 0.8, 0.02, 0.1]);
+  assert.equal(spanEnd(track, 10, 100), 39);
+  assert.equal(spanEnd(track, 40, 100), 100);
+  assert.equal(spanEnd(track, 10, 20), 20);
+});
+
+test("linked points follow their player; fixed points stay put", () => {
+  const track = mergeRows(newTrack(0, [0.2, 0.8, 0.02, 0.1]), 0, 1, [row(0.2, 1), row(0.6)]);
+  const zone = newItem("zone", [linkTo(track, [0.2, 0.8], 0), [0.9, 0.9], { track: track.id, dx: 0.05, dy: -0.1 }], { from: 0, to: 1 });
+  assert.deepEqual(zone.points[0], { track: track.id, dx: 0, dy: 0 });
+  const placed = resolveItem(zone, [track], 1);
+  const expected = [[0.6, 0.8], [0.9, 0.9], [0.65, 0.7]];
+  placed.points.forEach((point, i) => point.forEach((v, j) => assert.ok(Math.abs(v - expected[i][j]) < 1e-9, `${i},${j}`)));
+  assert.equal(resolveItem(ring(), [track], 1).points[0][0], 0.5); // nothing linked: unchanged
+  const moved = moveItem(zone, 0.1, 0);
+  assert.deepEqual([moved.points[0], moved.points[1]], [zone.points[0], [1, 0.9]]); // only fixed points move
+});
+
+test("players nothing follows any more are dropped", () => {
+  const kept = newTrack(0, [0.2, 0.8, 0.02, 0.1]);
+  const gone = newTrack(0, [0.4, 0.8, 0.02, 0.1]);
+  const item = newItem("ring", [{ track: kept.id, dx: 0, dy: 0 }], { from: 0, to: 1, geometry: ringGeometry(0.03, 16 / 9) });
+  const doc = pruneTracks({ version: 1, freezes: [], items: [item], tracks: [kept, gone] });
+  assert.deepEqual(doc.tracks.map((t) => t.id), [kept.id]);
+  assert.equal("tracks" in pruneTracks({ ...doc, items: [] }), false);
+});

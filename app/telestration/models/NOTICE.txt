@@ -1,0 +1,12 @@
+vittrack.onnx
+=============
+
+Source: opencv/opencv_zoo, models/object_tracking_vittrack
+        https://github.com/opencv/opencv_zoo/tree/main/models/object_tracking_vittrack
+Licence: Apache License, Version 2.0 (the licence of that model directory)
+         https://www.apache.org/licenses/LICENSE-2.0
+SHA-256: 2990f0b7cd44d92afa48cd97db6de7be113fc1d9594fddb74e2725c10478e91d
+
+Used by VizorPlay's analyst editor to follow a player (app/telestration/tracker.py).
+Before release: confirm the training data terms (not stated in the model README)
+and include the full Apache 2.0 licence text with the distribution.

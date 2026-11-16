@@ -36,6 +36,12 @@ hiddenimports = [
     "process_owner",
     "update_check",
     "user_folders",
+    "telestration.annotations",
+    "telestration.clips",
+    "telestration.timeline",
+    "telestration.segments",
+    "telestration.tracker",
+    "cv2",
     "tkinter",
     "tkinter.filedialog",
 ]

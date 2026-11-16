@@ -5,9 +5,9 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=13" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=2" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=3" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=2"></script>
+  <script type="module" src="annotate.js?v=3"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
@@ -35,6 +35,7 @@
         <button type="button" data-tool="freehand" title="Freehand (F)">Freehand</button>
         <button type="button" data-tool="text" title="Text (T)">Text</button>
         <button type="button" data-tool="zone" title="Zone (Z): click corners, then Enter or click the first corner">Zone</button>
+        <button type="button" data-tool="follow" title="Follow a player (P): drag a box around them">Follow</button>
       </div>
       <div class="annotate-centre">
         <div class="annotate-stage" data-stage>
@@ -52,6 +53,8 @@
           <button type="button" data-freeze title="Hold this frame still (silent) while drawings animate">Freeze frame</button>
         </div>
         <div class="annotate-lane" data-lane aria-hidden="true"><span class="annotate-lane-head" data-lane-head></span></div>
+        <div class="annotate-players" data-players></div>
+        <p class="annotate-track-status" data-track-status role="status" hidden></p>
         <div class="annotate-actions">
           <button type="button" class="native-button native-secondary" data-undo disabled title="Ctrl+Z">Undo</button>
           <button type="button" class="native-button native-secondary" data-redo disabled title="Ctrl+Shift+Z">Redo</button>
@@ -64,6 +67,22 @@
         <details open>
           <summary data-inspector-title>New drawing</summary>
           <div class="annotate-fields" data-style-fields></div>
+        </details>
+        <details open data-follow-panel hidden>
+          <summary>Player</summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-follow-state></p>
+            <button type="button" class="native-button" data-follow-start>Follow player</button>
+            <label data-follow-linked>Name <input type="text" data-follow-label maxlength="40" placeholder="Player" /></label>
+            <span class="annotate-pair" data-follow-linked>
+              <button type="button" data-follow-confirm title="The drawing is on the right player on this frame">Still right</button>
+              <button type="button" data-follow-next title="Go to the next frame marked for checking">Next check</button>
+            </span>
+            <span class="annotate-pair" data-follow-linked>
+              <button type="button" data-follow-retrack title="Track again from this frame">Track from here</button>
+              <button type="button" data-follow-stop title="Keep the drawing where it is now and stop following">Stop following</button>
+            </span>
+          </div>
         </details>
         <details open data-timing hidden>
           <summary>Timing and animation</summary>
