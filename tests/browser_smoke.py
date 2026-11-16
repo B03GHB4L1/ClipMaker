@@ -572,8 +572,18 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     # windows ignore browser downloads); a pop-up says where they went.
     component.locator('[data-export="png"]').click()
     downloads = [validate_chart_download(saved_picture(page), evidence / "native-shot-map.png", "PNG")]
-    # Build exercises the worker encoder and frame capture through the actual UI.
-    component.locator('[data-export-animation]').select_option("build")
+    # The GIF animations: Pulse, Still and Build are gone; Shot Flight leads on a shot map.
+    expect(component.locator('[data-export-animation] option')).to_have_text(["Shot Flight", "Match Clock"])
+    # Preview plays the animation on the chart; Stop puts the chart back. No file is made.
+    preview = component.locator('[data-export="preview"]')
+    preview.click()
+    expect(preview).to_have_text("Stop")
+    expect(component.locator('[data-export="gif"]')).to_be_disabled()
+    preview.click()
+    expect(preview).to_have_text("Preview")
+    expect(component.locator('[data-export="gif"]')).to_be_enabled()
+    # Shot Flight exercises the worker encoder and frame capture through the actual UI.
+    component.locator('[data-export-animation]').select_option("flight")
     gif_button = component.locator('[data-export="gif"]')
     gif_button.click()
     downloads.append(validate_chart_download(saved_picture(page, timeout=90000), evidence / "native-shot-map.gif", "GIF"))
