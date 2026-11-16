@@ -42,6 +42,18 @@
 .annotate-transport [data-play] { min-width: 58px; text-align: center; }
 .annotate-transport input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--cm-ink); }
 .annotate-time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.annotate-time .is-frozen { color: #1f5fbf; font-weight: 600; }
+/* Output timeline: freezes as blocks, their right edge drags to change the length. */
+.annotate-lane { position: relative; height: 16px; background: rgba(23, 24, 23, 0.06); border: 1px solid var(--cm-rule); cursor: pointer; touch-action: none; }
+.annotate-lane-head { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--cm-ink); pointer-events: none; }
+.annotate-lane-freeze { position: absolute; top: 0; bottom: 0; min-width: 4px; background: rgba(47, 128, 237, 0.35); border-left: 2px solid #2f80ed; }
+.annotate-lane-freeze.is-current { background: rgba(47, 128, 237, 0.55); }
+.annotate-lane-edge { position: absolute; top: -2px; bottom: -2px; right: -5px; width: 10px; cursor: ew-resize; }
+.annotate-lane-edge::after { content: ""; position: absolute; top: 2px; bottom: 2px; left: 4px; width: 2px; background: #2f80ed; }
+.annotate-freezes li { display: flex; align-items: center; gap: 4px; }
+.annotate-freezes li > button:first-child { flex: 1; }
+.annotate-freezes input { width: 58px; font: inherit; font-size: 11px; padding: 2px 4px; border: 1px solid var(--cm-rule); background: var(--cm-paper); }
+.annotate-freezes .annotate-remove { width: auto; padding: 2px 6px; }
 .annotate-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .annotate-spacer { flex: 1; }
 .annotate-inline { display: flex; align-items: center; gap: 6px; font-size: 12px; }
@@ -51,6 +63,7 @@
 .annotate-inspector details { border: 1px solid var(--cm-rule); }
 .annotate-inspector summary { padding: 7px 10px; cursor: pointer; font-weight: 500; }
 .annotate-fields { display: flex; flex-direction: column; gap: 9px; padding: 4px 10px 10px; }
+.annotate-fields select { font: inherit; font-size: 12px; padding: 3px 4px; border: 1px solid var(--cm-rule); background: var(--cm-paper); }
 .annotate-fields label { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .annotate-fields input[type="range"] { width: 120px; accent-color: var(--cm-ink); }
 .annotate-fields input[type="color"] { width: 40px; height: 24px; padding: 0; border: 1px solid var(--cm-rule); background: none; }

@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from app.telestration import annotations
+from app.telestration import annotations, timeline
 from app.telestration.clips import probe_video
 from packaging.clipmaker_api_server import create_server, _find_ffmpeg
 
@@ -40,7 +40,7 @@ class DocumentTests(unittest.TestCase):
             {"id": "z1", "kind": "zone", "points": [[0.1, 0.5], [0.4, 0.5], [0.4, 0.8]],
              "style": {"fill": "#2f80ed", "fillOpacity": 0.25}, "show": {"from": 0, "to": 2}},
         ]
-        clean = annotations.clean_document(document(*items), duration=2)
+        clean = annotations.clean_document(document(*items), duration=2, frames=50)
         self.assertEqual([item["kind"] for item in clean["items"]],
                          ["ring", "spotlight", "arrow", "line", "freehand", "text", "zone"])
         self.assertEqual(clean["items"][0]["style"]["stroke"], "#ffd400")  # colours are lower-cased
@@ -64,17 +64,44 @@ class DocumentTests(unittest.TestCase):
             "not a number": document(ring(geometry={"rx": "wide", "ry": 0.01})),
             "infinite": document(ring(points=[[float("inf"), 0.5]])),
             "unknown animation": document(ring(show={"from": 0, "to": 1, "animate": "spin"})),
-            "freeze before M2": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 2}]},
+            "freeze off the clip": {"version": 1, "items": [], "freezes": [{"atFrame": 50, "seconds": 2}]},
+            "freeze too long": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 61}]},
+            "freeze too short": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 0}]},
+            "two freezes on a frame": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 1},
+                                                                              {"atFrame": 3, "seconds": 2}]},
+            "freeze with extras": {"version": 1, "items": [], "freezes": [{"atFrame": 3, "seconds": 1, "audio": True}]},
+            "fractional freeze frame": {"version": 1, "items": [], "freezes": [{"atFrame": 3.5, "seconds": 1}]},
+            "arrow cannot pulse": document({"id": "a", "kind": "arrow", "points": [[0, 0], [1, 1]],
+                                            "show": {"from": 0, "to": 1, "pulse": True}}),
+            "unknown easing": document(ring(show={"from": 0, "to": 1, "animate": "fade", "ease": "bounce"})),
+            "unknown exit": document(ring(show={"from": 0, "to": 1, "animateOut": "spin"})),
+            "animation too long": document(ring(show={"from": 0, "to": 1, "animate": "fade", "animSeconds": 9})),
+            "unknown timing setting": document(ring(show={"from": 0, "to": 1, "loop": True})),
             "path-like id": document(ring("../x")),
         }
         for name, value in cases.items():
             with self.subTest(name), self.assertRaises(ValueError):
-                annotations.clean_document(value, duration=2)
+                annotations.clean_document(value, duration=2, frames=50)
+
+    def test_freezes_lengthen_the_time_drawings_may_use(self):
+        late = ring(show={"from": 2.5, "to": 5.4, "animate": "draw", "animateOut": "fade", "animSeconds": 0.4,
+                          "ease": "linear", "pulse": True})
+        value = {"version": 1, "items": [late], "freezes": [{"atFrame": 30, "seconds": 1.5}, {"atFrame": 0, "seconds": 1.5}]}
+        clean = annotations.clean_document(value, duration=2, frames=50)
+        self.assertEqual([f["atFrame"] for f in clean["freezes"]], [0, 30])  # stored in order
+        self.assertEqual(clean["items"][0]["show"], late["show"])
+        with self.assertRaises(ValueError):  # without the freezes it would run past the clip
+            annotations.clean_document({**value, "freezes": []}, duration=2, frames=50)
+
+    def test_no_animation_stores_no_animation_settings(self):
+        clean = annotations.clean_document(document(ring(show={"from": 0, "to": 1, "animSeconds": 2, "ease": "linear"})),
+                                           duration=2, frames=50)
+        self.assertEqual(clean["items"][0]["show"], {"from": 0, "to": 1, "animate": "none"})
 
     def test_too_many_drawings_are_refused(self):
         many = [ring(f"r{i}") for i in range(annotations.MAX_ITEMS + 1)]
         with self.assertRaises(ValueError):
-            annotations.clean_document(document(*many), duration=2)
+            annotations.clean_document(document(*many), duration=2, frames=50)
 
 
 def make_clip(path: Path, seconds=2, fps=25, size="320x240"):
@@ -144,6 +171,20 @@ class EditorApiTests(unittest.TestCase):
         self.assertEqual(json.loads(on_disk.read_text())["items"][0]["kind"], "ring")
         self.assertFalse(list(on_disk.parent.glob("saving-*")))  # atomic write left nothing behind
 
+    def test_freezes_save_and_reopen(self):
+        clip = self.annotate()
+        path = f"/api/editor/{self.project['id']}/{clip['id']}"
+        value = {"version": 1, "items": [ring(show={"from": 0.5, "to": 4.5, "animate": "grow", "animSeconds": 0.3,
+                                                     "ease": "ease-out"})],
+                 "freezes": [{"atFrame": 12, "seconds": 2.75}]}
+        status, saved = self.call(path, {"annotations": value})
+        self.assertEqual(status, 200, saved)
+        opened = self.call(path)[1]["annotations"]
+        self.assertEqual(opened["freezes"], [{"atFrame": 12, "seconds": 2.75}])
+        self.assertEqual(opened["items"][0]["show"]["animate"], "grow")
+        status, _ = self.call(path, {"annotations": {**value, "freezes": [{"atFrame": 50, "seconds": 1}]}})  # frame 51 of 50
+        self.assertEqual(status, 400)
+
     def test_bad_drawings_leave_the_saved_ones_untouched(self):
         clip = self.annotate()
         path = f"/api/editor/{self.project['id']}/{clip['id']}"
@@ -186,6 +227,34 @@ class EditorApiTests(unittest.TestCase):
             saved = json.loads(response.read())["saved"]
         self.assertEqual(saved["name"], "Frame.jpg")
         self.assertTrue((folder / "Frame.jpg").is_file())
+
+
+class TimelineTests(unittest.TestCase):
+    """The engine's rules match the browser's: both are checked against one fixture."""
+
+    def setUp(self):
+        self.cases = json.loads((Path(__file__).parent / "fixtures" / "timeline_cases.json").read_text(encoding="utf-8"))
+
+    def test_output_time_maps_to_source_frames_through_freezes(self):
+        clip, freezes = self.cases["clip"], self.cases["freezes"]
+        self.assertAlmostEqual(timeline.total_seconds(clip["duration"], freezes), self.cases["total"])
+        for case in self.cases["mapping"]:
+            with self.subTest(t=case["t"]):
+                at = timeline.output_to_source(case["t"], clip["fps"], clip["duration"], clip["frames"], freezes)
+                self.assertEqual((at["frame"], at["freeze"]), (case["frame"], case["freeze"]))
+
+    def test_animation_progress(self):
+        for case in self.cases["animation"]:
+            with self.subTest(item=case["item"], t=case["t"]):
+                state = timeline.animation(case["item"], case["t"])
+                if case["state"] is None:
+                    self.assertIsNone(state)
+                    continue
+                for key, expected in case["state"].items():
+                    if expected is None:
+                        self.assertIsNone(state[key])
+                    else:
+                        self.assertAlmostEqual(state[key], expected, places=6, msg=key)
 
 
 class ProbeTests(unittest.TestCase):
