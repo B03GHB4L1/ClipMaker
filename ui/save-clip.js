@@ -160,12 +160,48 @@ export const saveClip = async (url, name, button, what = "Clip") => {
   }
 };
 
-/** A "Save clip" button for a watched clip ({url, name}). */
+/** Open the clip behind `url` in the analyst editor; it is first copied into the project. */
+export const annotateClip = async (url, name, button, projectId = activeProjectId()) => {
+  const media = String(url || "").split("/").pop();
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Opening...";
+  }
+  try {
+    if (!projectId) throw new Error("Open a saved project first.");
+    const { clip } = await post("/api/editor/clips", { project_id: projectId, media, name });
+    window.location.href = `/annotate.html?project=${encodeURIComponent(projectId)}&clip=${encodeURIComponent(clip.id)}`;
+    return clip;
+  } catch (error) {
+    show({ title: "Could not open the editor", file: error.message, error: true });
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+    return null;
+  }
+};
+
+const activeProjectId = () => new URLSearchParams(window.location.search).get("project")
+  || sessionStorage.getItem("clipmaker.active-match") || "";
+
+/** "Save clip" and "Annotate" buttons for a watched clip ({url, name}). */
 export const saveClipButton = (file, what = "Clip", className = "native-button") => {
   const button = document.createElement("button");
   button.type = "button";
   button.className = className;
   button.textContent = `Save ${what.toLowerCase()}`;
   button.addEventListener("click", () => saveClip(file.url, file.name, button, what));
-  return button;
+  const annotate = document.createElement("button");
+  annotate.type = "button";
+  annotate.className = `${className} native-secondary`;
+  annotate.textContent = "Annotate";
+  annotate.title = `Draw on this ${what.toLowerCase()} in the analyst editor`;
+  annotate.addEventListener("click", () => annotateClip(file.url, file.name, annotate));
+  // Lays out as two siblings in whatever row holds it.
+  const pair = document.createElement("span");
+  pair.style.display = "contents";
+  pair.append(button, annotate);
+  return pair;
 };
