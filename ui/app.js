@@ -13,6 +13,24 @@ let activeMatch = {
   home_team: "", away_team: "", event_count: 0, markers: {},
 };
 
+// The source names open the sites in the user's browser (the desktop window
+// cannot show other sites). The engine opens only these two fixed addresses.
+document.addEventListener("click", async (event) => {
+  const link = event.target.closest?.("[data-source-site]");
+  if (!link) return;
+  event.preventDefault();
+  try {
+    await window.__TAURI__?.core?.invoke("allow_foreground").catch(() => {});
+    const response = await fetch("/api/open-site", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: link.dataset.sourceSite }),
+    });
+    if (!response.ok) throw new Error();
+  } catch {
+    window.open(link.href, "_blank", "noopener");
+  }
+});
+
 const apiRequest = async (path, options = {}) => {
   const response = await fetch(path, {
     ...options,

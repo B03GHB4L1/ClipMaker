@@ -1705,50 +1705,32 @@ def render_style_profile(df, team):
             config=_plotly_export_config("threat_created_passes_carries", team, _export_scope_label()),
         )
 
-    f1, f2 = st.columns([1, 1])
-    with f1:
-        final_third_entries = raw["ft_entries"]
-        touches_att_third = _str_series(team_df, "depth_zone").eq("Attacking Third").sum()
-        funnel = pd.DataFrame({
-            "Stage": ["All Events", "Attacking Third", "Final Third Entries", "Box Entries", "Shots"],
-            "Per Match": [
-                round(len(team_df) / raw["matches_analyzed"], 1),
-                round(touches_att_third / raw["matches_analyzed"], 1),
-                raw["ft_entries_per_match"],
-                raw["box_entries_per_match"],
-                raw["shots_per_match"],
-            ],
-        })
-        fig = px.funnel(funnel, x="Per Match", y="Stage", title="Progression Funnel Per Match")
-        st.plotly_chart(
-            _brand_fig(fig, 420),
-            width="stretch",
-            config=_plotly_export_config("progression_funnel", team, _export_scope_label()),
-        )
-    with f2:
-        zone = team_df.groupby(["depth_zone", "pitch_zone"]).size().reset_index(name="Events")
-        all_zones = pd.MultiIndex.from_product(
-            [DEPTH_ZONE_ORDER, PITCH_ZONE_ORDER],
-            names=["depth_zone", "pitch_zone"],
-        ).to_frame(index=False)
-        zone = all_zones.merge(zone, on=["depth_zone", "pitch_zone"], how="left").fillna({"Events": 0})
-        fig = px.density_heatmap(
-            zone,
-            x="pitch_zone",
-            y="depth_zone",
-            z="Events",
-            histfunc="sum",
-            title="Territory Heatmap",
-            category_orders={
-                "pitch_zone": PITCH_ZONE_ORDER,
-                "depth_zone": DEPTH_ZONE_ORDER,
-            },
-        )
-        st.plotly_chart(
-            _brand_fig(fig, 420),
-            width="stretch",
-            config=_plotly_export_config("territory_heatmap", team, _export_scope_label()),
-        )
+    # Where the team has the ball.
+    zone = team_df.groupby(["depth_zone", "pitch_zone"]).size().reset_index(name="Events")
+    all_zones = pd.MultiIndex.from_product(
+        [DEPTH_ZONE_ORDER, PITCH_ZONE_ORDER],
+        names=["depth_zone", "pitch_zone"],
+    ).to_frame(index=False)
+    zone = all_zones.merge(zone, on=["depth_zone", "pitch_zone"], how="left").fillna({"Events": 0})
+    fig = px.density_heatmap(
+        zone,
+        x="pitch_zone",
+        y="depth_zone",
+        z="Events",
+        histfunc="sum",
+        title="Territory Heatmap",
+        category_orders={
+            "pitch_zone": PITCH_ZONE_ORDER,
+            "depth_zone": DEPTH_ZONE_ORDER,
+        },
+    )
+    # The zone names say what the axes are; the note goes under them, not over.
+    fig.update_layout(xaxis_title=None, yaxis_title=None)
+    st.plotly_chart(
+        _drop_note_below_axis(_brand_fig(fig, 420)),
+        width="stretch",
+        config=_plotly_export_config("territory_heatmap", team, _export_scope_label()),
+    )
 
     # How the team moves the ball: how direct the passing is, and how long possessions last.
     d1, d2 = st.columns([1, 1])

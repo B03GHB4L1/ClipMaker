@@ -47,6 +47,7 @@ def deliberate_fixes(figure):
 ATTACK_LABEL = "ATTACK ->"
 XG_PLAYLIST = "Shots By xG"
 NEW_STYLE_CHARTS = re.compile(r"Pass Directness - |Possession Length - median")
+REMOVED_STYLE_CHARTS = re.compile(r"Progression Funnel Per Match")
 NEW_STYLE_CAPTIONS = {"No passes with end locations for this team.", "No possessions found for this team."}
 MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
 
@@ -76,6 +77,8 @@ def normal(element, norm):
         element = {**element, "options": [o for o in element["options"] if o != XG_PLAYLIST]}
     if kind == "Metric":
         return (kind, element["label"], norm.text(element["value"]), element.get("delta") or "")
+    if kind == "plotly" and REMOVED_STYLE_CHARTS.search(json.dumps(element["figure"].get("layout", {}))):
+        return None  # Taken out of Style Profile; see test_style_profile_has_no_progression_funnel.
     if kind == "plotly" and NEW_STYLE_CHARTS.search(json.dumps(element["figure"].get("layout", {}))):
         return None  # Added to Style Profile; see test_style_profile_directness_and_possession_length.
     if kind == "Caption" and element["value"] in NEW_STYLE_CAPTIONS:
@@ -87,6 +90,11 @@ def normal(element, norm):
         layout = {k: v for k, v in figure.get("layout", {}).items() if k != "template"}
         # The attack-direction label is new on the pitch maps; see test_pitch_maps_show_the_attack_direction.
         # The label gets 26px of its own at the top; the chart grows by the same so the pitch keeps its size.
+        if "Territory Heatmap" in json.dumps(layout.get("title")):
+            # Axis titles (raw column names) dropped and the note moved under the labels.
+            for axis in ("xaxis", "yaxis"):
+                layout[axis] = {k: v for k, v in (layout.get(axis) or {}).items() if k != "title"}
+            layout["annotations"] = [{k: v for k, v in a.items() if k != "yshift"} for a in layout.get("annotations") or []]
         if any(a.get("text") == ATTACK_LABEL for a in layout.get("annotations") or []):
             layout["annotations"] = [a for a in layout["annotations"] if a.get("text") != ATTACK_LABEL]
             layout["margin"] = {**layout["margin"], "t": layout["margin"]["t"] - 26}
@@ -167,6 +175,17 @@ class TacticalNativeParityTests(unittest.TestCase):
                             pd.testing.assert_frame_equal(expected.reset_index(drop=True), actual.reset_index(drop=True))
                             checked += 1
         self.assertGreater(checked, 40)
+
+    def test_style_profile_has_no_progression_funnel(self):
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            view, _ = tactical.render("style-profile", {}, project, projects)
+            text = json.dumps(view)
+            self.assertNotIn("Progression Funnel", text)
+            self.assertIn("Territory Heatmap", text)
 
     def test_pitch_maps_show_the_attack_direction(self):
         """Transition maps, the restart map and the event trace say which way the team attacks."""
