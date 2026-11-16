@@ -51,6 +51,20 @@
 .annotate-lane-edge { position: absolute; top: -2px; bottom: -2px; right: -5px; width: 10px; cursor: ew-resize; }
 .annotate-lane-edge::after { content: ""; position: absolute; top: 2px; bottom: 2px; left: 4px; width: 2px; background: #2f80ed; }
 .annotate-freezes li { display: flex; align-items: center; gap: 4px; }
+/* Followed players: one lane each, in output time like the freeze lane above. */
+.annotate-players { display: flex; flex-direction: column; gap: 3px; }
+.annotate-player { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; align-items: center; gap: 6px; font-size: 11px; }
+.annotate-player > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-player .annotate-lane { height: 12px; }
+.annotate-player button { padding: 2px 6px; border: 1px solid var(--cm-rule); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-cover { position: absolute; top: 3px; bottom: 3px; background: rgba(23, 24, 23, 0.25); pointer-events: none; }
+.annotate-progress { position: absolute; top: 0; bottom: 0; left: 0; background: rgba(200, 241, 53, 0.55); pointer-events: none; }
+.annotate-flag { position: absolute; top: 0; bottom: 0; min-width: 2px; pointer-events: none; }
+.annotate-flag.is-review { background: #e8a317; }
+.annotate-flag.is-lost { background: #ac302e; }
+.annotate-key { position: absolute; top: 1px; width: 8px; height: 8px; margin-left: -4px; background: var(--cm-ink); transform: rotate(45deg); pointer-events: none; }
+.annotate-track-status { margin: 0; font-size: 11px; }
+.annotate-track-status.is-problem { color: #8a5a00; }
 .annotate-freezes li > button:first-child { flex: 1; }
 .annotate-freezes input { width: 58px; font: inherit; font-size: 11px; padding: 2px 4px; border: 1px solid var(--cm-rule); background: var(--cm-paper); }
 .annotate-freezes .annotate-remove { width: auto; padding: 2px 6px; }

@@ -330,6 +330,11 @@ timeline, draw-on/fade/grow animation, preview playback through freezes.
 and cancel, keyframe correction with span re-tracking, review flags, scene-cut
 stop, player lanes, and points linked to tracks (moving rings, player-to-player
 lines, zones that reshape with their players).
+Built 2026-11-16: ViT model shipped in `app/telestration/models/` (training-data
+licence still to confirm before release, see its NOTICE.txt); MIL fallback with a
+visible notice if the model is missing. Checked on a real clip: a follow ran to a
+scene cut, a correction re-tracked only the frames after the corrected one, and
+cancel, stop following and a zone corner linked to a player all behaved as planned.
 
 **M4 – Export.** Render frames, freezes, drawings and text through the existing
 encoder; cancellation; save to the user's VizorPlay folder like other clips.
