@@ -107,6 +107,12 @@ class SharedUiTests(unittest.TestCase):
         reduced = styles[styles.index("@media (prefers-reduced-motion"):]
         self.assertRegex(reduced, r"\.page-wipe \{\s*display: none;")
 
+    def test_attack_label_adds_room_rather_than_shrinking_tactical_pitches(self):
+        source = (UI / "analysis" / "tabs" / "tactical.js").read_text(encoding="utf-8")
+        self.assertIn('note.text === "ATTACK ->") ? 26 : 0', source)
+        self.assertIn("t: 64 + labelRoom", source)  # phone layout
+        self.assertIn("Math.max(420, window.innerHeight - 120) + labelRoom", source)  # window-height cap
+
     def test_chart_pictures_are_saved_by_the_engine_not_browser_downloads(self):
         component = (UI.parent / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
         self.assertIn('fetch("/api/images/save"', component)

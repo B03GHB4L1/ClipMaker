@@ -254,7 +254,13 @@ def _brand_fig(fig, height=None, note="Values are calculated from the selected m
     return fig
 
 
+ATTACK_ROOM = 26  # px above the pitch for the attack label
+
+
 def _pitch_layout(fig, title="", height=520, attack_right=False):
+    if attack_right:
+        # The label gets its own room; the chart grows so the pitch keeps its size.
+        height += ATTACK_ROOM
     light = _is_light()
     paper = "#f5f0e8" if light else "#0b0e14"
     pitch = "#d4e8c2" if light else "#172617"
@@ -295,7 +301,7 @@ def _pitch_layout(fig, title="", height=520, attack_right=False):
         subtitle=_export_scope_label(),
         note="Pitch coordinates use a 0-100 event-data scale. Hover points or lines for event details.",
         height=height,
-        top=118 if attack_right else 92,  # room for the attack label under the subtitle
+        top=92 + ATTACK_ROOM if attack_right else 92,
         bottom=52,
     )
     return fig
