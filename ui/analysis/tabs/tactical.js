@@ -32,6 +32,8 @@ const pitchLayout = (target, figure) => {
   const named = new Set(figure.data.filter((trace) => trace.name && trace.showlegend !== false).map((trace) => trace.name));
   const hasLegend = layout.showlegend !== false && named.size > 1;
   const margin = { l: 80, r: 80, t: 100, b: 80, ...layout.margin };
+  // Maps with an "ATTACK ->" label above the pitch get extra room for it, never a smaller pitch.
+  const labelRoom = (layout.annotations || []).some((note) => note.text === "ATTACK ->") ? 26 : 0;
   const adjusted = {
     ...layout,
     // Spare room goes to the page colour around the pitch, never to stretched grass.
@@ -43,7 +45,7 @@ const pitchLayout = (target, figure) => {
     legendWidth = 0;
     const rows = hasLegend ? Math.ceil(named.size / 2) : 0;
     Object.assign(adjusted, {
-      margin: { ...margin, l: 8, r: 8, t: 64, b: 24 + rows * 22 },
+      margin: { ...margin, l: 8, r: 8, t: 64 + labelRoom, b: 24 + rows * 22 },
       legend: { ...layout.legend, orientation: "h", x: 0, xanchor: "left", y: -0.04, yanchor: "top" },
       title: layout.title && { ...layout.title, font: { ...layout.title.font, size: 13 } },
       // The hover hint does not apply to touch, and it runs off a phone screen.
@@ -56,7 +58,7 @@ const pitchLayout = (target, figure) => {
   const plotWidth = Math.max(160, target.clientWidth - (used.l ?? 80) - (used.r ?? 80) - legendWidth);
   const natural = plotWidth * ratio + (used.t ?? 100) + (used.b ?? 80);
   // Capped so the whole pitch fits the window.
-  adjusted.height = Math.round(Math.min(Math.max(natural, narrow ? 240 : 360), Math.max(420, window.innerHeight - 120)));
+  adjusted.height = Math.round(Math.min(Math.max(natural, (narrow ? 240 : 360) + labelRoom), Math.max(420, window.innerHeight - 120) + labelRoom));
   return adjusted;
 };
 

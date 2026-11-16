@@ -75,10 +75,11 @@ def normal(element, norm):
         figure = replace_placeholders(analysis_golden._round(deliberate_fixes(element["figure"])))
         layout = {k: v for k, v in figure.get("layout", {}).items() if k != "template"}
         # The attack-direction label is new on the pitch maps; see test_pitch_maps_show_the_attack_direction.
-        # The label also takes a little more room at the top (118px, not 92px).
+        # The label gets 26px of its own at the top; the chart grows by the same so the pitch keeps its size.
         if any(a.get("text") == ATTACK_LABEL for a in layout.get("annotations") or []):
             layout["annotations"] = [a for a in layout["annotations"] if a.get("text") != ATTACK_LABEL]
-            layout["margin"] = {**layout["margin"], "t": 92}
+            layout["margin"] = {**layout["margin"], "t": layout["margin"]["t"] - 26}
+            layout["height"] = layout["height"] - 26
         return (kind, norm.data({**figure, "layout": layout}))
     if kind == "Dataframe":
         return (kind, element["columns"], norm.data(analysis_golden._round(element["rows"])))
@@ -158,6 +159,8 @@ class TacticalNativeParityTests(unittest.TestCase):
 
     def test_pitch_maps_show_the_attack_direction(self):
         """Transition maps, the restart map and the event trace say which way the team attacks."""
+        import plotly.graph_objects as go
+        from analysis_core import tactical_page
         with analysis_golden.fixture_inputs() as (csvs, data):
             data.mkdir()
             ids = analysis_golden._make_projects(data, csvs[:1])
@@ -177,7 +180,11 @@ class TacticalNativeParityTests(unittest.TestCase):
                     # Just above the pitch's top-left corner, in pitch coordinates.
                     self.assertEqual((labels[0]["x"], labels[0]["y"], labels[0]["xanchor"], labels[0]["yanchor"]),
                                      (0, 100, "left", "bottom"))
-                    self.assertEqual(figures[0]["layout"]["margin"]["t"], 118)  # clear of the subtitle
+                    # Clear of the subtitle, and the pitch area is no smaller than before the label.
+                    layout = figures[0]["layout"]
+                    self.assertEqual(layout["margin"]["t"], 118)
+                    plain = tactical_page._pitch_layout(go.Figure(), title, height=layout["height"] - 26).to_plotly_json()["layout"]
+                    self.assertEqual(layout["height"] - layout["margin"]["t"], plain["height"] - plain["margin"]["t"])
             # Other pitch charts are unchanged.
             view, _ = tactical.render("style-profile", {}, project, projects)
             self.assertNotIn(ATTACK_LABEL, json.dumps(view))
