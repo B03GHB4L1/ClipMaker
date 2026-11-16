@@ -254,7 +254,7 @@ def _brand_fig(fig, height=None, note="Values are calculated from the selected m
     return fig
 
 
-def _pitch_layout(fig, title="", height=520):
+def _pitch_layout(fig, title="", height=520, attack_right=False):
     light = _is_light()
     paper = "#f5f0e8" if light else "#0b0e14"
     pitch = "#d4e8c2" if light else "#172617"
@@ -281,22 +281,30 @@ def _pitch_layout(fig, title="", height=520):
         dict(type="circle", x0=41.3, y0=37.2, x1=58.7, y1=62.8, line=dict(color=line, width=1.3)),
     ]
     fig.update_layout(shapes=shapes)
+    if attack_right:
+        # Which way the team plays, just above the pitch's top-left corner.
+        fig.add_annotation(
+            text="ATTACK ->", x=0, y=100, xref="x", yref="y", xanchor="left", yanchor="bottom", yshift=6,
+            showarrow=False, font=dict(size=12, color="#2f5d16" if light else "#8eff71", family="Geist Mono, monospace"),
+            bgcolor="rgba(245,240,232,0.72)" if light else "rgba(11,14,20,0.72)",
+            bordercolor="rgba(47,93,22,0.22)" if light else "rgba(142,255,113,0.28)", borderwidth=1, borderpad=4,
+        )
     _annotate_plotly_export(
         fig,
         title=title,
         subtitle=_export_scope_label(),
         note="Pitch coordinates use a 0-100 event-data scale. Hover points or lines for event details.",
         height=height,
-        top=92,
+        top=118 if attack_right else 92,  # room for the attack label under the subtitle
         bottom=52,
     )
     return fig
 
 
-def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, height=520):
+def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, height=520, attack_right=False):
     fig = go.Figure()
     if df.empty:
-        return _pitch_layout(fig, title, height=height)
+        return _pitch_layout(fig, title, height=height, attack_right=attack_right)
     hover_cols = hover_cols or []
     work = df.copy()
     work["x_plot"] = _num(work, "x")
@@ -321,10 +329,10 @@ def _scatter_pitch(df, title, color_col=None, color_map=None, hover_cols=None, h
             text=hover, hovertemplate="%{text}<extra></extra>",
             marker=dict(size=12, color=_pitch_accent(ACCENT), line=dict(width=1.2, color="#0e0e0e"), opacity=0.90 if _is_light() else 0.84),
         ))
-    return _pitch_layout(fig, title, height=height)
+    return _pitch_layout(fig, title, height=height, attack_right=attack_right)
 
 
-def _arrow_pitch(df, title, color=ACCENT, limit=80):
+def _arrow_pitch(df, title, color=ACCENT, limit=80, attack_right=False):
     fig = go.Figure()
     draw_color = _pitch_accent(color)
     draw_opacity = 0.84 if _is_light() else 0.58
@@ -342,7 +350,7 @@ def _arrow_pitch(df, title, color=ACCENT, limit=80):
                 hovertemplate=f"{row.get('playerName','')}<br>{row.get('type','')} - {_event_clock(row)}<extra></extra>",
                 showlegend=False,
             ))
-    return _pitch_layout(fig, title)
+    return _pitch_layout(fig, title, attack_right=attack_right)
 
 
 def _prepare_df(df):
@@ -857,7 +865,7 @@ def _trace_coordinates(row, focus_team=""):
 def _sequence_trace(window_df, focus_id=None, focus_team=""):
     fig = go.Figure()
     if window_df.empty:
-        return _pitch_layout(fig, "Event Trace", height=390)
+        return _pitch_layout(fig, "Event Trace", height=390, attack_right=True)
     work = window_df.sort_values("event_id").copy()
     for _, row in work.iterrows():
         color = ACCENT if row.get("event_id") == focus_id else (HOME_COLOR if row.get("type") in ["Pass", "Carry"] else AWAY_COLOR)
@@ -895,7 +903,7 @@ def _sequence_trace(window_df, focus_id=None, focus_team=""):
                 hovertemplate="%{text}<extra></extra>",
                 showlegend=False,
             ))
-    return _pitch_layout(fig, "Event Trace", height=390)
+    return _pitch_layout(fig, "Event Trace", height=390, attack_right=True)
 
 
 def _box_entry_mask(df):
@@ -1192,7 +1200,7 @@ def render_defensive_transitions(df, team):
         "Shot conceded": "#ff7351",
     }
     st.plotly_chart(
-        _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"], height=TRANSITION_PITCH_HEIGHT),
+        _scatter_pitch(trans, "Loss Locations By Transition Outcome", "outcome", colors, ["outcome", "opp_xT"], height=TRANSITION_PITCH_HEIGHT, attack_right=True),
         width="stretch",
         config=_plotly_export_config("defensive_transitions", team, _export_scope_label()),
     )
@@ -1238,7 +1246,7 @@ def render_attacking_transitions(df, team):
         "Stalled": MUTED,
     }
     st.plotly_chart(
-        _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"], height=TRANSITION_PITCH_HEIGHT),
+        _scatter_pitch(trans, "Recovery Locations By Attack Outcome", "outcome", colors, ["outcome", "xT_created"], height=TRANSITION_PITCH_HEIGHT, attack_right=True),
         width="stretch",
         config=_plotly_export_config("attacking_transitions", team, _export_scope_label()),
     )
@@ -1680,7 +1688,7 @@ def render_set_pieces(df, team):
     left, right = st.columns([1.25, 1])
     with left:
         st.plotly_chart(
-            _arrow_pitch(profile, "Restart Delivery Map", color=ACCENT),
+            _arrow_pitch(profile, "Restart Delivery Map", color=ACCENT, attack_right=True),
             width="stretch",
             config=_plotly_export_config("restart_delivery_map", team, _export_scope_label()),
         )

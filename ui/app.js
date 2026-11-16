@@ -237,12 +237,13 @@ document
   .querySelectorAll(".drawer-link")
   .forEach((link) => link.addEventListener("click", () => setDrawer(false)));
 
-window.addEventListener("load", () =>
-  requestAnimationFrame(() => {
-    body.classList.add("is-loaded");
-    connectApi();
-  }),
-);
+// The VizorPlay screen stays up a moment after the page loads, then peels away
+// (styles.css .page-wipe). The engine connects straight away underneath it.
+const WIPE_HOLD_MS = 1200;
+window.addEventListener("load", () => {
+  connectApi();
+  setTimeout(() => requestAnimationFrame(() => body.classList.add("is-loaded")), WIPE_HOLD_MS);
+});
 
 const observer = new IntersectionObserver(
   (entries) => {
