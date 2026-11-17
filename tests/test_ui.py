@@ -270,6 +270,34 @@ class SharedUiTests(unittest.TestCase):
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow", "token"])
 
+    def test_annotate_says_where_to_start_and_what_each_control_does(self):
+        # User request 2026-11-17: headed tool groups, plain labels, a start guide and a bigger video.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        rail = html[html.index('<div class="annotate-tools"'):html.index('<div class="annotate-centre">')]
+        self.assertEqual(re.findall(r'class="annotate-group-title" id="[a-z-]+">([A-Za-z ]+)<', rail), ["Draw", "Highlight", "Write"])
+        side = html[html.index('<section class="annotate-player-tools"'):html.index("</section>", html.index('<section class="annotate-player-tools"'))]
+        self.assertIn(">Mark a player</h2>", side)
+        self.assertIn(">Add at this frame</h2>", side)
+        self.assertIn("data-freeze ", side)
+        self.assertIn("data-board ", side)
+        self.assertEqual(side.count("<small>"), 5)  # every player and insert button says what it does
+        transport = html[html.index('<div class="annotate-transport"'):html.index("</div>", html.index('<div class="annotate-transport"'))]
+        self.assertNotIn("data-freeze", transport)  # it overflowed the transport row
+        # Vague tracking labels are gone; the buttons name their action.
+        for vague in ("Still right", "Next check"):
+            self.assertNotIn(vague, html + script)
+        for label in ("Confirm this frame", "Next frame to check", "Track again from here", "Check the tracking", "Fix the tracking"):
+            self.assertIn(label, html)
+        # A blank clip shows the steps to a first export; empty lanes say what will appear.
+        self.assertIn('"How to start"', script)
+        self.assertEqual(html.count("data-empty="), 2)
+        self.assertIn("content: attr(data-empty)", css)
+        # The video takes the height the bars, transport and footer leave.
+        self.assertIn("calc((100svh - 200px) * var(--clip-ratio, 1.7778))", css)
+        self.assertNotIn("100svh - 300px", css)
+
     def test_annotate_critique_fixes_hold(self):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
