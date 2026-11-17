@@ -34,8 +34,17 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-bar { display: flex; align-items: center; gap: 14px; min-height: 36px; }
 .annotate-back { display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px 6px 4px; margin-left: -4px; border-radius: 6px; color: var(--cm-muted); font-size: 11px; text-decoration: none; }
 .annotate-back:hover { background: var(--annotate-hover); color: var(--cm-ink); }
-.annotate-heading { display: flex; align-items: baseline; gap: 10px; flex: 0 1 auto; min-width: 0; }
-.annotate-bar .annotate-hint { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--cm-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-heading { display: flex; align-items: baseline; gap: 10px; flex: 0 1 auto; min-width: min(96px, 100%); }
+.annotate-bar .annotate-hint { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--cm-muted); font-size: 11px; line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-wrap: pretty; }
+/* The hint keeps room for a sentence; the clip name gives way first. */
+.annotate-bar .annotate-hint { flex: 1 1 0; min-width: 150px; }
+@media (max-width: 1060px) {
+  /* No room beside the commands: the hint takes its own line under them. */
+  .annotate-bar { flex-wrap: wrap; row-gap: 4px; }
+  .annotate-bar .annotate-hint { order: 5; flex-basis: 100%; min-width: 0; -webkit-line-clamp: 3; }
+  .annotate-commands { margin-left: auto; }
+}
 .annotate-heading h1 { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .annotate-save { flex: none; color: var(--cm-muted); font-size: 11px; }
 .annotate-commands { display: flex; align-items: center; gap: 6px; }
@@ -77,6 +86,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 }
 .annotate-tool-group { display: flex; flex-direction: column; gap: 2px; }
 .annotate-tool-group + .annotate-tool-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--cm-rule); }
+.annotate-group-title { margin: 2px 0 1px; color: var(--cm-muted); font-size: 10px; font-weight: 600; text-align: center; }
 .annotate-tools button {
   position: relative; display: grid; justify-items: center; gap: 3px; padding: 8px 2px 6px;
   border: 0; border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer;
@@ -88,11 +98,14 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-tools button[aria-pressed="true"] { background: var(--cm-ink); color: #fff; }
 .annotate-tools button[aria-pressed="true"] kbd { color: #b9bcb4; }
 /* Players: Ring and Follow work on a player, beside the player settings. */
-.annotate-player-tools { padding: 10px 12px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
-.annotate-player-tools h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
-.annotate-player-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.annotate-player-tools { display: flex; flex-direction: column; gap: 12px; padding: 10px 10px 10px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-player-tools h2 { margin: 0 0 6px 2px; font-size: 12px; font-weight: 600; }
+.annotate-player-buttons { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.annotate-option { display: flex; flex-direction: column; min-width: 0; }
+.annotate-option small { color: var(--cm-muted); font-size: 10.5px; font-weight: 400; line-height: 1.3; }
+.annotate-player-buttons button[aria-pressed="true"] small { color: #c9ccc4; }
 .annotate-player-buttons button {
-  position: relative; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 8px;
+  position: relative; display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 4px 22px 4px 8px;
   border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink);
   font: inherit; font-size: 11px; font-weight: 500; line-height: 1.25; text-align: left; cursor: pointer;
 }
@@ -106,8 +119,8 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
    The video's height leaves room for the bars, transport and timeline in one window. */
 .annotate-centre {
   display: flex; flex-direction: column; gap: 8px; justify-self: center; min-width: min(100%, 320px);
-  width: min(100%, calc((100vh - 300px) * var(--clip-ratio, 1.7778)));
-  width: min(100%, calc((100svh - 300px) * var(--clip-ratio, 1.7778)));
+  width: min(100%, calc((100vh - 200px) * var(--clip-ratio, 1.7778)));
+  width: min(100%, calc((100svh - 200px) * var(--clip-ratio, 1.7778)));
 }
 /* The stage takes the clip's own shape, so drawing coordinates are the video's. */
 .annotate-stage { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #0d0e0c; aspect-ratio: var(--clip-ratio, 16 / 9); }
@@ -153,6 +166,8 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-lane-edge { position: absolute; top: -3px; bottom: -3px; right: -5px; width: 10px; cursor: ew-resize; }
 .annotate-lane-edge::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 2px; border-radius: 1px; background: var(--annotate-freeze); }
 .annotate-drawings .annotate-lane { height: auto; min-height: 18px; }
+.annotate-lane[data-empty]:not(:has(.annotate-lane-freeze, .annotate-lane-drawing))::before {
+  content: attr(data-empty); position: absolute; inset: 0 8px; overflow: hidden; color: var(--cm-muted); font-size: 10.5px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .annotate-lane-drawing {
   position: absolute; height: 6px; min-width: 4px; border-radius: 3px; background: #a9ada2; cursor: pointer;
 }
@@ -199,7 +214,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-fields select { min-width: 112px; cursor: pointer; }
 .annotate-fields input[type="number"] { width: 72px; font-variant-numeric: tabular-nums; }
 .annotate-fields input[type="text"] { width: 140px; }
-.annotate-fields input[type="range"] { width: 96px; accent-color: var(--cm-ink); }
+.annotate-fields input[type="range"] { width: 96px; height: 20px; min-height: 0; margin: 0; accent-color: var(--cm-ink); } /* the shared 44px touch height left gaps between rows */
 .annotate-slider { display: inline-flex; align-items: center; gap: 6px; }
 .annotate-slider output { min-width: 3.5ch; color: var(--cm-ink); font-variant-numeric: tabular-nums; text-align: right; }
 .annotate-fields input[type="color"] { width: 32px; height: 24px; padding: 2px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; cursor: pointer; }
@@ -212,6 +227,17 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main .annotate-primary { height: 34px; border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
 .annotate-main .annotate-primary:hover:not(:disabled) { background: #b8e123; }
 .annotate-muted { margin: 0; color: var(--cm-muted); font-size: 11px; line-height: 1.5; }
+.annotate-steps { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.annotate-steps li { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; font-size: 11px; line-height: 1.45; counter-increment: step; }
+.annotate-steps li::before {
+  content: counter(step); grid-row: span 2; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--cm-ink); color: #fff; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.annotate-steps strong { font-weight: 600; }
+.annotate-steps span { color: var(--cm-muted); }
+.annotate-follow-group { display: flex; flex-direction: column; gap: 6px; }
+.annotate-follow-group[hidden] { display: none; }
+.annotate-follow-group h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; }
+.annotate-follow-group .annotate-pair { display: grid; grid-template-columns: minmax(0, 1fr); }
 
 .annotate-list { list-style: none; margin: 0; padding: 0 6px 8px; max-height: 260px; overflow: auto; }
 .annotate-list button:hover:not(.is-selected) { background: var(--annotate-hover); }
@@ -250,11 +276,11 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
     -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
   .annotate-tools::after { content: ""; flex: none; width: 20px; }
   .annotate-tool-group { flex-direction: row; }
+  .annotate-group-title { display: none; }
   .annotate-tool-group + .annotate-tool-group { margin: 0 0 0 4px; padding: 0 0 0 4px; border-top: 0; border-left: 1px solid var(--cm-rule); }
   .annotate-tools button { min-width: 58px; }
   .annotate-centre { width: 100%; min-width: 0; }
   .annotate-transport { flex-wrap: wrap; }
-  .annotate-main .annotate-freeze { margin-left: auto; }
   .annotate-transport input[type="range"] { order: 10; flex: 1 1 100%; margin: 4px 0 0; }
   .annotate-time { order: 11; }
   .annotate-row { grid-template-columns: 64px minmax(0, 1fr) 68px; gap: 8px; }

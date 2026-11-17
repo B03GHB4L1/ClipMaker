@@ -357,7 +357,7 @@ document.addEventListener("click", async (event) => {
 // Tools and the inspector
 // ---------------------------------------------------------------------------
 const HINTS = {
-  select: "Click a drawing to select it; drag it or its handles. Delete removes it.",
+  select: "Pick a tool, or click a drawing to edit it.",
   ring: "Drag from a player's feet outwards to size the ring.",
   spotlight: "Drag from a player's feet outwards; drag the top handle to change the beam.",
   arrow: "Drag from where the arrow starts to where it points.",
@@ -366,7 +366,7 @@ const HINTS = {
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line).",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
   follow: "Drag a box around a player, head to boots. A ring follows them; drag it back if it slips.",
-  token: "Click to place a player token, then type the shirt number. Team and name are on the right.",
+  token: "Click to place a player token. Number, team and name are on the right.",
 };
 const FOLLOWABLE = ["ring", "spotlight", "text"];
 let followTarget = null; // the drawing "Follow player" will link, or null for a new ring
@@ -378,6 +378,7 @@ const setTool = (next) => {
   document.querySelectorAll("button[data-tool]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.tool === tool)));
   canvas.dataset.tool = tool;
   $("[data-hint]").textContent = HINTS[tool];
+  $("[data-hint]").title = HINTS[tool];
   if (tool !== "select") selectedId = null;
   renderInspector();
   scheduleRender();
@@ -424,9 +425,25 @@ const renderInspector = () => {
   const kind = item ? item.kind : DEFAULT_STYLE[tool] ? tool : null; // select and follow have no drawing style
   const fields = $("[data-style-fields]");
   fields.replaceChildren();
-  $("[data-inspector-title]").textContent = item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : "Nothing selected";
-  if (!kind) {
-    fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted", textContent: "Choose a tool, or select a drawing to change it." }));
+  const empty = !doc?.items.length && !doc?.freezes.length;
+  $("[data-inspector-title]").textContent = item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : empty ? "How to start" : "Nothing selected";
+  if (!kind && empty) {
+    // First use: the four steps from a blank clip to an exported video.
+    const steps = document.createElement("ol");
+    steps.className = "annotate-steps";
+    steps.append(...[
+      ["Find the moment", "Play, or drag the playhead under the video."],
+      ["Pick a tool", "Choose one under Draw, Highlight or Mark a player, then drag on the video."],
+      ["Adjust it", "Click a drawing to change its look and when it shows."],
+      ["Export video", "When you are done. Your work saves as you go."],
+    ].map(([title, text]) => {
+      const step = document.createElement("li");
+      step.append(Object.assign(document.createElement("strong"), { textContent: title }), Object.assign(document.createElement("span"), { textContent: text }));
+      return step;
+    }));
+    fields.append(steps);
+  } else if (!kind) {
+    fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted", textContent: "Click a drawing on the video or in Drawings below to change it, or pick a tool to add one." }));
   } else {
     const style = item ? styleOf(item) : toolStyle[kind];
     if (kind === "token") fields.append(...tokenFields(item));
@@ -575,7 +592,7 @@ function renderFollowPanel(item) {
     state.textContent = job ? `Following ${playerName(track)}: tracking ${Math.round(job.progress * 100)}%...`
       : !at ? `Following ${playerName(track)}.`
         : at.held ? `${playerName(track)}: not tracked on this frame, so the drawing holds its last place. Drag it onto the player to carry on.`
-          : at.state === REVIEW ? `${playerName(track)}: check this frame. Still right, or drag the drawing back onto the player.`
+          : at.state === REVIEW ? `${playerName(track)}: the tracker was unsure here. If the drawing is on them, press Confirm this frame; if not, drag it onto them.`
             : at.state === 1 ? `${playerName(track)}: placed by you on this frame.`
               : `Following ${playerName(track)}.`;
     $("[data-follow-label]").value = track.label || "";
