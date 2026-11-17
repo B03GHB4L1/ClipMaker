@@ -371,6 +371,8 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn(".export-bar .export-settings { order: 5; flex-basis: 100%; }", css)
         self.assertNotIn(".export-settings[open] { order", css)
         self.assertNotIn(":has(.export-settings[open])", css)
+        # The toggle's own row stays short so the export line fits above the footer at 1440x900.
+        self.assertIn(".export-bar .export-settings > summary { min-height: 28px; }", css)
 
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
