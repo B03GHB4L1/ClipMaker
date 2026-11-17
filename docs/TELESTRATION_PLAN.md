@@ -449,6 +449,12 @@ user's clips, CPU only:
   least 90% of found players on the right team, under 2 s per board on this
   laptop, model pack under 50 MB.
 
+Done 2026-11-17, **go**: see [M6_BOARD_SPIKE.md](M6_BOARD_SPIKE.md). YOLOX-Nano
+(3.7 MB) on six tiles found 93% of players on 17 wide frames in 0.47 s;
+shirt hue put about 94% on the right team; the homography (simulated) is
+accurate to about 0.7 m with clicks spread across the frame, so M7 shows the
+fitted pitch lines on the video for checking.
+
 **M7 – Board from this frame.** Board insert (a freeze with a pitch
 background, kept in the existing `freezes` list so old projects open
 unchanged); `ui/annotate/board.js` draws the pitch; calibration clicks with a
