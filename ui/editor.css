@@ -550,6 +550,10 @@
 /* One layout open or closed: the choices and both buttons on the first row, the
    settings toggle on its own row under them. */
 .export-bar .export-settings { order: 5; flex-basis: 100%; }
+/* That extra row must not push the export line under the footer on a 1440x900
+   screen, so the toggle row is short and sits close under the buttons. */
+.export-bar .export-settings:not([open]) { margin-top: -4px; }
+.export-bar .export-settings > summary { min-height: 28px; }
 .export-bar .export-button { order: 4; }
 .export-bar .annotate-button {
   order: 4;
