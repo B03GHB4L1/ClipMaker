@@ -429,3 +429,36 @@ export const cropDrawn = (data, width, height) => {
   for (let y = 0; y < h; y += 1) pixels.set(data.subarray(((top + y) * width + left) * 4, ((top + y) * width + left + w) * 4), y * w * 4);
   return { x: left, y: top, w, h, pixels };
 };
+
+export const TILE = 64;
+/**
+ * The 64 px tiles where `current` differs from `previous` (both RGBA of the whole frame),
+ * as [{x, y, w, h, pixels}]; null when more than half the tiles changed, so a whole
+ * overlay is cheaper. A moving board changes only round its tokens (M8).
+ */
+export const changedTiles = (previous, current, width, height, share = 0.5) => {
+  const before = new Uint32Array(previous.buffer, previous.byteOffset, width * height);
+  const after = new Uint32Array(current.buffer, current.byteOffset, width * height);
+  const columns = Math.ceil(width / TILE);
+  const rows = Math.ceil(height / TILE);
+  const tiles = [];
+  for (let ty = 0; ty < rows; ty += 1) {
+    for (let tx = 0; tx < columns; tx += 1) {
+      const x = tx * TILE;
+      const y = ty * TILE;
+      const w = Math.min(TILE, width - x);
+      const h = Math.min(TILE, height - y);
+      let changed = false;
+      for (let row = y; row < y + h && !changed; row += 1) {
+        const start = row * width + x;
+        for (let i = start; i < start + w; i += 1) if (before[i] !== after[i]) { changed = true; break; }
+      }
+      if (!changed) continue;
+      if (tiles.length + 1 > columns * rows * share) return null;
+      const pixels = new Uint8Array(w * h * 4);
+      for (let row = 0; row < h; row += 1) pixels.set(current.subarray(((y + row) * width + x) * 4, ((y + row) * width + x + w) * 4), row * w * 4);
+      tiles.push({ x, y, w, h, pixels });
+    }
+  }
+  return tiles;
+};

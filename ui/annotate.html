@@ -5,9 +5,9 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=10" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=14" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=19" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=20" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=11"></script>
+  <script type="module" src="annotate.js?v=12"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
@@ -74,6 +74,7 @@
           <div class="annotate-calibrate-body">
             <svg class="annotate-pitch" data-calib-pitch viewBox="-56 -37.5 112 75" role="group" aria-label="Pitch marks: pick one, then click it on the video"></svg>
             <div class="annotate-calibrate-side">
+              <label class="annotate-calibrate-target" data-calib-target-row hidden>Make <select data-calib-target></select></label>
               <p class="annotate-calibrate-state" data-calib-state role="status"></p>
               <div class="annotate-calibrate-progress" data-calib-progress hidden>
                 <progress max="1" value="0" aria-label="Progress"></progress>

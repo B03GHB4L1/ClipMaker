@@ -294,6 +294,11 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-main .annotate-calibrate-actions button:not(.annotate-primary) { height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
 .annotate-main .annotate-calibrate-actions button:disabled { color: #a3a69e; cursor: not-allowed; }
 .annotate-calibrate-limits { font-size: 10.5px; }
+.annotate-calibrate-target { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--cm-muted); font-size: 11px; }
+.annotate-calibrate-target[hidden] { display: none; }
+.annotate-calibrate-target select { flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-token-moves { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.annotate-main .annotate-token-moves button { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
 @media (max-width: 720px) {
   .annotate-calibrate-body { grid-template-columns: minmax(0, 1fr); }
 }

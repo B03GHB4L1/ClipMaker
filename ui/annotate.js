@@ -3,11 +3,11 @@
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage, showSaved, showSaveError } from "./save-clip.js";
-import { cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
+import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
-  itemsAt, newToken, removeInsert, textOn, tokensFromPlayers } from "./annotate/board.js";
+  itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
@@ -201,8 +201,11 @@ const trackById = (id) => tracks().find((track) => track.id === id) || null;
 const frameNow = () => source().frame;
 const boardNow = () => (clip ? boardAt(doc.value, clip, outTime) : null);
 // On a board only its own drawings show; elsewhere the clip's drawings (annotate/board.js).
-const shown = () => itemsAt(doc.value, clip, outTime).map((item) => resolveItem(item, tracks(), frameNow()));
-const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(item, tracks(), frameNow()) : null; };
+// Moving board tokens are placed for the moment on screen (M8).
+const shown = () => itemsAt(doc.value, clip, outTime).map((item) => resolveItem(placedAt(doc.value, clip, item, outTime), tracks(), frameNow()));
+const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(placedAt(doc.value, clip, item, outTime), tracks(), frameNow()) : null; };
+// Seconds into the board that drawing `item` is on, at the playhead.
+const boardSeconds = (item) => outTime - freezeStart(item.on, clip, doc.freezes);
 const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
 
 const boxPixels = ([fx, fy, w, h]) => [(fx - w / 2) * canvas.width, (fy - h) * canvas.height, w * canvas.width, h * canvas.height];
@@ -530,7 +533,21 @@ function tokenFields(item) {
     label.append(`${labelText} `, input);
     return label;
   };
-  return [team, text("Number", "label", 3, "10"), text("Name", "name", 30, "Optional")];
+  const rows = [team, text("Number", "label", 3, "10"), text("Name", "name", 30, "Optional")];
+  if (item.on !== undefined) {
+    const count = item.moves?.length || 0;
+    const row = Object.assign(document.createElement("span"), { className: "annotate-token-moves" });
+    const note = Object.assign(document.createElement("span"), { className: "annotate-muted",
+      textContent: count ? `${count} move${count === 1 ? "" : "s"} on this board` : "Still. Drag it later in the board to make it move." });
+    row.append(note);
+    if (count) {
+      const clear = Object.assign(document.createElement("button"), { type: "button", textContent: "Clear moves" });
+      clear.onclick = () => { const current = doc.find(item.id); if (current) doc.replace(clearMoves(current)); };
+      row.append(clear);
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 
 // The colours of the teams on board `frame` (found from the shirts), or the defaults.
@@ -1123,6 +1140,13 @@ function openCalibration() {
   select(null);
   calib = { frame: frameNow(), pairs: [], pick: null, selected: null, drag: null, job: null, model: null, message: null };
   buildPitch();
+  // Boards before this frame with tokens: their players can glide to where they are here (M8).
+  const earlier = sortedFreezes().filter((f) => f.background && f.atFrame < calib.frame
+    && doc.items.some((item) => item.on === f.atFrame && item.kind === "token"));
+  const target = $("[data-calib-target]");
+  target.replaceChildren(new Option("A new board", ""), ...earlier.reverse().map((f) => new Option(`Players of board ${f.atFrame + 1} move here`, String(f.atFrame))));
+  target.value = "";
+  $("[data-calib-target-row]").hidden = !earlier.length;
   calibPanel.hidden = false;
   document.querySelectorAll("[data-calib-hide]").forEach((element) => { element.hidden = true; });
   $("[data-board]").setAttribute("aria-expanded", "true");
@@ -1218,8 +1242,10 @@ function renderCalibration() {
   line.textContent = state;
   line.classList.toggle("is-problem", problem);
   const busy = Boolean(calib.job);
+  const moving = $("[data-calib-target]").value !== "";
   $("[data-calib-find]").disabled = !fit || busy;
-  $("[data-calib-empty]").disabled = busy;
+  $("[data-calib-find]").textContent = moving ? "Find players and move" : "Find players";
+  $("[data-calib-empty]").disabled = busy || moving;
   $("[data-calib-remove]").disabled = !calibPair(calib.selected) || busy;
   $("[data-calib-progress]").hidden = !busy;
   if (busy) $("[data-calib-progress] progress").value = calib.job.progress;
@@ -1394,7 +1420,37 @@ async function downloadModel() {
 }
 
 // Insert the board (one undo step): tokens for the players found, or empty.
+// Two team colours are the same teams when each is nearer its partner than to the other one.
+const colourGap = (a, b) => {
+  const [x, y] = [a, b].map((hex) => { const n = parseInt(String(hex).slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; });
+  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+};
+
+// The players found here are where the tokens of an earlier board glide to.
+function moveBoardHere(target, result) {
+  const colours = teamColours(target);
+  // The finder lists the bigger team first in each frame, so the order can flip between frames.
+  const swap = colourGap(colours.home, result.teams[1]) + colourGap(colours.away, result.teams[0])
+    < colourGap(colours.home, result.teams[0]) + colourGap(colours.away, result.teams[1]);
+  const players = playersOnPitch(result.players.map((player) => ({ ...player, team: swap && player.team < 2 ? 1 - player.team : player.team })), calibFit());
+  let report;
+  doc.commitDocument((value) => {
+    report = moveBoard(value, clip, target, players, aspect(), colours);
+    return report.value;
+  });
+  const from = calib.frame;
+  closeCalibration();
+  setTool("select");
+  seekOutput(freezeStart(target, clip, doc.freezes));
+  const parts = [`${report.matched} player${report.matched === 1 ? "" : "s"} glide to where they are on frame ${from + 1}`];
+  if (report.added) parts.push(`${report.added} new appear${report.added === 1 ? "s" : ""}`);
+  if (report.kept) parts.push(`${report.kept} not found there stay${report.kept === 1 ? "s" : ""} put`);
+  trackStatus(`${parts.join("; ")}. The board is now 3 s longer; press Play to watch. Drag a token to correct it.`);
+}
+
 function makeBoard(result) {
+  const target = $("[data-calib-target]").value;
+  if (result && target !== "") return moveBoardHere(Number(target), result);
   const frame = boardFrame(doc.value, clip, calib.frame);
   if (frame === null) {
     calib.message = "There is no free frame after this one for a board.";
@@ -1626,7 +1682,11 @@ function applyEdit({ type, id, index, base, preview }) {
     return;
   }
   const linked = [...linkedTracks(original)];
-  if (!linked.length) {
+  if (original.kind === "token" && original.on !== undefined) {
+    const seconds = boardSeconds(original);
+    doc.replace(setMove(original, seconds, preview.points[0]));
+    if (seconds >= 0.05) trackStatus(`Move set at ${seconds.toFixed(1)} s into the board: the token glides there. Drag it at the board's start to change where it begins.`);
+  } else if (!linked.length) {
     doc.replace({ ...original, points: preview.points });
   } else if (linked.length === 1 && original.points.every(isLinked)) {
     correctTrack(linked[0], preview.points[0][0] - base.points[0][0], preview.points[0][1] - base.points[0][1]);
@@ -1745,7 +1805,7 @@ const overlayKey = (value, n) => {
   const shown = [];
   itemsAt(value, clip, t).forEach((item) => {
     const state = animation(item, t);
-    if (state) shown.push(resolveItem(item, value.tracks || [], frame), state);
+    if (state) shown.push(resolveItem(placedAt(value, clip, item, t), value.tracks || [], frame), state);
   });
   const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))]);
   return { t, board, shown, key };
@@ -1756,12 +1816,13 @@ const overlayKey = (value, n) => {
 const BATCH_BYTES = 8_000_000;
 const BATCH_FRAMES = 150;
 const sendBatch = async (sessionId, entries) => {
-  const header = new TextEncoder().encode(JSON.stringify(entries.map(({ frame, crop }) => ({
-    frame, box: crop ? [crop.x, crop.y, crop.w, crop.h] : null,
-  }))));
+  // A patch lists the tiles that changed over the overlay before it; a crop is a whole new overlay.
+  const header = new TextEncoder().encode(JSON.stringify(entries.map(({ frame, crop, tiles }) => (tiles
+    ? { frame, tiles: tiles.map((tile) => [tile.x, tile.y, tile.w, tile.h]) }
+    : { frame, box: crop ? [crop.x, crop.y, crop.w, crop.h] : null }))));
   const size = new Uint8Array(4);
   new DataView(size.buffer).setUint32(0, header.length);
-  const body = new Blob([size, header, ...entries.filter((entry) => entry.crop).map((entry) => entry.crop.pixels)]);
+  const body = new Blob([size, header, ...entries.flatMap((entry) => (entry.tiles ? entry.tiles.map((tile) => tile.pixels) : entry.crop ? [entry.crop.pixels] : []))]);
   const response = await fetch(`/api/editor-exports/${sessionId}/overlays`, {
     method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
   });
@@ -1791,6 +1852,7 @@ const exportVideo = async () => {
     sheet.height = height;
     const context = sheet.getContext("2d", { willReadFrequently: true });
     let previous = null;
+    let held = null; // the whole overlay the engine holds now (RGBA), for patches; null when clear
     let batch = [];
     let batchBytes = 0;
     let sending = Promise.resolve();
@@ -1807,15 +1869,24 @@ const exportVideo = async () => {
       const { board, shown, key } = overlayKey(value, n);
       if (key !== previous) {
         previous = key;
-        let crop = null;
+        let entry = { frame: n, crop: null };
         if (shown.length || board) {
           context.clearRect(0, 0, width, height);
           if (board) drawBoard(context, width, height, board.background); // covers the frozen frame
           for (let index = 0; index < shown.length; index += 2) drawItem(context, shown[index], width, height, shown[index + 1]);
-          crop = cropDrawn(context.getImageData(0, 0, width, height).data, width, height);
+          const pixels = context.getImageData(0, 0, width, height).data;
+          // Moving tokens change a few places: send those tiles over the overlay already held (M8).
+          const tiles = held ? changedTiles(held, pixels, width, height) : null;
+          if (tiles) entry = tiles.length ? { frame: n, tiles } : null;
+          else entry = { frame: n, crop: cropDrawn(pixels, width, height) };
+          held = entry?.crop === null ? null : pixels;
+        } else {
+          held = null;
         }
-        batch.push({ frame: n, crop });
-        batchBytes += crop ? crop.pixels.length : 0;
+        if (entry) {
+          batch.push(entry);
+          batchBytes += entry.tiles ? entry.tiles.reduce((sum, tile) => sum + tile.pixels.length, 0) : entry.crop ? entry.crop.pixels.length : 0;
+        }
         if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_FRAMES) await flush();
       }
       if (n % 10 === 0) exportStatus(`Drawing overlays: frame ${n + 1} of ${frames}`, (n / frames) * DRAWING_SHARE);
@@ -1882,6 +1953,7 @@ const wire = () => {
   $("[data-calib-close]").onclick = closeCalibration;
   $("[data-calib-stop]").onclick = stopCalibrationJob;
   $("[data-calib-download]").onclick = downloadModel;
+  $("[data-calib-target]").onchange = renderCalibration;
   $("[data-anim-in]").onchange = (event) => setAnimation({ animate: event.target.value });
   $("[data-anim-out]").onchange = (event) => setAnimation({ animateOut: event.target.value });
   $("[data-anim-seconds]").onchange = (event) => {

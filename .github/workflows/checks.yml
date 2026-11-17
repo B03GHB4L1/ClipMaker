@@ -45,6 +45,7 @@ jobs:
       - run: node --test tests/gif_animation.test.mjs
       - run: node --test tests/annotate.test.mjs
       - run: node --test tests/board.test.mjs
+      - run: node --test tests/moving_board.test.mjs
       - run: python packaging/clipmaker_api_server.py --help
       - uses: ./.github/actions/ubuntu-mirror
       - run: python -m playwright install --with-deps chromium
