@@ -4,6 +4,10 @@
 - Maintain one shared frontend for Windows, Linux, and macOS.
 - Treat the original applications in `older versions/` as the feature baseline. Record parity in a checklist before claiming completion.
 - Preserve the existing exclusion of AI filtering unless the user explicitly changes it.
+- Vision models for analysis (such as player detection and tracking) are allowed under these rules:
+  - Optional models are downloaded only when the user asks. Each comes from a fixed official address, is checked against a fixed checksum, and runs only on this computer.
+  - Each model must be under a permissive licence (Apache 2.0, MIT or BSD), with its training-data terms checked.
+  - The 0.7 MB ViT tracker model is the one exception: it is bundled in the base app.
 - The user authorized pushing code and running tests in the existing public repository on 20 October 2026. Do not change repository visibility or publish releases without a separate request.
 
 ## User Experience

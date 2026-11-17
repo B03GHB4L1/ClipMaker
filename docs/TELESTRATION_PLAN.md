@@ -270,7 +270,7 @@ between players, and zones whose corners follow players.
   the base app as an exception to the model policy (2026-11-16); it is not
   used for filtering, so it does not touch the AI-filtering exclusion.
 
-## AI model policy (proposed, awaiting the user's AGENTS.md wording)
+## AI model policy (recorded in AGENTS.md, 2026-11-17)
 
 The user is slightly open to AI models. To keep the app light and fast, any
 model must follow these rules:
@@ -297,9 +297,11 @@ model must follow these rules:
    light-and-fast principle. Target: the whole optional pack under about 50 MB
    (Metrica ships about 320 MB of models plus runtimes). Sizes in this plan are
    estimates until measured.
-7. **Recorded.** AGENTS.md excludes "AI filtering"; vision models are a
-   separate thing, but the allowed kinds of models should be written there
-   explicitly. The user decides that wording.
+7. **Recorded.** AGENTS.md still excludes "AI filtering". Since 2026-11-17 it
+   also allows vision models for analysis: downloaded only on request from a
+   fixed official address, checked against a fixed checksum, run locally, and
+   under Apache 2.0, MIT or BSD with training-data terms checked. The bundled
+   ViT tracker is the stated exception.
 
 The architecture already supports this: the `Tracker` adapter, per-frame
 confidence/state fields and review flags work unchanged with a model-backed
