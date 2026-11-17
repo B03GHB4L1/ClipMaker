@@ -383,7 +383,7 @@ analyst value it adds, its cost in app size, speed and complexity, and a
 recommendation (adopt, adapt, skip). We do **not** adopt everything Metrica
 has; each addition must earn its place against the lightness goal below.
 
-## Tactical board and inserts (M6-M8, roadmap step 2). Plan 2026-11-17, awaiting approval
+## Tactical board and inserts (M6-M8, roadmap step 2). Plan 2026-11-17
 
 **Goal.** The analyst can stop the clip and show something else for a few
 seconds: the held frame (today's freeze), a picture (for example a Tactical Lab
@@ -513,14 +513,13 @@ under 30 s on this laptop.
 - Browser check: board and picture inserts drawn, saved, reopened, exported;
   desktop and narrow layouts; no console errors.
 
-### Decisions for the user
+### Decisions (user, 2026-11-17)
 
-1. Board look: a grass-green pitch with white lines, a light pitch with grey
-   lines, or both (the plan assumes both).
-2. Tokens: shirt number only, or number plus an optional name under it (the
-   plan assumes the optional name).
-3. Whether M7 and M8 follow straight after M6, or coding on recorded footage
-   (roadmap step 3) comes first.
+1. Board look: both, a grass-green pitch with white lines and a light pitch
+   with grey lines.
+2. Tokens: shirt number, with an optional name under it.
+3. Order: M7 and M8 follow straight after M6; coding on recorded footage comes
+   after them.
 
 ## Roadmap after M5
 
