@@ -528,7 +528,6 @@
 }
 .export-bar .export-button:hover:not(:disabled) { background: #b8e123; }
 .export-bar .export-button:disabled { background: #e6e7e1; color: #8a8d85; }
-.export-settings[open] { flex-basis: 100%; }
 .export-settings > summary { display: flex; align-items: center; width: max-content; min-height: 40px; color: var(--cm-muted); font-size: 11px; cursor: pointer; }
 .export-settings > summary { gap: 8px; list-style: none; }
 .export-settings > summary::-webkit-details-marker { display: none; }
@@ -548,7 +547,9 @@
 .export-settings-body { margin-top: 12px; }
 .export-settings .export-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .export-settings .folder-control { gap: 8px; margin-bottom: 12px; }
-.export-bar .export-settings { order: 3; margin-left: auto; }
+/* One layout open or closed: the choices and both buttons on the first row, the
+   settings toggle on its own row under them. */
+.export-bar .export-settings { order: 5; flex-basis: 100%; }
 .export-bar .export-button { order: 4; }
 .export-bar .annotate-button {
   order: 4;
@@ -566,10 +567,7 @@
 .export-bar .annotate-button:hover:not(:disabled) { border-color: var(--cm-ink); }
 .export-bar .annotate-button:disabled { color: #8a8d85; cursor: not-allowed; }
 .export-bar .annotate-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.export-bar:has(.export-settings[open]) .annotate-button { margin-left: auto; }
-.export-bar:has(.export-settings[open]) .annotate-button + .export-button { margin-left: 0; }
-.export-bar .export-settings[open] { order: 5; margin-left: 0; }
-.export-bar:has(.export-settings[open]) .export-button { margin-left: auto; }
+.export-bar .annotate-button { margin-left: auto; }
 .export-bar .export-job { order: 6; }
 
 /* ---- Export progress card ------------------------------------------ */

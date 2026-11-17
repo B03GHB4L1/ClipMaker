@@ -322,6 +322,13 @@ class SharedUiTests(unittest.TestCase):
         correct = script[script.index("const correctTrack"):]
         self.assertIn("queued.set(trackId, [{ start: Math.max(...earlier), limit: frame - 1 }])", correct)
 
+    def test_export_line_looks_the_same_with_settings_open_or_closed(self):
+        # The buttons stay on the first row and the settings toggle sits under them either way.
+        css = (UI / "editor.css").read_text(encoding="utf-8")
+        self.assertIn(".export-bar .export-settings { order: 5; flex-basis: 100%; }", css)
+        self.assertNotIn(".export-settings[open] { order", css)
+        self.assertNotIn(":has(.export-settings[open])", css)
+
     def test_annotate_page_scrolls_past_the_window(self):
         # The editor shares the analysis shell, which locks the page to the window
         # (overflow hidden, height 100dvh); the editor's lanes and panels sit below it.
