@@ -383,6 +383,145 @@ analyst value it adds, its cost in app size, speed and complexity, and a
 recommendation (adopt, adapt, skip). We do **not** adopt everything Metrica
 has; each addition must earn its place against the lightness goal below.
 
+## Tactical board and inserts (M6-M8, roadmap step 2). Plan 2026-11-17, awaiting approval
+
+**Goal.** The analyst can stop the clip and show something else for a few
+seconds: the held frame (today's freeze), a picture (for example a Tactical Lab
+map), or a blank pitch board. All three use the same drawing tools. On a board,
+player tokens can move smoothly between positions the analyst sets, so a move
+can be explained on the board and then shown on the video.
+
+**What stays the same.** An insert is a freeze with a different background, so
+the two timelines, the freeze panel and timeline blocks, silence under the
+insert, undo, saving, and export (overlays drawn by the page, composited by the
+engine) all carry over. No new dependency and no model.
+
+### Saved data
+
+`freezes` keeps its name and meaning so existing projects open unchanged. Each
+entry gains an optional `background`:
+
+```json
+"freezes": [
+  { "atFrame": 120, "seconds": 3 },
+  { "atFrame": 200, "seconds": 6, "background": { "kind": "board", "pitch": "full", "theme": "grass" } },
+  { "atFrame": 200, "seconds": 4, "background": { "kind": "image", "asset": "3f9a...e1", "fit": "contain" } }
+]
+```
+
+- No `background` is a freeze, as today. `board` has `pitch` (`full`, `half`,
+  `blank`) and `theme` (`grass`, `light`). `image` points at a picture stored
+  with the project; `fit` is `contain` (letterboxed on the board colour) or
+  `cover`.
+- Several inserts may sit on the same frame and play in list order, so "freeze,
+  then board" works. The rule "two freezes on the same frame" becomes "two
+  *plain* freezes on the same frame".
+- An insert may also sit at `atFrame` = the clip's frame count, after the last
+  frame, so a board can close the clip.
+- Drawings: an item drawn during a board or picture insert is tied to it
+  (`"on": <index>`, kept in step when inserts are reordered or removed) and can
+  only use fixed points. Drawings on the clip, including Follow rings, are
+  hidden during board and picture inserts and still show during plain freezes.
+- New item kind `token`: a filled circle with a short label (number or
+  initials), `team` (`home`, `away`, `other`; colours in the style panel) and
+  an optional name under it.
+- Movement (M7): any item with fixed points may carry
+  `"moves": [{ "t": 2.4, "points": [[x, y]] }]`, times in output seconds inside
+  the item's show window. Between moves the points ease in and out; before the
+  first move the item sits at `points`. At most 50 moves per item, same number
+  of points each time, validated on save like everything else.
+
+### Pictures
+
+- **Insert picture** opens the system file picker in the page
+  (`<input type="file">`). The browser reads the file and posts the bytes; the
+  engine never opens a path named by the page.
+- `POST /api/editor/<project>/<clip>/assets`: PNG or JPEG only (checked by
+  content, not the name), under 25 MB, decoded with OpenCV (already bundled)
+  to check it is a real picture no larger than 8192 px a side. Stored
+  atomically as `<project>/annotations/assets/<sha256>.<png|jpg>`, so the same
+  picture is kept once. Returns `{asset, width, height}`.
+- `GET /api/editor/<project>/<clip>/assets/<sha256>` serves it to the editor;
+  the id must be 64 hex characters and the file must exist in that folder.
+- Pictures no clip in the project uses are removed when the project is saved,
+  never while any clip still points at them.
+- The Tactical Lab already saves its maps as pictures, so inserting a Tactical
+  Lab map works through the picker from day one. A "Send to editor" button on
+  the Tactical Lab is left for later.
+
+### Board
+
+- Drawn in the page by a new `ui/annotate/board.js` (pitch markings at the
+  clip's size, 105 x 68 m proportions, full or half pitch, grass or light).
+  The preview draws it under the drawings; export uses the same function.
+- Tokens are placed with a **Token** tool (click to drop, the number goes up by
+  one; Home/Away toggle in the style panel). A **Line-up** button drops 11 home
+  and 11 away tokens in a 4-4-2 to start from.
+
+### Export
+
+- The page draws each board or picture background once at the clip's size and
+  sends it (raw RGBA, one request) to
+  `POST /api/editor-exports/<id>/backgrounds`. For frames inside that insert,
+  the engine starts from the background instead of the held source frame, then
+  lays the overlays on top as today. Silence under inserts is unchanged.
+- Moving tokens change the overlay on every frame, and their crop box can
+  cover most of the frame (about 8 MB a frame at 1080p). M8 sends overlays as
+  64 px tiles that contain drawing pixels, instead of one bounding box, so a
+  board of 22 moving tokens costs about 1-2 MB a frame.
+
+### Editor
+
+- The **Freeze** panel becomes **Inserts**, with three add buttons: Freeze
+  frame, Pitch board, Picture. Each row has its length, type, move up/down for
+  inserts on the same frame, and delete.
+- The timeline marks inserts by kind (held frame, board, picture).
+- Setting a move (M7): with a board item selected, move the playhead and drag
+  the item; that adds or updates a move at the playhead. Move times show as
+  diamonds on the item's row in the Drawings lane, draggable and deletable,
+  like track keyframes.
+
+### Milestones
+
+**M6 – Inserts: picture and board.** `background` on freezes, several inserts
+per frame, insert after the last frame; picture upload and serving; board
+drawing; Token tool and Line-up; drawings tied to an insert; Inserts panel and
+timeline marks; export with backgrounds. Static tokens only.
+
+**M7 – Moving drawings.** `moves` on fixed-point items, eased between moves;
+diamonds in the Drawings lane; the same interpolation in `timeline.py` and
+`timeline.js`, checked by the shared fixture.
+
+**M8 – Tiled overlays.** Export sends only the 64 px tiles that contain
+drawing pixels. Target: a 6 s board with 22 moving tokens at 1080p exports in
+under 30 s on this laptop.
+
+### Tests
+
+- Old documents (freezes without `background`) load and save unchanged.
+- Validation: unknown background kinds, bad asset ids, `on` pointing nowhere,
+  linked points on an insert's drawing, moves outside the show window or with
+  the wrong number of points.
+- Output-time mapping with several inserts on one frame and one after the
+  last frame, in Python and JS from the shared fixture.
+- Uploads: PNG and JPEG accepted; a renamed text file, a too-large picture and
+  a picture over 8192 px rejected; the same picture twice is stored once; an
+  asset id with `..` or the wrong length is refused.
+- Export: an insert's frames match the background with the drawings on top
+  (mean pixel difference against the preview, as in M4); silence under it;
+  audio after it in step; cancel leaves no files.
+- Browser check: board and picture inserts drawn, saved, reopened, exported;
+  desktop and narrow layouts; no console errors.
+
+### Decisions for the user
+
+1. Board look: a grass-green pitch with white lines, a light pitch with grey
+   lines, or both (the plan assumes both).
+2. Tokens: shirt number only, or number plus an optional name under it (the
+   plan assumes the optional name).
+3. Whether M7 and M8 follow straight after M6, or coding on recorded footage
+   (roadmap step 3) comes first.
+
 ## Roadmap after M5
 
 Agreed order (2026-11-16). Each step gets its own plan before it starts.
