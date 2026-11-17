@@ -232,11 +232,26 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn('apiRequest("/api/previews/render"', handler)
         self.assertIn("annotateClip(result.file.url", handler)
 
+    def test_board_from_frame_is_wired_and_hides_the_transport_while_marking(self):
+        # M7: the board button opens the pitch marks; transport and timeline step aside so the frame stays put.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        self.assertIn('data-board aria-expanded="false" aria-controls="calibrate-panel"', html)
+        self.assertEqual(html.count("data-calib-hide"), 2)
+        self.assertIn(".annotate-transport[hidden], .annotate-timeline[hidden], .annotate-calibrate[hidden] { display: none; }", css)
+        for hook in ("openCalibration", "findPlayers", "downloadModel", "stopCalibrationJob", "removeCalibrationPoint", "closeCalibration"):
+            self.assertIn(hook, script)
+        # Boards are drawn in the preview, the screenshot and the exported overlay.
+        self.assertEqual(script.count("drawBoard("), 3)
+        # The download is offered, never started on its own.
+        self.assertIn('$("[data-calib-download]").onclick = downloadModel;', script)
+
     def test_annotate_markup_keeps_every_hook_the_editor_script_uses(self):
         # The editor's markup was redesigned; annotate.js finds its controls by data attribute.
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
-        built = {"data-head", "data-lane-freeze", "data-freeze-seconds", "data-bar"}  # made by the script itself
+        built = {"data-head", "data-lane-freeze", "data-freeze-seconds", "data-bar", "data-mark"}  # made by the script itself
         hooks = set(re.findall(r'\$\("\[(data-[a-z-]+)', script)) | set(re.findall(r'querySelector(?:All)?\("\[(data-[a-z-]+)', script))
         self.assertGreater(len(hooks), 20)
         for hook in sorted(hooks - built):
@@ -247,13 +262,13 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn('classList.toggle("is-playing", playing)', script)
 
     def test_annotate_drawing_tools_stand_apart_from_select_and_player_tools(self):
-        # User request: the rail holds drawing tools only; Select sits in the command bar; Ring and Follow with Players.
+        # User request: the rail holds drawing tools only; Select sits in the command bar; Ring, Follow and Token with Players.
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         section = lambda start, end: html[html.index(start):html.index(end, html.index(start))]
         rail = section('<div class="annotate-tools"', '<div class="annotate-centre">')
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "text"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
-        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow"])
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow", "token"])
 
     def test_annotate_critique_fixes_hold(self):
         html = (UI / "annotate.html").read_text(encoding="utf-8")

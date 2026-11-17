@@ -15,7 +15,7 @@ import re
 from typing import Any
 
 VERSION = 1
-KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone"}
+KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token"}
 ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
 EXIT_ANIMATIONS = {"none", "fade"}
 EASES = {"linear", "ease-out", "ease-in-out"}
@@ -26,8 +26,14 @@ MAX_KEYFRAMES = 500
 OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its player's feet
 FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
-MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40}
-MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3}
+MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1}
+MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1}
+# Tactical boards (M7): a freeze can show a pitch instead of the held frame.
+BOARD_VIEWS = {"full", "left", "right", "blank"}
+BOARD_THEMES = {"grass", "light"}
+TEAMS = {"home", "away", "other"}
+MAX_LABEL = 3
+MAX_NAME = 30
 MAX_TEXT = 300
 COORD_MIN, COORD_MAX = -0.5, 1.5
 COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -201,24 +207,52 @@ def _show(value: Any, limit: float, kind: str) -> dict[str, Any]:
     return clean
 
 
+def _background(value: Any, frames: int) -> dict[str, Any]:
+    """A board's picture: {"kind": "board", "view", "theme", optional "fromFrame" and team colours}."""
+    if not isinstance(value, dict) or value.get("kind") != "board":
+        raise ValueError("A freeze's picture must be a board.")
+    extra = set(value) - {"kind", "view", "theme", "fromFrame", "home", "away"}
+    if extra:
+        raise ValueError(f"Unknown board setting: {sorted(extra)[0]}.")
+    if value.get("view") not in BOARD_VIEWS:
+        raise ValueError(f"A board shows one of: {', '.join(sorted(BOARD_VIEWS))}.")
+    if value.get("theme") not in BOARD_THEMES:
+        raise ValueError(f"A board's look is one of: {', '.join(sorted(BOARD_THEMES))}.")
+    clean = {"kind": "board", "view": value["view"], "theme": value["theme"]}
+    if "fromFrame" in value:
+        source = value["fromFrame"]
+        if isinstance(source, bool) or not isinstance(source, int) or not 0 <= source < frames:
+            raise ValueError("A board must be made from a frame of the clip.")
+        clean["fromFrame"] = source
+    for team in ("home", "away"):
+        if team in value:
+            if not isinstance(value[team], str) or not COLOUR.match(value[team]):
+                raise ValueError(f"The {team} colour must be a colour like #d6262e.")
+            clean[team] = value[team].lower()
+    return clean
+
+
 def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
     if not isinstance(value, list) or len(value) > MAX_FREEZES:
         raise ValueError(f"A clip can hold up to {MAX_FREEZES} freezes.")
     clean = []
     for freeze in value:
-        if not isinstance(freeze, dict) or set(freeze) != {"atFrame", "seconds"}:
-            raise ValueError("Each freeze needs its frame and length only.")
+        if not isinstance(freeze, dict) or not {"atFrame", "seconds"} <= set(freeze) <= {"atFrame", "seconds", "background"}:
+            raise ValueError("Each freeze needs its frame and length, and may have a board.")
         frame = freeze["atFrame"]
         if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
             raise ValueError("A freeze must be on a frame of the clip.")
         seconds = _number(freeze["seconds"], *FREEZE_SECONDS, "Freeze length")
-        clean.append({"atFrame": frame, "seconds": round(seconds, 3)})
+        entry = {"atFrame": frame, "seconds": round(seconds, 3)}
+        if "background" in freeze:
+            entry["background"] = _background(freeze["background"], frames)
+        clean.append(entry)
     if len({freeze["atFrame"] for freeze in clean}) != len(clean):
         raise ValueError("Two freezes are on the same frame.")
     return sorted(clean, key=lambda freeze: freeze["atFrame"])
 
 
-def _item(value: Any, limit: float, tracks: set[str]) -> dict[str, Any]:
+def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Each drawing must be an object.")
     item_id = value.get("id")
@@ -247,7 +281,32 @@ def _item(value: Any, limit: float, tracks: set[str]) -> dict[str, Any]:
         clean["text"] = text
     elif "text" in value:
         raise ValueError(f"A {kind} has no text.")
-    known = {"id", "kind", "points", "style", "show", "geometry", "text"}
+    if kind == "token":
+        team = value.get("team", "home")
+        if team not in TEAMS:
+            raise ValueError("A token's team must be home, away or other.")
+        clean["team"] = team
+        label = value.get("label", "")
+        if not isinstance(label, str) or len(label) > MAX_LABEL:
+            raise ValueError(f"A token's number can have up to {MAX_LABEL} characters.")
+        clean["label"] = label
+        if "name" in value:
+            name = value["name"]
+            if not isinstance(name, str) or len(name) > MAX_NAME:
+                raise ValueError(f"A token's name can have up to {MAX_NAME} characters.")
+            if name.strip():
+                clean["name"] = name
+    elif {"team", "label", "name"} & set(value):
+        raise ValueError(f"A {kind} has no team, number or name.")
+    if "on" in value:
+        # Drawn on a board: shown only on it, and fixed in place (no player on a board to follow).
+        board = value["on"]
+        if isinstance(board, bool) or not isinstance(board, int) or board not in boards:
+            raise ValueError("A drawing belongs to a board that is not in the clip.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError("Drawings on a board cannot follow a player.")
+        clean["on"] = board
+    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on"}
     extra = set(value) - known
     if extra:
         raise ValueError(f"Unknown drawing setting: {sorted(extra)[0]}.")
@@ -271,7 +330,8 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     limit = duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
     tracks = _tracks(value.get("tracks", []), frames)
     track_ids = {track["id"] for track in tracks}
-    clean_items = [_item(item, limit, track_ids) for item in items]
+    boards = {freeze["atFrame"] for freeze in freezes if "background" in freeze}
+    clean_items = [_item(item, limit, track_ids, boards) for item in items]
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")

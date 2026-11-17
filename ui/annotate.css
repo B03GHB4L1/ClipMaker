@@ -10,6 +10,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   --annotate-review: #d08a00;
   --annotate-lost: #ac302e;
   --annotate-freeze: #2f6fd6;
+  --annotate-board: #2f7a43;
   gap: 8px;
 }
 .annotate-page ::selection { background: var(--cm-accent); color: var(--cm-ink); }
@@ -146,6 +147,9 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-lane-head { position: absolute; top: -4px; bottom: -4px; z-index: 1; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--cm-ink); pointer-events: none; }
 .annotate-lane-freeze { position: absolute; top: 0; bottom: 0; min-width: 4px; border-radius: 3px; background: color-mix(in srgb, var(--annotate-freeze) 30%, transparent); box-shadow: inset 2px 0 var(--annotate-freeze); }
 .annotate-lane-freeze.is-current { background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent); }
+.annotate-lane-freeze.is-board { background: color-mix(in srgb, var(--annotate-board) 30%, transparent); box-shadow: inset 2px 0 var(--annotate-board); }
+.annotate-lane-freeze.is-board.is-current { background: color-mix(in srgb, var(--annotate-board) 50%, transparent); }
+.annotate-lane-freeze.is-board .annotate-lane-edge::after { background: var(--annotate-board); }
 .annotate-lane-edge { position: absolute; top: -3px; bottom: -3px; right: -5px; width: 10px; cursor: ew-resize; }
 .annotate-lane-edge::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 2px; border-radius: 1px; background: var(--annotate-freeze); }
 .annotate-drawings .annotate-lane { height: auto; min-height: 18px; }
@@ -220,6 +224,9 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-freezes li { display: flex; align-items: center; gap: 4px; }
 .annotate-freezes li > button:first-child { flex: 1; }
 .annotate-freezes input { width: 56px; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
+.annotate-freezes li.is-board { flex-wrap: wrap; padding-bottom: 4px; }
+.annotate-board-settings { display: flex; flex: 1 0 100%; gap: 4px; padding-left: 8px; }
+.annotate-board-settings select { flex: 1; min-width: 0; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
 .annotate-main .annotate-remove { width: 26px; height: 26px; padding: 0; color: var(--cm-muted); }
 .annotate-main .annotate-remove svg { width: 12px; height: 12px; }
 .annotate-main .annotate-remove:hover:not(:disabled) { color: #9b2a28; }
@@ -253,4 +260,40 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
   .annotate-row { grid-template-columns: 64px minmax(0, 1fr) 68px; gap: 8px; }
   .annotate-track-status { margin-left: 0; }
   .annotate-inspector { position: static; max-height: none; }
+}
+
+/* Board from this frame: pitch marks to click, then the video to click them on. */
+.annotate-transport[hidden], .annotate-timeline[hidden], .annotate-calibrate[hidden] { display: none; }
+.annotate-calibrate { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); font-size: 12px; }
+.annotate-calibrate-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.annotate-calibrate h2 { margin: 0; font-size: 12px; font-weight: 600; }
+.annotate-main .annotate-calibrate-close { height: 28px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-calibrate-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.annotate-main svg.annotate-pitch { width: 100%; height: auto; stroke: none; stroke-width: 0; }
+.annotate-pitch-ground { fill: #2f6b3a; }
+.annotate-pitch-line { fill: none; stroke: rgba(255, 255, 255, 0.85); stroke-width: 0.45; stroke-linejoin: round; }
+.annotate-pitch-mark { cursor: pointer; outline: none; }
+.annotate-pitch-hit { fill: transparent; }
+.annotate-pitch-dot { fill: #fff; stroke: #171817; stroke-width: 0.45; transition: r 120ms var(--cm-settle); }
+.annotate-pitch-mark:hover .annotate-pitch-dot, .annotate-pitch-mark:focus-visible .annotate-pitch-dot { r: 1.8; }
+.annotate-pitch-mark:focus-visible .annotate-pitch-hit { stroke: #fff; stroke-width: 0.5; }
+.annotate-pitch-mark.is-placed .annotate-pitch-dot { fill: var(--cm-accent); }
+.annotate-pitch-mark.is-selected .annotate-pitch-dot { r: 1.8; stroke: #fff; }
+.annotate-pitch-mark.is-picked .annotate-pitch-dot { r: 2.1; fill: var(--cm-accent); stroke: #fff; stroke-width: 0.7; }
+.annotate-calibrate-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.annotate-calibrate-state { margin: 0; font-size: 12px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.annotate-calibrate-state.is-problem { color: #8a5a00; }
+.annotate-calibrate-progress { display: flex; align-items: center; gap: 8px; }
+.annotate-calibrate-progress[hidden], .annotate-calibrate-install[hidden] { display: none; }
+.annotate-calibrate-progress progress { flex: 1; min-width: 60px; height: 6px; border: 0; border-radius: 3px; background: #eff0ec; accent-color: var(--cm-ink); }
+.annotate-calibrate-progress progress::-webkit-progress-bar { border-radius: 3px; background: #eff0ec; }
+.annotate-calibrate-progress progress::-webkit-progress-value { border-radius: 3px; background: var(--cm-ink); }
+.annotate-calibrate-install { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid #ecd39a; border-radius: 6px; background: #fff9ea; }
+.annotate-calibrate-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.annotate-calibrate-actions .annotate-primary { grid-column: 1 / -1; }
+.annotate-main .annotate-calibrate-actions button:not(.annotate-primary) { height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-calibrate-actions button:disabled { color: #a3a69e; cursor: not-allowed; }
+.annotate-calibrate-limits { font-size: 10.5px; }
+@media (max-width: 720px) {
+  .annotate-calibrate-body { grid-template-columns: minmax(0, 1fr); }
 }
