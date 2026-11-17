@@ -383,143 +383,91 @@ analyst value it adds, its cost in app size, speed and complexity, and a
 recommendation (adopt, adapt, skip). We do **not** adopt everything Metrica
 has; each addition must earn its place against the lightness goal below.
 
-## Tactical board and inserts (M6-M8, roadmap step 2). Plan 2026-11-17
+## Board from this frame (M6-M8). Plan 2026-11-17, revised the same day
 
-**Goal.** The analyst can stop the clip and show something else for a few
-seconds: the held frame (today's freeze), a picture (for example a Tactical Lab
-map), or a blank pitch board. All three use the same drawing tools. On a board,
-player tokens can move smoothly between positions the analyst sets, so a move
-can be explained on the board and then shown on the video.
+**Why it changed.** The first board plan (blank pitch, tokens placed by hand)
+was judged not useful enough: placing players by hand is the tedious part. The
+user wants the board to start from where the players really are in a frame of
+the video. This pulls the single-frame part of roadmap step 6 ("board from this
+frame") forward. Tracking every player through a clip stays in step 6.
 
-**What stays the same.** An insert is a freeze with a different background, so
-the two timelines, the freeze panel and timeline blocks, silence under the
-insert, undo, saving, and export (overlays drawn by the page, composited by the
-engine) all carry over. No new dependency and no model.
+**What the analyst does.** Pause on a frame, press **Board from this frame**,
+click four or more known pitch points (box corners, where the halfway line
+meets the touchline, and so on). A pitch board appears with a token for every
+visible player in the right place, coloured by team. The analyst fixes the odd
+mistake, adds anyone off-screen, numbers or names who matters, and draws.
 
-### Saved data
+### How it works
 
-`freezes` keeps its name and meaning so existing projects open unchanged. Each
-entry gains an optional `background`:
+1. **Find the players (small model, one frame).** A person detector finds a
+   box around each visible player. It runs once per board, through OpenCV DNN
+   (already bundled), so it adds no runtime. Wide broadcast shots show players
+   only 20-40 px tall, so the frame may be split into overlapping tiles. Which
+   detector, and whether tiling is needed, is decided by the M6 spike.
+2. **Split the teams (no model).** Shirt colour from the upper half of each
+   box, grass pixels masked out, grouped into two teams. Referees and
+   goalkeepers come out as odd colours; the analyst moves them with one click.
+3. **Map video to pitch (no model).** The analyst's four or more clicks on
+   known pitch points give a homography (OpenCV `findHomography`). Each
+   player's feet (bottom centre of the box) map to pitch metres. An automatic
+   pitch-landmark model (roadmap step 5) can replace the clicks later.
 
-```json
-"freezes": [
-  { "atFrame": 120, "seconds": 3 },
-  { "atFrame": 200, "seconds": 6, "background": { "kind": "board", "pitch": "full", "theme": "grass" } },
-  { "atFrame": 200, "seconds": 4, "background": { "kind": "image", "asset": "3f9a...e1", "fit": "contain" } }
-]
-```
+**Limits, stated in the UI.** Players outside the frame cannot appear (a
+broadcast frame typically shows 10-16). Shirt numbers are not read; tokens
+start without a number. Players far from the camera or overlapping may be
+missed or merged.
 
-- No `background` is a freeze, as today. `board` has `pitch` (`full`, `half`,
-  `blank`) and `theme` (`grass`, `light`). `image` points at a picture stored
-  with the project; `fit` is `contain` (letterboxed on the board colour) or
-  `cover`.
-- Several inserts may sit on the same frame and play in list order, so "freeze,
-  then board" works. The rule "two freezes on the same frame" becomes "two
-  *plain* freezes on the same frame".
-- An insert may also sit at `atFrame` = the clip's frame count, after the last
-  frame, so a board can close the clip.
-- Drawings: an item drawn during a board or picture insert is tied to it
-  (`"on": <index>`, kept in step when inserts are reordered or removed) and can
-  only use fixed points. Drawings on the clip, including Follow rings, are
-  hidden during board and picture inserts and still show during plain freezes.
-- New item kind `token`: a filled circle with a short label (number or
-  initials), `team` (`home`, `away`, `other`; colours in the style panel) and
-  an optional name under it.
-- Movement (M7): any item with fixed points may carry
-  `"moves": [{ "t": 2.4, "points": [[x, y]] }]`, times in output seconds inside
-  the item's show window. Between moves the points ease in and out; before the
-  first move the item sits at `points`. At most 50 moves per item, same number
-  of points each time, validated on save like everything else.
+### Tokens
 
-### Pictures
+Free form: a filled circle in the team colour, an optional shirt number and an
+optional name under it. No formation presets. Tokens can be added, deleted and
+dragged anywhere. Board looks: both grass (white lines) and light (grey lines).
 
-- **Insert picture** opens the system file picker in the page
-  (`<input type="file">`). The browser reads the file and posts the bytes; the
-  engine never opens a path named by the page.
-- `POST /api/editor/<project>/<clip>/assets`: PNG or JPEG only (checked by
-  content, not the name), under 25 MB, decoded with OpenCV (already bundled)
-  to check it is a real picture no larger than 8192 px a side. Stored
-  atomically as `<project>/annotations/assets/<sha256>.<png|jpg>`, so the same
-  picture is kept once. Returns `{asset, width, height}`.
-- `GET /api/editor/<project>/<clip>/assets/<sha256>` serves it to the editor;
-  the id must be 64 hex characters and the file must exist in that folder.
-- Pictures no clip in the project uses are removed when the project is saved,
-  never while any clip still points at them.
-- The Tactical Lab already saves its maps as pictures, so inserting a Tactical
-  Lab map works through the picker from day one. A "Send to editor" button on
-  the Tactical Lab is left for later.
+### Model rules
 
-### Board
-
-- Drawn in the page by a new `ui/annotate/board.js` (pitch markings at the
-  clip's size, 105 x 68 m proportions, full or half pitch, grass or light).
-  The preview draws it under the drawings; export uses the same function.
-- Tokens are placed with a **Token** tool (click to drop, the number goes up by
-  one; Home/Away toggle in the style panel). A **Line-up** button drops 11 home
-  and 11 away tokens in a 4-4-2 to start from.
-
-### Export
-
-- The page draws each board or picture background once at the clip's size and
-  sends it (raw RGBA, one request) to
-  `POST /api/editor-exports/<id>/backgrounds`. For frames inside that insert,
-  the engine starts from the background instead of the held source frame, then
-  lays the overlays on top as today. Silence under inserts is unchanged.
-- Moving tokens change the overlay on every frame, and their crop box can
-  cover most of the frame (about 8 MB a frame at 1080p). M8 sends overlays as
-  64 px tiles that contain drawing pixels, instead of one bounding box, so a
-  board of 22 moving tokens costs about 1-2 MB a frame.
-
-### Editor
-
-- The **Freeze** panel becomes **Inserts**, with three add buttons: Freeze
-  frame, Pitch board, Picture. Each row has its length, type, move up/down for
-  inserts on the same frame, and delete.
-- The timeline marks inserts by kind (held frame, board, picture).
-- Setting a move (M7): with a board item selected, move the playhead and drag
-  the item; that adds or updates a move at the playhead. Move times show as
-  diamonds on the item's row in the Drawings lane, draggable and deletable,
-  like track keyframes.
+The detector follows the "AI model policy" above: permissive licence for code
+and weights (no Ultralytics YOLO), optional model pack downloaded on first use
+with a checksum, never silently disabled, output is a suggestion the analyst
+corrects. AGENTS.md's "AI filtering" exclusion is about filtering events and
+does not cover this, but the allowed model kinds still need the user's
+wording there before a model ships.
 
 ### Milestones
 
-**M6 – Inserts: picture and board.** `background` on freezes, several inserts
-per frame, insert after the last frame; picture upload and serving; board
-drawing; Token tool and Line-up; drawings tied to an insert; Inserts panel and
-timeline marks; export with backgrounds. Static tokens only.
+**M6 – Spike (go/no-go), no UI.** Standalone script, outside the app, on the
+user's clips, CPU only:
+- Detectors: YOLOX-s (36 MB, already used in M0), plus YOLOX-Tiny and
+  YOLOX-Nano if the user approves the downloads; whole frame and tiled.
+- Measured on 20 frames from wide and close shots: players found against a
+  count by eye, false boxes, time per frame, model size.
+- Team split by shirt colour on the same frames: share of players put on the
+  right team.
+- Homography from hand-clicked points on a few frames: error in metres at
+  known pitch points not used for the fit.
+- Result in `docs/M6_BOARD_SPIKE.md` with a recommendation.
+- Go if: at least 80% of visible outfield players found on wide shots, at
+  least 90% of found players on the right team, under 2 s per board on this
+  laptop, model pack under 50 MB.
 
-**M7 – Moving drawings.** `moves` on fixed-point items, eased between moves;
-diamonds in the Drawings lane; the same interpolation in `timeline.py` and
-`timeline.js`, checked by the shared fixture.
+**M7 – Board from this frame.** Board insert (a freeze with a pitch
+background, kept in the existing `freezes` list so old projects open
+unchanged); `ui/annotate/board.js` draws the pitch; calibration clicks with a
+pitch diagram showing which point to click; detection job with progress and
+cancel; tokens placed and coloured; correcting team, moving, adding and
+deleting tokens; export with the board as background. Picture inserts (for
+example a Tactical Lab map) come along, as they share the same code.
 
-**M8 – Tiled overlays.** Export sends only the 64 px tiles that contain
-drawing pixels. Target: a 6 s board with 22 moving tokens at 1080p exports in
-under 30 s on this laptop.
+**M8 – Moving boards.** Tokens glide between positions: either from two board
+frames (the same players matched by position and team) or by tracking each
+player through the clip with the M5 tracker. Export sends only the 64 px
+overlay tiles that contain drawing pixels, so moving boards stay light.
 
-### Tests
+### Tests (M7 onwards)
 
-- Old documents (freezes without `background`) load and save unchanged.
-- Validation: unknown background kinds, bad asset ids, `on` pointing nowhere,
-  linked points on an insert's drawing, moves outside the show window or with
-  the wrong number of points.
-- Output-time mapping with several inserts on one frame and one after the
-  last frame, in Python and JS from the shared fixture.
-- Uploads: PNG and JPEG accepted; a renamed text file, a too-large picture and
-  a picture over 8192 px rejected; the same picture twice is stored once; an
-  asset id with `..` or the wrong length is refused.
-- Export: an insert's frames match the background with the drawings on top
-  (mean pixel difference against the preview, as in M4); silence under it;
-  audio after it in step; cancel leaves no files.
-- Browser check: board and picture inserts drawn, saved, reopened, exported;
-  desktop and narrow layouts; no console errors.
-
-### Decisions (user, 2026-11-17)
-
-1. Board look: both, a grass-green pitch with white lines and a light pitch
-   with grey lines.
-2. Tokens: shirt number, with an optional name under it.
-3. Order: M7 and M8 follow straight after M6; coding on recorded footage comes
-   after them.
+Homography maths against known points; team split on fixed colour samples;
+detections mapped to pitch metres; board inserts saved and reopened; old
+documents unchanged; export of a board insert matches the preview; desktop and
+narrow layouts; missing model pack reported clearly, never silently skipped.
 
 ## Roadmap after M5
 
