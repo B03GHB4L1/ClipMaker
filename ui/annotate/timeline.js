@@ -101,6 +101,7 @@ export const setFreeze = (doc, clip, frame, seconds) => {
     if (t > start + next) return start + next; // inside a freeze that shrank
     return t;
   };
-  const nextFreezes = sorted([...freezes.filter((f) => f.atFrame !== frame), ...(next > 0 ? [{ atFrame: frame, seconds: next }] : [])]);
+  const kept = freezes.find((f) => f.atFrame === frame) || {}; // a board keeps its background
+  const nextFreezes = sorted([...freezes.filter((f) => f.atFrame !== frame), ...(next > 0 ? [{ ...kept, atFrame: frame, seconds: next }] : [])]);
   return { ...doc, freezes: nextFreezes, items: retime(doc, doc.items, map, totalSeconds(clip, nextFreezes)) };
 };

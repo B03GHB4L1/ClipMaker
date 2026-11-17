@@ -15,6 +15,7 @@ export const DEFAULT_STYLE = {
   freehand: { stroke: "#ff4d4d", width: 5 },
   text: { color: "#ffffff", background: "#171817", size: 40, bold: false },
   zone: { stroke: "#2f80ed", width: 3, fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25 },
+  token: { fill: "#d6262e", color: "#ffffff", stroke: "#ffffff", size: 34, width: 2 },
 };
 
 /** Zone fills: a wash of colour, or lines across the zone (hatching). */
@@ -241,6 +242,45 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
       textLines(item).forEach((line, index) => ctx.fillText(line, box.x + box.pad, box.y + box.pad + index * box.size * 1.25 + box.size * 0.1));
       break;
     }
+    case "token": {
+      const [cx, cy] = points[0];
+      const radius = (style.size / 2) * scale;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = style.fill;
+      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowBlur = radius * 0.35;
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      if (style.width) {
+        ctx.lineWidth = style.width * scale;
+        ctx.strokeStyle = style.stroke;
+        ctx.stroke();
+      }
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (item.label) {
+        ctx.font = `700 ${Math.max(1, radius * (item.label.length > 2 ? 0.8 : 1.0))}px ${TEXT_FONT}`;
+        ctx.fillStyle = style.color;
+        ctx.fillText(item.label, cx, cy + radius * 0.05);
+      }
+      if (item.name) {
+        // The name sits on a dark pill under the disc, readable on grass and on a light board.
+        const size = Math.max(1, radius * 0.72);
+        ctx.font = `600 ${size}px ${TEXT_FONT}`;
+        const width = ctx.measureText(item.name).width + size * 0.8;
+        const top = cy + radius + size * 0.3;
+        ctx.fillStyle = "rgba(23, 24, 23, 0.78)";
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(cx - width / 2, top, width, size * 1.45, size * 0.35);
+        else ctx.rect(cx - width / 2, top, width, size * 1.45);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(item.name, cx, top + size * 0.75);
+      }
+      break;
+    }
     default:
       break;
   }
@@ -329,6 +369,8 @@ export const hitTest = (item, x, y, w, h, tolerance = 6, measure) => {
     case "zone":
       return insidePolygon(at, points)
         || points.some((point, index) => segmentDistance(at, points[(index || points.length) - 1], point) <= reach);
+    case "token":
+      return Math.hypot(x - points[0][0], y - points[0][1]) <= (style.size / 2) * scale + tolerance;
     case "text": {
       const box = textBox(item, w, h, measure);
       return x >= box.x - tolerance && x <= box.x + box.width + tolerance && y >= box.y - tolerance && y <= box.y + box.height + tolerance;
@@ -348,7 +390,7 @@ export const itemAt = (items, x, y, w, h, time, measure) => {
 
 /** Drag handles for a selected item: [{index, point}] in fractions; index "r" resizes a ring or spotlight. */
 export const handlesFor = (item) => {
-  if (item.kind === "freehand") return [];
+  if (item.kind === "freehand" || item.kind === "token") return []; // tokens move whole
   const handles = item.points.map((point, index) => ({ index, point }));
   if (item.kind === "ring" || item.kind === "spotlight") {
     handles.push({ index: "r", point: [item.points[0][0] + item.geometry.rx, item.points[0][1]] });

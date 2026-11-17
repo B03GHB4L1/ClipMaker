@@ -463,6 +463,50 @@ cancel; tokens placed and coloured; correcting team, moving, adding and
 deleting tokens; export with the board as background. Picture inserts (for
 example a Tactical Lab map) come along, as they share the same code.
 
+Built 2026-11-17 (board inserts, calibration, player finder, tokens, export);
+**picture inserts deferred** (see below).
+- Engine: `app/telestration/players.py` (YOLOX-Nano on 3 x 2 tiles through
+  OpenCV DNN, feet-on-grass filter, team split by shirt hue). The model is an
+  optional download offered in the editor (fixed address, size and SHA-256
+  checked, written to `<data>/models` through a `.part` file, nothing kept on
+  any failure, cancel supported); finding players without it asks for the
+  download instead of failing. Routes: `GET /api/editor-models`,
+  `POST /api/editor-models/players` (one download job at a time),
+  `POST /api/editor/<project>/<clip>/players` with `{frame}`.
+- Document: a board is a freeze with `background: {kind: "board", view,
+  theme, fromFrame?, home?, away?}`; drawings made on it carry `on: atFrame`
+  (fixed points only) and show only on that board, while the clip's drawings
+  are hidden during it. Removing a board removes its drawings. Old documents
+  open unchanged.
+- Page: "Board from frame" opens a pitch diagram; pick a mark, click it on the
+  video, drag to fine-tune with a 3x loupe. With 4 or more marks the pitch
+  lines are drawn back on the video and the fit is graded in metres. Marks
+  that do not pin the pitch down (for example three on the halfway line) are
+  refused with a reason; this came up in testing. "Find players" runs the job
+  with progress and cancel, then inserts a 4 s board (one undo step) with a
+  token per player on the pitch, team colours from the shirts; players
+  mapped off the pitch are left out and counted. "Empty board" skips
+  detection. Token tool (K) places tokens by hand; tokens have team, shirt
+  number (3 characters), optional name, colour, size. Boards have view
+  (full, left half, right half, blank) and look (grass, light) in the
+  "Freezes and boards" list; changing the view keeps tokens on the same pitch
+  spot.
+- Screenshot and export draw the board in place of the frozen frame (into
+  the overlay, opaque), so the engine needed no change.
+- Checked in the browser on a real broadcast clip (1024x576): 5 marks fit
+  within 1.2 m, 14 players placed in 0.4 s, team and number edits saved,
+  exported video shows the board for 4 s then the clip; narrow layout has no
+  overflow.
+- Honest limits: one match tested so far; a half view gives no zoom on a 16:9
+  frame (the pitch height already sets the scale), so the board picks a half
+  only on narrower frames; landmarks on the centre circle are taken at its
+  axis points, which the analyst has to judge by eye; tokens are not linked
+  between boards yet (M8).
+- Deferred: **picture inserts** (an image, such as a Tactical Lab map, as a
+  freeze background). The `background` shape leaves room for it
+  (`kind: "picture"`), but it needs an upload route and stored image files,
+  which is separate work.
+
 **M8 – Moving boards.** Tokens glide between positions: either from two board
 frames (the same players matched by position and team) or by tracking each
 player through the clip with the M5 tracker. Export sends only the 64 px

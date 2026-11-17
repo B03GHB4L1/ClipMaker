@@ -1782,6 +1782,59 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         self.send_json(HTTPStatus.OK, {"job": job})
 
+    @property
+    def models_folder(self) -> Path:
+        """Optional model downloads live with the app's data, never in a folder the page names."""
+        return self.store.data_dir / "models"
+
+    def editor_models(self) -> None:
+        from telestration import players
+        self.send_json(HTTPStatus.OK, {"players": players.status(self.models_folder)})
+
+    def install_player_finder(self) -> None:
+        """Download the player finder (fixed address, checked against its SHA-256) as a job."""
+        from telestration import players
+        current = players.status(self.models_folder)
+        if current["installed"]:
+            self.send_json(HTTPStatus.OK, {"model": current})
+            return
+        server, jobs, folder = self.server, self.tracking_jobs, self.models_folder
+        with server.tracking_lock:  # type: ignore[attr-defined]  # one download at a time
+            running = getattr(server, "model_install_job", None)
+            job = jobs.get(running) if running else None
+            if job is None or job["status"] != "running":
+                job = jobs.start(lambda cancel, progress: players.install(folder, cancel, progress))
+                server.model_install_job = job["id"]  # type: ignore[attr-defined]
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
+    def find_players(self, path: str, body: dict[str, Any]) -> None:
+        """The players on one frame of an editor clip, in the background (board from this frame)."""
+        parts = path.split("/")
+        if len(parts) != 6:
+            raise ValueError("Unknown editor request")
+        try:
+            record, video = self.editor_clips.get(parts[3], parts[4])
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        frame = body.get("frame")
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < record["frames"]:
+            raise ValueError("Find players on a frame of the clip.")
+        from telestration import players
+        state = players.status(self.models_folder)
+        if not state["installed"]:
+            self.send_json(HTTPStatus.CONFLICT, {"error": "Download the player finder first.", "model": state})
+            return
+        try:
+            import cv2  # noqa: F401  # refuse now, not in the background, if OpenCV is missing
+        except ImportError as error:
+            raise RuntimeError("Finding players needs OpenCV, which is not installed.") from error
+        ffmpeg = _find_ffmpeg()
+        folder = self.models_folder
+        job = self.tracking_jobs.start(
+            lambda cancel, progress: players.find_players(ffmpeg, video, record, frame, folder, cancel, progress))
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
     def save_editor_annotations(self, path: str, body: dict[str, Any]) -> None:
         project_id, clip_id = self.editor_parts(path)
         try:
@@ -1980,6 +2033,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path.startswith("/api/editor-jobs/"):
             self.tracking_job(path.split("/")[-1])
+            return
+        if path == "/api/editor-models":
+            self.editor_models()
             return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
@@ -2235,6 +2291,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path.startswith("/api/editor/") and path.endswith("/track"):
                 self.start_tracking(path, body)
+                return
+            if path.startswith("/api/editor/") and path.endswith("/players"):
+                self.find_players(path, body)
+                return
+            if path == "/api/editor-models/players":
+                self.install_player_finder()
                 return
             if path.startswith("/api/editor/") and path.endswith("/export"):
                 self.start_export(path)

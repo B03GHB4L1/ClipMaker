@@ -6,6 +6,9 @@ import { saveImage, showSaved, showSaveError } from "./save-clip.js";
 import { cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
+import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
+  itemsAt, newToken, removeInsert, textOn, tokensFromPlayers } from "./annotate/board.js";
+import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -30,6 +33,8 @@ let gesture = null; // the drag or drawing in progress
 let zoneDraft = null; // corners of a zone being drawn
 let pointer = null; // last pointer position in fractions, for the zone preview
 let textEdit = null; // {id | null, point}
+let tokenTeam = "home"; // the team new tokens join
+let calib = null; // board from this frame, while the analyst marks the pitch: see "Board from this frame"
 const toolStyle = Object.fromEntries(Object.entries(DEFAULT_STYLE).map(([kind, style]) => [kind, { ...style }]));
 
 // ---------------------------------------------------------------------------
@@ -164,7 +169,7 @@ function tick(now) {
 
 const showTime = () => {
   const at = source();
-  const frozen = at.freeze !== null ? ' · <span class="is-frozen">frozen</span>' : "";
+  const frozen = at.freeze !== null ? ` · <span class="is-frozen">${boardNow() ? "board" : "frozen"}</span>` : "";
   $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${clip.frames}${frozen}`;
   const scrub = $("[data-scrub]");
   scrub.max = String(total());
@@ -194,7 +199,9 @@ const draftItem = () => (gesture?.draft ? gesture.draft : null);
 const tracks = () => doc.value.tracks || [];
 const trackById = (id) => tracks().find((track) => track.id === id) || null;
 const frameNow = () => source().frame;
-const shown = () => doc.items.map((item) => resolveItem(item, tracks(), frameNow()));
+const boardNow = () => (clip ? boardAt(doc.value, clip, outTime) : null);
+// On a board only its own drawings show; elsewhere the clip's drawings (annotate/board.js).
+const shown = () => itemsAt(doc.value, clip, outTime).map((item) => resolveItem(item, tracks(), frameNow()));
 const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(item, tracks(), frameNow()) : null; };
 const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
 
@@ -212,6 +219,7 @@ const drawPlayerBox = (track) => {
 };
 // Where a point dropped near a followed player's feet links to them.
 const snapPoint = (point) => {
+  if (boardNow()) return point; // a board has no players to follow
   const [x, y] = toPixels(point);
   for (const track of tracks()) {
     const at = boxAt(track, frameNow());
@@ -227,11 +235,14 @@ const render = () => {
   const { w, h } = size();
   ctx.clearRect(0, 0, w, h);
   const time = currentTime();
+  const board = boardNow();
+  if (board) drawBoard(ctx, w, h, board.background);
   const items = shown().map((item) => (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item));
   drawItems(ctx, items, w, h, time);
+  if (calib) return drawCalibration();
   const original = doc.find(selectedId);
-  if (original) linkedTracks(original).forEach((id) => { const track = trackById(id); if (track) drawPlayerBox(track); });
-  if (["ring", "spotlight", "arrow", "line", "zone"].includes(tool)) {
+  if (original && !board) linkedTracks(original).forEach((id) => { const track = trackById(id); if (track) drawPlayerBox(track); });
+  if (!board && ["ring", "spotlight", "arrow", "line", "zone"].includes(tool)) {
     // Feet a new drawing can link to.
     tracks().forEach((track) => { const at = boxAt(track, frameNow()); if (at) drawHandle([at.box[0], at.box[1]], true); });
   }
@@ -352,6 +363,7 @@ const HINTS = {
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line).",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
   follow: "Drag a box around a player, head to boots. A ring follows them; drag it back if it slips.",
+  token: "Click to place a player token, then type the shirt number. Team and name are on the right.",
 };
 const FOLLOWABLE = ["ring", "spotlight", "text"];
 let followTarget = null; // the drawing "Follow player" will link, or null for a new ring
@@ -374,7 +386,12 @@ const select = (id) => {
   scheduleRender();
 };
 
-const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone" };
+const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token" };
+const itemName = (item) => (item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}`
+  : item.kind === "token" ? ["Token", item.label, item.name].filter(Boolean).join(" ") : KIND_NAMES[item.kind]);
+// Some settings read differently on a token.
+const KIND_LABELS = { token: { fill: "Colour", color: "Number colour", stroke: "Outline", size: "Size", width: "Outline width" } };
+const KIND_RANGES = { token: { size: { min: 16, max: 80 }, width: { min: 0, max: 8 } } };
 
 const FIELDS = {
   stroke: { label: "Line colour", type: "color" },
@@ -409,8 +426,9 @@ const renderInspector = () => {
     fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted", textContent: "Choose a tool, or select a drawing to change it." }));
   } else {
     const style = item ? styleOf(item) : toolStyle[kind];
+    if (kind === "token") fields.append(...tokenFields(item));
     Object.keys(DEFAULT_STYLE[kind]).forEach((key) => {
-      const spec = FIELDS[key];
+      const spec = { ...FIELDS[key], ...KIND_RANGES[kind]?.[key], ...(KIND_LABELS[kind]?.[key] ? { label: KIND_LABELS[kind][key] } : {}) };
       const label = document.createElement("label");
       label.className = spec.type === "checkbox" ? "annotate-check" : "";
       if (spec.type === "select") {
@@ -482,6 +500,45 @@ const renderInspector = () => {
   renderList();
 };
 
+// Team, number and name of a token (or the team of the next one).
+function tokenFields(item) {
+  const team = document.createElement("label");
+  const choose = document.createElement("select");
+  choose.append(...Object.entries(TEAMS).map(([value, text]) => new Option(text, value, false, (item?.team || tokenTeam) === value)));
+  choose.onchange = () => {
+    tokenTeam = choose.value;
+    if (!item) return;
+    const current = doc.find(item.id);
+    const fill = teamColours(current.on)[choose.value];
+    doc.replace({ ...current, team: choose.value, style: { ...current.style, fill, color: textOn(fill) } });
+  };
+  team.append("Team ", choose);
+  if (!item) return [team];
+  const text = (labelText, key, max, placeholder) => {
+    const label = document.createElement("label");
+    const input = Object.assign(document.createElement("input"), { type: "text", maxLength: max, value: item[key] || "", placeholder });
+    input.dataset.tokenField = key;
+    input.onchange = () => {
+      const current = doc.find(item.id);
+      if (!current) return;
+      const value = input.value.trim().slice(0, max);
+      const next = { ...current, [key]: value };
+      if (key === "name" && !value) delete next.name;
+      doc.replace(next);
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); input.blur(); canvas.focus(); } });
+    label.append(`${labelText} `, input);
+    return label;
+  };
+  return [team, text("Number", "label", 3, "10"), text("Name", "name", 30, "Optional")];
+}
+
+// The colours of the teams on board `frame` (found from the shirts), or the defaults.
+function teamColours(frame = boardNow()?.atFrame) {
+  const board = doc.freezes.find((f) => f.atFrame === frame)?.background;
+  return { ...DEFAULT_TEAM_COLOURS, ...(board?.home ? { home: board.home } : {}), ...(board?.away ? { away: board.away } : {}) };
+}
+
 function renderFollowPanel(item) {
   const panel = $("[data-follow-panel]");
   const linked = item ? [...linkedTracks(item)] : [];
@@ -520,8 +577,7 @@ const renderList = () => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = item.id === selectedId ? "is-selected" : "";
-    const label = item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}` : KIND_NAMES[item.kind];
-    button.textContent = `${label} · ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)}s`;
+    button.textContent = `${itemName(item)}${item.on !== undefined ? " (board)" : ""} · ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)}s`;
     button.onclick = () => selectDrawing(item);
     entry.append(button);
     return entry;
@@ -536,16 +592,21 @@ const renderDrawingLane = () => {
   lane.querySelectorAll("[data-bar]").forEach((bar) => bar.remove());
   if (!clip) return;
   const length = total();
+  // A board's tokens and drawings share one row (boards never overlap); the clip's drawings stack below.
+  const boardRow = doc.items.some((item) => item.on !== undefined) ? 1 : 0;
   const rowsEnd = [];
   [...doc.items].sort((a, b) => a.show.from - b.show.from).forEach((item) => {
-    let row = rowsEnd.findIndex((end) => end <= item.show.from);
-    if (row < 0) row = rowsEnd.push(0) - 1;
-    rowsEnd[row] = item.show.to;
+    let row = 0;
+    if (item.on === undefined) {
+      row = rowsEnd.findIndex((end) => end <= item.show.from);
+      if (row < 0) row = rowsEnd.push(0) - 1;
+      rowsEnd[row] = item.show.to;
+      row += boardRow;
+    }
     const bar = document.createElement("span");
     bar.className = `annotate-lane-drawing${item.id === selectedId ? " is-selected" : ""}`;
     bar.dataset.bar = item.id;
-    const name = item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}` : KIND_NAMES[item.kind];
-    bar.title = `${name}, ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)} s`;
+    bar.title = `${itemName(item)}, ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)} s`;
     bar.style.left = `${(item.show.from / length) * 100}%`;
     bar.style.width = `${(Math.max(0, item.show.to - item.show.from) / length) * 100}%`;
     bar.style.top = `${4 + row * BAR_ROW}px`;
@@ -559,7 +620,16 @@ const renderDrawingLane = () => {
     }
     lane.append(bar);
   });
-  lane.style.height = `${Math.max(18, rowsEnd.length * BAR_ROW + 6)}px`;
+  lane.style.height = `${Math.max(18, (rowsEnd.length + boardRow) * BAR_ROW + 6)}px`;
+};
+
+// A drawing made on a board belongs to it: it shows only there, for the board's time.
+const placeNew = (item) => {
+  const board = boardNow();
+  if (!board) return item;
+  const start = Math.round(freezeStart(board.atFrame, clip, doc.freezes) * 1000) / 1000;
+  const end = Math.round((start + board.seconds) * 1000) / 1000;
+  return { ...item, on: board.atFrame, show: { ...item.show, from: Math.min(end, Math.max(start, item.show.from)), to: end } };
 };
 
 const selectDrawing = (item) => {
@@ -857,7 +927,7 @@ function renderPlayers() {
 // ---------------------------------------------------------------------------
 // Freezes
 // ---------------------------------------------------------------------------
-const changeFreeze = (frame, seconds) => doc.commitDocument((value) => setFreeze(value, clip, frame, seconds));
+const changeFreeze = (frame, seconds) => doc.commitDocument((value) => (seconds > 0 ? setFreeze(value, clip, frame, seconds) : removeInsert(value, clip, frame)));
 const freezeHere = () => {
   const at = source();
   if (at.freeze === null && !doc.freezes.some((f) => f.atFrame === at.frame)) changeFreeze(at.frame, 2);
@@ -875,8 +945,10 @@ const renderFreezes = () => {
   $("[data-freeze-empty]").hidden = freezes.length > 0;
   $("[data-freeze-list]").replaceChildren(...freezes.map((freeze) => {
     const entry = document.createElement("li");
+    const board = freeze.background;
     const start = freezeStart(freeze.atFrame, clip, freezes);
-    const go = Object.assign(document.createElement("button"), { type: "button", textContent: `Frame ${freeze.atFrame + 1} · ${formatTime(start)}` });
+    const go = Object.assign(document.createElement("button"), { type: "button",
+      textContent: `${board ? "Board" : "Frame"} ${freeze.atFrame + 1} · ${formatTime(start)}` });
     go.onclick = () => seekOutput(start);
     const seconds = Object.assign(document.createElement("input"), { type: "number", min: "0.04", max: "60", step: "0.1", value: String(freeze.seconds) });
     seconds.dataset.freezeSeconds = String(freeze.atFrame);
@@ -888,9 +960,26 @@ const renderFreezes = () => {
     };
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", title: "Remove this freeze",
       innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' });
-    remove.setAttribute("aria-label", `Remove the freeze at frame ${freeze.atFrame + 1}`);
+    remove.setAttribute("aria-label", `Remove the ${board ? "board" : "freeze"} at frame ${freeze.atFrame + 1}`);
+    if (board) remove.title = "Remove this board with its tokens and drawings";
     remove.onclick = () => changeFreeze(freeze.atFrame, 0);
     entry.append(go, seconds, Object.assign(document.createElement("span"), { textContent: "s" }), remove);
+    if (board) {
+      entry.className = "is-board";
+      const settings = Object.assign(document.createElement("span"), { className: "annotate-board-settings" });
+      const choice = (label, options, value, change) => {
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `${label} of the board at frame ${freeze.atFrame + 1}`);
+        select.append(...Object.entries(options).map(([key, text]) => new Option(typeof text === "string" ? text : text.name, key, false, key === value)));
+        select.onchange = () => change(select.value);
+        return select;
+      };
+      settings.append(
+        choice("View", VIEWS, board.view, (view) => doc.commitDocument((value) => changeBoardView(value, freeze.atFrame, view, aspect()))),
+        choice("Look", THEMES, board.theme, (theme) => doc.commitDocument((value) => changeBoard(value, freeze.atFrame, { theme }))),
+      );
+      entry.append(settings);
+    }
     return entry;
   }));
   const lane = $("[data-lane]");
@@ -898,9 +987,9 @@ const renderFreezes = () => {
   const length = total();
   freezes.forEach((freeze) => {
     const block = document.createElement("span");
-    block.className = "annotate-lane-freeze";
+    block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}`;
     block.dataset.laneFreeze = String(freeze.atFrame);
-    block.title = `Freeze at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Drag its right edge to change the length.`;
+    block.title = `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Drag its right edge to change the length.`;
     block.style.left = `${(freezeStart(freeze.atFrame, clip, freezes) / length) * 100}%`;
     block.style.width = `${(freeze.seconds / length) * 100}%`;
     const edge = document.createElement("span");
@@ -991,6 +1080,346 @@ const renderFreezes = () => {
 }
 
 // ---------------------------------------------------------------------------
+// Board from this frame (M7). The analyst marks pitch points on the frame;
+// the pitch lines are drawn back through the fit so a bad fit shows; then the
+// player finder puts a token for each player on a board inserted at the frame.
+// ---------------------------------------------------------------------------
+const SVG = "http://www.w3.org/2000/svg";
+const calibPanel = $("[data-calibrate]");
+const calibPair = (id) => (calib && id ? calib.pairs.find((pair) => pair.id === id) || null : null);
+const calibFit = () => (calib ? calibrate(calib.pairs, aspect()) : null);
+const round5 = (value) => Math.round(value * 1e5) / 1e5;
+
+function buildPitch() {
+  const svg = $("[data-calib-pitch]");
+  if (svg.childElementCount) return;
+  const make = (name, attributes) => {
+    const element = document.createElementNS(SVG, name);
+    Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
+    return element;
+  };
+  svg.append(make("rect", { x: -56, y: -37.5, width: 112, height: 75, rx: 1.5, class: "annotate-pitch-ground" }));
+  LINES.forEach((line) => svg.append(make("polyline", { points: line.map(([x, y]) => `${x},${y}`).join(" "), class: "annotate-pitch-line" })));
+  LANDMARKS.forEach((mark) => {
+    const group = make("g", { class: "annotate-pitch-mark", tabindex: 0, role: "button", "aria-label": mark.name, "data-mark": mark.id });
+    const title = make("title", {});
+    title.textContent = mark.name;
+    group.append(title, make("circle", { cx: mark.at[0], cy: mark.at[1], r: 2.8, class: "annotate-pitch-hit" }),
+      make("circle", { cx: mark.at[0], cy: mark.at[1], r: 1.2, class: "annotate-pitch-dot" }));
+    group.addEventListener("click", () => pickMark(mark.id));
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pickMark(mark.id); }
+    });
+    svg.append(group);
+  });
+}
+
+function openCalibration() {
+  if (!clip || calib || exporting) return;
+  if (boardNow()) { trackStatus("Go to a frame of the clip to make a board from it.", true); return; }
+  finishText();
+  zoneDraft = null;
+  pause();
+  select(null);
+  calib = { frame: frameNow(), pairs: [], pick: null, selected: null, drag: null, job: null, model: null, message: null };
+  buildPitch();
+  calibPanel.hidden = false;
+  document.querySelectorAll("[data-calib-hide]").forEach((element) => { element.hidden = true; });
+  $("[data-board]").setAttribute("aria-expanded", "true");
+  renderCalibration();
+  calibPanel.querySelector("[data-mark]")?.focus({ preventScroll: true });
+}
+
+function closeCalibration() {
+  if (!calib) return;
+  if (calib.job) projectRequest(`/api/editor-jobs/${calib.job.id}/cancel`, {}).catch(() => {});
+  calib = null;
+  pointer = null;
+  calibPanel.hidden = true;
+  document.querySelectorAll("[data-calib-hide]").forEach((element) => { element.hidden = false; });
+  $("[data-board]").setAttribute("aria-expanded", "false");
+  scheduleRender();
+  showTime();
+}
+
+function pickMark(id) {
+  if (!calib || calib.job) return;
+  calib.pick = calib.pick === id ? null : id;
+  calib.selected = calibPair(id) ? id : null;
+  calib.message = null;
+  renderCalibration();
+}
+
+function removeCalibrationPoint() {
+  if (!calib || !calib.selected) return;
+  calib.pairs = calib.pairs.filter((pair) => pair.id !== calib.selected);
+  if (calib.pick === calib.selected) calib.pick = null;
+  calib.selected = null;
+  renderCalibration();
+}
+
+function calibrationDown(event, at) {
+  if (calib.job) return;
+  const [x, y] = toPixels(at);
+  const near = calib.pairs.find((pair) => {
+    const [px, py] = toPixels(pair.at);
+    return Math.hypot(px - x, py - y) <= handleRadius() * 1.8;
+  });
+  calib.message = null;
+  if (near && near.id !== calib.pick) {
+    calib.drag = near.id; // drag a placed mark to fine-tune it
+    calib.selected = near.id;
+  } else if (calib.pick) {
+    const point = [round5(Math.min(1, Math.max(0, at[0]))), round5(Math.min(1, Math.max(0, at[1])))];
+    calib.pairs = [...calib.pairs.filter((pair) => pair.id !== calib.pick), { id: calib.pick, at: point }];
+    calib.selected = calib.drag = calib.pick;
+    calib.pick = null;
+  } else {
+    calib.selected = null;
+    calib.message = "Pick a mark on the pitch first, then click the same spot on the video.";
+    return renderCalibration();
+  }
+  canvas.setPointerCapture(event.pointerId);
+  renderCalibration();
+}
+
+function calibrationMove(at) {
+  const pair = calibPair(calib.drag);
+  if (pair) pair.at = [round5(Math.min(1, Math.max(0, at[0]))), round5(Math.min(1, Math.max(0, at[1])))];
+  scheduleRender();
+}
+
+function renderCalibration() {
+  if (!calib) return;
+  $("[data-calib-frame]").textContent = String(calib.frame + 1);
+  document.querySelectorAll("[data-mark]").forEach((group) => {
+    const id = group.dataset.mark;
+    group.classList.toggle("is-placed", Boolean(calibPair(id)));
+    group.classList.toggle("is-picked", calib.pick === id);
+    group.classList.toggle("is-selected", calib.selected === id && calib.pick !== id);
+    group.setAttribute("aria-pressed", String(calib.pick === id));
+  });
+  const count = calib.pairs.length;
+  const fit = calibFit();
+  $("[data-calib-help]").textContent = calib.pick
+    ? `Now click "${landmark(calib.pick).name}" on the video. Hold and drag to place it exactly; the loupe shows the detail.`
+    : "Pick a mark on the pitch, then click the same spot on the video. Use at least 4 marks spread across the frame; 6 or more is better.";
+  let state;
+  let problem = false;
+  if (calib.job) state = calib.job.text;
+  else if (calib.message) [state, problem] = [calib.message, /fail|stopp|could not|not fit|first/i.test(calib.message)];
+  else if (count < 4) state = `${count} of 4 marks placed.`;
+  else if (!fit) [state, problem] = ["These marks do not pin the pitch down: several lie on one line. Add marks away from that line, spread across the frame.", true];
+  else if (count === 4) state = "4 marks always fit exactly, so check the green lines on the video. More marks across the frame give a better fit.";
+  else if (fit.worst < 1.5) state = `Good fit: the marks agree within ${fit.worst.toFixed(1)} m. Check the green lines on the video.`;
+  else if (fit.worst < 4) [state, problem] = [`Rough fit: one mark is ${fit.worst.toFixed(1)} m out. Move marks that sit off their lines.`, true];
+  else [state, problem] = [`Poor fit: one mark is ${Math.round(fit.worst)} m out and may be on the wrong mark.`, true];
+  const line = $("[data-calib-state]");
+  line.textContent = state;
+  line.classList.toggle("is-problem", problem);
+  const busy = Boolean(calib.job);
+  $("[data-calib-find]").disabled = !fit || busy;
+  $("[data-calib-empty]").disabled = busy;
+  $("[data-calib-remove]").disabled = !calibPair(calib.selected) || busy;
+  $("[data-calib-progress]").hidden = !busy;
+  if (busy) $("[data-calib-progress] progress").value = calib.job.progress;
+  $("[data-calib-stop]").disabled = Boolean(calib.job?.stopping);
+  const install = $("[data-calib-install]");
+  install.hidden = !calib.model || busy;
+  if (calib.model) {
+    const megabytes = (calib.model.bytes / 1e6).toFixed(1);
+    $("[data-calib-install-text]").textContent = `Finding players needs a one-time ${megabytes} MB download: ${calib.model.label}, from the official YOLOX release. It is checked against its known fingerprint, kept with VizorPlay's data and run only on this computer.`;
+    $("[data-calib-download]").textContent = `Download ${megabytes} MB`;
+  }
+  scheduleRender();
+}
+
+// The pitch lines through the fit, the placed marks, and a loupe while placing.
+function drawCalibration() {
+  const ratio = window.devicePixelRatio || 1;
+  const fit = calibFit();
+  if (fit) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(200, 241, 53, 0.9)";
+    ctx.lineWidth = 1.5 * ratio;
+    ctx.lineJoin = "round";
+    projectedLines(fit).forEach((line) => {
+      ctx.beginPath();
+      let open = false;
+      line.forEach((point) => {
+        // Points behind the camera or far off screen break the line.
+        if (!point || !(Math.abs(point[0] - 0.5) < 3 && Math.abs(point[1] - 0.5) < 3)) { open = false; return; }
+        const [x, y] = toPixels(point);
+        if (open) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+        open = true;
+      });
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+  calib.pairs.forEach((pair) => drawMark(pair.at, pair.id === calib.selected));
+  const focus = calibPair(calib.drag)?.at || (calib.pick && pointer) || null;
+  if (focus) drawLoupe(focus);
+}
+
+function drawMark(point, strong) {
+  const [x, y] = toPixels(point);
+  const r = handleRadius();
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(23, 24, 23, 0.85)";
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = strong ? "#c8f135" : "#ffffff";
+  ctx.stroke();
+  ctx.fillStyle = strong ? "#c8f135" : "#ffffff";
+  ctx.fillRect(x - 1, y - 1, 2, 2);
+  ctx.restore();
+}
+
+function drawLoupe(point) {
+  if (!video.videoWidth) return;
+  const ratio = window.devicePixelRatio || 1;
+  const radius = 58 * ratio;
+  const zoom = 3;
+  const [x, y] = toPixels(point);
+  // Beside the pointer, away from the edges, so it never hides the spot being placed.
+  const cx = x + (x > canvas.width - radius * 3 ? -1 : 1) * radius * 1.7;
+  const cy = y + (y < radius * 2.2 ? 1 : -1) * radius * 1.7;
+  const sw = ((2 * radius) / zoom) * (video.videoWidth / canvas.width);
+  const sh = ((2 * radius) / zoom) * (video.videoHeight / canvas.height);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#0d0e0c";
+  ctx.fill();
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(video, point[0] * video.videoWidth - sw / 2, point[1] * video.videoHeight - sh / 2, sw, sh, cx - radius, cy - radius, radius * 2, radius * 2);
+  ctx.strokeStyle = "#c8f135";
+  ctx.lineWidth = ratio;
+  ctx.beginPath();
+  ctx.moveTo(cx - radius, cy); ctx.lineTo(cx - 4 * ratio, cy);
+  ctx.moveTo(cx + 4 * ratio, cy); ctx.lineTo(cx + radius, cy);
+  ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy - 4 * ratio);
+  ctx.moveTo(cx, cy + 4 * ratio); ctx.lineTo(cx, cy + radius);
+  ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.lineWidth = 2 * ratio;
+  ctx.strokeStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// A job of the player finder (download or search), shown in the panel with its progress.
+async function runCalibrationJob(job, text) {
+  const mine = calib;
+  mine.job = { id: job.id, progress: 0, text: `${text}...` };
+  renderCalibration();
+  for (;;) {
+    await sleep(250);
+    if (calib !== mine || mine.job?.id !== job.id) return null; // closed
+    const { job: now } = await projectRequest(`/api/editor-jobs/${job.id}`);
+    if (calib !== mine) return null;
+    if (now.status === "running") {
+      mine.job.progress = now.progress || 0;
+      if (!mine.job.stopping) mine.job.text = `${text}: ${Math.round(mine.job.progress * 100)}%`;
+      renderCalibration();
+      continue;
+    }
+    mine.job = null;
+    if (now.status === "done") return now.result;
+    mine.message = now.status === "cancelled" ? `${text} cancelled.` : `${text} failed: ${now.error}`;
+    renderCalibration();
+    return null;
+  }
+}
+
+function stopCalibrationJob() {
+  if (!calib?.job) return;
+  calib.job.stopping = true;
+  calib.job.text = "Cancelling...";
+  renderCalibration();
+  projectRequest(`/api/editor-jobs/${calib.job.id}/cancel`, {}).catch(() => {});
+}
+
+async function findPlayers() {
+  if (!calib || calib.job || !calibFit()) return;
+  const mine = calib;
+  mine.message = null;
+  mine.model = null;
+  try {
+    // Ask first, so a missing model is an offer to download rather than a failed request.
+    const { players: model } = await projectRequest("/api/editor-models");
+    if (calib !== mine) return;
+    if (!model.installed) { mine.model = model; return renderCalibration(); }
+    const response = await fetch(`${editorPath()}/players`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ frame: mine.frame }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (calib !== mine) return;
+    if (response.status === 409 && payload.model) { mine.model = payload.model; return renderCalibration(); }
+    if (!response.ok) throw new Error(payload.error || `request failed (${response.status})`);
+    const result = await runCalibrationJob(payload.job, "Finding players");
+    if (result && calib === mine) makeBoard(result);
+  } catch (error) {
+    if (calib !== mine) return;
+    mine.job = null;
+    mine.message = `Could not find players: ${error.message}`;
+    renderCalibration();
+  }
+}
+
+async function downloadModel() {
+  if (!calib || calib.job) return;
+  const mine = calib;
+  mine.model = null;
+  mine.message = null;
+  try {
+    const { job } = await projectRequest("/api/editor-models/players", {});
+    if (job && !(await runCalibrationJob(job, "Downloading the player finder"))) return;
+    if (calib === mine) await findPlayers();
+  } catch (error) {
+    if (calib !== mine) return;
+    mine.job = null;
+    mine.message = `The download failed: ${error.message}`;
+    renderCalibration();
+  }
+}
+
+// Insert the board (one undo step): tokens for the players found, or empty.
+function makeBoard(result) {
+  const frame = boardFrame(doc.value, clip, calib.frame);
+  if (frame === null) {
+    calib.message = "There is no free frame after this one for a board.";
+    return renderCalibration();
+  }
+  const background = { kind: "board", view: "full", theme: "grass", fromFrame: calib.frame };
+  let tokens = () => [];
+  let summary = "Empty board added. Place players with the Token tool (K).";
+  if (result) {
+    const colours = { ...DEFAULT_TEAM_COLOURS, home: result.teams[0], away: result.teams[1] };
+    const found = tokensFromPlayers(result.players, calibFit(), aspect(), colours);
+    Object.assign(background, { view: found.view, home: colours.home, away: colours.away });
+    tokens = found.tokens;
+    summary = found.placed
+      ? `Board added with ${found.placed} player${found.placed === 1 ? "" : "s"}${found.skipped ? ` (${found.skipped} found off the pitch left out)` : ""}. Players hidden or cut off by the camera are missing. Click a token to fix its team or add the shirt number.`
+      : "No players were found on the pitch in this frame, so the board is empty. Place players with the Token tool (K).";
+  }
+  doc.commitDocument((value) => addBoard(value, clip, frame, BOARD_SECONDS, background, tokens));
+  closeCalibration();
+  setTool("select");
+  seekOutput(freezeStart(frame, clip, doc.freezes));
+  trackStatus(summary);
+}
+
+// ---------------------------------------------------------------------------
 // Text
 // ---------------------------------------------------------------------------
 const openText = (point, item = null) => {
@@ -1022,7 +1451,7 @@ function finishText(cancel = false) {
     if (!text.trim()) doc.remove(id);
     else doc.replace({ ...existing, text });
   } else if (text.trim()) {
-    const item = newItem("text", [point], { from: currentTime(), to: total(), style: toolStyle.text, text });
+    const item = placeNew(newItem("text", [point], { from: currentTime(), to: total(), style: toolStyle.text, text }));
     doc.add(item);
     select(item.id);
   }
@@ -1051,7 +1480,7 @@ const nearHandle = (item, at) => {
 
 const finishZone = () => {
   if (zoneDraft && zoneDraft.length >= 3) {
-    const item = newItem("zone", zoneDraft, { from: currentTime(), to: total(), style: toolStyle.zone });
+    const item = placeNew(newItem("zone", zoneDraft, { from: currentTime(), to: total(), style: toolStyle.zone }));
     doc.add(item);
     select(item.id);
   }
@@ -1065,6 +1494,7 @@ canvas.addEventListener("pointerdown", (event) => {
   canvas.focus();
   if (playing) pause();
   const at = toFraction(event);
+  if (calib) { calibrationDown(event, at); return; }
   const [x, y] = toPixels(at);
   const { w, h } = size();
   const from = currentTime();
@@ -1079,7 +1509,16 @@ canvas.addEventListener("pointerdown", (event) => {
       if (hit) gesture = { type: "move", id: hit.id, start: at, base: hit, preview: hit };
     }
   } else if (tool === "follow") {
+    if (boardNow()) { trackStatus("Follow players on the clip itself; a board has no video.", true); return; }
     gesture = { type: "box", start: clampPoint(at), end: clampPoint(at) };
+  } else if (tool === "token") {
+    const placed = placeNew(newToken(clampPoint(at), { team: tokenTeam, colours: teamColours(), from, to: total() }));
+    const { fill, color, ...shape } = toolStyle.token; // the team decides the colour
+    const item = { ...placed, style: { ...placed.style, ...shape } };
+    doc.add(item);
+    select(item.id);
+    $('[data-token-field="label"]')?.focus(); // type the shirt number straight away
+    return;
   } else if (tool === "zone") {
     if (zoneDraft && zoneDraft.length >= 3) {
       const [fx, fy] = toPixels(zoneDraft[0]);
@@ -1105,6 +1544,7 @@ canvas.addEventListener("pointermove", (event) => {
   if (!clip) return;
   const at = toFraction(event);
   pointer = clampPoint(at);
+  if (calib) { calibrationMove(at); return; }
   if (zoneDraft) scheduleRender();
   if (!gesture?.type) {
     if (tool === "select") {
@@ -1156,7 +1596,7 @@ const endGesture = () => {
       }
       // Ring, spotlight, arrow and line ends dropped on a followed player's feet follow that player.
       const points = draft.kind === "freehand" ? draft.points : draft.points.map(snapPoint);
-      const item = newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry });
+      const item = placeNew(newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry }));
       doc.add(item);
       select(item.id);
     }
@@ -1195,8 +1635,13 @@ function applyEdit({ type, id, index, base, preview }) {
   }
 }
 
-canvas.addEventListener("pointerup", endGesture);
-canvas.addEventListener("pointercancel", () => { gesture = null; scheduleRender(); });
+canvas.addEventListener("pointerup", () => {
+  if (!calib) return endGesture();
+  calib.drag = null;
+  return renderCalibration();
+});
+canvas.addEventListener("pointercancel", () => { gesture = null; if (calib) calib.drag = null; scheduleRender(); });
+canvas.addEventListener("pointerleave", () => { if (calib) { pointer = null; scheduleRender(); } });
 canvas.addEventListener("dblclick", (event) => {
   if (tool === "zone") { if (zoneDraft) zoneDraft.pop(); finishZone(); return; } // the second click added a corner
   if (tool !== "select") return;
@@ -1208,7 +1653,7 @@ canvas.addEventListener("dblclick", (event) => {
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
-const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow" };
+const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token" };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMenu(false);
   if (!clip) return;
@@ -1216,6 +1661,11 @@ document.addEventListener("keydown", (event) => {
   if (typing) return;
   const command = event.ctrlKey || event.metaKey;
   const key = event.key.toLowerCase();
+  if (calib) {
+    if (event.key === "Escape") closeCalibration();
+    else if ((event.key === "Delete" || event.key === "Backspace") && calibPair(calib.selected)) { event.preventDefault(); removeCalibrationPoint(); }
+    return;
+  }
   if (command && key === "z") { event.preventDefault(); event.shiftKey ? doc.redo() : doc.undo(); return; }
   if (command && key === "y") { event.preventDefault(); doc.redo(); return; }
   if (command || event.altKey) return;
@@ -1250,7 +1700,9 @@ const screenshot = async (button) => {
   shot.width = video.videoWidth || clip.width;
   shot.height = video.videoHeight || clip.height;
   const context = shot.getContext("2d");
-  context.drawImage(video, 0, 0, shot.width, shot.height);
+  const board = boardNow();
+  if (board) drawBoard(context, shot.width, shot.height, board.background);
+  else context.drawImage(video, 0, 0, shot.width, shot.height);
   drawItems(context, shown(), shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise((resolve) => shot.toBlob(resolve, type, 0.92));
@@ -1289,12 +1741,14 @@ const DRAWING_SHARE = 0.35; // of the progress bar: drawing overlays, then rende
 const overlayKey = (value, n) => {
   const t = n / clip.fps;
   const frame = outputToSource(t, clip, value.freezes).frame;
+  const board = boardAt(value, clip, t);
   const shown = [];
-  value.items.forEach((item) => {
+  itemsAt(value, clip, t).forEach((item) => {
     const state = animation(item, t);
     if (state) shown.push(resolveItem(item, value.tracks || [], frame), state);
   });
-  return { t, shown, key: JSON.stringify(shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))) };
+  const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))]);
+  return { t, board, shown, key };
 };
 
 // Overlays go in batches: every request is a new connection to the engine, and
@@ -1350,12 +1804,13 @@ const exportVideo = async () => {
     };
     for (let n = 0; n < frames; n += 1) {
       if (run.cancelled) return;
-      const { t, shown, key } = overlayKey(value, n);
+      const { board, shown, key } = overlayKey(value, n);
       if (key !== previous) {
         previous = key;
         let crop = null;
-        if (shown.length) {
+        if (shown.length || board) {
           context.clearRect(0, 0, width, height);
+          if (board) drawBoard(context, width, height, board.background); // covers the frozen frame
           for (let index = 0; index < shown.length; index += 2) drawItem(context, shown[index], width, height, shown[index + 1]);
           crop = cropDrawn(context.getImageData(0, 0, width, height).data, width, height);
         }
@@ -1420,6 +1875,13 @@ const wire = () => {
   document.querySelectorAll("[data-tool]").forEach((button) => { button.onclick = () => setTool(button.dataset.tool); });
   document.querySelectorAll("[data-step]").forEach((button) => { button.onclick = () => step(Number(button.dataset.step)); });
   $("[data-freeze]").onclick = freezeHere;
+  $("[data-board]").onclick = openCalibration;
+  $("[data-calib-find]").onclick = findPlayers;
+  $("[data-calib-empty]").onclick = () => makeBoard(null);
+  $("[data-calib-remove]").onclick = removeCalibrationPoint;
+  $("[data-calib-close]").onclick = closeCalibration;
+  $("[data-calib-stop]").onclick = stopCalibrationJob;
+  $("[data-calib-download]").onclick = downloadModel;
   $("[data-anim-in]").onchange = (event) => setAnimation({ animate: event.target.value });
   $("[data-anim-out]").onchange = (event) => setAnimation({ animateOut: event.target.value });
   $("[data-anim-seconds]").onchange = (event) => {
