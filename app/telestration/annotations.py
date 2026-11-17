@@ -34,6 +34,7 @@ BOARD_THEMES = {"grass", "light"}
 TEAMS = {"home", "away", "other"}
 MAX_LABEL = 3
 MAX_NAME = 30
+MAX_MOVES = 100
 MAX_TEXT = 300
 COORD_MIN, COORD_MAX = -0.5, 1.5
 COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -252,6 +253,27 @@ def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
     return sorted(clean, key=lambda freeze: freeze["atFrame"])
 
 
+def _moves(value: Any, kind: str, on_board: bool) -> list[list[float]]:
+    """Where a board token glides to: [[seconds from the board's start, x, y], ...], in time order (M8)."""
+    if kind != "token" or not on_board:
+        raise ValueError("Only tokens on a board can move.")
+    if not isinstance(value, list) or len(value) > MAX_MOVES:
+        raise ValueError(f"A token can have up to {MAX_MOVES} moves.")
+    clean, last = [], 0.0
+    for key in value:
+        if (not isinstance(key, list) or len(key) != 3
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in key)):
+            raise ValueError("Each move is a time and a place.")
+        seconds, x, y = (float(v) for v in key)
+        if not last < seconds <= FREEZE_SECONDS[1]:
+            raise ValueError("A token's moves must come one after another, within its board.")
+        if not (COORD_MIN <= x <= COORD_MAX and COORD_MIN <= y <= COORD_MAX):
+            raise ValueError("A token's move goes off the picture.")
+        clean.append([round(seconds, 3), round(x, 5), round(y, 5)])
+        last = seconds
+    return clean
+
+
 def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Each drawing must be an object.")
@@ -306,7 +328,9 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[
         if any(isinstance(point, dict) for point in clean["points"]):
             raise ValueError("Drawings on a board cannot follow a player.")
         clean["on"] = board
-    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on"}
+    if "moves" in value:
+        clean["moves"] = _moves(value["moves"], kind, "on" in clean)
+    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on", "moves"}
     extra = set(value) - known
     if extra:
         raise ValueError(f"Unknown drawing setting: {sorted(extra)[0]}.")

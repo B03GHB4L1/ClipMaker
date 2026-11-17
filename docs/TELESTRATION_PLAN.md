@@ -512,6 +512,43 @@ frames (the same players matched by position and team) or by tracking each
 player through the clip with the M5 tracker. Export sends only the 64 px
 overlay tiles that contain drawing pixels, so moving boards stay light.
 
+M8 design (2026-11-17, at the start of M8):
+- **Moves are keyframes on a token**: `moves: [[seconds, x, y], ...]`, seconds
+  from the board's start, strictly increasing; the token starts at its point
+  and glides (ease in and out) from key to key, then holds. Only board
+  tokens move. Times are relative to the board, so changing earlier freezes
+  does not break them.
+- **By hand**: on a board, move the playhead to a later moment and drag a
+  token: that sets its key there. The inspector shows the number of moves and
+  clears them.
+- **From a later frame**: "Board from frame" on a frame after a board offers
+  "Move the players of board N here". Players found on that frame are matched
+  to the board's tokens by team and nearest pitch position (within 20 m); the
+  board grows by 3 s, the matched tokens hold, glide over 2 s and hold again.
+  Unmatched new players appear at the end of the glide; unmatched tokens stay
+  where they are. The counts are reported.
+- **Not in M8**: following every player through a panning broadcast clip.
+  That needs the camera's calibration on every frame (automatic pitch
+  landmarks, roadmap step 5), so it stays in step 6.
+- **Export**: when the overlay changes only in places, the page sends the
+  changed 64 px tiles as a patch over the previous overlay instead of the
+  whole frame; the engine keeps the overlay and applies patches in order.
+
+Built 2026-11-17 as designed. The engine accepts `moves` only on board tokens
+(at most 100, 0 < s ≤ 60), and a patch only after an earlier overlay. Checked in
+the browser on a 1024×576 clip:
+- A hand-set move glides.
+- "Players of board 1 move here" from a later frame matched 13 players, added
+  1 and kept 1, and the board grew from 4 s to 7 s.
+- The export matches the preview frame for frame. It sent 201 tile patches
+  (35.5 MB) instead of 201 whole overlays (about 470 MB).
+
+Limits, stated honestly:
+- Matching is greedy (nearest pair first, same team, within 20 m), so two
+  players crossing can swap tokens; drag to correct.
+- The result is only as good as the later frame's calibration.
+- A frame where more than half the tiles change is sent whole.
+
 ### Tests (M7 onwards)
 
 Homography maths against known points; team split on fixed colour samples;

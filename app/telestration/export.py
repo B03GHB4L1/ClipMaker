@@ -17,6 +17,7 @@ An export session lives in its own folder under the data directory:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -37,6 +38,7 @@ AUDIO_CHANNELS = 2
 OVERLAY_LIMIT = 4096 * 2160 * 4  # a whole 4K frame of RGBA pixels
 BATCH_LIMIT = 64_000_000  # bytes in one request
 BATCH_ENTRIES = 1000
+MAX_TILES = 4096  # tiles in one patch: a 4K frame in 64 px tiles is 2040
 MAX_OUTPUT_FRAMES = 20 * 60 * 60  # 20 minutes at 60 fps
 SESSION_TTL = 6 * 3600
 
@@ -92,9 +94,10 @@ class ExportSessions:
         with self._lock:
             return self._sessions.get(session_id)
 
-    def add_overlay(self, session_id: str, frame: Any, data: bytes, box: Any = None) -> None:
+    def add_overlay(self, session_id: str, frame: Any, data: bytes, box: Any = None, tiles: Any = None) -> None:
         """Store the overlay from output frame `frame` on: RGBA pixels of `box` (x, y, width, height).
-        Empty data means no drawings from that frame."""
+        Empty data means no drawings from that frame. With `tiles` instead, `data` holds the pixels
+        of those boxes, laid over the overlay before (a patch: moving board tokens, M8)."""
         session = self.get(session_id)
         if session is None:
             raise LookupError("This export is no longer open. Start it again.")
@@ -104,8 +107,27 @@ class ExportSessions:
             raise ValueError("Overlay frames must be frames of the export.")
         if frame <= session["last"]:
             raise ValueError("Overlays must arrive in order.")
-        if data:
-            record = session["record"]
+        record = session["record"]
+        if tiles is not None:
+            if box is not None or session["last"] < 0:
+                raise ValueError("A patch goes over an earlier overlay.")
+            if not isinstance(tiles, list) or not 1 <= len(tiles) <= MAX_TILES:
+                raise ValueError("A patch needs between 1 and 4096 tiles.")
+            size = 0
+            for tile in tiles:
+                if (not isinstance(tile, list) or len(tile) != 4
+                        or any(isinstance(v, bool) or not isinstance(v, int) for v in tile)):
+                    raise ValueError("Each tile needs x, y, width and height.")
+                x, y, w, h = tile
+                if not (0 <= x and 0 <= y and w >= 1 and h >= 1 and x + w <= record["width"] and y + h <= record["height"]):
+                    raise ValueError("A tile must be inside the frame.")
+                size += w * h * 4
+            if len(data) != size:
+                raise ValueError("The patch's size does not match its tiles.")
+            header = json.dumps(tiles).encode("utf-8")
+            data = len(header).to_bytes(4, "big") + header + data
+            name = f"overlay-{frame:06d}.patch"
+        elif data:
             if (not isinstance(box, (list, tuple)) or len(box) != 4
                     or any(isinstance(v, bool) or not isinstance(v, int) for v in box)):
                 raise ValueError("Overlays need their box: x, y, width and height.")
@@ -115,7 +137,7 @@ class ExportSessions:
             if len(data) != w * h * 4:
                 raise ValueError("The overlay's size does not match its box.")
             name = f"overlay-{frame:06d}-{x}-{y}-{w}-{h}.rgba"
-        else:
+        if tiles is None and not data:
             name = f"overlay-{frame:06d}.clear"
         target = session["folder"] / name
         temporary = target.with_suffix(".part")
@@ -126,8 +148,8 @@ class ExportSessions:
     def add_batch(self, session_id: str, body: bytes) -> int:
         """Store several overlays sent in one request (see unpack_batch); returns how many."""
         entries = unpack_batch(body)
-        for frame, box, pixels in entries:
-            self.add_overlay(session_id, frame, pixels, box)
+        for frame, box, pixels, tiles in entries:
+            self.add_overlay(session_id, frame, pixels, box, tiles)
         return len(entries)
 
     def take(self, session_id: str) -> dict[str, Any]:
@@ -163,11 +185,11 @@ class ExportSessions:
                     shutil.rmtree(folder, ignore_errors=True)
 
 
-def unpack_batch(body: bytes) -> list[tuple[Any, Any, bytes]]:
-    """A batch is a 4-byte big-endian length, a JSON list of {"frame", "box": [x, y, w, h] | null},
-    then each entry's RGBA pixels (w * h * 4 bytes; none when box is null), in order.
-    One request carries many frames because each request is a new connection here."""
-    import json
+def unpack_batch(body: bytes) -> list[tuple[Any, Any, bytes, Any]]:
+    """A batch is a 4-byte big-endian length, a JSON list of {"frame", "box": [x, y, w, h] | null}
+    or {"frame", "tiles": [[x, y, w, h], ...]}, then each entry's RGBA pixels (w * h * 4 bytes per
+    box or tile, in order; none when box is null). One request carries many frames because each
+    request is a new connection here."""
     if len(body) < 4:
         raise ValueError("The overlays did not arrive in full.")
     size = int.from_bytes(body[:4], "big")
@@ -183,9 +205,19 @@ def unpack_batch(body: bytes) -> list[tuple[Any, Any, bytes]]:
     for entry in header:
         if not isinstance(entry, dict):
             raise ValueError("The overlays could not be read.")
-        box = entry.get("box")
+        box, tiles = entry.get("box"), entry.get("tiles")
         length = 0
-        if box is not None:
+        if tiles is not None:
+            if box is not None or not isinstance(tiles, list) or not 1 <= len(tiles) <= MAX_TILES:
+                raise ValueError("A patch needs between 1 and 4096 tiles.")
+            for tile in tiles:
+                if (not isinstance(tile, list) or len(tile) != 4
+                        or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in tile)):
+                    raise ValueError("Each tile needs x, y, width and height.")
+                length += tile[2] * tile[3] * 4
+            if not length:
+                raise ValueError("A tile must be inside the frame.")
+        elif box is not None:
             if (not isinstance(box, list) or len(box) != 4
                     or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in box)):
                 raise ValueError("Overlays need their box: x, y, width and height.")
@@ -194,23 +226,23 @@ def unpack_batch(body: bytes) -> list[tuple[Any, Any, bytes]]:
                 raise ValueError("The overlay's box must be inside the frame.")
         if offset + length > len(body):
             raise ValueError("The overlays did not arrive in full.")
-        entries.append((entry.get("frame"), box, body[offset:offset + length]))
+        entries.append((entry.get("frame"), box, body[offset:offset + length], tiles))
         offset += length
     if offset != len(body):
         raise ValueError("The overlays did not arrive in full.")
     return entries
 
 
-OVERLAY_NAME = re.compile(r"overlay-(\d{6})(?:-(\d+)-(\d+)-(\d+)-(\d+)\.rgba|\.clear)")
+OVERLAY_NAME = re.compile(r"overlay-(\d{6})(?:-(\d+)-(\d+)-(\d+)-(\d+)\.rgba|\.clear|\.patch)")
 
 
 def overlay_schedule(folder: Path) -> dict[int, Path | None]:
-    """Output frame -> overlay file (None: no drawings) where the overlay changes."""
+    """Output frame -> overlay or patch file (None: no drawings) where the overlay changes."""
     schedule: dict[int, Path | None] = {}
     for path in folder.iterdir():
         match = OVERLAY_NAME.fullmatch(path.name)
         if match:
-            schedule[int(match[1])] = path if match[2] is not None else None
+            schedule[int(match[1])] = path if match[2] is not None or path.suffix == ".patch" else None
     return schedule
 
 
@@ -260,8 +292,13 @@ def write_audio(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[
 class Overlay:
     """An overlay: the box of pixels that has drawings in it."""
 
-    def __init__(self, path: Path, width: int, height: int) -> None:
+    def __init__(self, path: Path | None, width: int, height: int) -> None:
         import numpy as np
+        if path is None:  # nothing drawn yet: a clear frame, for patches to go over
+            self.box = (slice(0, height), slice(0, width))
+            self.alpha = np.zeros((height, width, 1), np.float32)
+            self.colour = np.zeros((height, width, 3), np.float32)
+            return
         match = OVERLAY_NAME.fullmatch(path.name)
         x, y, w, h = (int(v) for v in match.groups()[1:])
         pixels = np.fromfile(str(path), np.uint8)
@@ -271,6 +308,30 @@ class Overlay:
         self.box = (slice(y, y + h), slice(x, x + w))
         self.alpha = region[:, :, 3:4].astype(np.float32) / 255.0
         self.colour = region[:, :, 2::-1].astype(np.float32)  # RGBA -> BGR, the frames' order
+
+    def patched(self, path: Path, width: int, height: int) -> "Overlay":
+        """This overlay with a patch's tiles laid in (they replace the pixels under them)."""
+        import numpy as np
+        body = path.read_bytes()
+        size = int.from_bytes(body[:4], "big")
+        tiles = json.loads(body[4:4 + size].decode("utf-8"))
+        whole = self if self.box == (slice(0, height), slice(0, width)) else self._whole(width, height)
+        offset = 4 + size
+        for x, y, w, h in tiles:
+            if x + w > width or y + h > height or offset + w * h * 4 > len(body):
+                raise ValueError("An overlay could not be read.")
+            region = np.frombuffer(body, np.uint8, w * h * 4, offset).reshape(h, w, 4)
+            whole.alpha[y:y + h, x:x + w] = region[:, :, 3:4].astype(np.float32) / 255.0
+            whole.colour[y:y + h, x:x + w] = region[:, :, 2::-1].astype(np.float32)
+            offset += w * h * 4
+        return whole
+
+    def _whole(self, width: int, height: int) -> "Overlay":
+        """A copy covering the whole frame, so patches can land anywhere."""
+        whole = Overlay(None, width, height)
+        whole.alpha[self.box] = self.alpha
+        whole.colour[self.box] = self.colour
+        return whole
 
     def apply(self, frame: Any) -> Any:
         """The frame with the overlay laid over it (straight alpha, as a canvas exports it)."""
@@ -320,7 +381,11 @@ def render(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[
                     if current is None:
                         raise ValueError("The clip's frames could not be read.")
                     if n in schedule:
-                        overlay = Overlay(schedule[n], width, height) if schedule[n] is not None else None
+                        path = schedule[n]
+                        if path is not None and path.suffix == ".patch":
+                            overlay = (overlay or Overlay(None, width, height)).patched(path, width, height)
+                        else:
+                            overlay = Overlay(path, width, height) if path is not None else None
                     picture = overlay.apply(current) if overlay is not None else current
                     try:
                         encoder_process.stdin.write(picture.tobytes())
