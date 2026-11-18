@@ -84,6 +84,50 @@ def at(frame, dx=0):
     return [(40 + 3 * frame + 11 + dx) / W, 150 / H, 22 / W, 50 / H]
 
 
+class BoxSizeTests(unittest.TestCase):
+    """A real clip (2026-11-18): the tracker let its box swell over a crowd of players and nothing noticed."""
+
+    def test_a_box_much_bigger_or_smaller_than_the_seed_is_doubted_then_stopped(self):
+        flagger = segments.Flagger(25)
+        flagger.push((0.5, 0.5, 0.05, 0.1))  # the seed: area 0.005
+        states = lambda w, h: flagger.push((0.5, 0.5, w, h), colour=0.0)
+        self.assertEqual(states(0.06, 0.11)[1][5], segments.TRACKED)  # a player coming nearer
+        self.assertEqual(states(0.07, 0.14)[1][5], segments.REVIEW)  # twice the area: may be wrong
+        self.assertEqual(states(0.04, 0.02)[1][5], segments.REVIEW)  # shrunk to a limb
+        self.assertEqual(states(0.12, 0.2), ("stop", "lost"))  # nearly five times: not one player
+        self.assertEqual(states(0.02, 0.02), ("stop", "lost"))  # a tenth of it: not the player either
+
+    def test_slow_zoom_within_the_limits_is_not_flagged(self):
+        flagger = segments.Flagger(25)
+        flagger.push((0.5, 0.5, 0.05, 0.1))
+        for scale in (1.02, 1.05, 1.1, 1.2, 1.25, 1.3):  # up to 1.7 times the area
+            self.assertEqual(flagger.push((0.5, 0.5, 0.05 * scale, 0.1 * scale), colour=0.0)[1][5], segments.TRACKED, scale)
+
+    def test_the_drawing_waits_where_the_player_was_last_trusted(self):
+        class Swelling:  # a tracker whose box grows 20% in area every frame, as the real one did over a crowd
+            def init(self, frame, box):
+                self.box, self.n = list(box), 0
+
+            def update(self, frame):
+                self.n += 1
+                grow = 1.2 ** (self.n / 2)
+                x, y, w, h = self.box
+                return True, (x, y, w * grow, h * grow)
+
+        original = tracker.make_tracker
+        tracker.make_tracker = lambda model=None: (Swelling(), None)
+        try:
+            frames = iter([np.full((H, W, 3), 90, np.uint8) for _ in range(40)])
+            rows, reason, _ = tracker._follow(frames, SEED, (W, H), FPS, None, None, lambda: None)
+        finally:
+            tracker.make_tracker = original
+        self.assertEqual(reason, "lost")
+        self.assertLess(len(rows), 8)  # it stopped when the box passed four times the seed's area
+        self.assertEqual(rows[0][5], segments.KEYFRAME)
+        self.assertTrue(all(row[5] != segments.REVIEW for row in rows[-3:]), [row[5] for row in rows])  # no doubtful tail
+        self.assertTrue(all(row[2] * row[3] < 1.9 * SEED[2] * SEED[3] for row in rows))  # nothing from the swollen frames is kept
+
+
 class QualityTests(unittest.TestCase):
     """M5: blending passes, bridging holes, smoothing (pure functions)."""
 

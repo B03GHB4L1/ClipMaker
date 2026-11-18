@@ -171,7 +171,12 @@ identical in both.
 - Confidence (validated in M0): ViT's own loss signal, plus a **shirt-colour
   check** (upper-body colour inside the box, grass masked out, compared with
   the seed; flag when it stays different for about 0.2 s), plus an
-  **out-of-frame rule** (box reaching the frame edge and shrinking). Any flag
+  **out-of-frame rule** (box reaching the frame edge and shrinking), plus a
+  **box-size rule** (2026-11-18, from a real clip where the box swelled over three
+  players and nothing noticed: more than 1.8 times the seed's area, or under a
+  fifth of it, is doubtful; more than 4 times, or under 8%, stops tracking, and the
+  doubtful frames just before a stop are dropped so the drawing waits where the
+  player was last trusted). Any flag
   → amber review frame with a one-click "still right" or drag-to-fix; a run
   of flags or a scene cut → stop the segment and ask for a new seed.
 - `export.py` (built in M4, replacing the planned `render.py`): the editor draws

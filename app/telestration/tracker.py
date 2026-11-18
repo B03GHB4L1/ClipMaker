@@ -174,6 +174,11 @@ def _follow(frames: Iterator[Any], seed: list[float], size: tuple[int, int], fps
             kind, value = flagger.push(to_fractions((x, y, w, h), size), ok=bool(ok), confidence=confidence,
                                        colour=colour, edge=against_edge and w * h < EDGE_SHRINK * seed_area, cut=cut)
         if kind == "stop":
+            if value == "lost":
+                # Drop the doubtful frames just before the stop: the tracker was already off then, and the
+                # drawing should wait where the player was last trusted instead of wandering away.
+                while len(rows) > 1 and rows[-1][5] == segments.REVIEW:
+                    rows.pop()
             return rows, value, notice
         rows.append(value)
         previous = scene
