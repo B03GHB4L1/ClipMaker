@@ -10,6 +10,7 @@ import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, p
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
+import { fitBox } from "./annotate/fit.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -406,7 +407,7 @@ const HINTS = {
   freehand: "Hold and draw.",
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line).",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
-  follow: "Drag a box around a player, head to boots. A ring follows them; drag it back if it slips.",
+  follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
   token: "Click to place a player token. Number, team and name are on the right.",
 };
 const FOLLOWABLE = ["ring", "spotlight", "text"];
@@ -859,6 +860,37 @@ async function cancelTracking(trackId, quiet = false) {
   renderPlayers();
 }
 
+// A box fitted to the player inside `box` ([footX, footY, w, h] fractions of the frame) on the frame on screen,
+// or null when their outline cannot be told from what is round them (annotate/fit.js).
+const fitCut = document.createElement("canvas");
+const fitPlayerBox = (box) => {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || boardNow()) return null;
+  const [fx, fy, w, h] = box;
+  const [x0, x1, y0, y1] = [(fx - w / 2) * vw, (fx + w / 2) * vw, (fy - h) * vh, fy * vh];
+  const [mx, my] = [(x1 - x0) * 0.25, (y1 - y0) * 0.25]; // room round the box, for a box that cuts the player off
+  const [sx, sy] = [Math.max(0, Math.floor(x0 - mx)), Math.max(0, Math.floor(y0 - my))];
+  const [ex, ey] = [Math.min(vw, Math.ceil(x1 + mx)), Math.min(vh, Math.ceil(y1 + my))];
+  if (ex - sx < 8 || ey - sy < 12) return null;
+  const scale = Math.min(1, 360 / (ey - sy)); // at most 360 px high: plenty to see a player, and quick
+  fitCut.width = Math.max(1, Math.round((ex - sx) * scale));
+  fitCut.height = Math.max(1, Math.round((ey - sy) * scale));
+  const cutCtx = fitCut.getContext("2d", { willReadFrequently: true });
+  let image;
+  try {
+    cutCtx.drawImage(video, sx, sy, ex - sx, ey - sy, 0, 0, fitCut.width, fitCut.height);
+    image = cutCtx.getImageData(0, 0, fitCut.width, fitCut.height);
+  } catch {
+    return null; // the picture cannot be read back
+  }
+  const rect = [(x0 - sx) * scale, (y0 - sy) * scale, (x1 - sx) * scale, (y1 - sy) * scale];
+  const found = fitBox(image, rect, { left: sx === 0, right: ex === vw, top: sy === 0, bottom: ey === vh });
+  if (!found) return null;
+  const [a0, b0, a1, b1] = [sx + found[0] / scale, sy + found[1] / scale, sx + found[2] / scale, sy + found[3] / scale];
+  return [(a0 + a1) / 2 / vw, b1 / vh, (a1 - a0) / vw, (b1 - b0) / vh].map((value) => Math.round(value * 1e5) / 1e5);
+};
+
 // The analyst moved the player's drawing on this frame: that frame becomes a
 // keyframe and the spans on both sides of it are tracked again.
 const correctTrack = (trackId, dx, dy) => {
@@ -879,7 +911,7 @@ const keyTrack = (trackId, box) => {
   const earlier = Object.keys(track.keyframes).map(Number).filter((key) => key < frame);
   if (earlier.length && frame - Math.max(...earlier) > 1) queued.set(trackId, [{ start: Math.max(...earlier), limit: frame - 1 }]);
   else queued.delete(trackId);
-  startTracking(trackId, frame, box, limit);
+  return startTracking(trackId, frame, box, limit); // resolves once the job has started (its status line then clears)
 };
 
 function nextCheck(track) {
@@ -900,6 +932,15 @@ const followSelected = (action) => {
   if (!track) return;
   const frame = frameNow();
   const at = boxAt(track, frame);
+  if (action === "fit" && at) {
+    const fitted = fitPlayerBox(at.box);
+    if (!fitted) {
+      trackStatus("Could not tell the player's outline from what is round them on this frame. Drag a corner of the dashed box to fit it by hand.", true);
+      return;
+    }
+    keyTrack(track.id, fitted).then(() => trackStatus("Box fitted to the player on this frame; the rest of the clip is tracked again from it. Undo puts it back."));
+    return;
+  }
   if (action === "confirm" && at) updateTrack(track.id, (current) => setKeyframe(current, frame, at.box));
   if (action === "next") {
     const run = nextCheck(track);
@@ -928,7 +969,8 @@ const followFromBox = (start, end) => {
     return;
   }
   const frame = frameNow();
-  const box = [(x0 + x1) / 2, y1, x1 - x0, y1 - y0].map((v) => Math.round(Math.min(1.5, Math.max(-0.5, v)) * 1e5) / 1e5);
+  const drawn = [(x0 + x1) / 2, y1, x1 - x0, y1 - y0].map((v) => Math.round(Math.min(1.5, Math.max(-0.5, v)) * 1e5) / 1e5);
+  const box = fitPlayerBox(drawn) || drawn; // a tight box tracks far better than a loose one
   const track = newTrack(frame, box);
   const target = followTarget && doc.find(followTarget);
   followTarget = null;
@@ -1968,8 +2010,8 @@ const endGesture = () => {
   } else if (current.type === "resize") {
     const same = current.box.every((value, i) => Math.abs(value - current.base[i]) < 1e-4);
     if (!same) {
-      keyTrack(current.trackId, current.box.map((v) => Math.round(v * 1e5) / 1e5));
-      trackStatus("Box fitted to the player on this frame; the rest of the clip is tracked again from it.");
+      keyTrack(current.trackId, current.box.map((v) => Math.round(v * 1e5) / 1e5))
+        .then(() => trackStatus("Box fitted to the player on this frame; the rest of the clip is tracked again from it."));
     }
   } else if (current.preview && (current.moved || (current.type !== "move" && current.type !== "handle"))) {
     applyEdit(current); // a plain click on a drawing only selects it: no edit, and no new keyframe on a followed player
@@ -2302,6 +2344,7 @@ const wire = () => {
   $("[data-follow-confirm]").onclick = () => followSelected("confirm");
   $("[data-follow-next]").onclick = () => followSelected("next");
   $("[data-follow-retrack]").onclick = () => followSelected("retrack");
+  $("[data-follow-fit]").onclick = () => followSelected("fit");
   $("[data-follow-stop]").onclick = () => followSelected("stop");
   $("[data-follow-label]").onchange = (event) => {
     const item = doc.find(selectedId);
