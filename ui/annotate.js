@@ -235,15 +235,30 @@ const boardSeconds = (item) => outTime - freezeStart(item.on, timing, doc.freeze
 const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
 
 const boxPixels = ([fx, fy, w, h]) => [(fx - w / 2) * canvas.width, (fy - h) * canvas.height, w * canvas.width, h * canvas.height];
+// The corners of a player box [footX, footY, w, h] (fractions), named by compass point.
+const boxCorners = ([fx, fy, w, h]) => [[fx - w / 2, fy - h, "nw"], [fx + w / 2, fy - h, "ne"], [fx - w / 2, fy, "sw"], [fx + w / 2, fy, "se"]];
 const drawPlayerBox = (track) => {
   const at = boxAt(track, frameNow());
   if (!at) return;
-  const [x, y, w, h] = boxPixels(at.box);
+  const resizing = gesture?.type === "resize" && gesture.trackId === track.id;
+  const box = resizing ? gesture.box : at.box;
+  const [x, y, w, h] = boxPixels(box);
   ctx.save();
   ctx.setLineDash([5, 4]);
   ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  ctx.strokeStyle = at.held || at.state === REVIEW ? "#e8a317" : at.state === 1 ? "#c8f135" : "rgba(255, 255, 255, 0.7)";
+  ctx.strokeStyle = at.held || at.state === REVIEW ? "#e8a317" : at.state === 1 || resizing ? "#c8f135" : "rgba(255, 255, 255, 0.7)";
   ctx.strokeRect(x, y, w, h);
+  // Corner handles: drag one to fit the box to the player (a tight box tracks better).
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#171817";
+  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+  const half = handleRadius() * 0.6;
+  boxCorners(box).forEach(([cx, cy]) => {
+    const [px, py] = toPixels([cx, cy]);
+    ctx.fillRect(px - half, py - half, half * 2, half * 2);
+    ctx.strokeRect(px - half, py - half, half * 2, half * 2);
+  });
   ctx.restore();
 };
 // Where a point dropped near a followed player's feet links to them.
@@ -848,10 +863,15 @@ async function cancelTracking(trackId, quiet = false) {
 // keyframe and the spans on both sides of it are tracked again.
 const correctTrack = (trackId, dx, dy) => {
   const track = trackById(trackId);
-  const frame = frameNow();
-  const at = track && boxAt(track, frame);
+  const at = track && boxAt(track, frameNow());
   if (!at) return;
-  const box = [at.box[0] + dx, at.box[1] + dy, at.box[2], at.box[3]];
+  keyTrack(trackId, [at.box[0] + dx, at.box[1] + dy, at.box[2], at.box[3]]);
+};
+// Make `box` the player's keyframe on this frame and track the clip again either side of it.
+const keyTrack = (trackId, box) => {
+  const track = trackById(trackId);
+  const frame = frameNow();
+  if (!track) return;
   const limit = Math.max(lastFrame(track), followLimit(trackId));
   updateTrack(trackId, (current) => setKeyframe(current, frame, box));
   // Then track the stretch before the correction again, back from it, so the drawing glides
@@ -1774,6 +1794,26 @@ textInput.addEventListener("blur", () => finishText());
 // Pointer gestures
 // ---------------------------------------------------------------------------
 const aspect = () => clip.width / clip.height;
+// The followed player's box the selected drawing is linked to (when exactly one), if it is on this frame.
+const selectedTrackBox = () => {
+  const item = doc.find(selectedId);
+  const ids = item && !boardNow() ? [...linkedTracks(item)] : [];
+  const track = ids.length === 1 ? trackById(ids[0]) : null;
+  const at = track && boxAt(track, frameNow());
+  return at ? { trackId: track.id, box: at.box } : null;
+};
+// The nearest corner of that box within reach of `at`: {trackId, box, corner, distance} (pixels).
+const nearBoxCorner = (at) => {
+  const found = selectedTrackBox();
+  if (!found) return null;
+  const [x, y] = toPixels(at);
+  const near = boxCorners(found.box).map(([cx, cy, corner]) => {
+    const [px, py] = toPixels([cx, cy]);
+    return { ...found, corner, distance: Math.hypot(px - x, py - y) };
+  }).filter((entry) => entry.distance <= handleRadius() * 1.6);
+  return near.sort((a, b) => a.distance - b.distance)[0] || null;
+};
+
 const nearHandle = (item, at) => {
   const [x, y] = toPixels(at);
   return handlesFor(item).find(({ point }) => {
@@ -1805,7 +1845,11 @@ canvas.addEventListener("pointerdown", (event) => {
   if (tool === "select") {
     const selected = shownItem(selectedId);
     const handle = selected && nearHandle(selected, at);
-    if (handle) {
+    const corner = nearBoxCorner(at);
+    const handleDistance = handle ? Math.hypot(...toPixels(handle.point).map((value, i) => value - toPixels(at)[i])) : Infinity;
+    if (corner && corner.distance <= handleDistance) {
+      gesture = { type: "resize", trackId: corner.trackId, corner: corner.corner, base: corner.box, box: corner.box.slice() };
+    } else if (handle) {
       gesture = { type: "handle", id: selected.id, index: handle.index, base: selected, preview: selected };
     } else {
       const hit = itemAt(shown(), x, y, w, h, from, measure);
@@ -1854,13 +1898,23 @@ canvas.addEventListener("pointermove", (event) => {
     if (tool === "select") {
       const [x, y] = toPixels(at);
       const selected = doc.find(selectedId);
-      const over = (selected && nearHandle(shownItem(selectedId), at)) || itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
+      const over = (selected && nearHandle(shownItem(selectedId), at)) || nearBoxCorner(at) || itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
       canvas.classList.toggle("is-over", Boolean(over));
     }
     return;
   }
   const item = gesture.base;
-  if (gesture.type === "move" && item) {
+  if (gesture.type === "resize") {
+    // The dragged corner follows the pointer; the opposite corner stays where it is.
+    const [fx, fy, bw, bh] = gesture.base;
+    const point = clampPoint(at);
+    const minW = 4 / canvas.width;
+    const minH = 8 / canvas.height;
+    let [x0, x1, y0, y1] = [fx - bw / 2, fx + bw / 2, fy - bh, fy];
+    if (gesture.corner.includes("w")) x0 = Math.min(point[0], x1 - minW); else x1 = Math.max(point[0], x0 + minW);
+    if (gesture.corner.includes("n")) y0 = Math.min(point[1], y1 - minH); else y1 = Math.max(point[1], y0 + minH);
+    gesture.box = [(x0 + x1) / 2, y1, x1 - x0, y1 - y0];
+  } else if (gesture.type === "move" && item) {
     gesture.preview = moveItem(item, at[0] - gesture.start[0], at[1] - gesture.start[1]);
   } else if (gesture.type === "handle" && item) {
     gesture.preview = dragHandle(item, gesture.index, at);
@@ -1906,6 +1960,12 @@ const endGesture = () => {
     }
   } else if (current.type === "box") {
     followFromBox(current.start, current.end);
+  } else if (current.type === "resize") {
+    const same = current.box.every((value, i) => Math.abs(value - current.base[i]) < 1e-4);
+    if (!same) {
+      keyTrack(current.trackId, current.box.map((v) => Math.round(v * 1e5) / 1e5));
+      trackStatus("Box fitted to the player on this frame; the rest of the clip is tracked again from it.");
+    }
   } else if (current.preview) {
     applyEdit(current);
   }
