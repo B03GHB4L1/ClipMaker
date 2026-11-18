@@ -129,6 +129,13 @@ class SharedUiTests(unittest.TestCase):
         size = lambda xg: 6 + 40 * xg
         self.assertGreaterEqual(size(0.94) - size(0.76), 7)  # a visible step between big chances
 
+    def test_full_event_table_fills_its_pop_up(self):
+        # compact.css caps the Intake preview table at 160px; that cap must not reach the pop-up.
+        css = (UI / "compact.css").read_text(encoding="utf-8")
+        self.assertIn(".event-dialog .event-dialog-table { max-height: none;", css)
+        self.assertLess(css.index(".event-table-wrap { max-height: 160px; }"),
+                        css.index(".event-dialog .event-dialog-table { max-height: none;"))
+
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")
         self.assertIn("Clip match footage from event data in one seamless experience.", html)

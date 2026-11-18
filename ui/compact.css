@@ -109,6 +109,8 @@ main#intake > section { scroll-margin-top: 76px; }
 .score strong { font-size: 24px; }
 .event-browser summary { min-height: 38px; }
 .event-table-wrap { max-height: 160px; }
+/* The Intake preview stays short; the full table pop-up gives the table all its free height. */
+.event-dialog .event-dialog-table { max-height: none; min-height: 0; margin: 12px 24px 16px; }
 .dropzone { height: 132px; }
 .drop-icon { margin-bottom: 8px; }
 /* Timeline sync: a narrow control rail and a player that takes the rest of the row.
