@@ -227,7 +227,10 @@ def _annotate_plotly_export(fig, title="", subtitle="", note="", height=None, to
     return fig
 
 
-def _brand_fig(fig, height=None, note="Values are calculated from the selected match source. Hover for exact values."):
+def _brand_fig(fig, height=None, note=""):
+    # A chart passes a note only when it has something specific to say; the old generic
+    # "Values are calculated from the selected match source..." footnote was printed on
+    # every PNG export and said nothing.
     light = _is_light()
     if light:
         paper = "#f5f0e8"
