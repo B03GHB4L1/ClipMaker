@@ -641,6 +641,35 @@ Beyond the limits stated above: a clip cut to the very end of a part that holds
 a drawing keeps the drawing only for the time left; the Parts list shows a
 part's actions (Earlier, Later, Repeat, Remove) only for the selected part.
 
+## Fitting a followed player's box (2026-11-18)
+
+**Why.** On a real clip the ViT tracker lost players that were followed with
+loose boxes (a box mostly grass), let its box swell over a crowd, and each
+"confirm" or click then locked the swollen box in as the next seed. Fixes made
+that day: the box-size rule (see the confidence list), a plain click no longer
+edits a drawing (it used to re-track), and the box can be fitted by hand or
+automatically.
+
+**By hand.** Drag a corner of the dashed box (four handles); the opposite corner
+stays, and on release the box becomes this frame's keyframe and the clip is
+tracked again from it.
+
+**Automatically** (`ui/annotate/fit.js`, pure JS, run on pixels cut from the
+video, no model and no download). The pitch colour is read from the picture
+(broadcasts grade it differently: one real match has yellow-green grass, hue 63);
+everything else in the region is a candidate; gaps are closed, thin pitch lines
+opened away; the blob on the middle of the analyst's box is the player. It gives
+nothing, and the analyst's box is kept, when the outline is not clear: no pitch,
+a blob that is not player-shaped (two players touching, a pitch line or the stand
+joined on), or one that runs past the cut-out. It is applied to every new follow,
+and a **Fit box to player** button does it for a followed player on the current
+frame (the result is one Undo).
+
+Checked on the real clip's saved keyframes, as saved and made 1.7 times looser:
+12 of 16 fitted, all on the player (none on a line or a neighbour), the other 4
+kept the analyst's box. The hard cases are a thick pitch line through the player
+and a player in front of the stand.
+
 ## Roadmap after M5
 
 Agreed order (2026-11-16). Each step gets its own plan before it starts.

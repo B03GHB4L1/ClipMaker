@@ -262,6 +262,8 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-follow-group[hidden] { display: none; }
 .annotate-follow-group h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; }
 .annotate-follow-group .annotate-pair { display: grid; grid-template-columns: minmax(0, 1fr); }
+.annotate-main .annotate-follow-group > button { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-follow-group > button:hover:not(:disabled) { background: var(--annotate-hover); }
 
 .annotate-list { list-style: none; margin: 0; padding: 0 6px 8px; max-height: 260px; overflow: auto; }
 .annotate-list button:hover:not(.is-selected) { background: var(--annotate-hover); }

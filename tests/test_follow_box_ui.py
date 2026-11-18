@@ -39,6 +39,13 @@ class FollowBoxUiTests(unittest.TestCase):
         self.assertIn("> 3 * (window.devicePixelRatio || 1)", self.script)
         self.assertIn('(current.moved || (current.type !== "move" && current.type !== "handle"))', self.script)
 
+    def test_boxes_are_fitted_automatically_on_new_follows_and_on_a_button(self):
+        self.assertIn('import { fitBox } from "./annotate/fit.js";', self.script)
+        self.assertIn("const box = fitPlayerBox(drawn) || drawn;", self.script)  # the analyst's box is kept when no outline is found
+        self.assertIn('action === "fit"', self.script)
+        self.assertIn("data-follow-fit", self.html)
+        self.assertIn("Fit box to player", self.html)
+
     def test_the_panel_says_how_to_fit_the_box(self):
         self.assertIn("Drag a corner of the dashed box to fit it tightly to the player", self.html)
 
