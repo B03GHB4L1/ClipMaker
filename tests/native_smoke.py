@@ -106,6 +106,11 @@ def wait_for_driver(process, port, timeout=30):
     raise TimeoutError("The native WebDriver did not report ready")
 
 
+# The upgrade test first runs the old predecessor app, which plays from a button over the
+# picture; the current app has only the green button in the control bar.
+PLAY_BUTTON = ".play-button, [data-player-toggle]"
+
+
 def ready_element(driver, wait, selector):
     target = wait.until(lambda current: current.find_element("css selector", selector))
     driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'instant'})", target)
@@ -216,10 +221,10 @@ def main():
                                 "markers": {"1H": "00:00:00", "2H": "00:00:00"}})
                         driver.refresh()
                         stage(evidence, "verify installed webview decodes and plays footage")
-                        element('[data-player-toggle]').click()
+                        element(PLAY_BUTTON).click()
                         wait.until(lambda current: current.execute_script(
                             "const v=document.querySelector('[data-match-video]'); return v.videoWidth > 0 && v.currentTime > 0"))
-                        element('[data-player-toggle]').click()
+                        element(PLAY_BUTTON).click()
                         stage(evidence, "open filters and build clip plan")
                         element('[data-continue]').click()
                         element('#actions summary').click()
