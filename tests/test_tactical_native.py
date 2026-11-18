@@ -48,6 +48,8 @@ ATTACK_LABEL = "ATTACK ->"
 XG_PLAYLIST = "Shots By xG"
 NEW_STYLE_CHARTS = re.compile(r"Pass Directness - |Possession Length - median")
 REMOVED_STYLE_CHARTS = re.compile(r"Progression Funnel Per Match")
+# The generic footnote printed on every PNG export is gone; the box it needed under the chart goes too.
+GENERIC_NOTE = "Values are calculated from the selected match source."
 NEW_STYLE_CAPTIONS = {"No passes with end locations for this team.", "No possessions found for this team."}
 MOMENT_CELL = re.compile(r'<div style="padding:9px 10px[^"]*">([^<]*)</div>')
 
@@ -94,7 +96,13 @@ def normal(element, norm):
             # Axis titles (raw column names) dropped and the note moved under the labels.
             for axis in ("xaxis", "yaxis"):
                 layout[axis] = {k: v for k, v in (layout.get(axis) or {}).items() if k != "title"}
-            layout["annotations"] = [{k: v for k, v in a.items() if k != "yshift"} for a in layout.get("annotations") or []]
+            if layout.get("annotations"):
+                layout["annotations"] = [{k: v for k, v in a.items() if k != "yshift"} for a in layout["annotations"]]
+        if any(str(a.get("text", "")).startswith(GENERIC_NOTE) for a in layout.get("annotations") or []):
+            layout["annotations"] = [a for a in layout["annotations"] if not str(a.get("text", "")).startswith(GENERIC_NOTE)]
+            if not layout["annotations"]:
+                del layout["annotations"]  # a chart with no annotations has no such key at all
+            layout["margin"] = {**layout["margin"], "b": 78}
         if any(a.get("text") == ATTACK_LABEL for a in layout.get("annotations") or []):
             layout["annotations"] = [a for a in layout["annotations"] if a.get("text") != ATTACK_LABEL]
             layout["margin"] = {**layout["margin"], "t": layout["margin"]["t"] - 26}
@@ -186,6 +194,16 @@ class TacticalNativeParityTests(unittest.TestCase):
             text = json.dumps(view)
             self.assertNotIn("Progression Funnel", text)
             self.assertIn("Territory Heatmap", text)
+
+    def test_charts_carry_no_generic_footnote_into_png_exports(self):
+        with analysis_golden.fixture_inputs() as (csvs, data):
+            data.mkdir()
+            ids = analysis_golden._make_projects(data, csvs[:1])
+            projects = MatchStore(data).list()
+            project = next(item for item in projects if item["id"] == ids[0])
+            for slug in ("style-profile", "set-pieces", "defensive-transitions", "attacking-transitions", "video-lab"):
+                view, _ = tactical.render(slug, {}, project, projects)
+                self.assertNotIn(GENERIC_NOTE, json.dumps(view), slug)
 
     def test_pitch_maps_show_the_attack_direction(self):
         """Transition maps, the restart map and the event trace say which way the team attacks."""
