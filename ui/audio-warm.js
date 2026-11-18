@@ -5,9 +5,11 @@
 // play then froze the picture until the sound caught up. A running but silent
 // audio stream keeps the output open, so play starts at once.
 //
-// It starts on the first play on a page, stops when the page is hidden, and
-// stops after IDLE_MS without any play, pause or seek, so it never keeps the
-// sound device busy for long when nobody is watching.
+// It starts at the first click or key press on a page with a video (a few
+// seconds before play, so the output is already awake, including on a fresh
+// clip or a freshly opened page) and at any play. It stops when the page is
+// hidden, and after IDLE_MS without a click, key, play, pause or seek, so it
+// never keeps the sound device busy for long when nobody is using the page.
 const IDLE_MS = 5 * 60 * 1000;
 let context = null;
 let idleTimer = null;
@@ -55,6 +57,15 @@ document.addEventListener("play", (event) => {
 for (const name of ["pause", "seeked"]) {
   document.addEventListener(name, (event) => {
     if (event.target instanceof HTMLMediaElement && context) touch();
+  }, true);
+}
+// Any click or key press on a page with a video: the user is working here, and
+// the gesture also lets the browser start audio.
+for (const name of ["pointerdown", "keydown"]) {
+  document.addEventListener(name, () => {
+    if (document.hidden || !document.querySelector("video")) return;
+    touch();
+    hold();
   }, true);
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
