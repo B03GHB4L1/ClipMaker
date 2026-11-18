@@ -5,10 +5,11 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=21" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=22" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=13"></script>
+  <script type="module" src="annotate.js?v=14"></script>
   <script type="module" src="update.js?v=1"></script>
+  <script type="module" src="audio-warm.js?v=1"></script>
 </head>
 <body class="analysis-page annotate-page">
   <header class="filter-topbar">
@@ -104,6 +105,11 @@
           <output class="annotate-time" data-time>0:00.00 &middot; frame 1</output>
         </div>
         <section class="annotate-timeline" aria-label="Timeline" data-calib-hide>
+          <div class="annotate-row annotate-parts">
+            <span class="annotate-row-name">Parts</span>
+            <div class="annotate-lane" data-parts-lane role="group" aria-label="Parts of the clip"></div>
+            <button type="button" class="annotate-row-action" data-split title="Cut the clip into two parts at the playhead (X)">Split</button>
+          </div>
           <div class="annotate-row">
             <span class="annotate-row-name">Freezes</span>
             <div class="annotate-lane" data-lane data-empty="Freezes and boards show here" aria-hidden="true"><span class="annotate-lane-head" data-lane-head></span></div>
@@ -173,6 +179,13 @@
             <label data-anim-detail>Animation (s) <input type="number" data-anim-seconds min="0.05" max="5" step="0.05" /></label>
             <label data-anim-detail>Easing <select data-ease><option value="ease-out">Ease out</option><option value="ease-in-out">Ease in and out</option><option value="linear">Even</option></select></label>
             <label class="annotate-check" data-pulse-row><input type="checkbox" data-pulse /> Pulse</label>
+          </div>
+        </details>
+        <details data-parts-panel>
+          <summary>Parts <span class="annotate-count" data-parts-count>(1)</span></summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-parts-empty>The clip is one part. Press Split (X) at the playhead to cut it, then trim, move, repeat or remove parts.</p>
+            <ol class="annotate-list annotate-parts-list" data-parts-list></ol>
           </div>
         </details>
         <details data-freeze-panel>
