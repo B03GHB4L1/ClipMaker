@@ -6,12 +6,12 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
     <meta name="theme-color" content="#f4f4f0" />
     <title>VizorPlay - Match Intake</title>
-    <link rel="stylesheet" href="styles.css?v=10" />
+    <link rel="stylesheet" href="styles.css?v=11" />
     <link rel="stylesheet" href="compact.css?v=15" />
     <link rel="stylesheet" href="design.css?v=6" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
     <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
-    <script type="module" src="app.js?v=19"></script>
+    <script type="module" src="app.js?v=20"></script>
     <script type="module" src="update.js?v=1"></script>
   </head>
   <body>
@@ -342,14 +342,6 @@
               ><strong data-frame-score>0 - 0</strong
               ><span data-frame-away>AWAY</span><time>00:00</time>
             </div>
-            <button
-              class="play-button"
-              type="button"
-              aria-label="Play preview"
-              disabled
-            >
-              ▶
-            </button>
           </div>
           <div
             class="player-controls"
@@ -357,12 +349,12 @@
             aria-label="Playback controls"
             data-player-controls
           >
-            <button type="button" class="player-toggle" data-player-toggle aria-label="Play" disabled>▶</button
-            ><span class="step-group" role="group" aria-label="Step back"
+            <span class="step-group" role="group" aria-label="Step back"
               ><button type="button" data-step="-60" title="Back 1 minute (Ctrl+←)" disabled>−1m</button
               ><button type="button" data-step="-10" title="Back 10 seconds (Shift+←)" disabled>−10s</button
               ><button type="button" data-step="-1" title="Back 1 second (←)" disabled>−1s</button
               ><button type="button" data-step="frame-back" title="Back 1 frame (,)" aria-label="Back 1 frame" disabled>−1f</button></span
+            ><button type="button" class="player-toggle" data-player-toggle aria-label="Play" disabled>▶</button
             ><span class="step-group" role="group" aria-label="Step forward"
               ><button type="button" data-step="frame-forward" title="Forward 1 frame (.)" aria-label="Forward 1 frame" disabled>+1f</button
               ><button type="button" data-step="1" title="Forward 1 second (→)" disabled>+1s</button

@@ -136,6 +136,24 @@ class SharedUiTests(unittest.TestCase):
         self.assertLess(css.index(".event-table-wrap { max-height: 160px; }"),
                         css.index(".event-dialog .event-dialog-table { max-height: none;"))
 
+    def test_intake_video_has_no_play_button_over_the_picture(self):
+        # It covered the centre spot at kick-off; the ▶ in the control bar plays and pauses.
+        for name in ("index.html", "app.js", "styles.css"):
+            self.assertNotIn("play-button", (UI / name).read_text(encoding="utf-8"), name)
+        self.assertIn("data-player-toggle", (UI / "index.html").read_text(encoding="utf-8"))
+        self.assertIn('playerToggle.addEventListener("click", togglePlayback)', (UI / "app.js").read_text(encoding="utf-8"))
+        # Play sits in the middle of the stepping buttons: −1f ▶ +1f.
+        html = (UI / "index.html").read_text(encoding="utf-8")
+        self.assertRegex(html, r">−1f</button></span\s*><button[^>]*data-player-toggle[^>]*>▶</button\s*><span class=\"step-group\" role=\"group\" aria-label=\"Step forward\"")
+
+    def test_switching_period_keeps_the_playhead_unless_the_period_has_a_kickoff(self):
+        # 1H -> 2H used to send the playhead back to 0 because an unset period's
+        # 00:00:00 is only a placeholder, and it reloaded the same video.
+        app = (UI / "app.js").read_text(encoding="utf-8")
+        self.assertIn('const markerSet = button.dataset.markerSet === "true";', app)
+        self.assertIn("markerSet ? parseClock(button.dataset.marker) : (sameFile ? currentSeconds() : 0)", app)
+        self.assertIn("if (!sameFile && activeMatch.id && sourceOf(button.dataset.period))", app)  # reload only for another file
+
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")
         self.assertIn("Clip match footage from event data in one seamless experience.", html)

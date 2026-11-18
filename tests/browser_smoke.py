@@ -720,19 +720,21 @@ def exercise_kickoff_player(page, base, root):
                     "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video)],
                    check=True, capture_output=True)
     page.locator('[data-video-input]').set_input_files(str(video))
-    page.get_by_role("button", name="Play preview", exact=True).wait_for()
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
     page.wait_for_function("document.querySelector('[data-match-video]').duration > 179")
     current = lambda: page.locator('[data-match-video]').evaluate("(video) => video.currentTime")
     controls = page.get_by_role("group", name="Playback controls")
     kickoff = page.get_by_role("textbox", name="Selected period kick-off time")
 
     def switch_period(name):
-        # A period tab reopens its video; wait for that reload before going on.
+        # Every period here plays the same file, so switching must not reload the video.
         page.locator('[data-match-video]').evaluate(
             "(video) => { window.__periodLoads = 0; video.addEventListener('loadedmetadata',"
             " () => { window.__periodLoads += 1; }, { once: true }); }")
         page.get_by_role("tab", name=name, exact=True).click()
-        page.wait_for_function("window.__periodLoads > 0")
+        expect(page.get_by_role("tab", name=name, exact=True)).to_have_attribute("aria-selected", "true")
+        page.wait_for_timeout(300)
+        assert page.evaluate("window.__periodLoads") == 0, ("period switch reloaded the video", name)
 
     stage("kick-off player: second, minute and frame steps by button and key")
     controls.get_by_role("button", name="+1m").click()
@@ -758,6 +760,8 @@ def exercise_kickoff_player(page, base, root):
     expect(kickoff).to_have_value("00:02:00")
     switch_period("2H")
     expect(page.get_by_role("button", name="Set 2H kick-off here")).to_be_visible()
+    # 2H has no kick-off yet, so the playhead stays where it was instead of going back to 0.
+    assert abs(current() - 120.02) < 0.05, ("switching to an unset period moved the playhead", current())
     kickoff.fill("00:02:50")
     kickoff.press("Tab")
     first = page.get_by_role("button", name="Jump to first-half kick-off at 00:02:00")
@@ -790,7 +794,7 @@ def exercise_kickoff_player(page, base, root):
     expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
     expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
 
-    stage("kick-off player: switching period lands on its kick-off after the video reloads")
+    stage("kick-off player: switching to a period with a kick-off lands on it")
     switch_period("2H")
     page.wait_for_function("Math.abs(document.querySelector('[data-match-video]').currentTime - 170) < 0.01")
     switch_period("1H")
@@ -808,7 +812,7 @@ def exercise_kickoff_player(page, base, root):
         "(video) => ({rate: video.playbackRate, muted: video.muted, paused: video.paused})")
     assert state == {"rate": 4, "muted": True, "paused": False}, state
     controls.get_by_role("button", name="Pause", exact=True).click()
-    expect(page.get_by_role("button", name="Play preview", exact=True)).to_be_visible()
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_visible()
     speed.select_option("1")
     mute.click()
 
@@ -954,7 +958,7 @@ def exercise(page, base, root, evidence, errors):
     page.locator('[data-csv-input]').set_input_files(str(csv))
     page.get_by_text("2 events found", exact=True).wait_for()
     page.locator('[data-video-input]').set_input_files(str(video))
-    page.get_by_role("button", name="Play preview", exact=True).wait_for()
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
     for period in ("2H", "1H"):
         page.get_by_role("tab", name=period, exact=True).click()
         page.get_by_role("textbox", name="Selected period kick-off time").fill("00:00:00")
@@ -963,7 +967,7 @@ def exercise(page, base, root, evidence, errors):
     page.reload()
     stage("verify saved intake and keyboard menu")
     expect(page.get_by_role("textbox", name="Project name")).to_have_value("Browser test project")
-    page.get_by_role("button", name="Play preview", exact=True).wait_for()
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
     menu = page.get_by_role("button", name="Open navigation", exact=True)
     menu.press("Space")
     expect(menu).to_have_attribute("aria-expanded", "true")

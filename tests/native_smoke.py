@@ -216,10 +216,10 @@ def main():
                                 "markers": {"1H": "00:00:00", "2H": "00:00:00"}})
                         driver.refresh()
                         stage(evidence, "verify installed webview decodes and plays footage")
-                        element('.play-button').click()
+                        element('[data-player-toggle]').click()
                         wait.until(lambda current: current.execute_script(
                             "const v=document.querySelector('[data-match-video]'); return v.videoWidth > 0 && v.currentTime > 0"))
-                        element('.play-button').click()
+                        element('[data-player-toggle]').click()
                         stage(evidence, "open filters and build clip plan")
                         element('[data-continue]').click()
                         element('#actions summary').click()
