@@ -1850,11 +1850,11 @@ canvas.addEventListener("pointerdown", (event) => {
     if (corner && corner.distance <= handleDistance) {
       gesture = { type: "resize", trackId: corner.trackId, corner: corner.corner, base: corner.box, box: corner.box.slice() };
     } else if (handle) {
-      gesture = { type: "handle", id: selected.id, index: handle.index, base: selected, preview: selected };
+      gesture = { type: "handle", id: selected.id, index: handle.index, start: at, moved: false, base: selected, preview: selected };
     } else {
       const hit = itemAt(shown(), x, y, w, h, from, measure);
       select(hit?.id || null);
-      if (hit) gesture = { type: "move", id: hit.id, start: at, base: hit, preview: hit };
+      if (hit) gesture = { type: "move", id: hit.id, start: at, moved: false, base: hit, preview: hit };
     }
   } else if (tool === "follow") {
     if (boardNow()) { trackStatus("Follow players on the clip itself; a board has no video.", true); return; }
@@ -1904,6 +1904,11 @@ canvas.addEventListener("pointermove", (event) => {
     return;
   }
   const item = gesture.base;
+  if ((gesture.type === "move" || gesture.type === "handle") && !gesture.moved) {
+    // A click is not an edit: only a real drag (a few pixels) moves a drawing.
+    gesture.moved = Math.hypot((at[0] - gesture.start[0]) * canvas.width, (at[1] - gesture.start[1]) * canvas.height) > 3 * (window.devicePixelRatio || 1);
+    if (!gesture.moved) return;
+  }
   if (gesture.type === "resize") {
     // The dragged corner follows the pointer; the opposite corner stays where it is.
     const [fx, fy, bw, bh] = gesture.base;
@@ -1966,8 +1971,8 @@ const endGesture = () => {
       keyTrack(current.trackId, current.box.map((v) => Math.round(v * 1e5) / 1e5));
       trackStatus("Box fitted to the player on this frame; the rest of the clip is tracked again from it.");
     }
-  } else if (current.preview) {
-    applyEdit(current);
+  } else if (current.preview && (current.moved || (current.type !== "move" && current.type !== "handle"))) {
+    applyEdit(current); // a plain click on a drawing only selects it: no edit, and no new keyframe on a followed player
   }
   scheduleRender();
 };
