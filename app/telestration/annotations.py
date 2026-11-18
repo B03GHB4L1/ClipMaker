@@ -14,6 +14,8 @@ import math
 import re
 from typing import Any
 
+from . import parts as cuts
+
 VERSION = 1
 KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token"}
 ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
@@ -233,7 +235,8 @@ def _background(value: Any, frames: int) -> dict[str, Any]:
     return clean
 
 
-def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
+def _freezes(value: Any, frames: int, source: int | None = None) -> list[dict[str, Any]]:
+    """`frames` is the cut clip's frame count (freezes sit on cut frames); `source` the clip's own (a board's fromFrame)."""
     if not isinstance(value, list) or len(value) > MAX_FREEZES:
         raise ValueError(f"A clip can hold up to {MAX_FREEZES} freezes.")
     clean = []
@@ -246,7 +249,7 @@ def _freezes(value: Any, frames: int) -> list[dict[str, Any]]:
         seconds = _number(freeze["seconds"], *FREEZE_SECONDS, "Freeze length")
         entry = {"atFrame": frame, "seconds": round(seconds, 3)}
         if "background" in freeze:
-            entry["background"] = _background(freeze["background"], frames)
+            entry["background"] = _background(freeze["background"], source if source is not None else frames)
         clean.append(entry)
     if len({freeze["atFrame"] for freeze in clean}) != len(clean):
         raise ValueError("Two freezes are on the same frame.")
@@ -350,8 +353,11 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     items = value.get("items")
     if not isinstance(items, list) or len(items) > MAX_ITEMS:
         raise ValueError(f"A clip can hold up to {MAX_ITEMS} drawings.")
-    freezes = _freezes(value.get("freezes", []), frames)
-    limit = duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
+    parts = cuts.clean(value.get("parts"), frames)
+    cut_count = cuts.cut_frames(parts, frames)
+    freezes = _freezes(value.get("freezes", []), cut_count, frames)
+    cut_duration = duration * cut_count / frames if parts else duration
+    limit = cut_duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
     tracks = _tracks(value.get("tracks", []), frames)
     track_ids = {track["id"] for track in tracks}
     boards = {freeze["atFrame"] for freeze in freezes if "background" in freeze}
@@ -359,12 +365,14 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")
-    extra = set(value) - {"version", "items", "freezes", "tracks"}
+    extra = set(value) - {"version", "items", "freezes", "tracks", "parts"}
     if extra:
         raise ValueError(f"Unknown annotation setting: {sorted(extra)[0]}.")
     clean = {"version": VERSION, "items": clean_items, "freezes": freezes}
     if tracks:
         clean["tracks"] = tracks
+    if parts:
+        clean["parts"] = parts
     return clean
 
 

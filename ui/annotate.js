@@ -6,6 +6,7 @@ import { saveImage, showSaved, showSaveError } from "./save-clip.js";
 import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
+import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
@@ -26,7 +27,9 @@ const status = $("[data-annotate-status]");
 const saveStatus = $("[data-save-status]");
 
 let clip;
+let timing; // the clip as the timeline sees it: its parts joined (annotate/parts.js)
 let doc;
+let selectedPart = null; // a part chosen on the Parts lane
 let tool = "select";
 let selectedId = null;
 let gesture = null; // the drag or drawing in progress
@@ -76,8 +79,13 @@ let outTime = 0;
 let playing = false;
 let run = null; // while playing: {held, next, freeze: {start, end, wall} | null}
 const currentTime = () => outTime;
-const total = () => totalSeconds(clip, doc.freezes);
-const source = () => outputToSource(outTime, clip, doc.freezes);
+const total = () => totalSeconds(timing, doc.freezes);
+// `source()` is a place on the cut clip (its frames are what freezes and boards sit on); the picture, tracks and
+// sound need the real source frame (annotate/parts.js).
+const source = () => outputToSource(outTime, timing, doc.freezes);
+const refreshTiming = () => { timing = cutClip(clip, doc.value.parts); };
+const realFrame = (cut) => cutToSource(cut, doc.value.parts, clip.frames);
+const sourceSeconds = (at) => (realFrame(at.frame) + (at.time * fps() - at.frame)) / fps(); // the moment `at` shows in the source
 const formatTime = (seconds) => {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${(seconds - minutes * 60).toFixed(2).padStart(5, "0")}`;
@@ -85,7 +93,7 @@ const formatTime = (seconds) => {
 const clampTime = (t) => Math.min(total(), Math.max(0, t));
 // Show the frame for output time `outTime`: the middle of that frame, so the decoder shows it and not its neighbour.
 const showFrame = () => {
-  const frame = source().frame;
+  const frame = realFrame(source().frame);
   const target = Math.min(clip.duration, (frame + 0.5) / fps());
   if (Math.abs(video.currentTime - target) > 0.25 / fps()) video.currentTime = target;
 };
@@ -104,27 +112,35 @@ const seekOutput = (t) => {
 // One stop = the start of a frame, or the start or end of a freeze.
 const step = (direction, big = false) => {
   if (big) return seekOutput(outTime + direction);
-  const list = stops(clip, doc.freezes);
+  const list = stops(timing, doc.freezes);
   const target = direction > 0 ? list.find((t) => t > outTime + 1e-6) : [...list].reverse().find((t) => t < outTime - 1e-6);
   seekOutput(target ?? (direction > 0 ? list[list.length - 1] : 0));
 };
 
 const sortedFreezes = () => [...doc.freezes].sort((a, b) => a.atFrame - b.atFrame);
+// Each part as {from, to, cutStart}: source frames it plays, and the cut frame it starts at.
+const playParts = () => {
+  let offset = 0;
+  return spansOf(doc.value.parts, clip.frames).map(([from, to]) => { const part = { from, to, cutStart: offset }; offset += to - from; return part; });
+};
+const cutSeconds = (videoSeconds, part) => (part.cutStart + videoSeconds * fps() - part.from) / fps(); // cut-clip seconds for a video time inside `part`
 const play = () => {
   if (outTime >= total() - 1e-3) outTime = 0;
   const at = source();
   const freezes = sortedFreezes();
+  const parts = playParts();
+  const part = partAt(doc.value, clip, at.frame).index;
   if (at.freeze !== null) {
     const index = freezes.findIndex((f) => f.atFrame === at.freeze);
-    run = { held: freezes.slice(0, index).reduce((sum, f) => sum + f.seconds, 0), next: index,
+    run = { held: freezes.slice(0, index).reduce((sum, f) => sum + f.seconds, 0), next: index, part, parts,
       freeze: { start: outTime, end: at.freezeStart + freezes[index].seconds, wall: performance.now() } };
     video.pause();
     showFrame();
   } else {
     const index = freezes.findIndex((f) => f.atFrame > at.frame);
     const next = index < 0 ? freezes.length : index;
-    run = { held: freezes.slice(0, next).reduce((sum, f) => sum + f.seconds, 0), next, freeze: null };
-    video.currentTime = at.time;
+    run = { held: freezes.slice(0, next).reduce((sum, f) => sum + f.seconds, 0), next, part, parts, freeze: null };
+    video.currentTime = sourceSeconds(at);
     video.play().catch(() => pause());
   }
   playing = true;
@@ -149,17 +165,26 @@ function tick(now) {
     }
   } else {
     const next = freezes[run.next];
-    if (next && video.currentTime >= next.atFrame / fps() - 1e-4) {
+    const here = run.parts[run.part];
+    const cutTime = cutSeconds(video.currentTime, here);
+    if (next && cutTime >= next.atFrame / fps() - 1e-4) {
       video.pause();
-      outTime = freezeStart(next.atFrame, clip, freezes);
+      outTime = freezeStart(next.atFrame, timing, freezes);
       run.freeze = { start: outTime, end: outTime + next.seconds, wall: now };
-      video.currentTime = (next.atFrame + 0.5) / fps();
-    } else {
-      outTime = Math.min(total(), video.currentTime + run.held);
-      if (video.ended && !next) {
+      video.currentTime = (realFrame(next.atFrame) + 0.5) / fps();
+    } else if (video.ended || video.currentTime >= (here.to - 0.5) / fps()) {
+      // This part is over: carry on into the next one (a seek when it does not follow on in the source), or stop.
+      const following = run.parts[run.part + 1];
+      if (!following) {
         outTime = total();
         pause();
+      } else {
+        run.part += 1;
+        if (following.from !== here.to) video.currentTime = (following.from + 0.1) / fps();
+        outTime = Math.min(total(), following.cutStart / fps() + run.held);
       }
+    } else {
+      outTime = Math.min(total(), cutTime + run.held);
     }
   }
   render();
@@ -170,7 +195,7 @@ function tick(now) {
 const showTime = () => {
   const at = source();
   const frozen = at.freeze !== null ? ` · <span class="is-frozen">${boardNow() ? "board" : "frozen"}</span>` : "";
-  $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${clip.frames}${frozen}`;
+  $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${timing.frames}${doc.value.parts?.length > 1 ? ` · part ${partAt(doc.value, clip, at.frame).index + 1}/${doc.value.parts.length}` : ""}${frozen}`;
   const scrub = $("[data-scrub]");
   scrub.max = String(total());
   if (document.activeElement !== scrub) scrub.value = String(outTime);
@@ -198,14 +223,15 @@ const draftItem = () => (gesture?.draft ? gesture.draft : null);
 // Linked points follow their player: drawings are placed for the frame on screen.
 const tracks = () => doc.value.tracks || [];
 const trackById = (id) => tracks().find((track) => track.id === id) || null;
-const frameNow = () => source().frame;
-const boardNow = () => (clip ? boardAt(doc.value, clip, outTime) : null);
+const frameNow = () => realFrame(source().frame); // the source frame on screen: tracks and the picture use it
+const cutFrameNow = () => source().frame; // its place on the cut clip: freezes and boards sit there
+const boardNow = () => (clip ? boardAt(doc.value, timing, outTime) : null);
 // On a board only its own drawings show; elsewhere the clip's drawings (annotate/board.js).
 // Moving board tokens are placed for the moment on screen (M8).
-const shown = () => itemsAt(doc.value, clip, outTime).map((item) => resolveItem(placedAt(doc.value, clip, item, outTime), tracks(), frameNow()));
-const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(placedAt(doc.value, clip, item, outTime), tracks(), frameNow()) : null; };
+const shown = () => itemsAt(doc.value, timing, outTime).map((item) => resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()));
+const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()) : null; };
 // Seconds into the board that drawing `item` is on, at the playhead.
-const boardSeconds = (item) => outTime - freezeStart(item.on, clip, doc.freezes);
+const boardSeconds = (item) => outTime - freezeStart(item.on, timing, doc.freezes);
 const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
 
 const boxPixels = ([fx, fy, w, h]) => [(fx - w / 2) * canvas.width, (fy - h) * canvas.height, w * canvas.width, h * canvas.height];
@@ -386,6 +412,8 @@ const setTool = (next) => {
 
 const select = (id) => {
   selectedId = id;
+  if (id) selectedPart = null;
+  renderParts();
   renderInspector();
   scheduleRender();
 };
@@ -425,7 +453,7 @@ const renderInspector = () => {
   const kind = item ? item.kind : DEFAULT_STYLE[tool] ? tool : null; // select and follow have no drawing style
   const fields = $("[data-style-fields]");
   fields.replaceChildren();
-  const empty = !doc?.items.length && !doc?.freezes.length;
+  const empty = !doc?.items.length && !doc?.freezes.length && !(doc?.value.parts?.length > 1);
   $("[data-inspector-title]").textContent = item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : empty ? "How to start" : "Nothing selected";
   if (!kind && empty) {
     // First use: the four steps from a blank clip to an exported video.
@@ -433,6 +461,7 @@ const renderInspector = () => {
     steps.className = "annotate-steps";
     steps.append(...[
       ["Find the moment", "Play, or drag the playhead under the video."],
+      ["Cut the clip", "Optional: press X to split at the playhead. Then drag parts to move them, drag their edges to trim, or press Delete to remove one."],
       ["Pick a tool", "Choose one under Draw, Highlight or Mark a player, then drag on the video."],
       ["Adjust it", "Click a drawing to change its look and when it shows."],
       ["Export video", "When you are done. Your work saves as you go."],
@@ -661,7 +690,7 @@ const renderDrawingLane = () => {
 const placeNew = (item) => {
   const board = boardNow();
   if (!board) return item;
-  const start = Math.round(freezeStart(board.atFrame, clip, doc.freezes) * 1000) / 1000;
+  const start = Math.round(freezeStart(board.atFrame, timing, doc.freezes) * 1000) / 1000;
   const end = Math.round((start + board.seconds) * 1000) / 1000;
   return { ...item, on: board.atFrame, show: { ...item.show, from: Math.min(end, Math.max(start, item.show.from)), to: end } };
 };
@@ -720,7 +749,7 @@ const updateTrack = (id, change) => doc.commitDocument((value) => ({
   ...value, tracks: (value.tracks || []).map((track) => (track.id === id ? change(track) : track)),
 }));
 // The source frame a drawing stops showing on.
-const endFrame = (item) => outputToSource(item.show.to, clip, doc.freezes).frame;
+const endFrame = (item) => realFrame(outputToSource(item.show.to, timing, doc.freezes).frame);
 const followLimit = (trackId) => {
   const frames = doc.items.filter((item) => linkedTracks(item).has(trackId)).map(endFrame);
   return Math.min(clip.frames - 1, Math.max(frameNow(), ...frames));
@@ -854,7 +883,9 @@ const followSelected = (action) => {
   if (action === "confirm" && at) updateTrack(track.id, (current) => setKeyframe(current, frame, at.box));
   if (action === "next") {
     const run = nextCheck(track);
-    if (run) seekOutput(playStart(run[0], clip, doc.freezes));
+    const place = run && sourceToCut(run[0], doc.value.parts, clip.frames)[0];
+    if (place !== undefined) seekOutput(playStart(place, timing, doc.freezes));
+    else if (run) trackStatus("That frame is not in any part of the clip now.", true);
   }
   if (action === "retrack" && at) {
     updateTrack(track.id, (current) => setKeyframe(current, frame, at.box));
@@ -903,8 +934,23 @@ const followFromBox = (start, end) => {
   startTracking(track.id, frame, box);
 };
 
-const lanePercent = (frame) => `${(playStart(Math.min(frame, clip.frames - 1), clip, doc.freezes) / total()) * 100}%`;
-const laneWidth = (first, last) => `${((playStart(Math.min(last + 1, clip.frames - 1), clip, doc.freezes) - playStart(first, clip, doc.freezes)) / total()) * 100}%`;
+// Where source frames `first` to `last` play on the timeline: [left %, width %], one for each place they play
+// (a repeated part plays them again, a cut part not at all).
+const laneSpans = (first, last) => {
+  const found = [];
+  let offset = 0;
+  for (const [from, to] of spansOf(doc.value.parts, clip.frames)) {
+    const a = Math.max(first, from);
+    const b = Math.min(last + 1, to);
+    if (b > a) {
+      const left = playStart(offset + a - from, timing, doc.freezes);
+      const right = offset + b - from >= timing.frames ? total() : freezeStart(offset + b - from, timing, doc.freezes);
+      found.push([(left / total()) * 100, (Math.max(right - left, 0) / total()) * 100]);
+    }
+    offset += to - from;
+  }
+  return found;
+};
 
 function renderPlayers() {
   const box = $("[data-players]");
@@ -925,12 +971,13 @@ function renderPlayers() {
       if (width) mark.style.width = width;
       lane.append(mark);
     };
-    add("annotate-cover", lanePercent(first), laneWidth(first, last));
-    flaggedRuns(track, REVIEW).forEach(([a, b]) => add("annotate-flag is-review", lanePercent(a), laneWidth(a, b)));
-    flaggedRuns(track, LOST).forEach(([a, b]) => add("annotate-flag is-lost", lanePercent(a), laneWidth(a, b)));
-    keys.forEach((frame) => add("annotate-key", lanePercent(frame)));
+    const place = (className, a, b) => laneSpans(a, b).forEach(([left, width]) => add(className, `${left}%`, `${width}%`));
+    place("annotate-cover", first, last);
+    flaggedRuns(track, REVIEW).forEach(([a, b]) => place("annotate-flag is-review", a, b));
+    flaggedRuns(track, LOST).forEach(([a, b]) => place("annotate-flag is-lost", a, b));
+    keys.forEach((frame) => laneSpans(frame, frame).forEach(([left]) => add("annotate-key", `${left}%`)));
     const job = jobs.get(track.id);
-    if (job) add("annotate-progress", lanePercent(job.start), `${(job.progress * (playStart(job.end, clip, doc.freezes) - playStart(job.start, clip, doc.freezes)) / total()) * 100}%`);
+    if (job) laneSpans(job.start, job.end).forEach(([left, width]) => add("annotate-progress", `${left}%`, `${job.progress * width}%`));
     add("annotate-lane-head", `${(outTime / total()) * 100}%`);
     lane.lastChild.dataset.head = "";
     lane.addEventListener("pointerdown", (event) => {
@@ -961,11 +1008,11 @@ function renderPlayers() {
 // ---------------------------------------------------------------------------
 // Freezes
 // ---------------------------------------------------------------------------
-const changeFreeze = (frame, seconds) => doc.commitDocument((value) => (seconds > 0 ? setFreeze(value, clip, frame, seconds) : removeInsert(value, clip, frame)));
+const changeFreeze = (frame, seconds) => doc.commitDocument((value) => (seconds > 0 ? setFreeze(value, timing, frame, seconds) : removeInsert(value, timing, frame)));
 const freezeHere = () => {
   const at = source();
   if (at.freeze === null && !doc.freezes.some((f) => f.atFrame === at.frame)) changeFreeze(at.frame, 2);
-  seekOutput(freezeStart(at.frame, clip, doc.freezes)); // into the freeze, ready to draw on it
+  seekOutput(freezeStart(at.frame, timing, doc.freezes)); // into the freeze, ready to draw on it
   document.querySelector(`[data-freeze-seconds="${at.frame}"]`)?.focus();
 };
 
@@ -980,7 +1027,7 @@ const renderFreezes = () => {
   $("[data-freeze-list]").replaceChildren(...freezes.map((freeze) => {
     const entry = document.createElement("li");
     const board = freeze.background;
-    const start = freezeStart(freeze.atFrame, clip, freezes);
+    const start = freezeStart(freeze.atFrame, timing, freezes);
     const go = Object.assign(document.createElement("button"), { type: "button",
       textContent: `${board ? "Board" : "Frame"} ${freeze.atFrame + 1} · ${formatTime(start)}` });
     go.onclick = () => seekOutput(start);
@@ -1024,7 +1071,7 @@ const renderFreezes = () => {
     block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}`;
     block.dataset.laneFreeze = String(freeze.atFrame);
     block.title = `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Drag its right edge to change the length.`;
-    block.style.left = `${(freezeStart(freeze.atFrame, clip, freezes) / length) * 100}%`;
+    block.style.left = `${(freezeStart(freeze.atFrame, timing, freezes) / length) * 100}%`;
     block.style.width = `${(freeze.seconds / length) * 100}%`;
     const edge = document.createElement("span");
     edge.className = "annotate-lane-edge";
@@ -1033,6 +1080,190 @@ const renderFreezes = () => {
     lane.append(block);
   });
 };
+
+// ---------------------------------------------------------------------------
+// Parts: cut, reorder and repeat (annotate/parts.js)
+// ---------------------------------------------------------------------------
+const partName = (index) => `Part ${index + 1}`;
+const ICONS = {
+  earlier: '<path d="M10 3L5 8l5 5"/>', later: '<path d="M6 3l5 5-5 5"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h.5"/>',
+  remove: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v3.5M9 7v3.5"/>',
+};
+const partAction = (name, text, label, onclick, disabled = false) => {
+  const button = Object.assign(document.createElement("button"), { type: "button", className: "annotate-part-act", title: label, disabled,
+    innerHTML: `<svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>${text}` });
+  button.setAttribute("aria-label", label);
+  button.onclick = onclick;
+  return button;
+};
+
+const selectPart = (index) => {
+  selectedPart = index;
+  if (index !== null) selectedId = null;
+  renderParts();
+  renderInspector();
+  scheduleRender();
+};
+
+const editParts = (change) => {
+  let changed = false;
+  doc.commitDocument((value) => {
+    const next = change(value);
+    changed = next !== null;
+    return next || value;
+  });
+  return changed;
+};
+
+function splitHere() {
+  if (!clip || playing) return;
+  const frame = cutFrameNow();
+  if (!editParts((value) => splitAt(value, clip, frame))) {
+    trackStatus("Move the playhead to a frame inside a part to split it there.", true);
+    return;
+  }
+  selectedPart = partAt(doc.value, clip, frame).index;
+  renderParts();
+  trackStatus(`Split at ${formatTime(outTime)}. Drag a part to move it, drag its edges to trim it, or select one and press Delete.`);
+}
+
+function removePart(index) {
+  const gone = partSpans(doc.value, clip)[index];
+  if (!gone || !editParts((value) => deletePart(value, clip, index))) {
+    trackStatus("A clip keeps at least one part.", true);
+    return;
+  }
+  selectedPart = null;
+  renderParts();
+  seekOutput(gone.outStart);
+  trackStatus(`${partName(index)} removed: the clip is ${formatTime(gone.outEnd - gone.outStart)} shorter, with its drawings. Undo brings it back.`);
+}
+
+function moveSelectedPart(index, target) {
+  if (!editParts((value) => movePart(value, clip, index, target))) return;
+  selectedPart = target;
+  renderParts();
+  seekOutput(partSpans(doc.value, clip)[target].outStart);
+  trackStatus(`${partName(index)} is now part ${target + 1}. Its freezes, boards and drawings went with it.`);
+}
+
+function duplicateAt(index) {
+  if (!editParts((value) => duplicatePart(value, clip, index))) {
+    trackStatus(`A clip can hold up to ${MAX_PARTS} parts.`, true);
+    return;
+  }
+  selectedPart = index + 1;
+  renderParts();
+  seekOutput(partSpans(doc.value, clip)[index + 1].outStart);
+  trackStatus(`${partName(index)} repeated as part ${index + 2}. Its drawings came too; freezes and boards stay with the first.`);
+}
+
+let partsShown = 1;
+function renderParts() {
+  if (!clip || !doc) return;
+  const spans = partSpans(doc.value, clip);
+  if (selectedPart !== null && selectedPart >= spans.length) selectedPart = null;
+  if (spans.length > partsShown) $("[data-parts-panel]").open = true;
+  partsShown = spans.length;
+  const length = total();
+  const lane = $("[data-parts-lane]");
+  lane.querySelectorAll(".annotate-part").forEach((block) => block.remove());
+  spans.forEach((span) => {
+    const block = document.createElement("span");
+    block.className = `annotate-part${span.index === selectedPart ? " is-selected" : ""}`;
+    block.dataset.part = String(span.index);
+    block.style.left = `${(span.outStart / length) * 100}%`;
+    block.style.width = `${((span.outEnd - span.outStart) / length) * 100}%`;
+    block.title = `${partName(span.index)}, ${formatTime(span.outEnd - span.outStart)}. Click to select, drag to move it, drag an edge to trim it.`;
+    block.append(Object.assign(document.createElement("span"), { className: "annotate-part-label", textContent: spans.length > 1 ? `${span.index + 1} · ${formatTime(span.outEnd - span.outStart)}` : "Whole clip" }));
+    ["from", "to"].forEach((edge) => {
+      const handle = Object.assign(document.createElement("span"), { className: `annotate-part-edge is-${edge}` });
+      handle.dataset.partEdge = edge;
+      block.append(handle);
+    });
+    lane.append(block);
+  });
+  $("[data-parts-count]").textContent = `(${spans.length})`;
+  $("[data-parts-list]").replaceChildren(...spans.map((span) => {
+    const entry = document.createElement("li");
+    entry.className = span.index === selectedPart ? "is-selected" : "";
+    const go = Object.assign(document.createElement("button"), { type: "button", className: "annotate-part-go",
+      textContent: `${partName(span.index)} · ${formatTime(span.outEnd - span.outStart)}` });
+    go.title = `Frames ${span.from + 1} to ${span.to} of the source clip`;
+    go.setAttribute("aria-pressed", String(span.index === selectedPart));
+    go.onclick = () => { selectPart(span.index); seekOutput(span.outStart); };
+    entry.append(go);
+    if (span.index === selectedPart) {
+      // The selected part's actions, with words: Earlier and Later change its place in the clip.
+      const actions = Object.assign(document.createElement("span"), { className: "annotate-part-actions" });
+      actions.append(
+        partAction("earlier", "Earlier", `Move ${partName(span.index)} earlier`, () => moveSelectedPart(span.index, span.index - 1), span.index === 0),
+        partAction("later", "Later", `Move ${partName(span.index)} later`, () => moveSelectedPart(span.index, span.index + 1), span.index === spans.length - 1),
+        partAction("copy", "Repeat", `Repeat ${partName(span.index)} after itself`, () => duplicateAt(span.index), spans.length >= MAX_PARTS),
+        partAction("remove", "Remove", `Remove ${partName(span.index)} and close the gap`, () => removePart(span.index), spans.length < 2));
+      entry.append(actions);
+    }
+    return entry;
+  }));
+  $("[data-parts-empty]").hidden = spans.length > 1;
+}
+
+{
+  // Click a part to select it and put the playhead there. Drag it to move it; drag an edge to trim it.
+  const lane = $("[data-parts-lane]");
+  let drag = null;
+  const timeAt = (event) => {
+    const rect = lane.getBoundingClientRect();
+    return Math.min(total(), Math.max(0, ((event.clientX - rect.left) / rect.width) * total()));
+  };
+  lane.addEventListener("pointerdown", (event) => {
+    if (!clip || event.button !== 0) return;
+    const block = event.target.closest("[data-part]");
+    if (!block) { seekOutput(timeAt(event)); return; }
+    const index = Number(block.dataset.part);
+    const span = partSpans(doc.value, clip)[index];
+    drag = { index, span, edge: event.target.closest("[data-part-edge]")?.dataset.partEdge || null, x: event.clientX, width: lane.getBoundingClientRect().width,
+      length: total(), block, moved: false, target: index, next: null, click: timeAt(event) };
+    lane.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  lane.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    const dx = event.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) < 4) return;
+    drag.moved = true;
+    if (drag.edge) {
+      const frames = Math.round(((dx / drag.width) * drag.length) * fps());
+      const base = drag.edge === "to" ? drag.span.to : drag.span.from;
+      drag.next = Math.min(drag.edge === "to" ? clip.frames : drag.span.to - 1, Math.max(drag.edge === "to" ? drag.span.from + 1 : 0, base + frames));
+      const grew = drag.edge === "to" ? drag.next - drag.span.to : drag.span.from - drag.next;
+      drag.block.style.width = `${(((drag.span.outEnd - drag.span.outStart) + grew / fps()) / drag.length) * 100}%`;
+      drag.block.title = `${grew >= 0 ? "+" : ""}${grew} frames`;
+    } else {
+      const t = timeAt(event);
+      const spans = partSpans(doc.value, clip);
+      drag.target = (spans.find((span) => t >= span.outStart && t < span.outEnd) || spans[spans.length - 1]).index;
+      drag.block.classList.add("is-dragging");
+      lane.querySelectorAll(".annotate-part").forEach((block) => block.classList.toggle("is-drop", Number(block.dataset.part) === drag.target && drag.target !== drag.index));
+    }
+  });
+  const finish = () => {
+    const done = drag;
+    drag = null;
+    if (!done) return;
+    if (!done.moved) { selectPart(done.index); seekOutput(done.click); return; }
+    if (done.edge) {
+      if (done.next === null || !editParts((value) => trimPart(value, clip, done.index, done.edge, done.next))) { renderParts(); return; }
+      selectedPart = done.index;
+      renderParts();
+      trackStatus(`${partName(done.index)} trimmed: it is now ${formatTime(partSpans(doc.value, clip)[done.index].cutLength / fps())} long.`);
+    } else if (done.target !== done.index) moveSelectedPart(done.index, done.target);
+    else renderParts();
+  };
+  lane.addEventListener("pointerup", finish);
+  lane.addEventListener("pointercancel", () => { drag = null; renderParts(); });
+}
 
 {
   // Click or drag on the lane to move the playhead; drag a freeze's right edge to resize it.
@@ -1155,10 +1386,10 @@ function openCalibration() {
   zoneDraft = null;
   pause();
   select(null);
-  calib = { frame: frameNow(), pairs: [], pick: null, selected: null, drag: null, job: null, model: null, message: null };
+  calib = { frame: frameNow(), cut: cutFrameNow(), pairs: [], pick: null, selected: null, drag: null, job: null, model: null, message: null };
   buildPitch();
   // Boards before this frame with tokens: their players can glide to where they are here (M8).
-  const earlier = sortedFreezes().filter((f) => f.background && f.atFrame < calib.frame
+  const earlier = sortedFreezes().filter((f) => f.background && f.atFrame < calib.cut
     && doc.items.some((item) => item.on === f.atFrame && item.kind === "token"));
   const target = $("[data-calib-target]");
   target.replaceChildren(new Option("A new board", ""), ...earlier.reverse().map((f) => new Option(`Players of board ${f.atFrame + 1} move here`, String(f.atFrame))));
@@ -1452,13 +1683,13 @@ function moveBoardHere(target, result) {
   const players = playersOnPitch(result.players.map((player) => ({ ...player, team: swap && player.team < 2 ? 1 - player.team : player.team })), calibFit());
   let report;
   doc.commitDocument((value) => {
-    report = moveBoard(value, clip, target, players, aspect(), colours);
+    report = moveBoard(value, timing, target, players, aspect(), colours);
     return report.value;
   });
   const from = calib.frame;
   closeCalibration();
   setTool("select");
-  seekOutput(freezeStart(target, clip, doc.freezes));
+  seekOutput(freezeStart(target, timing, doc.freezes));
   const parts = [`${report.matched} player${report.matched === 1 ? "" : "s"} glide to where they are on frame ${from + 1}`];
   if (report.added) parts.push(`${report.added} new appear${report.added === 1 ? "s" : ""}`);
   if (report.kept) parts.push(`${report.kept} not found there stay${report.kept === 1 ? "s" : ""} put`);
@@ -1468,7 +1699,7 @@ function moveBoardHere(target, result) {
 function makeBoard(result) {
   const target = $("[data-calib-target]").value;
   if (result && target !== "") return moveBoardHere(Number(target), result);
-  const frame = boardFrame(doc.value, clip, calib.frame);
+  const frame = boardFrame(doc.value, timing, calib.cut);
   if (frame === null) {
     calib.message = "There is no free frame after this one for a board.";
     return renderCalibration();
@@ -1485,10 +1716,10 @@ function makeBoard(result) {
       ? `Board added with ${found.placed} player${found.placed === 1 ? "" : "s"}${found.skipped ? ` (${found.skipped} found off the pitch left out)` : ""}. Players hidden or cut off by the camera are missing. Click a token to fix its team or add the shirt number.`
       : "No players were found on the pitch in this frame, so the board is empty. Place players with the Token tool (K).";
   }
-  doc.commitDocument((value) => addBoard(value, clip, frame, BOARD_SECONDS, background, tokens));
+  doc.commitDocument((value) => addBoard(value, timing, frame, BOARD_SECONDS, background, tokens));
   closeCalibration();
   setTool("select");
-  seekOutput(freezeStart(frame, clip, doc.freezes));
+  seekOutput(freezeStart(frame, timing, doc.freezes));
   trackStatus(summary);
 }
 
@@ -1755,11 +1986,18 @@ document.addEventListener("keydown", (event) => {
   } else if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
     event.preventDefault();
     removeSelected();
+  } else if ((event.key === "Delete" || event.key === "Backspace") && selectedPart !== null) {
+    event.preventDefault();
+    removePart(selectedPart);
+  } else if (key === "x" && !event.shiftKey) {
+    event.preventDefault();
+    splitHere();
   } else if (event.key === "Enter" && zoneDraft) {
     event.preventDefault();
     finishZone();
   } else if (event.key === "Escape") {
     if (zoneDraft) zoneDraft = null;
+    else if (selectedPart !== null) selectPart(null);
     else select(null);
     scheduleRender();
   } else if (TOOL_KEYS[key] && !event.shiftKey) {
@@ -1783,7 +2021,7 @@ const screenshot = async (button) => {
   drawItems(context, shown(), shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise((resolve) => shot.toBlob(resolve, type, 0.92));
-  const name = `${clip.name} frame ${source().frame + 1}.${format === "jpeg" ? "jpg" : "png"}`;
+  const name = `${clip.name} frame ${frameNow() + 1}.${format === "jpeg" ? "jpg" : "png"}`;
   button.disabled = true;
   try { await saveImage(blob, name); } finally { button.disabled = false; }
 };
@@ -1817,12 +2055,13 @@ const DRAWING_SHARE = 0.35; // of the progress bar: drawing overlays, then rende
 /** What the overlay looks like on output frame `n`: a key that changes only when the picture does. */
 const overlayKey = (value, n) => {
   const t = n / clip.fps;
-  const frame = outputToSource(t, clip, value.freezes).frame;
-  const board = boardAt(value, clip, t);
+  const cut = cutClip(clip, value.parts);
+  const frame = cutToSource(outputToSource(t, cut, value.freezes).frame, value.parts, clip.frames);
+  const board = boardAt(value, cut, t);
   const shown = [];
-  itemsAt(value, clip, t).forEach((item) => {
+  itemsAt(value, cut, t).forEach((item) => {
     const state = animation(item, t);
-    if (state) shown.push(resolveItem(placedAt(value, clip, item, t), value.tracks || [], frame), state);
+    if (state) shown.push(resolveItem(placedAt(value, cut, item, t), value.tracks || [], frame), state);
   });
   const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))]);
   return { t, board, shown, key };
@@ -1963,6 +2202,7 @@ const wire = () => {
   document.querySelectorAll("[data-tool]").forEach((button) => { button.onclick = () => setTool(button.dataset.tool); });
   document.querySelectorAll("[data-step]").forEach((button) => { button.onclick = () => step(Number(button.dataset.step)); });
   $("[data-freeze]").onclick = freezeHere;
+  $("[data-split]").onclick = splitHere;
   $("[data-board]").onclick = openCalibration;
   $("[data-calib-find]").onclick = findPlayers;
   $("[data-calib-empty]").onclick = () => makeBoard(null);
@@ -2009,9 +2249,12 @@ const wire = () => {
   new ResizeObserver(fitCanvas).observe(stage);
   window.addEventListener("resize", fitCanvas);
   doc.onChange(() => {
+    refreshTiming();
     if (selectedId && !doc.find(selectedId)) selectedId = null;
     if (playing) pause();
     outTime = clampTime(outTime);
+    showFrame(); // the parts may have changed what the playhead shows
+    renderParts();
     renderFreezes();
     renderPlayers();
     $("[data-undo]").disabled = !doc.canUndo;
@@ -2030,6 +2273,7 @@ const start = async () => {
     const opened = await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`);
     clip = opened.clip;
     doc = createDocument(opened.annotations);
+    refreshTiming();
     document.title = `VizorPlay - Annotate ${clip.name}`;
     $("[data-annotate-title]").textContent = clip.name;
     $("[data-annotate-changed]").hidden = !opened.changed;
@@ -2043,6 +2287,7 @@ const start = async () => {
     wire();
     fitCanvas();
     setTool("select");
+    renderParts();
     renderFreezes();
     renderPlayers();
     seekOutput(0);

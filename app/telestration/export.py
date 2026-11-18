@@ -30,7 +30,7 @@ import wave
 from pathlib import Path
 from typing import Any, Callable
 
-from . import timeline
+from . import parts as cuts, timeline
 from .tracker import Cancelled, read_frames  # Cancelled: the job runner reports it as cancelled
 
 AUDIO_RATE = 48_000
@@ -38,21 +38,27 @@ AUDIO_CHANNELS = 2
 OVERLAY_LIMIT = 4096 * 2160 * 4  # a whole 4K frame of RGBA pixels
 BATCH_LIMIT = 64_000_000  # bytes in one request
 BATCH_ENTRIES = 1000
+SKIP_FRAMES = 100  # decode through a gap this small; a bigger jump seeks again
 MAX_TILES = 4096  # tiles in one patch: a 4K frame in 64 px tiles is 2040
 MAX_OUTPUT_FRAMES = 20 * 60 * 60  # 20 minutes at 60 fps
 SESSION_TTL = 6 * 3600
 
 
-def output_frames(record: dict[str, Any], freezes: list[dict[str, Any]]) -> int:
-    """How many frames the finished clip has: source plus freezes, at the clip's frame rate."""
-    return max(1, round(timeline.total_seconds(record["duration"], freezes) * record["fps"]))
+def output_frames(record: dict[str, Any], freezes: list[dict[str, Any]], parts: list[dict[str, int]] | None = None) -> int:
+    """How many frames the finished clip has: its parts plus freezes, at the clip's frame rate."""
+    cut = cuts.cut_clip(record, parts)
+    return max(1, round(timeline.total_seconds(cut["duration"], freezes) * record["fps"]))
 
 
-def source_frames(record: dict[str, Any], freezes: list[dict[str, Any]], count: int) -> list[int]:
-    """The source frame shown on each output frame (never goes backwards)."""
+def source_frames(record: dict[str, Any], freezes: list[dict[str, Any]], count: int,
+                  parts: list[dict[str, int]] | None = None) -> list[int]:
+    """The source frame shown on each output frame. It only goes forwards within a part; parts may be
+    reordered or repeated, so it can jump."""
     fps = record["fps"]
-    return [timeline.output_to_source(n / fps, fps, record["duration"], record["frames"], freezes)["frame"]
-            for n in range(count)]
+    cut = cuts.cut_clip(record, parts)
+    return [cuts.cut_to_source(
+        timeline.output_to_source(n / fps, fps, cut["duration"], cut["frames"], freezes)["frame"], parts, record["frames"])
+        for n in range(count)]
 
 
 def silence_plan(record: dict[str, Any], freezes: list[dict[str, Any]], rate: int = AUDIO_RATE) -> list[tuple[int, int]]:
@@ -74,14 +80,15 @@ class ExportSessions:
                document: dict[str, Any]) -> dict[str, Any]:
         self.prune()
         freezes = document.get("freezes") or []
-        count = output_frames(record, freezes)
+        parts = document.get("parts") or None
+        count = output_frames(record, freezes, parts)
         if count > MAX_OUTPUT_FRAMES:
             raise ValueError("Exports can be up to 20 minutes long.")
         session_id = uuid.uuid4().hex[:16]
         folder = self.root / session_id
         folder.mkdir(parents=True, exist_ok=True)
         session = {"id": session_id, "project": project_id, "clip": clip_id, "record": record, "video": video,
-                   "freezes": freezes, "frames": count, "folder": folder, "last": -1, "started": False,
+                   "freezes": freezes, "parts": parts, "frames": count, "folder": folder, "last": -1, "started": False,
                    "created": time.time()}
         with self._lock:
             self._sessions[session_id] = session
@@ -260,8 +267,8 @@ def has_audio(ffmpeg: str, video: Path) -> bool:
 
 
 def write_audio(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[str, Any]], target: Path,
-                cancel: threading.Event | None = None) -> None:
-    """The clip's sound as a WAV file with silence inserted under every freeze."""
+                cancel: threading.Event | None = None, parts: list[dict[str, int]] | None = None) -> None:
+    """The clip's sound as a WAV file: its parts in order, with silence inserted under every freeze."""
     raw = target.with_suffix(".pcm")
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(video), "-vn",
                "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_RATE), "-f", "s16le", str(raw)]
@@ -275,16 +282,21 @@ def write_audio(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[
             output.setnchannels(AUDIO_CHANNELS)
             output.setsampwidth(2)
             output.setframerate(AUDIO_RATE)
-            position = 0
-            for at, length in silence_plan(record, freezes):
+            for step, first, last in cuts.audio_plan(parts, freezes, record["fps"], AUDIO_RATE, record["frames"]):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled()
-                if at > position:
-                    output.writeframes(source.read((at - position) * sample_bytes))
-                    position = at
-                output.writeframes(bytes(length * sample_bytes))
-            while chunk := source.read(1 << 20):
-                output.writeframes(chunk)
+                if step == "silence":
+                    output.writeframes(bytes(first * sample_bytes))
+                    continue
+                source.seek(first * sample_bytes)
+                remaining = None if last < 0 else max(0, last - first) * sample_bytes
+                while remaining is None or remaining > 0:
+                    chunk = source.read(1 << 20 if remaining is None else min(1 << 20, remaining))
+                    if not chunk:
+                        break  # the sound ran out before the picture did
+                    output.writeframes(chunk)
+                    if remaining is not None:
+                        remaining -= len(chunk)
     finally:
         raw.unlink(missing_ok=True)
 
@@ -343,17 +355,18 @@ class Overlay:
 
 def render(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[str, Any]], count: int,
            schedule: dict[int, Path | None], target: str, encoder: str,
-           cancel: threading.Event | None = None, progress: Callable[[int, int], None] | None = None) -> None:
+           cancel: threading.Event | None = None, progress: Callable[[int, int], None] | None = None,
+           parts: list[dict[str, int]] | None = None) -> None:
     """Write the finished clip to `target` (an .mp4 written whatever its name)."""
     import video_encoder as encoders
 
     width, height, fps = record["width"], record["height"], record["fps"]
-    shown = source_frames(record, freezes, count)
+    shown = source_frames(record, freezes, count, parts)
     with tempfile.TemporaryDirectory(prefix="vizorplay-export-") as scratch:
         audio = Path(scratch) / "sound.wav"
         sound = has_audio(ffmpeg, video)
         if sound:
-            write_audio(ffmpeg, video, record, freezes, audio, cancel)
+            write_audio(ffmpeg, video, record, freezes, audio, cancel, parts)
         _, video_args = encoders.video_args(encoder, ffmpeg, 18, "veryfast")
         command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
                    "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", "-"]
@@ -366,13 +379,19 @@ def render(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[
         with errors.open("wb") as log:
             encoder_process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log,
                                                creationflags=_flags())
-            frames = read_frames(ffmpeg, video, fps, 0, record["frames"] + 2, (width, height))
+            frames = None
             current_index, current = -1, None
             overlay = None
             try:
                 for n, wanted in enumerate(shown):
                     if cancel is not None and cancel.is_set():
                         raise Cancelled()
+                    if frames is None or wanted < current_index or wanted > current_index + SKIP_FRAMES:
+                        # The first frame, or a cut, reorder or repeat: decode again from here.
+                        if frames is not None:
+                            frames.close()
+                        frames = read_frames(ffmpeg, video, fps, wanted, record["frames"] - wanted + 2, (width, height))
+                        current_index, current = wanted - 1, None
                     while current_index < wanted:
                         following = next(frames, None)
                         if following is None:
@@ -398,7 +417,8 @@ def render(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[
                 encoder_process.wait()  # Windows keeps the half-written file locked until it has gone
                 raise
             finally:
-                frames.close()
+                if frames is not None:
+                    frames.close()
                 try:
                     encoder_process.stdin.close()
                 except OSError:
@@ -425,10 +445,10 @@ def run_export(ffmpeg: str, session: dict[str, Any], folder: Path, name: str, sa
         def write(temporary: str) -> None:
             try:
                 render(ffmpeg, session["video"], session["record"], session["freezes"], session["frames"],
-                       schedule, temporary, encoder, cancel, progress)
+                       schedule, temporary, encoder, cancel, progress, session.get("parts"))
             except encoders.HardwareEncodeError:
                 render(ffmpeg, session["video"], session["record"], session["freezes"], session["frames"],
-                       schedule, temporary, encoders.SOFTWARE, cancel, progress)
+                       schedule, temporary, encoders.SOFTWARE, cancel, progress, session.get("parts"))
 
         saved = save(folder, name, ".mp4", write, fallback="VizorPlay annotated clip")
         return {"saved": {"name": saved.name, "folder": str(saved.parent), "id": register(saved)},

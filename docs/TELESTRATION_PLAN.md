@@ -558,6 +558,84 @@ detections mapped to pitch metres; board inserts saved and reopened; old
 documents unchanged; export of a board insert matches the preview; desktop and
 narrow layouts; missing model pack reported clearly, never silently skipped.
 
+## Parts: cut, reorder and repeat (M9). Plan 2026-11-18
+
+**Request (2026-11-18).** Make the editor a classic timeline editor: cut
+unwanted parts out of the clip to change its length, reorder and repeat parts,
+and keep different drawings on different parts. User choice: reordering and
+duplicating are in the first version, not later.
+
+**What the analyst does.** The timeline gets a **Parts** row above Freezes. A
+new clip is one part. *Split* (X, or the button) cuts the part at the playhead.
+Drag a part's edges to trim it, drag it sideways to reorder it, and use
+Duplicate or Delete (Delete key) on the selected part; Delete closes the gap.
+The inspector's **Parts** list does the same with buttons (Move earlier / later,
+Duplicate, Delete), so everything has a keyboard route. Undo restores a part
+with its drawings.
+
+**Saved data.** `parts: [{from, to}]`: source frame ranges (`to` exclusive) in
+play order, the same frame may appear in several parts. Absent means the whole
+clip, so old documents are unchanged. Up to 200 parts, at least one.
+
+**One idea keeps the rest of the editor unchanged.** The parts joined end to end
+are the *cut clip*, with its own frame numbers (cut frame 0 is the start of the
+first part). Everything the editor already does in clip frames works on the cut
+clip: freezes (`atFrame`), boards (`on`), output time, drawing times, the frame
+steppers. Only three things need the real source frame: the picture shown, the
+tracks (stored per source frame; a repeated part shows the same track), and the
+sound. So the timeline code is reused as it is, with the cut clip's frame count
+and length in place of the source's. Boards keep `fromFrame` as a source frame.
+
+**Editing = one reshape step.** Split, trim, delete, move and duplicate each
+produce a list of *pieces* (old cut-frame range → new start). One function then
+moves freezes and boards with their pieces, drops those whose frames are gone
+(a board takes its tokens with it), and maps every drawing's times the same way.
+A drawing wholly inside deleted time is removed; one that straddles it is
+shortened; one that spans reordered parts covers the first to last part it
+touched. Duplicate copies the part's plain drawings onto the copy; **freezes
+and boards are not copied** (each one belongs to its own place on the timeline,
+and the copy can be given its own). Whatever a step removes comes back with Undo.
+
+**Playback.** When a part ends and the next one starts at the next source frame
+(a split), the video simply continues. When it does not (a cut, reorder or
+repeat), the player seeks to the next part's start while playing: a brief stall
+on some machines, never a frame of the removed footage.
+
+**Export.** The engine maps each output frame to a cut-clip frame, then to a
+source frame, and decodes one run of consecutive source frames at a time, so
+order and repeats cost one seek per part. The sound is built part by part with
+silence under freezes, so it stays in step. Export length and limits use the cut
+clip.
+
+**Limits, stated up front.**
+- A repeated part does not repeat freezes or boards (above).
+- Tracking lanes mark every place a tracked frame plays; a track still follows
+  the same player on each repeat.
+- Parts cut inside a followed player's range keep the track; the unused frames
+  are ignored.
+- Sound is cut and joined hard at part boundaries (no crossfade).
+
+**Tests.** Cut-clip maths in both languages against one shared fixture;
+reshape steps (split, trim, delete, move, duplicate) on freezes, boards and
+drawings; server validation; export frame order and audio length for a
+reordered, repeated and cut clip, decoded; old documents unchanged; browser
+check of every action, undo, playback across a cut, desktop and narrow layouts.
+
+Built 2026-11-18 as planned (engine `app/telestration/parts.py`, editor
+`ui/annotate/parts.js`). Checked in a real browser on a 13 s clip: split with X,
+select, trim by dragging an edge, move and repeat with the buttons, remove with
+Delete and undo, saved and reopened. Playback across a cut jumped from source
+4 s to 9 s with the output clock continuing. A clip cut into three parts, one
+repeated and the order changed, exported at exactly the expected 12.0 s, and
+every sampled output frame matched its own source frame (difference about 2/255,
+against 20-86 for other frames). Decoded sound matched in the engine tests.
+Drawings moved with their parts: an arrow shown 10-13 s moved to 6-9 s when the
+4 s part before it was removed, and came back with Undo.
+
+Beyond the limits stated above: a clip cut to the very end of a part that holds
+a drawing keeps the drawing only for the time left; the Parts list shows a
+part's actions (Earlier, Later, Repeat, Remove) only for the selected part.
+
 ## Roadmap after M5
 
 Agreed order (2026-11-16). Each step gets its own plan before it starts.

@@ -163,6 +163,30 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-lane-freeze.is-board { background: color-mix(in srgb, var(--annotate-board) 30%, transparent); box-shadow: inset 2px 0 var(--annotate-board); }
 .annotate-lane-freeze.is-board.is-current { background: color-mix(in srgb, var(--annotate-board) 50%, transparent); }
 .annotate-lane-freeze.is-board .annotate-lane-edge::after { background: var(--annotate-board); }
+/* Parts: one block per part, in play order, as wide as it plays (freezes included). */
+.annotate-parts .annotate-lane { height: 28px; overflow: hidden; background: #e4e6df; cursor: default; }
+.annotate-part {
+  position: absolute; top: 2px; bottom: 2px; min-width: 6px; overflow: hidden; box-sizing: border-box;
+  border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 1px #c3c6bd; cursor: grab; touch-action: none;
+}
+.annotate-part:hover { box-shadow: inset 0 0 0 1px var(--cm-muted); }
+.annotate-part.is-selected { background: color-mix(in srgb, var(--cm-accent) 55%, #fff); box-shadow: inset 0 0 0 2px var(--cm-ink); }
+.annotate-part.is-dragging { opacity: 0.55; cursor: grabbing; }
+.annotate-part.is-drop { box-shadow: inset 0 0 0 2px var(--annotate-freeze); }
+.annotate-part-label { position: absolute; inset: 0 8px; display: flex; align-items: center; overflow: hidden; font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.annotate-part-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.annotate-part-edge.is-from { left: 0; }
+.annotate-part-edge.is-to { right: 0; }
+.annotate-part-edge::after { content: ""; position: absolute; top: 7px; bottom: 7px; left: 3px; width: 2px; border-radius: 1px; background: var(--cm-ink); opacity: 0; transition: opacity 120ms var(--cm-settle); }
+.annotate-part:hover .annotate-part-edge::after, .annotate-part.is-selected .annotate-part-edge::after { opacity: 0.55; }
+.annotate-parts-list { padding: 0; max-height: none; }
+.annotate-parts-list li { display: flex; flex-direction: column; gap: 4px; padding-bottom: 2px; }
+.annotate-parts-list li.is-selected { padding-bottom: 6px; }
+.annotate-part-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 2px; }
+.annotate-main .annotate-part-act { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-part-act:hover:not(:disabled) { background: var(--annotate-hover); }
+.annotate-main .annotate-part-act:disabled { color: #a3a69e; cursor: not-allowed; }
+.annotate-main .annotate-part-act svg { width: 14px; height: 14px; }
 .annotate-lane-edge { position: absolute; top: -3px; bottom: -3px; right: -5px; width: 10px; cursor: ew-resize; }
 .annotate-lane-edge::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 2px; border-radius: 1px; background: var(--annotate-freeze); }
 .annotate-drawings .annotate-lane { height: auto; min-height: 18px; }
