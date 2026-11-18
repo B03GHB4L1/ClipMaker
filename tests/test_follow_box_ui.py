@@ -32,6 +32,13 @@ class FollowBoxUiTests(unittest.TestCase):
         # On a small player the corners and the foot handle overlap.
         self.assertIn("corner.distance <= handleDistance", self.script)
 
+    def test_a_plain_click_only_selects_and_a_real_drag_edits(self):
+        # A click used to count as "moved by 0": on a followed ring it made this frame a keyframe, which
+        # locked in whatever box the tracker had there (even a swollen one) and tracked the clip again.
+        self.assertIn("moved: false", self.script)
+        self.assertIn("> 3 * (window.devicePixelRatio || 1)", self.script)
+        self.assertIn('(current.moved || (current.type !== "move" && current.type !== "handle"))', self.script)
+
     def test_the_panel_says_how_to_fit_the_box(self):
         self.assertIn("Drag a corner of the dashed box to fit it tightly to the player", self.html)
 
