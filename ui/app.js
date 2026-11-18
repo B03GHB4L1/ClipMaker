@@ -380,7 +380,6 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
     `${(size / 1073741824).toFixed(1)} GB · local file`;
   previewName.textContent = name;
   previewName.title = name;
-  document.querySelector(".play-button").disabled = false;
   setPlayerEnabled(true);
   if (save) {
     activeMatch.video_name = name;
@@ -482,7 +481,6 @@ const clearFootage = () => {
   activeMatch.video_name = "";
   activeMatch.video_path = "";
   document.querySelector("[data-file-count]").textContent = "No file";
-  document.querySelector(".play-button").disabled = true;
   setPlayerEnabled(false);
   pendingSeek = null;
   previewName.textContent = "No footage selected";
@@ -605,7 +603,6 @@ const playbackTime = document.querySelector("[data-timeline-time]");
 const timelineStart = document.querySelector("[data-timeline-start]");
 const timelineEnd = document.querySelector("[data-timeline-end]");
 const timelineMarkers = document.querySelector("[data-timeline-markers]");
-const playButton = document.querySelector(".play-button");
 const playerToggle = document.querySelector("[data-player-toggle]");
 const playbackRate = document.querySelector("[data-playback-rate]");
 const muteButton = document.querySelector("[data-mute]");
@@ -810,7 +807,6 @@ const stepPlayback = (step) => {
     setScrubTime(matchVideo.currentTime + Number(step));
   }
 };
-playButton.addEventListener("click", togglePlayback);
 playerToggle.addEventListener("click", togglePlayback);
 document.querySelectorAll("[data-step]").forEach((button) =>
   button.addEventListener("click", () => stepPlayback(button.dataset.step)),
@@ -835,14 +831,10 @@ document.querySelectorAll("[data-zoom]").forEach((button) =>
 );
 matchVideo.addEventListener("timeupdate", syncPlaybackUi);
 matchVideo.addEventListener("play", () => {
-  playButton.textContent = "Ⅱ";
-  playButton.setAttribute("aria-label", "Pause preview");
   playerToggle.textContent = "Ⅱ";
   playerToggle.setAttribute("aria-label", "Pause");
 });
 matchVideo.addEventListener("pause", () => {
-  playButton.textContent = "▶";
-  playButton.setAttribute("aria-label", "Play preview");
   playerToggle.textContent = "▶";
   playerToggle.setAttribute("aria-label", "Play");
 });
@@ -942,6 +934,10 @@ document
   .forEach((button) => {
     button.dataset.defaultMarker = button.dataset.marker;
     button.addEventListener("click", () => {
+      const previous = activePeriodButton();
+      // Which file each period plays: its own, or the main match video.
+      const sourceOf = (period) => activeMatch.period_videos?.[period] || activeMatch.video_path || "";
+      const sameFile = previous && sourceOf(previous.dataset.period) === sourceOf(button.dataset.period);
       document
         .querySelectorAll(".period-selector [data-period]")
         .forEach((item) => {
@@ -953,14 +949,17 @@ document
         periodLabels[button.dataset.period];
       updateKickoffButton();
       updateMarkerTime(button.dataset.marker);
-      const seconds = parseClock(button.dataset.marker);
-      if (activeMatch.id && (activeMatch.video_path || activeMatch.period_videos?.[button.dataset.period])) {
-        // Reopening reloads the video, so land on this period's kick-off once it is ready.
+      // A period with a kick-off set jumps to it. One not set yet keeps the
+      // playhead where it is in the same video (00:00:00 is only a placeholder),
+      // or starts a different file from the beginning.
+      const markerSet = button.dataset.markerSet === "true";
+      const seconds = markerSet ? parseClock(button.dataset.marker) : (sameFile ? currentSeconds() : 0);
+      if (!sameFile && activeMatch.id && sourceOf(button.dataset.period)) {
+        // A different file: reopen it and land on the period's kick-off once it is ready.
         apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: activeMatch.id, period: button.dataset.period }) })
           .then((result) => { pendingSeek = seconds; showSelectedVideo(result.file, false); })
           .catch((error) => showToast(error.message));
-      }
-      if (Number.isFinite(matchVideo.duration)) {
+      } else if (markerSet && Number.isFinite(matchVideo.duration)) {
         setScrubTime(seconds, false);
       }
     });

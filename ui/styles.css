@@ -1144,25 +1144,6 @@ input:focus {
   margin-left: 4px;
   color: #afb3aa;
 }
-.play-button {
-  position: absolute;
-  z-index: 3;
-  left: 50%;
-  top: 50%;
-  width: 52px;
-  height: 52px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.46);
-  color: rgba(17, 19, 15, 0.82);
-  backdrop-filter: blur(7px);
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-}
-.play-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.32;
-}
 .timeline {
   position: relative;
   height: 96px;
