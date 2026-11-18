@@ -160,9 +160,11 @@ class SharedUiTests(unittest.TestCase):
         module = (UI / "audio-warm.js").read_text(encoding="utf-8")
         self.assertIn("const IDLE_MS = 5 * 60 * 1000;", module)  # released when nobody is watching
         self.assertIn("if (document.hidden) release();", module)
+        # Warmed by the first click or key press, ahead of play, so a fresh clip or page starts at once.
+        self.assertIn('for (const name of ["pointerdown", "keydown"])', module)
         self.assertIn("opened.state !== \"running\"", module)  # never claims a stream that did not start
         for name in ("index.html", "filters.html", "analysis.html", "annotate.html"):
-            self.assertIn('src="audio-warm.js?v=1"', (UI / name).read_text(encoding="utf-8"), name)
+            self.assertIn('src="audio-warm.js?v=2"', (UI / name).read_text(encoding="utf-8"), name)
 
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")
