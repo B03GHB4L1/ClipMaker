@@ -12,6 +12,13 @@ own loss signal, a grass-masked shirt-colour check that stays different for
 about 0.2 s, and a box squeezed against the frame edge. A scene cut stops
 tracking at once; a second of uninterrupted doubt stops it too, so a drawing
 never wanders off on its own for long.
+
+Box size is the fourth rule (2026-11-18, from a real clip): when the tracker
+loses a player it can let its box swell over a crowd, and nothing else notices
+because the box still holds shirts. A box more than SIZE_DOUBT times the
+seed's area is doubtful (so is a box shrunk below SHRINK_DOUBT of it); more
+than SIZE_STOP times is not the player any more, so tracking stops there.
+A box's shape is not checked: it varies too much as a player runs and turns.
 """
 from __future__ import annotations
 
@@ -22,6 +29,10 @@ TRACKED, KEYFRAME, REVIEW, LOST = 0, 1, 2, 3
 COLOUR_LIMIT = 0.6  # Bhattacharyya distance to the seed's shirt colour
 COLOUR_SECONDS = 0.2
 DOUBT_SECONDS = 1.0
+SIZE_DOUBT = 1.8  # box area against the seed's: beyond this the tracker may be wrong
+SIZE_STOP = 4.0  # beyond this the box is not one player: stop at once
+SHRINK_DOUBT = 0.2  # a box shrunk to this share of the seed's area may have slipped onto a limb
+SHRINK_STOP = 0.08
 
 
 def row(box: tuple[float, float, float, float], confidence: float, state: int) -> list[float]:
@@ -37,18 +48,25 @@ class Flagger:
         self.doubt_limit = max(2, round(DOUBT_SECONDS * fps))
         self.doubt = 0
         self.first = True
+        self.seed_area = 0.0
 
     def push(self, box: tuple[float, float, float, float], *, ok: bool = True, confidence: float = 1.0,
              colour: float | None = None, edge: bool = False, cut: bool = False) -> tuple[str, Any]:
         """("row", row) to store, or ("stop", reason) to end the span before this frame."""
+        area = max(box[2] * box[3], 1e-9)
         if self.first:
             self.first = False
+            self.seed_area = area
             return "row", row(box, 1.0, KEYFRAME)
         if cut:
             return "stop", "scene-cut"
+        grown = area / self.seed_area  # 1 = the seed's size
+        if grown > SIZE_STOP or grown < SHRINK_STOP:
+            return "stop", "lost"
+        wrong_size = grown > SIZE_DOUBT or grown < SHRINK_DOUBT
         self.colours.append(1.0 if colour is None else colour)
         colour_off = len(self.colours) == self.colours.maxlen and sum(self.colours) / len(self.colours) > COLOUR_LIMIT
-        doubtful = not ok or colour_off or edge
+        doubtful = not ok or colour_off or edge or wrong_size
         self.doubt = self.doubt + 1 if doubtful else 0
         if self.doubt >= self.doubt_limit:
             return "stop", "lost"
