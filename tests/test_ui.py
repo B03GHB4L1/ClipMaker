@@ -154,6 +154,16 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("markerSet ? parseClock(button.dataset.marker) : (sameFile ? currentSeconds() : 0)", app)
         self.assertIn("if (!sameFile && activeMatch.id && sourceOf(button.dataset.period))", app)  # reload only for another file
 
+    def test_every_video_page_keeps_the_sound_output_open(self):
+        # Pressing play after a long pause froze the picture for ~2.7s while the browser reopened
+        # the audio output; a silent running stream keeps it open (measured: 0 of 5 stalls vs 4 of 7).
+        module = (UI / "audio-warm.js").read_text(encoding="utf-8")
+        self.assertIn("const IDLE_MS = 5 * 60 * 1000;", module)  # released when nobody is watching
+        self.assertIn("if (document.hidden) release();", module)
+        self.assertIn("opened.state !== \"running\"", module)  # never claims a stream that did not start
+        for name in ("index.html", "filters.html", "analysis.html", "annotate.html"):
+            self.assertIn('src="audio-warm.js?v=1"', (UI / name).read_text(encoding="utf-8"), name)
+
     def test_intake_intro_reads_cleanly(self):
         html = (UI / "index.html").read_text(encoding="utf-8")
         self.assertIn("Clip match footage from event data in one seamless experience.", html)
