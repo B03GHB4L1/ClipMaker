@@ -88,7 +88,8 @@ jobs:
           port=""
           for i in $(seq 1 60); do
             sleep 2
-            port="$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk '/vizorplay-engine/ {sub(".*:", "", $9); print $9; exit}')"
+            # +c 0: lsof otherwise cuts command names to 9 characters ("vizorplay").
+            port="$(lsof -nP +c 0 -iTCP -sTCP:LISTEN 2>/dev/null | awk '/vizorplay-engine/ {sub(".*:", "", $9); print $9; exit}')"
             [ -n "$port" ] && break
           done
           echo "engine port: ${port:-none}"
