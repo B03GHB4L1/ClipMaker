@@ -1,0 +1,115 @@
+name: Mac Intel test build
+
+# A downloadable VizorPlay.app for Intel Macs, so the compiled app can be tried
+# without building it on the Mac. This is a test build: it is not the release
+# candidate, is not notarized, and nothing here publishes a release.
+#
+# Runs when this file changes on the release branch, or by hand from the Actions tab.
+# The Intel runner runs the app natively, so the engine is frozen as x86_64.
+
+on:
+  push:
+    branches: ["codex/release-packaging"]
+    paths: [".github/workflows/mac-intel-test.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: VizorPlay.app for Intel Macs
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      # Build for macOS 11 (Big Sur) and later.
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the engine's packages (Intel Mac versions)
+        run: |
+          # requirements.txt pins curl-cffi 0.14.0 and opencv-python-headless 4.10.0.84,
+          # which have no Intel Mac wheels, and OpenCV 4.9 needs numpy 1.x. These versions
+          # do have Intel wheels; the unit tests pass with them (the one Windows-only
+          # failure is numpy 1.x's 32-bit default integer on Windows).
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller==6.19.0 numpy==1.26.4 pandas==2.3.3 plotly==6.6.0 \
+            imageio-ffmpeg==0.6.0 opencv-python-headless==4.9.0.80 curl-cffi==0.15.0
+          python -c "import platform, numpy, cv2; print(platform.machine(), numpy.__version__, cv2.__version__)"
+
+      - name: Freeze the engine
+        run: |
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+          file dist/vizorplay-engine/vizorplay-engine
+          mkdir -p src-tauri/resources/backend
+          cp -a dist/vizorplay-engine/. src-tauri/resources/backend/
+
+      - name: Check the frozen engine (media, cancellation, server)
+        run: python packaging/smoke_test.py --server dist/vizorplay-engine/vizorplay-engine
+
+      - run: npm ci
+
+      - name: Build VizorPlay.app
+        run: |
+          mkdir -p build
+          # Ad hoc signature: Intel Macs run it, but it is not notarized (no Apple Developer membership).
+          printf '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}\n' > build/mac-config.json
+          npm run tauri build -- --bundles app --config "$PWD/build/mac-config.json"
+          ls -la src-tauri/target/release/bundle/macos/
+
+      - name: Check the finished app
+        run: |
+          APP="$PWD/src-tauri/target/release/bundle/macos/VizorPlay.app"
+          set -x
+          lipo -info "$APP"/Contents/MacOS/*
+          file "$APP/Contents/Resources/backend/vizorplay-engine"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          du -sh "$APP"
+          # The engine inside the finished app must pass the same smoke test.
+          python packaging/smoke_test.py --server "$APP/Contents/Resources/backend/vizorplay-engine"
+
+      - name: Open the app; its engine must start and answer
+        run: |
+          APP="$PWD/src-tauri/target/release/bundle/macos/VizorPlay.app"
+          export VIZORPLAY_DATA_DIR="$RUNNER_TEMP/vizorplay-data"
+          mkdir -p "$VIZORPLAY_DATA_DIR"
+          "$APP"/Contents/MacOS/VizorPlay > "$RUNNER_TEMP/app.log" 2>&1 &
+          app_pid=$!
+          port=""
+          for i in $(seq 1 60); do
+            sleep 2
+            port="$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk '/vizorplay-engine/ {sub(".*:", "", $9); print $9; exit}')"
+            [ -n "$port" ] && break
+          done
+          echo "engine port: ${port:-none}"
+          if [ -z "$port" ]; then cat "$RUNNER_TEMP/app.log"; kill "$app_pid" 2>/dev/null || true; exit 1; fi
+          curl -fsS "http://127.0.0.1:$port/api/health"
+          echo
+          kill "$app_pid" 2>/dev/null || true
+          sleep 3
+          # Closing the app stops its engine.
+          ! pgrep -f vizorplay-engine
+
+      - name: Zip the app
+        run: |
+          mkdir -p build/intel-test
+          ditto -c -k --sequesterRsrc --keepParent src-tauri/target/release/bundle/macos/VizorPlay.app build/intel-test/VizorPlay-macOS-Intel.zip
+          (cd build/intel-test && shasum -a 256 VizorPlay-macOS-Intel.zip > SHA256SUMS && cat SHA256SUMS)
+          ls -la build/intel-test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VizorPlay-macOS-Intel-test
+          path: build/intel-test/
+          retention-days: 14
+          if-no-files-found: error
