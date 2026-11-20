@@ -11,6 +11,7 @@ import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, 
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { fitBox } from "./annotate/fit.js";
+import { showClipStrip, showLibrary } from "./annotate/library.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -67,9 +68,13 @@ document.querySelectorAll(".filter-topbar nav a").forEach((link) => {
 {
   const back = $("[data-annotate-back]");
   const from = document.referrer ? new URL(document.referrer) : null;
-  back.href = from && from.origin === location.origin && !from.pathname.endsWith("/annotate.html")
-    ? from.pathname + from.search
-    : `/analysis.html?view=analyst&project=${encodeURIComponent(projectId)}`;
+  const library = `/annotate.html?project=${encodeURIComponent(projectId)}`;
+  if (from && from.origin === location.origin && !from.pathname.endsWith("/annotate.html")) back.href = from.pathname + from.search;
+  else if (clipId) {
+    // Arrived from the session list or another clip of the session: go back to the list.
+    back.href = library;
+    $("[data-back-label]").textContent = "All sessions";
+  } else back.href = `/analysis.html?view=analyst&project=${encodeURIComponent(projectId)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2614,9 +2619,12 @@ const wire = () => {
 
 const start = async () => {
   try {
-    if (!projectId || !/^[a-f0-9]{32}$/.test(clipId)) throw new Error("Open a clip with its Annotate button first.");
+    if (!projectId) throw new Error("Open a saved project first, then come back to Annotate.");
+    if (!clipId) return await startLibrary();
+    if (!/^[a-f0-9]{32}$/.test(clipId)) throw new Error("This clip link is not valid. Open the clip from Annotate.");
     const { project } = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
     rememberProject(project);
+    showClipStrip($("[data-clip-strip]"), projectId, clipId);
     const opened = await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`);
     clip = opened.clip;
     doc = createDocument(opened.annotations);
@@ -2647,4 +2655,14 @@ const start = async () => {
     output.hidden = false;
   }
 };
+
+// No clip chosen: the Annotate tab lists the project's sessions.
+async function startLibrary() {
+  const { project } = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
+  rememberProject(project);
+  document.body.classList.add("annotate-library-mode");
+  document.title = "VizorPlay - Annotate";
+  $("[data-annotate-title]").textContent = "Annotate";
+  await showLibrary($("[data-library]"), projectId, (text) => { status.textContent = text; });
+}
 start();

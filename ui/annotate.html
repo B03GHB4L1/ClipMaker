@@ -6,23 +6,23 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=23" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=24" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=18"></script>
+  <script type="module" src="annotate.js?v=19"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
 <body class="analysis-page annotate-page">
   <header class="filter-topbar">
     <button type="button" class="filter-brand" data-analysis-menu aria-label="Open navigation" aria-expanded="false" aria-controls="analysis-menu"><span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span><span class="menu-dots" aria-hidden="true">•••</span></button>
-    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-view="analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-view="tactical" data-project-navigation>Tactical</a></nav>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-view="analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-view="tactical" data-project-navigation>Tactical</a><a class="is-active" href="/annotate.html" aria-current="page" data-annotate-nav>Annotate</a></nav>
     <span data-annotate-status role="status">Loading clip...</span>
   </header>
   <nav id="analysis-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
   <main class="analysis-main annotate-main">
     <div class="annotate-bar">
-      <a href="/analysis.html" class="annotate-back" data-annotate-back data-project-navigation><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>Back</a>
+      <a href="/analysis.html" class="annotate-back" data-annotate-back data-project-navigation><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg><span data-back-label>Back</span></a>
       <div class="annotate-heading">
         <h1 data-annotate-title>Annotate</h1>
         <span class="annotate-save" data-save-status role="status"></span>
@@ -47,6 +47,16 @@
     </div>
     <p class="annotate-warning" data-annotate-changed role="alert" hidden>This clip's video file has changed since it was annotated. Check that the drawings still line up.</p>
     <p class="annotate-error" data-annotate-error role="alert" hidden></p>
+    <section class="annotate-library" data-library aria-labelledby="library-title" hidden>
+      <div class="annotate-library-head">
+        <h2 id="library-title">Sessions in this project</h2>
+        <p class="annotate-muted">Each session keeps its clips and drawings. To start one, tick clips on the Filter page and choose Annotate, or press Annotate on any clip.</p>
+      </div>
+      <p class="annotate-error" data-library-error role="alert" hidden></p>
+      <p class="annotate-library-empty" data-library-empty hidden>No clips have been annotated in this project yet.</p>
+      <ol class="annotate-sessions" data-library-list></ol>
+    </section>
+    <nav class="annotate-strip" data-clip-strip aria-label="Clips in this session" hidden></nav>
     <div class="annotate-workspace" data-annotate-workspace hidden>
       <div class="annotate-tools" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical" data-tools>
         <div class="annotate-tool-group" role="group" aria-labelledby="tools-draw">

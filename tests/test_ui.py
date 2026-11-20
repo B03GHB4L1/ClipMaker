@@ -108,7 +108,7 @@ class SharedUiTests(unittest.TestCase):
             if path.name != "save-clip.js":
                 self.assertNotRegex(source, r"(post|apiRequest|fetch)\(`/api/(saved|jobs)/[^`]*/reveal", path.name)
             if "Open folder" in source and path.name != "save-clip.js":
-                self.assertIn("data-reveal-export", source, path.name)
+                self.assertTrue("data-reveal-export" in source or "revealFolder(`/api/" in source, path.name)
         self.assertIn('invoke("allow_foreground")', (UI / "update.js").read_text(encoding="utf-8"))
 
     def test_projects_can_be_deleted_from_intake_and_the_projects_dialog(self):
@@ -257,8 +257,10 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("Annotate", (UI / "save-clip.js").read_text(encoding="utf-8"))
         self.assertIn("data-render-annotate", (UI / "filters.html").read_text(encoding="utf-8"))
         self.assertIn("annotateClip(result.file.url", (UI / "filters.js").read_text(encoding="utf-8"))
-        for name in ("index.html", "app.js"):
-            self.assertNotIn("annotate", (UI / name).read_text(encoding="utf-8").lower(), name)
+        # Intake only links to the Annotate tab (a nav item on every page); it offers no clip to annotate.
+        self.assertNotIn("annotate", (UI / "app.js").read_text(encoding="utf-8").lower())
+        home = (UI / "index.html").read_text(encoding="utf-8").lower()
+        self.assertEqual(home.count("annotate"), 2 * home.count('href="/annotate.html"'))  # each link and its label
 
     def test_export_line_offers_annotate_for_the_clip_in_the_player(self):
         # User request: Annotate sits on the Clips screen's export line, not only behind "Render this clip".
@@ -268,7 +270,8 @@ class SharedUiTests(unittest.TestCase):
         script = (UI / "filters.js").read_text(encoding="utf-8")
         self.assertIn("annotateButton.disabled = !clips.length || !hasFootage();", script)
         handler = script[script.index('annotateButton.addEventListener("click"'):]
-        self.assertIn("const clip = focused();", handler)
+        self.assertIn("const targets = annotateTargets();", handler)  # the clip in the player unless several are ticked
+        self.assertIn(": [focused()].filter(Boolean));", script)
         self.assertIn('apiRequest("/api/previews/render"', handler)
         self.assertIn("annotateClip(result.file.url", handler)
 
@@ -389,6 +392,41 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("(isLinked(corner) && sameCorner(zoneDraft[0], corner))", script)
         self.assertIn("const corners = zoneDraft ? zoneCorners(zoneDraft) : [];", script)
         self.assertNotIn("zoneDraft.pop()", script)
+
+    def test_annotate_is_a_fifth_tab_with_the_project_sessions(self):
+        for page in ("index.html", "filters.html", "analysis.html", "annotate.html"):
+            html = (UI / page).read_text(encoding="utf-8")
+            self.assertIn('href="/annotate.html"', html, page)
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        self.assertIn('aria-current="page" data-annotate-nav>Annotate</a>', html)
+        self.assertIn("data-library-list", html)
+        self.assertIn('data-clip-strip aria-label="Clips in this session"', html)
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        # No clip in the link: list the sessions instead of failing; a clip shows its session's other clips.
+        self.assertIn("if (!clipId) return await startLibrary();", script)
+        self.assertIn('showClipStrip($("[data-clip-strip]"), projectId, clipId);', script)
+        library = (UI / "annotate" / "library.js").read_text(encoding="utf-8")
+        for action in ('act("rename"', 'act("delete"', 'act("remove-clip"'):
+            self.assertIn(action, library)
+        self.assertIn("window.confirm(", library)  # removing clips asks first
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        self.assertIn(".annotate-library-mode :is(.annotate-commands, .annotate-hint, .annotate-save) { display: none; }", css)
+
+    def test_filter_annotates_several_ticked_clips_into_one_session(self):
+        script = (UI / "filters.js").read_text(encoding="utf-8")
+        self.assertIn("selected.size > 1 ? clips.filter((clip) => selected.has(clip.id))", script)
+        self.assertIn("if (targets.length > 1) return annotateMany(targets);", script)
+        self.assertIn("...(session ? { session_id: session.id } : { session_name: sessionName })", script)
+        self.assertIn("targets.length > MAX_ANNOTATE", script)
+
+    def test_filter_finds_players_across_saved_matches(self):
+        script = (UI / "filters.js").read_text(encoding="utf-8")
+        self.assertIn('import { openPlayerSearch } from "./player-search.js";', script)
+        self.assertIn("openPlayerSearch({", script)
+        search = (UI / "player-search.js").read_text(encoding="utf-8")
+        self.assertIn('"/api/previews"', search)
+        self.assertIn('"/api/jobs"', search)
+        self.assertNotIn("/api/fs", search)  # only the engine's own filter and export calls
 
     def test_annotate_critique_fixes_hold(self):
         html = (UI / "annotate.html").read_text(encoding="utf-8")

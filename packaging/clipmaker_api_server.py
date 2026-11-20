@@ -51,7 +51,7 @@ else:
     from process_owner import watch_process_owner
     import update_check
     import user_folders
-from telestration.clips import EditorClips
+from telestration.clips import CLIP_ID, SESSION_ID, EditorClips
 
 
 # Navigating here asks the Windows desktop shell to install the update
@@ -1736,8 +1736,57 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         project_id = str(body.get("project_id") or "")
         if self.store.get(project_id) is None:
             raise ValueError("Open a saved project before annotating a clip.")
+        session_id = body.get("session_id")
+        if session_id is not None and not (isinstance(session_id, str) and SESSION_ID.match(session_id)):
+            raise ValueError("Invalid annotate session.")
+        if session_id is not None and not self.editor_clips.has_session(project_id, session_id):
+            self.send_post_error(HTTPStatus.NOT_FOUND, "That annotate session is not in the project any more.")
+            return
         clip = self.editor_clips.import_clip(project_id, source, str(body.get("name") or ""))
-        self.send_json(HTTPStatus.CREATED, {"clip": clip})
+        try:
+            # Several clips sent together share one session; a single clip starts its own.
+            session = self.editor_clips.add_to_session(project_id, clip["id"], session_id,
+                                                       str(body.get("session_name") or clip["name"]))
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        self.send_json(HTTPStatus.CREATED, {"clip": clip, "session": session})
+
+    def editor_sessions(self, path: str, body: dict[str, Any] | None) -> None:
+        """The project's annotate sessions (GET), or rename / delete a session, or remove one clip (POST)."""
+        parts = path.split("/")
+        project_id = parts[3] if len(parts) > 3 else ""
+        action = parts[4] if len(parts) == 5 else None
+        if len(parts) not in (4, 5) or self.store.get(project_id) is None:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Open a saved project first."})
+            return
+        clips = self.editor_clips
+        try:
+            if body is None and action is None:
+                self.send_json(HTTPStatus.OK, {"sessions": clips.sessions(project_id)})
+                return
+            if body is None:
+                raise ValueError("Unknown annotate session request")
+            session_id = str(body.get("session_id") or "")
+            clip_id = str(body.get("clip_id") or "")
+            if action == "rename":
+                if not SESSION_ID.match(session_id):
+                    raise ValueError("Invalid annotate session.")
+                clips.rename_session(project_id, session_id, str(body.get("name") or ""))
+            elif action == "delete":
+                if not SESSION_ID.match(session_id):
+                    raise ValueError("Invalid annotate session.")
+                clips.remove_session(project_id, session_id)
+            elif action == "remove-clip":
+                if not CLIP_ID.match(clip_id):
+                    raise ValueError("Invalid clip id.")
+                clips.remove_clip(project_id, clip_id)
+            else:
+                raise ValueError("Unknown annotate session request")
+        except LookupError as error:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": str(error)})
+            return
+        self.send_json(HTTPStatus.OK, {"sessions": clips.sessions(project_id)})
 
     def editor_parts(self, path: str) -> tuple[str, str]:
         parts = path.split("/")
@@ -2062,6 +2111,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/media/"):
             self.send_media(path.rsplit("/", 1)[-1])
             return
+        if path.startswith("/api/editor-sessions/"):
+            self.editor_sessions(path, None)
+            return
         if path.startswith("/api/editor/"):
             self.editor_clip()
             return
@@ -2325,6 +2377,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/editor/clips":
                 self.annotate_clip(body)
+                return
+            if path.startswith("/api/editor-sessions/"):
+                self.editor_sessions(path, body)
                 return
             if path.startswith("/api/editor/") and path.endswith("/track"):
                 self.start_tracking(path, body)
