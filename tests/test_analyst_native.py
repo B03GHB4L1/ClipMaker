@@ -31,6 +31,8 @@ def classic_args(args):
     if isinstance(option, dict) and args.get("filename_hint") == "pressing_map":
         y_axis = {k: v for k, v in option["yAxis"].items() if k != "inverse"}
         args = {**args, "option": {**option, "yAxis": y_axis}}
+    if isinstance(args.get("option"), dict):
+        args = {**args, "option": analysis_golden.without_credit_graphic(args["option"])}
     return args
 
 
@@ -252,7 +254,8 @@ class AnalystNativeParityTests(unittest.TestCase):
                 result = analysis_golden._round(comparison.build_view(self.frames, controls))
                 elements = record["elements"]
                 # Templates differ by design: Streamlit's is a placeholder its browser code replaces.
-                strip = lambda figure: {**figure, "layout": {k: v for k, v in figure["layout"].items() if k != "template"}}
+                strip = lambda figure: analysis_golden.without_chart_restyle(
+                    {**figure, "layout": {k: v for k, v in figure["layout"].items() if k != "template"}})
                 figures = [strip(e["figure"]) for e in elements if e["kind"] == "plotly"]
                 # Shooting & xG is new (VizorPlay xG); test_comparison_shows_shooting_and_xg covers it.
                 self.assertEqual(figures, [strip(analysis_golden._round(f["figure"])) for f in result["figures"]

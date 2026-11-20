@@ -468,7 +468,6 @@
   // ════════════════════════════════════════════════════════════════════════════
   // Shared ECharts renderer/export adapter
   // ════════════════════════════════════════════════════════════════════════════
-  const EXPORT_BRAND_TEXT = "VizorPlay<br>@B03GHB4L1";
   let _exportBrandColor = "#DFFF00";
   const ECHARTS_RENDERER = "canvas";
   let _cmChart = null;
@@ -605,17 +604,6 @@
         borderpad: 4,
       });
     }
-    annotations.push({
-      text: EXPORT_BRAND_TEXT,
-      xref: "paper",
-      yref: "paper",
-      x: 0.975,
-      y: 0.015,
-      xanchor: "right",
-      yanchor: "bottom",
-      showarrow: false,
-      font: { size: 10, color: _exportBrandColor, family: "Geist Mono, monospace" },
-    });
     branded.annotations = annotations;
     return branded;
   }
@@ -1161,7 +1149,8 @@
           yAxisIndex: idx,
           data: [[ann.x, ann.y]],
           symbolSize: 1,
-          itemStyle: { opacity: 0 },
+          // A clear point, not opacity 0: the label inherits the point's opacity.
+          itemStyle: { color: "rgba(0,0,0,0)" },
           label: {
             show: true,
             formatter: stripHtml(ann.text || ""),
@@ -1257,7 +1246,12 @@
   async function saveChartPicture(url, filename) {
     let response;
     try {
-      const blob = await (await fetch(url)).blob();
+      let blob = await (await fetch(url)).blob();
+      if (/\.png$/i.test(filename || "")) {
+        // Every exported picture carries the VizorPlay credit strip (ui/analysis/brand-export.js).
+        const { brandPicture } = await import("/analysis/brand-export.js");
+        blob = await brandPicture(blob);
+      }
       response = await fetch("/api/images/save", {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(filename || "") },
@@ -1682,6 +1676,121 @@
     return !run.stopped;
   }
 
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // Player names on exported pictures (build-up maps)
+  // ════════════════════════════════════════════════════════════════════════════
+  // A map that wants names on its PNG sets this plan while it renders:
+  // { labels: [{x, y, name, r}], markers: [{x, y, r}], segments: [[x0, y0, x1, y1]], isLight }
+  // in data coordinates. Names are placed only for the picture, so the live map stays clean.
+  let _cmExportLabels = null;
+  const LABEL_FONT_SIZE = 11;
+  const LABEL_FONT = `600 ${LABEL_FONT_SIZE}px "Geist Mono", monospace`;
+  let _labelMeasure = null;
+
+  function measureLabel(text) {
+    _labelMeasure ||= document.createElement("canvas").getContext("2d");
+    _labelMeasure.font = LABEL_FONT;
+    return _labelMeasure.measureText(text).width;
+  }
+
+  function rectOverlap(a, b) {
+    const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+    return w > 0 && h > 0 ? w * h : 0;
+  }
+
+  function circleRectOverlap(c, r) {
+    const nx = Math.max(r.x0, Math.min(c.x, r.x1));
+    const ny = Math.max(r.y0, Math.min(c.y, r.y1));
+    const d = Math.hypot(c.x - nx, c.y - ny);
+    return d < c.r ? (c.r - d + 1) * (c.r - d + 1) : 0;
+  }
+
+  function segmentHitsRect(seg, r) {
+    // Sample along the line: plenty for label-sized boxes.
+    const steps = Math.max(4, Math.ceil(Math.hypot(seg[2] - seg[0], seg[3] - seg[1]) / 4));
+    let hits = 0;
+    for (let i = 0; i <= steps; i++) {
+      const x = seg[0] + (seg[2] - seg[0]) * i / steps;
+      const y = seg[1] + (seg[3] - seg[1]) * i / steps;
+      if (x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1) hits++;
+    }
+    return hits;
+  }
+
+  // Each name takes the spot round its marker that covers the least: other names
+  // first, then markers, then the lines of the move, then the chart edge. Crowded
+  // markers are placed first; a name with no clear spot moves out on a short leader line.
+  function placeExportLabels(chart, plan) {
+    const toPx = (x, y) => chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [x, y]);
+    const width = chart.getWidth();
+    const height = chart.getHeight();
+    const markers = plan.markers.map((m) => { const [x, y] = toPx(m.x, m.y); return { x, y, r: m.r }; });
+    const segments = plan.segments.map((seg) => [...toPx(seg[0], seg[1]), ...toPx(seg[2], seg[3])]);
+    const labels = plan.labels.map((label) => {
+      const [x, y] = toPx(label.x, label.y);
+      return { ...label, px: x, py: y, w: measureLabel(label.name) + 10, h: LABEL_FONT_SIZE + 8 };
+    });
+    const crowd = (l) => markers.filter((m) => Math.hypot(m.x - l.px, m.y - l.py) < 60).length;
+    labels.sort((a, b) => crowd(b) - crowd(a));
+    const directions = [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [-1, -1], [1, 1], [-1, 1]];
+    const placed = [];
+    for (const label of labels) {
+      let best = null;
+      for (const [ring, gap] of [[0, 3], [1, 20], [2, 38]]) {
+        directions.forEach(([dx, dy], order) => {
+          const reach = label.r + gap;
+          const slant = dx && dy ? 0.8 : 1;
+          const cx = label.px + dx * (reach + label.w / 2) * slant;
+          const cy = label.py + dy * (reach + label.h / 2) * slant;
+          const box = { x0: cx - label.w / 2, x1: cx + label.w / 2, y0: cy - label.h / 2, y1: cy + label.h / 2 };
+          let cost = order * 0.5 + ring * 14;
+          if (box.x0 < 4 || box.y0 < 4 || box.x1 > width - 4 || box.y1 > height - 4) cost += 5000;
+          placed.forEach((other) => { cost += rectOverlap(box, other.box) * 4; });
+          markers.forEach((m) => { cost += circleRectOverlap(m, box) * 2; });
+          segments.forEach((seg) => { cost += segmentHitsRect(seg, box) * 6; });
+          if (!best || cost < best.cost) best = { cost, box, cx, cy, ring };
+        });
+        if (best && best.cost < 20) break; // a clear spot close in: take it
+      }
+      placed.push({ ...label, ...best });
+    }
+    const ink = plan.isLight ? "#111611" : "#f2f5ee";
+    const pill = plan.isLight ? "rgba(250,250,246,0.9)" : "rgba(10,16,10,0.82)";
+    const rule = plan.isLight ? "rgba(17,22,17,0.45)" : "rgba(242,245,238,0.5)";
+    const elements = [];
+    placed.forEach((label, i) => {
+      if (label.ring > 0) {
+        // A leader from the marker's edge to the name.
+        const angle = Math.atan2(label.cy - label.py, label.cx - label.px);
+        elements.push({ id: `cm-export-leader-${i}`, type: "line", silent: true, z: 120,
+          shape: { x1: label.px + Math.cos(angle) * label.r, y1: label.py + Math.sin(angle) * label.r,
+                   x2: Math.max(label.box.x0, Math.min(label.px, label.box.x1)),
+                   y2: Math.max(label.box.y0, Math.min(label.py, label.box.y1)) },
+          style: { stroke: rule, lineWidth: 1 } });
+      }
+      elements.push({ id: `cm-export-pill-${i}`, type: "rect", silent: true, z: 121,
+        shape: { x: label.box.x0, y: label.box.y0, width: label.w, height: label.h, r: 3 },
+        style: { fill: pill } });
+      elements.push({ id: `cm-export-label-${i}`, type: "text", silent: true, z: 122,
+        x: label.cx, y: label.cy,
+        style: { text: label.name, fill: ink, font: LABEL_FONT, align: "center", verticalAlign: "middle" } });
+    });
+    return elements;
+  }
+
+  // Names in a picture: the surname, or the full name when two players share it.
+  function exportNames(players) {
+    const short = (name) => String(name || "").trim().split(/\s+/).pop() || "";
+    const owners = new Map();
+    players.forEach((name) => {
+      const key = short(name);
+      owners.set(key, (owners.get(key) || new Set()).add(name));
+    });
+    return (name) => ((owners.get(short(name)) || new Set()).size > 1 ? String(name).trim() : short(name));
+  }
+
   // PNG / animation / Preview / GIF for one chart. `stepsFor(mode)` gives the
   // frames; `restore()` puts the full chart back afterwards.
   function wireExportControls(controls, chart, args, stepsFor, restore) {
@@ -1703,7 +1812,19 @@
     };
     controls.querySelector('[data-export="png"]').onclick = () => {
       stopAnimation();
-      downloadDataUrl(chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg }), `${exportFilenameFromArgs(args || {})}.png`);
+      const plan = _cmExportLabels;
+      let labelled = false;
+      if (plan && plan.labels.length) {
+        try {
+          chart.setOption({ graphic: placeExportLabels(chart, plan) });
+          labelled = true;
+        } catch (error) {
+          // The picture is still saved, without names.
+        }
+      }
+      const url = chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg });
+      if (labelled) restore();
+      downloadDataUrl(url, `${exportFilenameFromArgs(args || {})}.png`);
     };
     previewButton.onclick = async () => {
       if (_cmPlaying && _cmPlaying.kind === "preview" && _cmPlaying.controls === controls) {
@@ -1734,18 +1855,31 @@
       gifButton.textContent = "MAKING";
       gifButton.disabled = true;
       previewButton.disabled = true;
-      const gif = new GIF({
-        workers: 2,
-        quality: 10,
-        width: chart.getWidth(),
-        height: chart.getHeight(),
-        workerScript: "gif.worker.js",
-        background: bg,
-      });
+      // Each frame carries the VizorPlay credit strip (ui/analysis/brand-export.js).
+      let brand = null;
+      let brandCanvas = (canvas) => canvas;
+      try {
+        const module = await import("/analysis/brand-export.js");
+        brand = await module.loadBrand();
+        brandCanvas = (canvas) => module.brandCanvas(canvas, brand);
+      } catch (error) {
+        // Without the logo the GIF is still made, unbranded.
+      }
+      let gif = null;
       const done = await playSteps(stepsFor(selector.value), run, (step) => {
-        gif.addFrame(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }), { copy: true, delay: step.delay });
+        const frame = brandCanvas(chart.getRenderedCanvas({ pixelRatio: 1, backgroundColor: bg }));
+        gif ||= new GIF({
+          workers: 2,
+          quality: 10,
+          width: frame.width,
+          height: frame.height,
+          workerScript: "gif.worker.js",
+          background: bg,
+        });
+        gif.addFrame(frame, { copy: true, delay: step.delay });
       });
       if (!done) return;
+      if (!gif) { finish(run); return; }
       gif.on("finished", (blob) => {
         if (_cmPlaying === run) _cmPlaying = null;
         downloadDataUrl(URL.createObjectURL(blob), `${exportFilenameFromArgs(args || {})}.gif`);
@@ -1921,12 +2055,35 @@
   // ════════════════════════════════════════════════════════════════════════════
   // SHOT MAP — based on working Shot Map Parlour
   // ════════════════════════════════════════════════════════════════════════════
-  // Shot markers grow with the shot's xG (area tracks the chance), so big chances stand out.
+  // Shot markers: the circle's area tracks the shot's xG, from a floor that keeps
+  // every shot (even a 0.01 speculative one) clearly visible to a ceiling that keeps
+  // a penalty-size chance from swallowing the shots around it.
+  const SHOT_SIZE_MIN = 10;
+  const SHOT_SIZE_SPAN = 22;
+  const SHOT_SIZE_KEY = [0.05, 0.2, 0.5];
+  function shotDiameter(xg) {
+    return SHOT_SIZE_MIN + SHOT_SIZE_SPAN * Math.sqrt(Math.max(0, Math.min(1, xg)));
+  }
   function shotMarkerSize(shot, selected, isGF) {
-    if (isGF || typeof shot.xG !== "number") return selected ? 22 : 13;
-    // Diameter grows linearly with xG, so a 0.94 chance reads clearly bigger than a 0.76 one.
-    const size = 6 + 40 * Math.max(0, Math.min(1, shot.xG));
-    return Math.round((selected ? size + 7 : size) * 10) / 10;
+    if (isGF || typeof shot.xG !== "number") return selected ? 22 : 14;
+    const size = shotDiameter(shot.xG);
+    return Math.round((selected ? size + 6 : size) * 10) / 10;
+  }
+
+  // The size key: three reference circles with their xG, drawn in a strip under
+  // the pitch so it is part of every exported picture.
+  function shotSizeKey(keyY, xStart, step, color, fill) {
+    const xs = SHOT_SIZE_KEY.map((_, i) => xStart + step * (i + 1));
+    return {
+      trace: { x: xs, y: xs.map(() => keyY), mode: "markers", type: "scatter", name: "xG size", showlegend: false,
+        hoverinfo: "skip", customdata: xs.map(() => null),
+        marker: { size: SHOT_SIZE_KEY.map(shotDiameter), color: fill, symbol: "circle", line: { color, width: 1.4 } } },
+      annotations: [
+        { x: xs[0] - step * 0.5, y: keyY, xref: "x", yref: "y", text: "xG", showarrow: false, xanchor: "right", font: { color, size: 11 } },
+        ...SHOT_SIZE_KEY.map((value, i) => ({ x: xs[i] + step * 0.42, y: keyY, xref: "x", yref: "y", text: String(value), showarrow: false,
+          xanchor: "left", font: { color, size: 10 } })),
+      ],
+    };
   }
 
   function buildShotTrace(shotList, isHome, teamName, selectedIdx, isGF) {
@@ -1935,6 +2092,9 @@
         marker:{size:12, color:isHome?HOME_HEX:AWAY_HEX}, showlegend:true };
     }
     const xs=[], ys=[], colors=[], symbols=[], sizes=[], texts=[], cd=[], lineColors=[], lineWidths=[], lineDashes=[];
+    // Biggest chances first, so smaller shots are drawn on top and never hidden; the selected shot last.
+    const rank = (s) => (s.df_idx === selectedIdx ? 2 : 0) - (typeof s.xG === "number" ? s.xG : 0);
+    shotList = [...shotList].sort((a, b) => rank(a) - rank(b));
     for (const s of shotList) {
       xs.push(s._px); ys.push(s._py);
       const baseFill = shotColor(isHome);
@@ -2061,11 +2221,19 @@
       );
       xRange=expanded.xRange; yRange=expanded.yRange; scaleRatio=GOAL_SCALERATIO; shapes=goalframeShapes(xRange, yRange, _gfLine, _gfFrame, _pitchBG, _pitchLine);
     } else if (isHPV) {
-      xRange=[-5,105]; yRange=[55,-5]; scaleRatio=VERTICAL_PITCH_SCALERATIO; shapes=halfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+      xRange=[-5,105]; yRange=[60,-5]; scaleRatio=VERTICAL_PITCH_SCALERATIO; shapes=halfPitchVertShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     } else if (isHP) {
-      xRange=[50,105]; yRange=[105,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=halfPitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+      xRange=[50,105]; yRange=[113,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=halfPitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
     } else {
-      xRange=[-5,105]; yRange=[105,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+      xRange=[-5,105]; yRange=[113,-5]; scaleRatio=HORIZONTAL_PITCH_SCALERATIO; shapes=pitchShapes(_pitchLine, _pitchThick, _pitchBG, _goalFill);
+    }
+    if (!isGF && !noData) {
+      // The strip under the pitch holds the xG size key.
+      const keyY = isHPV ? 56.5 : 109.2;
+      const key = isHP ? shotSizeKey(keyY, 79, 7.5, _annoColor, "rgba(0,0,0,0)")
+        : shotSizeKey(keyY, isHPV ? 58 : 70, isHPV ? 10 : 8.5, _annoColor, "rgba(0,0,0,0)");
+      traces.push(key.trace);
+      annotations.push(...key.annotations);
     }
 
     const layout = {
@@ -3150,6 +3318,34 @@
       });
     }
 
+    // Exported pictures name the player at each step of a chain (one name per run of
+    // actions by the same player); entry maps name only the selected entry's player.
+    {
+      const named = actions.filter((a) => a.endX != null && a.endY != null && a.playerName);
+      const nameOf = exportNames(named.map((a) => a.playerName));
+      const labels = [];
+      named.forEach((a, i) => {
+        if (isEntryMap) {
+          if (selectedIdx == null || Number(a.df_idx) !== selectedIdx) return;
+          const end = plotPoint(a.endX, a.endY);
+          labels.push({ x: end.x, y: end.y, name: nameOf(a.playerName), r: 10 });
+          return;
+        }
+        if (i > 0 && named[i - 1].playerName === a.playerName) return;
+        const start = plotPoint(a.x, a.y);
+        labels.push({ x: start.x, y: start.y, name: nameOf(a.playerName), r: 11 });
+      });
+      const markers = [];
+      const segments = [];
+      named.forEach((a) => {
+        const start = plotPoint(a.x, a.y);
+        const end = plotPoint(a.endX, a.endY);
+        markers.push({ x: start.x, y: start.y, r: isEntryMap ? 4 : 11 }, { x: end.x, y: end.y, r: 7 });
+        segments.push([start.x, start.y, end.x, end.y]);
+      });
+      _cmExportLabels = labels.length ? { labels, markers, segments, isLight } : null;
+    }
+
     const layout = {
       paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: _pitchBG,
       xaxis: { range: [-5, 105], showgrid: false, zeroline: false, showticklabels: false, fixedrange: true },
@@ -3535,6 +3731,7 @@
     document.body.classList.toggle("cm-light", args.light_mode === true);
     _exportBrandColor = args.light_mode === true ? "#2f5d16" : "#DFFF00";
     const t = args.component_type || "";
+    _cmExportLabels = null;
     if (t === "penalty_shootout")       renderPenaltyShootout(args);
     else if (t === "echarts_option")    renderEchartsOption(args);
     else if (t === "shot_map")         renderShotMap(args);

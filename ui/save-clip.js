@@ -138,8 +138,9 @@ export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
       title: "Save as PNG",
       icon: Plotly.Icons.camera,
       // Only sizes that are set: toImage never finishes when given width: undefined.
-      click: (chart) => saveImage(Plotly.toImage(chart, { format: "png", scale: options.scale || 2,
-        ...(options.width ? { width: options.width } : {}), ...(options.height ? { height: options.height } : {}) }),
+      // The picture gets the VizorPlay credit strip (analysis/brand-export.js).
+      click: (chart) => saveImage(import("./analysis/brand-export.js").then(({ brandPicture }) => brandPicture(Plotly.toImage(chart, { format: "png", scale: options.scale || 2,
+        ...(options.width ? { width: options.width } : {}), ...(options.height ? { height: options.height } : {}) }))),
       `${options.filename || "VizorPlay chart"}.png`),
     }],
   };

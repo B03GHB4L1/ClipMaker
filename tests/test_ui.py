@@ -123,11 +123,14 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("const fresh = await newProject();", app)  # deleting the last one leaves a listed blank project
         self.assertIn(".project-delete", (UI / "compact.css").read_text(encoding="utf-8"))
 
-    def test_shot_marker_size_grows_linearly_with_xg(self):
+    def test_shot_marker_area_tracks_xg_from_a_visible_floor(self):
         component = (UI.parent / "app/smp_component/frontend/index.html").read_text(encoding="utf-8")
-        self.assertIn("const size = 6 + 40 * Math.max(0, Math.min(1, shot.xG));", component)
-        size = lambda xg: 6 + 40 * xg
-        self.assertGreaterEqual(size(0.94) - size(0.76), 7)  # a visible step between big chances
+        self.assertIn("const SHOT_SIZE_MIN = 10;", component)
+        self.assertIn("const SHOT_SIZE_SPAN = 22;", component)
+        size = lambda xg: 10 + 22 * xg ** 0.5
+        self.assertGreaterEqual(size(0.01), 12)  # even a speculative shot is plainly visible
+        self.assertLessEqual(size(0.95), 32)  # a big chance never swallows its neighbours
+        self.assertAlmostEqual(((size(0.4) - 10) / (size(0.1) - 10)) ** 2, 4)  # area beyond the floor tracks xG
 
     def test_full_event_table_fills_its_pop_up(self):
         # compact.css caps the Intake preview table at 160px; that cap must not reach the pop-up.

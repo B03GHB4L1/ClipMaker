@@ -25,6 +25,35 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden" / "analysis" / "fixture.json.gz"
 
 
+OLD_CREDIT = "@B03GHB4L1"
+
+
+def without_chart_restyle(figure):
+    """A Plotly figure without what VizorPlay deliberately restyled for both themes:
+    the handle text credit (exported pictures carry the VizorPlay logo strip now,
+    ui/analysis/brand-export.js), the radar's polar area (themed, not Plotly's white
+    disc) and the radar trace colours (olive on light paper, where lime had no contrast).
+    See tests/test_chart_theme.py."""
+    layout = dict(figure.get("layout", {}))
+    layout.pop("polar", None)
+    if layout.get("annotations"):
+        layout["annotations"] = [a for a in layout["annotations"] if OLD_CREDIT not in str(a.get("text", ""))]
+        if not layout["annotations"]:
+            del layout["annotations"]
+    data = [{k: v for k, v in trace.items() if k not in {"line", "fillcolor", "marker"}}
+            if trace.get("type") == "scatterpolar" else trace for trace in figure.get("data", [])]
+    return {**figure, "data": data, "layout": layout}
+
+
+def without_credit_graphic(option):
+    """An ECharts option without the handle text credit it used to draw."""
+    if not isinstance(option, dict) or not option.get("graphic"):
+        return option
+    graphic = [g for g in option["graphic"] if OLD_CREDIT not in str((g.get("style") or {}).get("text", ""))]
+    option = {k: v for k, v in option.items() if k != "graphic"}
+    return {**option, "graphic": graphic} if graphic else option
+
+
 def _round(value):
     if isinstance(value, float):
         if math.isnan(value) or math.isinf(value):

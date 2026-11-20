@@ -191,10 +191,10 @@ class AnalystViewTests(unittest.TestCase):
         self.assertEqual(view["figures"].index(figure), 3)  # drawn under the radar by index
         ev = frames.df_all[frames.df_all["playerName"] == shooters[0]]
         profile = comparison.shooting_profile(ev, frames.df_all)
-        self.assertEqual(list(profile), ["Minutes", "Shots", "Goals", "xG", "xG per 90", "Goals - xG", "xG per shot"])
+        self.assertEqual(list(profile), ["Minutes", "Shots", "Goals", "xG", "Goals - xG", "xG per shot"])
         self.assertAlmostEqual(profile["Goals - xG"], round(profile["Goals"] - profile["xG"], 2), places=2)
         minutes = comparison.minutes_played(ev, frames.df_all)
-        self.assertAlmostEqual(profile["xG per 90"], profile["xG"] / minutes * 90, delta=0.02)
+        self.assertNotIn("xG per 90", profile)
         self.assertIn("StatsBomb", json.dumps(figure["figure"]))
         source = (ROOT / "ui/analysis/tabs/comparison.js").read_text(encoding="utf-8")
         self.assertIn('"data-figure": "3"', source)

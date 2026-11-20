@@ -1458,6 +1458,20 @@ def scrape_match(url: str, output_dir: Path) -> dict[str, Any]:
 
 class ClipMakerHandler(SimpleHTTPRequestHandler):
     server_version = "VizorPlay/1.0"
+    _cache_header_sent = False
+
+    def send_header(self, keyword: str, value: str) -> None:
+        if keyword.lower() == "cache-control":
+            self._cache_header_sent = True
+        super().send_header(keyword, value)
+
+    def end_headers(self) -> None:
+        # Page files are checked with the engine on every load (a cheap 304 when
+        # unchanged), so an updated app never runs a mix of old and new scripts.
+        if not self._cache_header_sent:
+            super().send_header("Cache-Control", "no-cache")
+        self._cache_header_sent = False
+        super().end_headers()
 
     @property
     def store(self) -> MatchStore:
@@ -1600,7 +1614,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             clip = folder / f"tactical-{uuid.uuid4().hex[:12]}.mp4"
             shutil.move(source, clip)
             return {"file": self.publish_clip(clip, name, 0, 0, folder)}
-        view, _ = tactical.render(tab, controls, project, projects)
+        view, _ = tactical.render(tab, controls, project, projects, light=body.get("theme") != "dark")
         view["has_video"] = bool(str(project.get("video_path") or "").strip())
         return {"view": view}
 
@@ -2126,7 +2140,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if len(parts) == 6:
                     self.send_json(HTTPStatus.OK, {"file": self.analysis_clip(project, frames, handler, controls, body)})
                     return
-                view = handler["view"](frames, controls)
+                view = handler["view"](frames, controls, light_mode=body.get("theme") != "dark")
                 settings = project.get("filter_settings") or {}
                 view["clip_defaults"] = {"before": clamp_buffer(settings.get("before_buffer", 5)),
                                          "after": clamp_buffer(settings.get("after_buffer", 8))}

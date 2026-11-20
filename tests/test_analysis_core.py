@@ -104,7 +104,7 @@ class AnalysisCoreTests(unittest.TestCase):
         self.assertGreater(markers[1][1], markers[2][1])  # left-wing win sits above the right-wing win
         frontend = (ROOT / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
         self.assertIn("return { x: x, y: 100 - y };", frontend)  # the other maps: left touchline on top
-        self.assertIn("yRange=[105,-5]", frontend)
+        self.assertIn("yRange=[113,-5]", frontend)  # 105 plus the strip for the xG size key
 
     def test_pressing_markers_carry_their_event_ids(self):
         # Without ids, clicks on the pressing map could never select a win.
