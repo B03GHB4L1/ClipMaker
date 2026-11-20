@@ -199,7 +199,7 @@
                 <i aria-hidden="true"></i>
               </summary>
               <div class="filter-band-content">
-                <p class="field-note">If the recording doesn't match the match clock from some point on, shift every later clip in that period to line it back up.</p>
+                <p class="field-note">If the recording doesn't match the match clock from some point on, move every event after that point in the period, so it lines back up with the recording.</p>
                 <div class="correction-list" data-correction-list></div>
                 <div class="control-grid correction-grid">
                   <label><span>Period</span><select data-correction-period>
@@ -213,8 +213,8 @@
                   <label><span>From match clock</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-clock /></label>
                   <label class="wide"><span>What happened to the recording</span><select data-correction-direction>
                     <option value="" selected>Choose what happened</option>
-                    <option value="subtract">Footage is missing (stream cut out): clips come earlier</option>
-                    <option value="add">Extra footage: clips come later</option>
+                    <option value="subtract">Footage is missing (stream cut out): events come earlier</option>
+                    <option value="add">Extra footage: events come later</option>
                   </select></label>
                   <label><span>How long</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-amount /></label>
                   <label><span>Note</span><input type="text" placeholder="Optional" data-correction-note /></label>

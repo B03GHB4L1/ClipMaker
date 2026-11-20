@@ -1058,7 +1058,7 @@ def exercise(page, base, root, evidence, errors):
     page.locator('[data-correction-amount]').fill("00:20")
     page.get_by_role("button", name="Add correction").click()
     expect(page.locator('[data-correction-count]')).to_have_text("1 active")
-    expect(page.locator('[data-correction-list]')).to_contain_text("P2 from 10:00: extra footage, later clips 0:20 later")
+    expect(page.locator('[data-correction-list]')).to_contain_text("P2 from 10:00: extra footage, events after that point move 0:20 later")
     assert page.locator('[data-correction-clock]').input_value() == ""
     page.locator('[data-correction-list] button').first.click()
     expect(page.locator('[data-correction-count]')).to_have_text("None active")
