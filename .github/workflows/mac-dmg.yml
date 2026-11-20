@@ -51,7 +51,8 @@ jobs:
       - name: Install the engine's packages and the disk image builder
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-build.txt dmgbuild==1.6.5
+          # Pillow is not part of the engine; it only draws the disk image's window background.
+          python -m pip install -r requirements-build.txt dmgbuild==1.6.5 pillow==11.3.0
           python -c "import platform, numpy, cv2; print(platform.machine(), numpy.__version__, cv2.__version__)"
 
       - name: Freeze the engine
