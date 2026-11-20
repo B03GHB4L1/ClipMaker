@@ -41,9 +41,54 @@ the same command. APT installs required system dependencies. Linux packages do
 not update from inside the app, and no APT repository is configured. Other distributions
 and RPM packages are outside the verified candidate scope.
 
+## macOS disk image (Apple Silicon and Intel)
+
+The Mac download is a disk image (`.dmg`) with VizorPlay's engine inside, so
+there is nothing else to install and no Terminal. It is built for macOS 11 (Big
+Sur) or later. Status: CI builds and tests the Apple Silicon image
+(`.github/workflows/mac-dmg.yml`); the Intel image is not built yet, only a
+test app (`mac-intel-test.yml`). No VizorPlay release is published yet, so these
+steps describe the supported install once it is.
+
+1. **Find your Mac's chip.** Apple menu, **About This Mac**. If it says *Chip:
+   Apple M1* (or M2, M3, M4), download `VizorPlay_<version>_aarch64.dmg`. If it
+   says *Processor: Intel*, download `VizorPlay_<version>_x64.dmg`. An Apple
+   Silicon Mac can also run the Intel file (through Rosetta), but an Intel Mac
+   cannot run the Apple Silicon file.
+2. **Install.** Open the downloaded file. A window shows VizorPlay and your
+   Applications folder with an arrow between them: drag VizorPlay onto
+   Applications. Then eject the disk (click the eject button beside it in
+   Finder's sidebar).
+3. **Open it once, past macOS's check.** VizorPlay is not notarized by Apple,
+   because there is no Apple Developer membership. macOS therefore blocks the
+   first launch with a message that it cannot verify the app. This is the only
+   extra step, and it happens once:
+   - **macOS 15 (Sequoia) or later:** open VizorPlay from Applications and close
+     the message. Open **System Settings**, **Privacy & Security**, scroll to
+     **Security**, find "VizorPlay was blocked", click **Open Anyway**, confirm
+     with your password or Touch ID, then click **Open**.
+   - **macOS 14 (Sonoma) or earlier:** in Applications, Control-click (or
+     right-click) VizorPlay, choose **Open**, then click **Open** again.
+   - **From Terminal instead:** `xattr -dr com.apple.quarantine /Applications/VizorPlay.app`
+     removes the download flag; then open VizorPlay normally.
+
+   VizorPlay is ad hoc signed so Apple Silicon will run it, but ad hoc signing
+   does not satisfy Gatekeeper and nothing here bypasses it: you are telling
+   macOS to trust this one app. Later launches open normally.
+4. **Updating and removing.** Download the newer disk image and drag VizorPlay
+   onto Applications again, choosing **Replace**; your projects stay (they live
+   in your user Library, outside the app). Updates do not install themselves on
+   macOS yet. To remove VizorPlay, drag it from Applications to the Bin; projects
+   stay until you delete them (the local-project picker shows where).
+
+The image's own window repeats the Open Anyway step, so it is seen before the
+first launch. A Mac that blocks the app even after Open Anyway, or says it is
+damaged, usually has the download flag set by a browser or archive tool; the
+Terminal command above clears it.
+
 ## macOS Homebrew
 
-On macOS, Homebrew builds the VizorPlay app on your Mac during `brew install`,
+Homebrew is an alternative to the disk image and is slower. On macOS, Homebrew builds the VizorPlay app on your Mac during `brew install`,
 so VizorPlay opens in its own window like the Windows and Linux apps. No Apple
 Developer membership is involved: the app is not notarized by Apple. It opens
 because it was built on your Mac rather than downloaded, so macOS does not

@@ -44,9 +44,12 @@ def descendants(ps_output: str, root: int) -> dict[int, str]:
 
 
 def engine_port(ps_output: str, root: int) -> int | None:
-    """The port of the VizorPlay engine started by the app (root), if it is running yet."""
+    """The port of the VizorPlay engine started by the app (root), if it is running yet.
+
+    Homebrew's launcher runs clipmaker_api_server.py; an app with the frozen engine inside
+    (the DMG) runs Contents/Resources/backend/vizorplay-engine directly."""
     for command in descendants(ps_output, root).values():
-        if "clipmaker_api_server.py" in command:
+        if "clipmaker_api_server.py" in command or "/backend/vizorplay-engine" in command:
             match = re.search(r"--port\s+(\d+)", command)
             if match:
                 return int(match.group(1))
