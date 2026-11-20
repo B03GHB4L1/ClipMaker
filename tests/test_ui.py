@@ -335,6 +335,58 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("calc((100svh - 200px) * var(--clip-ratio, 1.7778))", css)
         self.assertNotIn("100svh - 300px", css)
 
+    def test_annotate_select_tool_box_selects_and_deletes_several(self):
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        # A drag on empty picture draws a selection box; every drawing it touches is selected.
+        self.assertIn('gesture = { type: "marquee"', script)
+        self.assertIn("return r >= x0 && l <= x1 && b >= y0 && t <= y1;", script)
+        # Shift+click adds or removes one; a drag on one of them moves them all, as one undo step.
+        self.assertIn("if (event.shiftKey && hit) {", script)
+        self.assertIn('gesture = { type: "group"', script)
+        self.assertIn("function moveGroup(", script)
+        # Delete removes every selected drawing at once.
+        self.assertIn("const ids = new Set(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []);", script)
+
+    def test_annotate_freezes_and_boards_delete_from_the_timeline(self):
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        # Each block on the Freezes lane has a delete cross; a click selects the block and Delete removes it.
+        self.assertIn('remove.dataset.freezeRemove = String(freeze.atFrame);', script)
+        self.assertIn("removeFreeze(Number(removeButton.dataset.freezeRemove))", script)
+        self.assertIn("if (selectedFreeze !== null && !selectedIds.length) return removeFreeze(selectedFreeze);", script)
+        self.assertIn(".annotate-lane-freeze:hover .annotate-lane-remove", css)
+
+    def test_annotate_handles_are_thin_and_cursors_say_what_a_drag_does(self):
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        # Small, thin handles: what catches the pointer stays bigger than what is drawn.
+        draw = script[script.index("function drawHandle("):script.index("function drawSquareHandle(")]
+        self.assertIn("ctx.lineWidth = ratio;", draw)
+        self.assertNotIn("ctx.arc(x, y, handleRadius()", draw)
+        # Two-headed arrows on size handles and box corners, the four-headed move arrow on a drawing.
+        self.assertIn('const CORNER_CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };', script)
+        self.assertIn('if (handle.index === "r") return "ew-resize";', script)
+        self.assertIn('if (handle.index === "h") return "ns-resize";', script)
+        self.assertIn("canvas.style.cursor = cursorAt(at);", script)
+
+    def test_annotate_text_follows_players(self):
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        # Text placed or dropped on a followed player links to them; dragging linked text changes only
+        # where it sits beside them, never the player's tracked box.
+        self.assertIn("const link = linkToPlayerAt(point);", script)
+        apply = script[script.index("function applyEdit("):]
+        text = apply[apply.index('if (original.kind === "text")'):apply.index('if (type === "handle" && (index === "r"')]
+        self.assertIn("dx: Math.round((point.dx + dx) * 1e5) / 1e5", text)
+        self.assertNotIn("correctTrack", text)
+
+    def test_annotate_zone_corners_on_followed_players(self):
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        # A first corner on a player is placed for this frame before the close check (it is not an [x, y]),
+        # a click on that player again closes the zone, and repeated corners are dropped.
+        self.assertIn("toPixels(resolvePoint(zoneDraft[0], tracks(), frameNow()))", script)
+        self.assertIn("(isLinked(corner) && sameCorner(zoneDraft[0], corner))", script)
+        self.assertIn("const corners = zoneDraft ? zoneCorners(zoneDraft) : [];", script)
+        self.assertNotIn("zoneDraft.pop()", script)
+
     def test_annotate_critique_fixes_hold(self):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
@@ -358,7 +410,7 @@ class SharedUiTests(unittest.TestCase):
         bar = html[html.index('<div class="annotate-commands">'):html.index("</div>", html.index('<div class="annotate-commands">'))]
         self.assertIn('data-delete disabled', bar)
         self.assertEqual(html.count("data-delete"), 1)
-        self.assertIn('$("[data-delete]").disabled = !item;', script)
+        self.assertIn('$("[data-delete]").disabled = !item && !many && !freeze;', script)
         self.assertIn("<h1 data-annotate-title>", html)
         # aria-pressed goes on tool buttons, never on the canvas.
         self.assertIn('querySelectorAll("button[data-tool]")', script)

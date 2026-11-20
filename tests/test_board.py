@@ -155,6 +155,25 @@ class TeamTests(unittest.TestCase):
         self.assertGreater(int(colours[0][1:3], 16), int(colours[0][5:7], 16))  # reddish
         self.assertGreater(int(colours[1][5:7], 16), int(colours[1][1:3], 16))  # bluish
 
+    def test_halves_of_players_cut_by_a_tile_edge_are_dropped(self):
+        width, height = 1920, 1080
+        tile_list = list(players.tiles(width, height))
+        seam = tile_list[0][3]  # the bottom edge of the top row of tiles
+        whole = [800.0, seam - 60.0, 30.0, 100.0]  # a player across the seam, found whole in the bottom tile
+        half = [801.0, seam - 60.0, 29.0, 60.0]  # the same player cut at the seam in the top tile: "feet" at the waist
+        apart = [300.0, 200.0, 30.0, 90.0]
+        top, bottom = tile_list[1], tile_list[4]
+        kept = players.drop_parts([whole, half, apart], [bottom, top, tile_list[0]], width, height)
+        self.assertEqual(kept, [whole, apart])
+
+    def test_overlapping_players_away_from_tile_edges_are_both_kept(self):
+        width, height = 1920, 1080
+        front = [400.0, 120.0, 34.0, 110.0]
+        behind = [410.0, 125.0, 28.0, 90.0]  # mostly hidden behind the first, but a real player
+        first = list(players.tiles(width, height))[0]
+        kept = players.drop_parts([front, behind], [first, first], width, height)
+        self.assertEqual(kept, [front, behind])
+
     def test_token_colours_are_vivid(self):
         dull_red = players.token_colour(np.array([50, 50, 120]))
         r, g, b = (int(dull_red[i:i + 2], 16) for i in (1, 3, 5))
