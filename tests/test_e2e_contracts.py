@@ -197,6 +197,38 @@ class AutomationContracts(unittest.TestCase):
         self.assertEqual(engine_port(listing, 500), 50123)
         self.assertIsNone(engine_port(listing, 1234))  # another engine on the machine is not the app's
 
+    def test_macos_app_test_finds_the_frozen_engine_inside_a_dmg_app(self):
+        from tests.macos_app_smoke import engine_port
+        listing = """  PID  PPID COMMAND
+        800     1 /Applications/VizorPlay.app/Contents/MacOS/vizorplay
+        801   800 /Applications/VizorPlay.app/Contents/Resources/backend/vizorplay-engine --port 50321
+        900     1 /Applications/Other.app/Contents/Resources/backend/vizorplay-engine --port 50999
+        """
+        self.assertEqual(engine_port(listing, 800), 50321)
+        self.assertIsNone(engine_port(listing, 1234))
+
+    def test_mac_dmg_job_builds_tests_and_keeps_the_disk_image(self):
+        workflow = (ROOT / ".github/workflows/mac-dmg.yml").read_text(encoding="utf-8")
+        for needle in ("macos-latest", "packaging/macos/make_dmg.py", "tests/macos_dmg_smoke.py",
+                       "signingIdentity", "VizorPlay_${VERSION}_aarch64.dmg", "upload-artifact"):
+            self.assertIn(needle, workflow)
+        for forbidden in ("gh release", "git tag", "softwareupdate", "spctl --master-disable"):
+            self.assertNotIn(forbidden, workflow)  # builds and tests only; publishes nothing
+
+    def test_dmg_background_fits_its_window_and_names_the_extra_step(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("make_dmg", ROOT / "packaging/macos/make_dmg.py")
+        make_dmg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(make_dmg)
+        for key in ("APP_AT", "APPLICATIONS_AT"):
+            x, y = getattr(make_dmg, key)
+            self.assertTrue(0 < x < make_dmg.WINDOW[0] and 0 < y < make_dmg.WINDOW[1])
+        self.assertLess(make_dmg.APP_AT[0], make_dmg.APPLICATIONS_AT[0])  # app on the left, folder on the right
+        source = (ROOT / "packaging/macos/make_dmg.py").read_text(encoding="utf-8")
+        self.assertIn("Open Anyway", source)
+        self.assertIn("Control-click", source)
+        self.assertEqual(make_dmg.draw_background(2).size, (make_dmg.WINDOW[0] * 2, make_dmg.WINDOW[1] * 2))
+
     def test_homebrew_formula_installs_every_local_server_module(self):
         import re
         formula = (ROOT / "packaging/homebrew/vizorplay.rb.in").read_text(encoding="utf-8")

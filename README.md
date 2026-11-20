@@ -70,9 +70,23 @@ Data: StatsBomb.
 
 ### Mac
 
-VizorPlay installs on a Mac through Homebrew, a free tool for installing apps.
-If you don't have it, follow the one-step instructions at [brew.sh](https://brew.sh).
+1. Check your Mac's chip: Apple menu, **About This Mac**. *Chip: Apple M…*
+   means Apple Silicon; *Processor: Intel* means Intel.
+2. Download `VizorPlay_1.0.0_aarch64.dmg` (Apple Silicon) or
+   `VizorPlay_1.0.0_x64.dmg` (Intel) from the [Releases](../../releases) page.
+   The Intel file is still being tested; until it is there, use Homebrew below.
+3. Open the file and drag **VizorPlay** onto **Applications**.
+4. Open VizorPlay from Applications. VizorPlay isn't approved by Apple, so your
+   Mac blocks it the first time. On macOS 15 or later, open **System Settings**,
+   **Privacy & Security**, and click **Open Anyway**. On macOS 14 or earlier,
+   Control-click VizorPlay in Applications and choose **Open**. You only do this
+   once.
 
+Step-by-step help, including a Terminal option, is in
+[docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+**Or, with Homebrew** (slower, because it builds the app on your Mac): if you
+don't have it, follow the one-step instructions at [brew.sh](https://brew.sh).
 Then open the **Terminal** app and type these three lines, pressing Enter after
 each one:
 
@@ -104,7 +118,9 @@ You only install VizorPlay once. When a new version comes out, a message
 appears at the bottom of the app:
 
 - **Windows:** click **Update and restart**. That's it.
-- **Mac:** close VizorPlay, then type `brew upgrade vizorplay` in Terminal.
+- **Mac:** download the newer disk image and drag VizorPlay onto Applications
+  again (choose **Replace**). If you used Homebrew, close VizorPlay, then type
+  `brew upgrade vizorplay` in Terminal.
 - **Linux:** click **Download**, then install the new file the same way as
   before.
 
