@@ -1222,9 +1222,17 @@ def normalize_period(value: Any) -> int | str:
 
 
 def infer_score(frame: Any, home_team: str, away_team: str) -> tuple[int, int]:
-    scores = {home_team: 0, away_team: 0}
     if "type" not in frame.columns or "team" not in frame.columns:
         return 0, 0
+    # Fixture labels ("Paris SG") often differ from the event feed's team names
+    # ("Paris Saint-Germain FC"), so map them onto the names the events use.
+    from team_names import resolve_home_away
+
+    event_teams = [str(team).strip() for team in frame["team"].dropna().unique() if str(team).strip()]
+    home_team, away_team = resolve_home_away(home_team, away_team, event_teams)
+    if not home_team or not away_team or home_team == away_team:
+        return 0, 0
+    scores = {home_team: 0, away_team: 0}
     for _, event in frame.iterrows():
         if str(event.get("type") or "").strip().lower() != "goal":
             continue
@@ -1241,6 +1249,18 @@ def infer_score(frame: Any, home_team: str, away_team: str) -> tuple[int, int]:
         if team in scores:
             scores[team] += 1
     return scores[home_team], scores[away_team]
+
+
+def repair_saved_score(store: Any, project: dict[str, Any], csv_path: str) -> dict[str, int]:
+    """Re-derive a project's score from its saved events; projects scraped before team names
+    were resolved can carry a wrong 0-0. Saves the corrected score and returns it."""
+    import pandas as pd
+
+    frame = pd.read_csv(csv_path, low_memory=False)
+    home_score, away_score = infer_score(frame, str(project.get("home_team") or ""), str(project.get("away_team") or ""))
+    if (home_score, away_score) != (project.get("home_score"), project.get("away_score")):
+        store.upsert({"id": project["id"], "home_score": home_score, "away_score": away_score})
+    return {"home_score": home_score, "away_score": away_score}
 
 
 def event_table(frame: Any, limit: int) -> dict[str, Any]:
@@ -2202,10 +2222,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 csv_path = str(body.get("csv_path") or "").strip()
                 if not csv_path:
                     raise ValueError("Scrape or reopen a saved match before opening the table.")
-                known = {Path(item["csv_path"]).resolve() for item in self.store.list() if item.get("csv_path")}
-                if Path(csv_path).resolve() not in known:
+                owners = [item for item in self.store.list()
+                          if item.get("csv_path") and Path(item["csv_path"]).resolve() == Path(csv_path).resolve()]
+                if not owners:
                     raise ValueError("Open event data belonging to a saved project.")
-                self.send_json(HTTPStatus.OK, load_event_rows(csv_path))
+                rows = load_event_rows(csv_path)
+                rows.update(repair_saved_score(self.store, owners[0], csv_path))
+                self.send_json(HTTPStatus.OK, rows)
                 return
             if path == "/api/filter-options":
                 match = self.store.get(str(body.get("match_id") or "").strip())

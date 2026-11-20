@@ -563,6 +563,13 @@ const openProject = async (project) => {
       const result = await apiRequest("/api/events", { method: "POST", body: JSON.stringify({ csv_path: project.csv_path }) });
       renderEvents(result.events);
       document.querySelector(".event-footer span").textContent = `${result.event_count.toLocaleString()} saved rows`;
+      if (Number.isInteger(result.home_score) && Number.isInteger(result.away_score)
+          && (result.home_score !== Number(project.home_score || 0) || result.away_score !== Number(project.away_score || 0))) {
+        activeMatch = { ...activeMatch, home_score: result.home_score, away_score: result.away_score };
+        document.querySelector("[data-home-score]").textContent = result.home_score;
+        document.querySelector("[data-away-score]").textContent = result.away_score;
+        document.querySelector("[data-frame-score]").textContent = `${result.home_score} - ${result.away_score}`;
+      }
     } catch (error) { showToast("Saved event data is unavailable. Import the CSV or scrape the match again."); }
   }
   if (project.video_path) {
