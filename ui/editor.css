@@ -8,7 +8,7 @@
 /* One slim strip for the match: label beside the picker, each fact on one line. */
 .filter-page .match-context { align-items: center; margin-bottom: 0; }
 @media (min-width: 1101px) {
-  .filter-page .match-context { grid-template-columns: minmax(220px, 1fr) minmax(200px, 1.3fr) auto minmax(160px, 1.2fr) auto; }
+  .filter-page .match-context { grid-template-columns: minmax(220px, 1fr) minmax(200px, 1.3fr) auto minmax(160px, 1.2fr) auto auto; }
 }
 @media (max-width: 1100px) {
   .filter-page .match-context { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
