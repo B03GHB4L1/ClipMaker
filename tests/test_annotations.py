@@ -218,6 +218,78 @@ class EditorApiTests(unittest.TestCase):
             self.assertEqual(status, 404, media)
         self.assertFalse((self.data / "projects" / self.project["id"] / "clips").exists())
 
+    def sessions(self):
+        status, result = self.call(f"/api/editor-sessions/{self.project['id']}")
+        self.assertEqual(status, 200, result)
+        return result["sessions"]
+
+    def test_one_clip_gets_its_own_session_and_several_can_share_one(self):
+        first = self.annotate()
+        status, result = self.call("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken",
+                                                          "name": "Odegaard 51'.mp4", "session_name": "Pressing"})
+        self.assertEqual(status, 201, result)
+        shared = result["session"]["id"]
+        status, again = self.call("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken",
+                                                         "name": "Rice 70'.mp4", "session_id": shared})
+        self.assertEqual(status, 201, again)
+        self.assertEqual(again["session"]["id"], shared)
+        listed = {session["name"]: session for session in self.sessions()}
+        self.assertEqual(set(listed), {"Saka 34'", "Pressing"})
+        self.assertEqual([clip["name"] for clip in listed["Pressing"]["clips"]], ["Odegaard 51'", "Rice 70'"])
+        self.assertEqual(listed["Saka 34'"]["clips"][0]["id"], first["id"])
+
+    def test_clips_saved_before_sessions_appear_as_their_own_session(self):
+        clip = self.annotate()
+        (self.data / "projects" / self.project["id"] / "sessions.json").unlink()
+        self.call(f"/api/editor/{self.project['id']}/{clip['id']}", {"annotations": document(ring())})
+        [session] = self.sessions()
+        self.assertEqual(session["clips"][0]["id"], clip["id"])
+        self.assertEqual(session["clips"][0]["drawings"], 1)
+
+    def test_sessions_rename_and_remove_clips_to_the_trash(self):
+        clip = self.annotate()
+        [session] = self.sessions()
+        base = f"/api/editor-sessions/{self.project['id']}"
+        status, result = self.call(base + "/rename", {"session_id": session["id"], "name": "  Build-up   play "})
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result["sessions"][0]["name"], "Build-up play")
+        self.assertEqual(self.call(base + "/rename", {"session_id": session["id"], "name": " "})[0], 400)
+        status, result = self.call(base + "/delete", {"session_id": session["id"]})
+        self.assertEqual((status, result["sessions"]), (200, []))
+        project = self.data / "projects" / self.project["id"]
+        self.assertFalse((project / "clips" / f"{clip['id']}.mp4").exists())
+        self.assertEqual(len(list((project / "editor-trash").glob(f"*-{clip['id']}/clip.mp4"))), 1)
+        self.assertEqual(self.call(f"/api/editor/{self.project['id']}/{clip['id']}")[0], 404)
+
+    def test_removing_one_clip_keeps_the_rest_of_its_session(self):
+        self.annotate()
+        status, result = self.call("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken",
+                                                          "name": "Second.mp4", "session_name": "Pair"})
+        second = result["clip"]
+        self.call("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken",
+                                        "name": "Third.mp4", "session_id": result["session"]["id"]})
+        status, result = self.call(f"/api/editor-sessions/{self.project['id']}/remove-clip", {"clip_id": second["id"]})
+        self.assertEqual(status, 200, result)
+        pair = next(session for session in result["sessions"] if session["name"] == "Pair")
+        self.assertEqual([clip["name"] for clip in pair["clips"]], ["Third"])
+
+    def test_bad_session_requests_are_refused(self):
+        self.annotate()
+        base = f"/api/editor-sessions/{self.project['id']}"
+        cases = [(base + "/rename", {"session_id": "../x", "name": "A"}, 400),
+                 (base + "/delete", {"session_id": "s" + "0" * 16}, 404),
+                 (base + "/remove-clip", {"clip_id": "../../x"}, 400),
+                 (base + "/remove-clip", {"clip_id": "0" * 32}, 404),
+                 (base + "/explode", {"session_id": "s" + "0" * 16}, 400),
+                 ("/api/editor-sessions/no-such-project/delete", {"session_id": "s" + "0" * 16}, 404),
+                 ("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken", "session_id": "nope"}, 400),
+                 ("/api/editor/clips", {"project_id": self.project["id"], "media": "previewtoken",
+                                        "session_id": "s" + "0" * 16}, 404)]
+        for path, payload, expected in cases:
+            self.assertEqual(self.call(path, payload)[0], expected, (path, payload))
+        self.assertEqual(self.call("/api/editor-sessions/..%2F..%2Fx")[0], 404)
+        self.assertEqual(len(self.sessions()), 1)
+
     def test_requests_cannot_reach_outside_the_project(self):
         clip = self.annotate()
         status, _ = self.call("/api/editor/clips", {"project_id": "no-such-project", "media": "previewtoken"})

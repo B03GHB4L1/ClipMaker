@@ -366,3 +366,39 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 @media (max-width: 720px) {
   .annotate-calibrate-body { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* The Annotate tab without a clip: the project's sessions (annotate/library.js). */
+.annotate-library-mode :is(.annotate-commands, .annotate-hint, .annotate-save) { display: none; }
+.annotate-library { display: grid; gap: 12px; max-width: 920px; }
+.annotate-library-head { display: grid; gap: 4px; }
+.annotate-library-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.annotate-library-empty { margin: 0; padding: 18px; border: 1px dashed var(--cm-rule); border-radius: 8px; color: var(--cm-muted); font-size: 12px; }
+.annotate-sessions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.annotate-session { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-session-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.annotate-session-title { flex: 1 1 220px; min-width: 0; }
+.annotate-session-name { margin: 0; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-session-meta { margin: 2px 0 0; color: var(--cm-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.annotate-session-tools { display: flex; gap: 6px; }
+.annotate-main .annotate-session-open { height: 30px; text-decoration: none; color: #171817; } /* dark text on the lime fill in both themes */
+.annotate-main .annotate-session-tool { height: 30px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.annotate-main .annotate-session-tool.annotate-danger { font-size: 11px; }
+.annotate-session-rename { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--cm-ink); border-radius: 6px; background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 13px; font-weight: 600; }
+.annotate-session-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.annotate-session-clip { display: flex; align-items: stretch; min-width: 0; border: 1px solid var(--cm-rule); border-radius: 6px; }
+.annotate-session-clip-link { display: grid; flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; color: var(--cm-ink); text-decoration: none; }
+.annotate-session-clip-link:hover { background: var(--annotate-hover); }
+.annotate-session-clip-name { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-session-clip-meta { color: var(--cm-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.annotate-main .annotate-session-drop { display: inline-flex; align-items: center; justify-content: center; width: 30px; flex: none; padding: 0; border: 0; border-left: 1px solid var(--cm-rule); border-radius: 0 6px 6px 0; background: transparent; color: var(--cm-muted); cursor: pointer; }
+.annotate-main .annotate-session-drop:hover:not(:disabled) { color: #b3261e; }
+
+/* A session's clips above the editor: switch clip without going back to the list. */
+.annotate-strip { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.annotate-strip-name { flex: none; margin-right: 4px; color: var(--cm-muted); font-size: 11px; font-weight: 600; }
+.annotate-strip-clip { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 200px; height: 28px; padding: 0 10px 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--annotate-panel); color: var(--cm-ink); font-size: 11px; text-decoration: none; }
+.annotate-strip-clip:hover { background: var(--annotate-hover); }
+.annotate-strip-clip[aria-current="page"] { border-color: var(--cm-ink); box-shadow: inset 0 0 0 1px var(--cm-ink); font-weight: 600; }
+.annotate-strip-index { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 4px; background: var(--annotate-hover); color: var(--cm-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.annotate-strip-clip[aria-current="page"] .annotate-strip-index { background: var(--cm-ink); color: var(--annotate-panel); }
+.annotate-strip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,5 +1,6 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
 import { annotateClip, revealFolder, saveClip } from "./save-clip.js";
+import { openPlayerSearch } from "./player-search.js";
 import {
   duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
   restoreSelection, totalDuration, trimClip,
@@ -847,6 +848,20 @@ const refreshExportState = () => {
   exportButton.disabled = !clips.length || !count || Boolean(activeJobId) || !hasFootage();
   exportButton.title = hasFootage() ? "" : "Add match footage in Intake before exporting.";
   annotateButton.disabled = !clips.length || !hasFootage();
+  setAnnotateLabel();
+};
+
+// Annotate takes the clip in the player, or every ticked clip when more than one is ticked
+// (they go into one session on the Annotate tab).
+const MAX_ANNOTATE = 30;
+const annotateTargets = () => (selected.size > 1 ? clips.filter((clip) => selected.has(clip.id)) : [focused()].filter(Boolean));
+const setAnnotateLabel = () => {
+  const count = selected.size > 1 ? selected.size : 1;
+  const label = [...annotateButton.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+  if (label) label.textContent = count > 1 ? `Annotate ${count} clips` : "Annotate clip";
+  annotateButton.title = count > 1
+    ? `Put the ${count} ticked clips into one annotate session and open the first`
+    : "Draw on the clip in the player in the analyst editor";
 };
 
 const showClips = (windows, savedSelection) => {
@@ -1515,7 +1530,9 @@ exportButton.addEventListener("click", startExport);
 
 // Annotate (export line): cut the clip in the player, then open it in the analyst editor.
 annotateButton.addEventListener("click", async () => {
-  const clip = focused();
+  const targets = annotateTargets();
+  if (targets.length > 1) return annotateMany(targets);
+  const clip = targets[0];
   if (!clip || !activeMatch) return;
   const content = [...annotateButton.childNodes]; // icon and label, put back after the busy text
   annotateButton.disabled = true;
@@ -1534,6 +1551,47 @@ annotateButton.addEventListener("click", async () => {
     annotateButton.disabled = false;
   }
 });
+
+// Several ticked clips: cut each, copy it into the project under one shared session, then open the first.
+async function annotateMany(targets) {
+  if (!activeMatch) return;
+  const note = field("summary-note");
+  if (targets.length > MAX_ANNOTATE) {
+    note.textContent = `Tick at most ${MAX_ANNOTATE} clips to annotate together (${targets.length} are ticked).`;
+    return;
+  }
+  const content = [...annotateButton.childNodes];
+  annotateButton.disabled = true;
+  const sessionName = `${activeMatch.home_team} vs ${activeMatch.away_team}: ${targets.length} clips`;
+  let session = null;
+  let first = null;
+  try {
+    for (const [index, clip] of targets.entries()) {
+      annotateButton.textContent = `Preparing ${index + 1} of ${targets.length}...`;
+      const result = await apiRequest("/api/previews/render", {
+        method: "POST",
+        body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+      });
+      const added = await apiRequest("/api/editor/clips", {
+        method: "POST",
+        body: JSON.stringify({
+          project_id: activeMatch.id, media: String(result.file.url).split("/").pop(),
+          name: clip.label || `Clip ${clips.indexOf(clip) + 1}`,
+          ...(session ? { session_id: session.id } : { session_name: sessionName }),
+        }),
+      });
+      session = added.session;
+      first = first || added.clip;
+    }
+    window.location.href = `/annotate.html?project=${encodeURIComponent(activeMatch.id)}&clip=${encodeURIComponent(first.id)}`;
+  } catch (error) {
+    note.textContent = first
+      ? `Annotated ${session.clips.length} of ${targets.length} clips, then stopped: ${error.message.replace(/\.?$/, ".")} The ones done are on the Annotate tab.`
+      : `Could not prepare the clips for annotating: ${error.message}`;
+    annotateButton.replaceChildren(...content);
+    annotateButton.disabled = false;
+  }
+}
 
 cancelJobButton.addEventListener("click", async () => {
   if (!activeJobId) return;
@@ -1617,5 +1675,14 @@ document.querySelector("[data-new-project]").onclick = async (event) => {
   } catch (error) { event.currentTarget.disabled = false; showToast(error.message); }
 };
 document.querySelectorAll('.filter-topbar a, .context-edit').forEach((link) => link.setAttribute("data-project-navigation", ""));
+
+// Players across every saved match (ui/player-search.js): starts with the players ticked here.
+{
+  const across = Object.assign(document.createElement("button"), { type: "button", className: "context-across", textContent: "Players across matches" });
+  across.dataset.playersAcross = "";
+  across.title = "Find one or more players' clips in all your saved matches";
+  across.onclick = () => openPlayerSearch({ pageOptions: () => collectOptions(true), preset: selectedValues('input[name="player"]') });
+  document.querySelector(".context-edit")?.before(across);
+}
 
 connect();

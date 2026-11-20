@@ -39,3 +39,8 @@
 :root[data-theme="dark"] img[src*="vizorplay-mark.svg"] { content: url("assets/brand/vizorplay-mark-on-dark.svg"); }
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a3f38; }
 :root[data-theme="dark"] .app-footer { background: var(--cm-paper); color: var(--cm-muted); }
+/* Lime buttons keep dark text; clips keep a black surround (Annotate sessions, Players across matches). */
+:root[data-theme="dark"] .annotate-main .annotate-session-open,
+:root[data-theme="dark"] .ps-actions .ps-primary { color: #171817; }
+:root[data-theme="dark"] .ps-viewer video { background: #000; }
+:root[data-theme="dark"] .player-search::backdrop { background: rgba(0, 0, 0, 0.6); }
