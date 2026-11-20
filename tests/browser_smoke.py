@@ -1076,7 +1076,7 @@ def exercise(page, base, root, evidence, errors):
         page.goto(base + "/filters.html?match=" + project_id)
         page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        expect(page.get_by_role("navigation", name="Workflow").get_by_role("link")).to_have_count(4)
+        expect(page.get_by_role("navigation", name="Workflow").get_by_role("link")).to_have_count(5)  # Intake, Filter, Analyst, Tactical, Annotate
         page.locator('#export-settings summary').click()
         page.screenshot(path=str(evidence / f"filters-{width}.png"))
     assert not errors, errors
