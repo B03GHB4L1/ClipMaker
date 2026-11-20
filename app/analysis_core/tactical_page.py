@@ -242,8 +242,8 @@ def _brand_fig(fig, height=None, note=""):
         paper = "#0b0e14"
         plot = "#10131a"
         font = "#ecedf6"
-        grid = "rgba(142,255,113,0.08)"
-        line = "rgba(142,255,113,0.18)"
+        grid = "rgba(214,236,206,0.13)"  # neutral, so grids never compete with team colours
+        line = "rgba(214,236,206,0.3)"
     fig.update_layout(
         paper_bgcolor=paper,
         plot_bgcolor=plot,
@@ -252,6 +252,10 @@ def _brand_fig(fig, height=None, note=""):
     )
     fig.update_xaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font), automargin=True)
     fig.update_yaxes(gridcolor=grid, zerolinecolor=line, linecolor=line, tickfont=dict(color=font), automargin=True)
+    # Radar charts: the polar plot takes the chart's colours, not Plotly's white disc.
+    fig.update_polars(bgcolor=plot,
+                      angularaxis=dict(gridcolor=grid, linecolor=line, tickfont=dict(color=font, size=12)),
+                      radialaxis=dict(gridcolor=grid, linecolor=line, tickfont=dict(color=font, size=10)))
     title = fig.layout.title.text if fig.layout.title and fig.layout.title.text else ""
     _annotate_plotly_export(fig, title=title, subtitle=_export_scope_label(), note=note, height=height)
     return fig
@@ -1128,7 +1132,8 @@ def render_video_lab(df, team):
             st.plotly_chart(
                 _sequence_trace(window, selected.get("event_id"), team),
                 width="stretch",
-                config=_plotly_export_config("event_trace", team, playlist, selected.get("playerName"), selected.get("time")),
+                # A trace says little without the clip beside it, so it is not offered as a picture.
+                config={"displayModeBar": False, "displaylogo": False, "staticPlot": False},
             )
         except Exception as exc:
             st.error(f"Could not render event trace: {exc}")
@@ -1406,8 +1411,10 @@ def _radar_chart(dims, team_name):
         r=values + [values[0]],
         theta=labels + [labels[0]],
         fill="toself",
-        fillcolor="rgba(223,255,0,0.18)",
-        line=dict(color=ACCENT, width=2.5),
+        # Lime reads on dark; on the light paper it needs the deeper olive to keep its contrast.
+        fillcolor="rgba(223,255,0,0.18)" if not _is_light() else "rgba(138,111,0,0.16)",
+        line=dict(color=_pitch_accent(ACCENT), width=2.5),
+        marker=dict(size=7, color=_pitch_accent(ACCENT)),
         name=team_name,
         hovertemplate="%{theta}: %{r:.1f}<extra></extra>",
     ))

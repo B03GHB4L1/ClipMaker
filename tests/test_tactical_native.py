@@ -88,7 +88,8 @@ def normal(element, norm):
     if kind == "plotly":
         # Classic figures carry Streamlit's placeholder colours, swapped for its
         # light palette in the browser; compare the colours users saw.
-        figure = replace_placeholders(analysis_golden._round(deliberate_fixes(element["figure"])))
+        figure = analysis_golden.without_chart_restyle(
+            replace_placeholders(analysis_golden._round(deliberate_fixes(element["figure"]))))
         layout = {k: v for k, v in figure.get("layout", {}).items() if k != "template"}
         # The attack-direction label is new on the pitch maps; see test_pitch_maps_show_the_attack_direction.
         # The label gets 26px of its own at the top; the chart grows by the same so the pitch keeps its size.

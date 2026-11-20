@@ -225,9 +225,6 @@ def xg_race_option(shots_df, home_team, away_team, selected_idx=None, light_mode
         "yAxis": {"type": "value", "min": 0, "max": round(max(top * 1.15, top + 0.2), 1),
                   "axisLabel": {"color": ink},
                   "splitLine": {"lineStyle": {"color": grid_line}}},
-        "graphic": [{"type": "text", "right": 24, "bottom": 10,
-                     "style": {"text": "VizorPlay\n@B03GHB4L1", "fill": "#2f5d16" if light_mode else "#DFFF00",
-                               "font": "700 10px monospace"}, "silent": True}],
         "series": series,
     }
 

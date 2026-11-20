@@ -37,8 +37,8 @@ def _zone_figure(ev, player_name, color, match_context, light):
 
 
 SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
-XG_NOTE = ("VizorPlay xG, fitted on StatsBomb open data (Data: StatsBomb). Minutes come from substitutions; "
-           "per-90 values from short spells swing a lot. Penalties count; own goals do not.")
+XG_NOTE = ("VizorPlay xG, fitted on StatsBomb open data (Data: StatsBomb). Minutes come from substitutions. "
+           "Penalties count; own goals do not.")
 
 
 COUNTS = {"Minutes", "Shots", "Goals"}
@@ -73,7 +73,6 @@ def shooting_profile(ev, df_all):
         "Shots": int(len(shots)),
         "Goals": goals,
         "xG": round(xg, 2),
-        "xG per 90": round(xg / minutes * 90, 2),
         "Goals - xG": round(goals - xg, 2),
         "xG per shot": round(xg / len(shots), 2) if len(shots) else 0.0,
     }

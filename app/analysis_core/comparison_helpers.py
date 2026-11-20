@@ -41,7 +41,6 @@ _MOMENT_TIERS = {
 }
 
 
-PLOTLY_EXPORT_BRAND = "VizorPlay · @B03GHB4L1"
 PLOTLY_EXPORT_CONFIG = {
     "displayModeBar": True,
     "displaylogo": False,
@@ -86,23 +85,17 @@ def brand_plotly_export(fig, light: bool = False):
         hover_bg  = "#f5f0e8"
         hover_br  = "rgba(120,100,60,0.35)"
         hover_fc  = "#1a1a1a"
-        ann_fc    = "#ffffff"
-        ann_bc    = "rgba(60,48,30,0.36)"
-        ann_col   = "rgba(54,47,36,0.74)"
     else:
         bg        = "#0b0e14"
         plot_bg   = "#071008"
         font_col  = "#ecedf6"
-        grid_col  = "rgba(142,255,113,0.08)"
-        zero_col  = "rgba(142,255,113,0.12)"
-        line_col  = "rgba(142,255,113,0.18)"
-        tick_col  = "#a9abb3"
+        grid_col  = "rgba(214,236,206,0.13)"
+        zero_col  = "rgba(214,236,206,0.22)"
+        line_col  = "rgba(214,236,206,0.3)"
+        tick_col  = "#c4c8bf"
         hover_bg  = "#10131a"
         hover_br  = "rgba(142,255,113,0.35)"
         hover_fc  = "#ecedf6"
-        ann_fc    = "#ffffff"
-        ann_bc    = "rgba(142,255,113,0.28)"
-        ann_col   = "rgba(11,14,20,0.72)"
     fig.update_layout(
         paper_bgcolor=bg,
         plot_bgcolor=plot_bg,
@@ -120,27 +113,16 @@ def brand_plotly_export(fig, light: bool = False):
         tickfont=dict(color=tick_col),
         automargin=True,
     )
+    # Radar charts: the polar plot takes the chart's colours, not Plotly's white disc.
+    fig.update_polars(bgcolor=plot_bg,
+                      angularaxis=dict(gridcolor=grid_col, linecolor=line_col, tickfont=dict(color=font_col, size=12)),
+                      radialaxis=dict(gridcolor=grid_col, linecolor=line_col, tickfont=dict(color=tick_col, size=10)))
     fig.update_yaxes(
         gridcolor=grid_col,
         zerolinecolor=zero_col,
         linecolor=line_col,
         tickfont=dict(color=tick_col),
         automargin=True,
-    )
-    fig.add_annotation(
-        text=PLOTLY_EXPORT_BRAND,
-        xref="paper",
-        yref="paper",
-        x=0.995,
-        y=0.015,
-        xanchor="right",
-        yanchor="bottom",
-        showarrow=False,
-        font=dict(size=10, color=ann_fc, family="Geist Mono, monospace"),
-        bgcolor=ann_col,
-        bordercolor=ann_bc,
-        borderwidth=1,
-        borderpad=3,
     )
     return fig
 

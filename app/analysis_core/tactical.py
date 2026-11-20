@@ -108,13 +108,14 @@ def _matches(controls, project, projects, state):
     return page._prepare_df(frame), [page._match_label(path)], [project["id"]]
 
 
-def render(tab, controls, project, projects, action=None):
+def render(tab, controls, project, projects, action=None, light=True):
     """Render one Tactical tab; returns (view dict, final session state)."""
     if tab not in TABS:
         raise ValueError("Unknown analytical tab")
     controls = controls if isinstance(controls, dict) else {}
     with _lock:
         state = _session(project, projects)
+        state["light_mode"] = bool(light)  # charts follow the app's light or dark theme
         frame, labels, chosen = _matches(controls, project, projects, state)
         options = [{"value": item["id"], "label": page._match_label(item["csv_path"])} for item in projects
                    if item.get("csv_path") and item["csv_path"] in state["multi_scraped_csv_paths"]]

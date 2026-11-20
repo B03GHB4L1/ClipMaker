@@ -4,6 +4,10 @@ const operations = new Set();
 let failure;
 
 export const projectRequest = async (path, body) => {
+  // Analysis charts are drawn for the app's light or dark theme (ui/theme.js).
+  if (body && typeof body === "object" && !Array.isArray(body) && path.startsWith("/api/analysis/")) {
+    body = { ...body, theme: window.vizorTheme?.get?.() || "light" };
+  }
   const response = await fetch(path, body === undefined ? {} : {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

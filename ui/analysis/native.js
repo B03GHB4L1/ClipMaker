@@ -126,6 +126,8 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
     };
 
     root.replaceChildren(heading, tablist, panel);
+    // Charts are drawn for one theme; draw the open tab again when it changes.
+    window.addEventListener("vizorplay-theme", () => { if (panel.isConnected) select(active); });
     select(active);
   };
 
