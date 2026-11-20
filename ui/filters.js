@@ -521,7 +521,7 @@ const renderCorrections = () => {
     const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
     const from = correction.clock || clock(Number(correction.at_seconds || 0));
     label.textContent = `P${correction.period} from ${from}: ${shift < 0 ? "missing footage" : "extra footage"}, ` +
-      `later clips ${clock(Math.abs(shift))} ${shift < 0 ? "earlier" : "later"}${correction.note ? ` (${correction.note})` : ""}`;
+      `events after that point move ${clock(Math.abs(shift))} ${shift < 0 ? "earlier" : "later"}${correction.note ? ` (${correction.note})` : ""}`;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Remove";
