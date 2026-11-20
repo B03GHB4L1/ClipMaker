@@ -107,14 +107,16 @@ def main() -> int:
         stage(evidence, f"bundle verified: {result['bundle']['codesign']}")
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory) / "data"
-            env = {**os.environ, "VIZORPLAY_DATA_DIR": str(data_dir)}
+            env = {**os.environ, "VIZORPLAY_DATA_DIR": str(data_dir), "RUST_BACKTRACE": "1"}
             app_process = subprocess.Popen([result["bundle"]["executable"]], env=env,
                                            stdout=(evidence / "app.log").open("w"), stderr=subprocess.STDOUT)
             stage(evidence, f"app started, pid {app_process.pid}")
             deadline = time.monotonic() + args.timeout_seconds
             port = state = None
             while time.monotonic() < deadline:
-                assert app_process.poll() is None, f"The app exited with {app_process.returncode}"
+                if app_process.poll() is not None:
+                    log = (evidence / "app.log").read_text(encoding="utf-8", errors="replace")[:6000]
+                    raise AssertionError(f"The app exited with {app_process.returncode}. Its log:\n{log}")
                 listing = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, timeout=15).stdout
                 port = port or engine_port(listing, app_process.pid)
                 state = health(port) if port else None
