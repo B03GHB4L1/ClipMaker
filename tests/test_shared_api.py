@@ -186,6 +186,19 @@ class SharedApiTests(unittest.TestCase):
         )
         self.assertEqual(infer_score(frame, "Home", "Away"), (2, 1))
 
+    def test_score_resolves_fixture_labels_to_event_team_names(self):
+        import pandas as pd
+
+        frame = pd.DataFrame(
+            [
+                {"type": "Goal", "team": "Arsenal FC", "period": "FirstHalf"},
+                {"type": "Goal", "team": "Paris Saint-Germain FC", "period": "SecondHalf"},
+                {"type": "Goal", "team": "Paris Saint-Germain FC", "period": "PenaltyShootout"},
+                {"type": "Goal", "team": "Arsenal FC", "period": "PenaltyShootout"},
+            ]
+        )
+        self.assertEqual(infer_score(frame, "Paris SG", "Arsenal"), (1, 1))
+
     def test_named_periods_are_normalized(self):
         self.assertEqual(normalize_period("FirstHalf"), 1)
         self.assertEqual(normalize_period("SecondHalf"), 2)
