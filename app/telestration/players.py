@@ -135,7 +135,7 @@ class Detector:
         import cv2
         import numpy as np
         h, w = frame.shape[:2]
-        found, scores = [], []
+        found, scores, origins = [], [], []
         for x0, y0, x1, y1 in tiles(w, h):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
@@ -144,12 +144,52 @@ class Detector:
             boxes[:, 1] += y0
             found.append(boxes)
             scores.append(score)
+            origins += [(x0, y0, x1, y1)] * len(boxes)
         boxes, score = np.concatenate(found), np.concatenate(scores)
         if not len(boxes):
             return []
         keep = np.array(cv2.dnn.NMSBoxes(boxes.tolist(), score.tolist(), SCORE, NMS_IOU), dtype=int).reshape(-1)
+        keep = drop_parts([boxes[i] for i in keep], [origins[i] for i in keep], w, h)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        return [[float(v) for v in boxes[i]] for i in keep if boxes[i][3] >= 8 and on_grass(hsv, boxes[i])]
+        return [[float(v) for v in box] for box in keep if box[3] >= 8 and on_grass(hsv, box)]
+
+
+CONTAIN = 0.6  # a box this much inside a bigger one is part of the same player
+EDGE = 3  # pixels: a box this close to a tile's inner edge was cut off by it
+
+
+def drop_parts(boxes: list[Any], origins: list[tuple[int, int, int, int]], width: int, height: int) -> list[Any]:
+    """The boxes without halves of players cut by a tile's edge.
+
+    A player across the line between two tiles is found whole in one tile and cut in
+    half in the other. The half overlaps the whole box too little for NMS to remove it,
+    and its bottom edge (the "feet" a token is placed by) is the player's waist, so its
+    token lands metres away on the board. Remove a box that touches an inner edge of the
+    tile it was found in (`origins[i]`) and lies mostly inside a bigger box. Two real
+    players overlapping away from a tile edge are both kept.
+    """
+    def touches_cut(i: int) -> bool:
+        x, y, w, h = boxes[i]
+        x0, y0, x1, y1 = origins[i]
+        return ((x0 > 0 and x <= x0 + EDGE) or (x1 < width and x + w >= x1 - EDGE)
+                or (y0 > 0 and y <= y0 + EDGE) or (y1 < height and y + h >= y1 - EDGE))
+
+    order = sorted(range(len(boxes)), key=lambda i: -boxes[i][2] * boxes[i][3])  # biggest first
+    kept: list[Any] = []
+    for i in order:
+        x, y, w, h = boxes[i]
+
+        def inside(other: Any) -> bool:
+            kx, ky, kw, kh = other
+            ix = max(0.0, min(x + w, kx + kw) - max(x, kx))
+            iy = max(0.0, min(y + h, ky + kh) - max(y, ky))
+            return ix * iy >= CONTAIN * w * h
+
+        if touches_cut(i) and any(inside(other) for other in kept):
+            continue
+        kept.append(boxes[i])
+    order_back = {id(box): n for n, box in enumerate(boxes)}
+    return sorted(kept, key=lambda box: order_back[id(box)])  # the finder's own order
 
 
 def tiles(width: int, height: int, grid: tuple[int, int] = TILES, overlap: float = OVERLAP) -> Iterable[tuple[int, int, int, int]]:

@@ -3,7 +3,7 @@
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage, showSaved, showSaveError } from "./save-clip.js";
-import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textFont, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
+import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
@@ -33,6 +33,8 @@ let doc;
 let selectedPart = null; // a part chosen on the Parts lane
 let tool = "select";
 let selectedId = null;
+let selectedIds = []; // several drawings chosen at once (a drag round them, or Shift+click); empty otherwise
+let selectedFreeze = null; // a freeze or board chosen on the Freezes lane (its frame)
 let gesture = null; // the drag or drawing in progress
 let zoneDraft = null; // corners of a zone being drawn
 let pointer = null; // last pointer position in fractions, for the zone preview
@@ -251,16 +253,8 @@ const drawPlayerBox = (track) => {
   ctx.strokeRect(x, y, w, h);
   // Corner handles: drag one to fit the box to the player (a tight box tracks better).
   ctx.setLineDash([]);
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#171817";
-  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  const half = handleRadius() * 0.6;
-  boxCorners(box).forEach(([cx, cy]) => {
-    const [px, py] = toPixels([cx, cy]);
-    ctx.fillRect(px - half, py - half, half * 2, half * 2);
-    ctx.strokeRect(px - half, py - half, half * 2, half * 2);
-  });
   ctx.restore();
+  boxCorners(box).forEach(([cx, cy]) => drawSquareHandle([cx, cy]));
 };
 // Where a point dropped near a followed player's feet links to them.
 const snapPoint = (point) => {
@@ -275,6 +269,21 @@ const snapPoint = (point) => {
   return point;
 };
 
+// Text placed or dropped with the pointer on a followed player (inside their box, or on their feet) follows them,
+// keeping its place beside them: the link to `point` from that player on this frame, or null.
+const linkToPlayerAt = (point, pointerAt = point) => {
+  if (boardNow() || !pointerAt) return null;
+  const [x, y] = toPixels(pointerAt);
+  const margin = handleRadius() * 1.5;
+  for (const track of [...tracks()].reverse()) {
+    const at = boxAt(track, frameNow());
+    if (!at) continue;
+    const [bx, by, bw, bh] = boxPixels(at.box);
+    if (x >= bx - margin && x <= bx + bw + margin && y >= by - margin && y <= by + bh + margin) return linkTo(track, point, frameNow());
+  }
+  return null;
+};
+
 const render = () => {
   if (!clip) return;
   const { w, h } = size();
@@ -282,12 +291,12 @@ const render = () => {
   const time = currentTime();
   const board = boardNow();
   if (board) drawBoard(ctx, w, h, board.background);
-  const items = shown().map((item) => (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item));
+  const items = shown().map((item) => (gesture?.previews?.[item.id] || (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item)));
   drawItems(ctx, items, w, h, time);
   if (calib) return drawCalibration();
   const original = doc.find(selectedId);
   if (original && !board) linkedTracks(original).forEach((id) => { const track = trackById(id); if (track) drawPlayerBox(track); });
-  if (!board && ["ring", "spotlight", "arrow", "line", "zone"].includes(tool)) {
+  if (!board && ["ring", "spotlight", "arrow", "line", "zone", "text"].includes(tool)) {
     // Feet a new drawing can link to.
     tracks().forEach((track) => { const at = boxAt(track, frameNow()); if (at) drawHandle([at.box[0], at.box[1]], true); });
   }
@@ -318,20 +327,82 @@ const render = () => {
   }
   const selected = items.find((item) => item.id === selectedId);
   if (selected && !draft) {
-    handlesFor(selected).forEach(({ point }) => drawHandle(point));
+    handlesFor(selected).forEach(({ index, point }) => (typeof index === "string" ? drawSquareHandle(point) : drawHandle(point)));
+  }
+  // Several drawings selected: a thin outline round each.
+  if (selectedIds.length > 1) items.filter((item) => selectedIds.includes(item.id)).forEach((item) => outlineBox(itemBounds(item)));
+  if (gesture?.type === "marquee") {
+    const [x0, y0] = toPixels(gesture.start);
+    const [x1, y1] = toPixels(gesture.end);
+    ctx.save();
+    ctx.fillStyle = "rgba(200, 241, 53, 0.12)";
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.strokeStyle = "#c8f135";
+    ctx.lineWidth = window.devicePixelRatio || 1;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
   }
 };
 
+// The box round a drawing as placed on screen, in pixels: [left, top, right, bottom].
+function itemBounds(item) {
+  const { w, h } = size();
+  if (item.kind === "text") {
+    const box = textBox(item, w, h, measure);
+    return [box.x, box.y, box.x + box.width, box.y + box.height];
+  }
+  const points = item.points.map(toPixels);
+  if (item.kind === "ring" || item.kind === "spotlight") {
+    const [cx, cy] = points[0];
+    const rx = item.geometry.rx * w;
+    const ry = item.geometry.ry * h;
+    return [cx - rx, cy - (item.kind === "spotlight" ? item.geometry.h * h : ry), cx + rx, cy + ry];
+  }
+  if (item.kind === "token") {
+    const r = (styleOf(item).size / 2) * (h / 1080);
+    return [points[0][0] - r, points[0][1] - r, points[0][0] + r, points[0][1] + r];
+  }
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+function outlineBox([x0, y0, x1, y1]) {
+  const pad = 4 * (window.devicePixelRatio || 1);
+  ctx.save();
+  ctx.strokeStyle = "#c8f135";
+  ctx.lineWidth = window.devicePixelRatio || 1;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2);
+  ctx.restore();
+}
+
+// Handles are drawn small and thin, like a design tool's, so they never hide the picture; the area that
+// catches the pointer (handleRadius) stays larger than what is drawn.
 function drawHandle(point, strong = false) {
+  const ratio = window.devicePixelRatio || 1;
   const [x, y] = toPixels(point);
   ctx.save();
   ctx.beginPath();
-  ctx.arc(x, y, handleRadius(), 0, Math.PI * 2);
+  ctx.arc(x, y, (strong ? 3.5 : 3) * ratio, 0, Math.PI * 2);
   ctx.fillStyle = strong ? "#c8f135" : "#ffffff";
-  ctx.strokeStyle = "#171817";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(23, 24, 23, 0.9)";
+  ctx.lineWidth = ratio;
   ctx.fill();
   ctx.stroke();
+  ctx.restore();
+}
+// A square handle: a size or a corner (resize), as opposed to a round point handle.
+function drawSquareHandle(point) {
+  const ratio = window.devicePixelRatio || 1;
+  const [x, y] = toPixels(point);
+  const half = 3.5 * ratio;
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "rgba(23, 24, 23, 0.9)";
+  ctx.lineWidth = ratio;
+  ctx.fillRect(x - half, y - half, half * 2, half * 2);
+  ctx.strokeRect(x - half + ratio / 2, y - half + ratio / 2, half * 2 - ratio, half * 2 - ratio);
   ctx.restore();
 }
 
@@ -399,16 +470,16 @@ document.addEventListener("click", async (event) => {
 // Tools and the inspector
 // ---------------------------------------------------------------------------
 const HINTS = {
-  select: "Pick a tool, or click a drawing to edit it.",
+  select: "Click a drawing to edit it, or drag round several to select them all. Shift+click adds one.",
   ring: "Drag from a player's feet outwards to size the ring.",
   spotlight: "Drag from a player's feet outwards; drag the top handle to change the beam.",
   arrow: "Drag from where the arrow starts to where it points.",
   line: "Drag to draw a line.",
   freehand: "Hold and draw.",
-  text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line).",
+  text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line). Click on a followed player to make the text follow them.",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
   follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
-  token: "Click to place a player token. Number, team and name are on the right.",
+  token: "Click to place a player token. On a board it belongs to that board; on the video it is a fixed marker that does not follow anyone.",
 };
 const FOLLOWABLE = ["ring", "spotlight", "text"];
 let followTarget = null; // the drawing "Follow player" will link, or null for a new ring
@@ -421,14 +492,16 @@ const setTool = (next) => {
   canvas.dataset.tool = tool;
   $("[data-hint]").textContent = HINTS[tool];
   $("[data-hint]").title = HINTS[tool];
-  if (tool !== "select") selectedId = null;
+  if (tool !== "select") { selectedId = null; selectedIds = []; }
+  canvas.style.cursor = "";
   renderInspector();
   scheduleRender();
 };
 
 const select = (id) => {
   selectedId = id;
-  if (id) selectedPart = null;
+  selectedIds = id ? [id] : [];
+  if (id) { selectedPart = null; selectedFreeze = null; }
   renderParts();
   renderInspector();
   scheduleRender();
@@ -470,8 +543,27 @@ const renderInspector = () => {
   const fields = $("[data-style-fields]");
   fields.replaceChildren();
   const empty = !doc?.items.length && !doc?.freezes.length && !(doc?.value.parts?.length > 1);
-  $("[data-inspector-title]").textContent = item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : empty ? "How to start" : "Nothing selected";
-  if (!kind && empty) {
+  const many = selectedIds.length > 1;
+  const freeze = selectedFreeze !== null ? doc.freezes.find((f) => f.atFrame === selectedFreeze) : null;
+  $("[data-inspector-title]").textContent = many ? `${selectedIds.length} drawings selected`
+    : freeze ? `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}`
+      : item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : empty ? "How to start" : "Nothing selected";
+  if (many) {
+    fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
+      textContent: "Drag one of them to move them all, or press Delete to remove them. Shift+click adds or removes a drawing; Esc clears the selection." }));
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-danger", textContent: `Delete ${selectedIds.length} drawings` });
+    remove.onclick = removeSelected;
+    fields.append(remove);
+  } else if (freeze) {
+    fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
+      textContent: freeze.background
+        ? "A tactical board, with its own tokens and drawings. Press Delete to remove it with everything on it; Undo brings it back."
+        : "The picture holds still here. Drag its right edge on the timeline to change the length, or press Delete to remove it." }));
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-danger",
+      textContent: freeze.background ? "Delete board" : "Delete freeze" });
+    remove.onclick = () => removeFreeze(freeze.atFrame);
+    fields.append(remove);
+  } else if (!kind && empty) {
     // First use: the four steps from a blank clip to an exported video.
     const steps = document.createElement("ol");
     steps.className = "annotate-steps";
@@ -545,10 +637,10 @@ const renderInspector = () => {
       fields.append(label);
     });
   }
-  renderFollowPanel(item);
+  renderFollowPanel(many ? null : item);
   const timing = $("[data-timing]");
-  timing.hidden = !item;
-  $("[data-delete]").disabled = !item;
+  timing.hidden = !item || many;
+  $("[data-delete]").disabled = !item && !many && !freeze;
   if (item) {
     $("[data-from]").value = item.show.from;
     $("[data-to]").value = item.show.to;
@@ -655,9 +747,9 @@ const renderList = () => {
     const entry = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    button.className = item.id === selectedId ? "is-selected" : "";
+    button.className = selectedIds.includes(item.id) ? "is-selected" : "";
     button.textContent = `${itemName(item)}${item.on !== undefined ? " (board)" : ""} · ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)}s`;
-    button.onclick = () => selectDrawing(item);
+    button.onclick = (event) => (event.shiftKey ? toggleSelected(item.id) : selectDrawing(item));
     entry.append(button);
     return entry;
   }));
@@ -683,7 +775,7 @@ const renderDrawingLane = () => {
       row += boardRow;
     }
     const bar = document.createElement("span");
-    bar.className = `annotate-lane-drawing${item.id === selectedId ? " is-selected" : ""}`;
+    bar.className = `annotate-lane-drawing${selectedIds.includes(item.id) ? " is-selected" : ""}`;
     bar.dataset.bar = item.id;
     bar.title = `${itemName(item)}, ${item.show.from.toFixed(2)}–${item.show.to.toFixed(2)} s`;
     bar.style.left = `${(item.show.from / length) * 100}%`;
@@ -718,10 +810,28 @@ const selectDrawing = (item) => {
 };
 
 const removeSelected = () => {
-  if (!selectedId) return;
-  const id = selectedId;
-  doc.commitDocument((value) => pruneTracks({ ...value, items: value.items.filter((item) => item.id !== id) }));
+  if (selectedFreeze !== null && !selectedIds.length) return removeFreeze(selectedFreeze);
+  const ids = new Set(selectedIds.length ? selectedIds : selectedId ? [selectedId] : []);
+  if (!ids.size) return;
+  doc.commitDocument((value) => pruneTracks({ ...value, items: value.items.filter((item) => !ids.has(item.id)) }));
   select(null);
+  if (ids.size > 1) trackStatus(`${ids.size} drawings deleted. Undo brings them back.`);
+};
+
+// Several drawings at once: Shift+click adds or removes one; one left behaves as a normal selection.
+const selectMany = (ids) => {
+  if (ids.length <= 1) return select(ids[0] || null);
+  selectedId = null;
+  selectedIds = ids;
+  selectedPart = null;
+  selectedFreeze = null;
+  renderParts();
+  renderInspector();
+  scheduleRender();
+};
+const toggleSelected = (id) => {
+  const current = selectedIds.length ? selectedIds : selectedId ? [selectedId] : [];
+  selectMany(current.includes(id) ? current.filter((each) => each !== id) : [...current, id]);
 };
 
 const setAnimation = (patch) => {
@@ -1071,6 +1181,24 @@ function renderPlayers() {
 // Freezes
 // ---------------------------------------------------------------------------
 const changeFreeze = (frame, seconds) => doc.commitDocument((value) => (seconds > 0 ? setFreeze(value, timing, frame, seconds) : removeInsert(value, timing, frame)));
+// Remove a freeze, or a board with its tokens and drawings, in one undoable step.
+const removeFreeze = (frame) => {
+  const freeze = doc.freezes.find((f) => f.atFrame === frame);
+  if (!freeze) return;
+  if (selectedFreeze === frame) selectedFreeze = null;
+  changeFreeze(frame, 0);
+  trackStatus(`${freeze.background ? "Board" : "Freeze"} at frame ${frame + 1} deleted. Undo brings it back.`);
+};
+const selectFreeze = (frame) => {
+  selectedFreeze = frame;
+  selectedId = null;
+  selectedIds = [];
+  selectedPart = null;
+  renderParts();
+  renderFreezes();
+  renderInspector();
+  scheduleRender();
+};
 const freezeHere = () => {
   const at = source();
   if (at.freeze === null && !doc.freezes.some((f) => f.atFrame === at.frame)) changeFreeze(at.frame, 2);
@@ -1105,7 +1233,7 @@ const renderFreezes = () => {
       innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' });
     remove.setAttribute("aria-label", `Remove the ${board ? "board" : "freeze"} at frame ${freeze.atFrame + 1}`);
     if (board) remove.title = "Remove this board with its tokens and drawings";
-    remove.onclick = () => changeFreeze(freeze.atFrame, 0);
+    remove.onclick = () => removeFreeze(freeze.atFrame);
     entry.append(go, seconds, Object.assign(document.createElement("span"), { textContent: "s" }), remove);
     if (board) {
       entry.className = "is-board";
@@ -1130,9 +1258,15 @@ const renderFreezes = () => {
   const length = total();
   freezes.forEach((freeze) => {
     const block = document.createElement("span");
-    block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}`;
+    block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}${freeze.atFrame === selectedFreeze ? " is-selected" : ""}`;
     block.dataset.laneFreeze = String(freeze.atFrame);
-    block.title = `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Drag its right edge to change the length.`;
+    block.title = `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag its right edge to change the length.`;
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-lane-remove",
+      innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>' });
+    remove.dataset.freezeRemove = String(freeze.atFrame);
+    remove.title = freeze.background ? "Delete this board with its tokens and drawings" : "Delete this freeze";
+    remove.setAttribute("aria-label", remove.title);
+    block.append(remove);
     block.style.left = `${(freezeStart(freeze.atFrame, timing, freezes) / length) * 100}%`;
     block.style.width = `${(freeze.seconds / length) * 100}%`;
     const edge = document.createElement("span");
@@ -1162,7 +1296,7 @@ const partAction = (name, text, label, onclick, disabled = false) => {
 
 const selectPart = (index) => {
   selectedPart = index;
-  if (index !== null) selectedId = null;
+  if (index !== null) { selectedId = null; selectedIds = []; selectedFreeze = null; }
   renderParts();
   renderInspector();
   scheduleRender();
@@ -1337,7 +1471,16 @@ function renderParts() {
   };
   lane.addEventListener("pointerdown", (event) => {
     if (!clip) return;
+    const removeButton = event.target.closest("[data-freeze-remove]");
+    if (removeButton) { event.preventDefault(); removeFreeze(Number(removeButton.dataset.freezeRemove)); return; }
     const edge = event.target.closest("[data-edge]");
+    const block = event.target.closest("[data-lane-freeze]");
+    if (block && !edge) {
+      const frame = Number(block.dataset.laneFreeze);
+      selectFreeze(frame);
+      seekOutput(freezeStart(frame, timing, doc.freezes));
+      return;
+    }
     if (edge) {
       const frame = Number(edge.dataset.edge);
       const freeze = doc.freezes.find((f) => f.atFrame === frame);
@@ -1817,9 +1960,11 @@ function finishText(cancel = false) {
     if (!text.trim()) doc.remove(id);
     else doc.replace({ ...existing, text });
   } else if (text.trim()) {
-    const item = placeNew(newItem("text", [point], { from: currentTime(), to: total(), style: toolStyle.text, text }));
+    const link = linkToPlayerAt(point);
+    const item = placeNew(newItem("text", [link || point], { from: currentTime(), to: total(), style: toolStyle.text, text }));
     doc.add(item);
     select(item.id);
+    if (link) trackStatus(`The text follows ${playerName(trackById(link.track))}. Drag it to change where it sits beside them.`);
   }
   canvas.focus();
 }
@@ -1864,9 +2009,26 @@ const nearHandle = (item, at) => {
   });
 };
 
+// Two corners count as one when they are the same player, or a few pixels apart (a double-click's second click).
+const sameCorner = (a, b) => {
+  if (isLinked(a) && isLinked(b)) return a.track === b.track;
+  const [ax, ay] = toPixels(resolvePoint(a, tracks(), frameNow()));
+  const [bx, by] = toPixels(resolvePoint(b, tracks(), frameNow()));
+  return Math.hypot(ax - bx, ay - by) <= handleRadius();
+};
+// The corners without repeats: one next to its neighbour, or a last corner back on the first.
+const zoneCorners = (points) => {
+  const kept = [];
+  points.forEach((point) => { if (!kept.length || !sameCorner(kept[kept.length - 1], point)) kept.push(point); });
+  while (kept.length > 1 && sameCorner(kept[0], kept[kept.length - 1])) kept.pop();
+  return kept;
+};
 const finishZone = () => {
-  if (zoneDraft && zoneDraft.length >= 3) {
-    const item = placeNew(newItem("zone", zoneDraft, { from: currentTime(), to: total(), style: toolStyle.zone }));
+  const corners = zoneDraft ? zoneCorners(zoneDraft) : [];
+  if (zoneDraft && corners.length < 3) {
+    trackStatus("A zone needs at least 3 different corners.", true);
+  } else if (zoneDraft) {
+    const item = placeNew(newItem("zone", corners, { from: currentTime(), to: total(), style: toolStyle.zone }));
     doc.add(item);
     select(item.id);
   }
@@ -1891,12 +2053,24 @@ canvas.addEventListener("pointerdown", (event) => {
     const handleDistance = handle ? Math.hypot(...toPixels(handle.point).map((value, i) => value - toPixels(at)[i])) : Infinity;
     if (corner && corner.distance <= handleDistance) {
       gesture = { type: "resize", trackId: corner.trackId, corner: corner.corner, base: corner.box, box: corner.box.slice() };
-    } else if (handle) {
+    } else if (handle && !event.shiftKey) {
       gesture = { type: "handle", id: selected.id, index: handle.index, start: at, moved: false, base: selected, preview: selected };
     } else {
       const hit = itemAt(shown(), x, y, w, h, from, measure);
-      select(hit?.id || null);
-      if (hit) gesture = { type: "move", id: hit.id, start: at, moved: false, base: hit, preview: hit };
+      const chosen = selectedIds.length ? selectedIds : [];
+      if (event.shiftKey && hit) {
+        toggleSelected(hit.id);
+      } else if (hit && chosen.length > 1 && chosen.includes(hit.id)) {
+        // Drag one of several selected drawings: they all move together.
+        gesture = { type: "group", start: at, moved: false, bases: chosen.map(shownItem).filter(Boolean), previews: {} };
+      } else if (hit) {
+        select(hit.id);
+        gesture = { type: "move", id: hit.id, start: at, moved: false, base: hit, preview: hit };
+      } else {
+        // A drag on empty picture draws a selection box; Shift keeps what is already selected.
+        if (!event.shiftKey) select(null);
+        gesture = { type: "marquee", start: clampPoint(at), end: clampPoint(at), keep: event.shiftKey ? chosen.slice() : [] };
+      }
     }
   } else if (tool === "follow") {
     if (boardNow()) { trackStatus("Follow players on the clip itself; a board has no video.", true); return; }
@@ -1910,12 +2084,15 @@ canvas.addEventListener("pointerdown", (event) => {
     $('[data-token-field="label"]')?.focus(); // type the shirt number straight away
     return;
   } else if (tool === "zone") {
-    if (zoneDraft && zoneDraft.length >= 3) {
-      const [fx, fy] = toPixels(zoneDraft[0]);
-      if (Math.hypot(fx - x, fy - y) <= handleRadius() * 1.6) { finishZone(); return; }
+    // The first corner may follow a player: compare with where it is on this frame.
+    // A click that lands on the same player as the first corner closes the zone too.
+    const corner = snapPoint(clampPoint(at));
+    if (zoneDraft && zoneCorners(zoneDraft).length >= 3) {
+      const [fx, fy] = toPixels(resolvePoint(zoneDraft[0], tracks(), frameNow()));
+      if (Math.hypot(fx - x, fy - y) <= handleRadius() * 1.6 || (isLinked(corner) && sameCorner(zoneDraft[0], corner))) { finishZone(); return; }
     }
-    zoneDraft = [...(zoneDraft || []), snapPoint(clampPoint(at))];
-    if (zoneDraft.length >= 40) finishZone();
+    zoneDraft = [...(zoneDraft || []), corner];
+    if (zoneCorners(zoneDraft).length >= 40) finishZone();
   } else if (tool === "text") {
     event.preventDefault();
     openText(clampPoint(at));
@@ -1937,16 +2114,11 @@ canvas.addEventListener("pointermove", (event) => {
   if (calib) { calibrationMove(at); return; }
   if (zoneDraft) scheduleRender();
   if (!gesture?.type) {
-    if (tool === "select") {
-      const [x, y] = toPixels(at);
-      const selected = doc.find(selectedId);
-      const over = (selected && nearHandle(shownItem(selectedId), at)) || nearBoxCorner(at) || itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
-      canvas.classList.toggle("is-over", Boolean(over));
-    }
+    if (tool === "select") canvas.style.cursor = cursorAt(at);
     return;
   }
   const item = gesture.base;
-  if ((gesture.type === "move" || gesture.type === "handle") && !gesture.moved) {
+  if ((gesture.type === "move" || gesture.type === "handle" || gesture.type === "group") && !gesture.moved) {
     // A click is not an edit: only a real drag (a few pixels) moves a drawing.
     gesture.moved = Math.hypot((at[0] - gesture.start[0]) * canvas.width, (at[1] - gesture.start[1]) * canvas.height) > 3 * (window.devicePixelRatio || 1);
     if (!gesture.moved) return;
@@ -1961,8 +2133,14 @@ canvas.addEventListener("pointermove", (event) => {
     if (gesture.corner.includes("w")) x0 = Math.min(point[0], x1 - minW); else x1 = Math.max(point[0], x0 + minW);
     if (gesture.corner.includes("n")) y0 = Math.min(point[1], y1 - minH); else y1 = Math.max(point[1], y0 + minH);
     gesture.box = [(x0 + x1) / 2, y1, x1 - x0, y1 - y0];
+  } else if (gesture.type === "marquee") {
+    gesture.end = clampPoint(at);
+  } else if (gesture.type === "group") {
+    const [dx, dy] = [at[0] - gesture.start[0], at[1] - gesture.start[1]];
+    gesture.previews = Object.fromEntries(gesture.bases.map((base) => [base.id, moveItem(base, dx, dy)]));
   } else if (gesture.type === "move" && item) {
-    gesture.preview = moveItem(item, at[0] - gesture.start[0], at[1] - gesture.start[1]);
+    gesture.end = clampPoint(at); // where it was dropped: text dropped on a followed player follows them
+    gesture.preview = moveItem(item, at[0] - gesture.start[0], at[1] - gesture.start[1]); // `item` is placed for this frame
   } else if (gesture.type === "handle" && item) {
     gesture.preview = dragHandle(item, gesture.index, at);
   } else if (gesture.type === "box") {
@@ -2005,6 +2183,19 @@ const endGesture = () => {
       doc.add(item);
       select(item.id);
     }
+  } else if (current.type === "marquee") {
+    const [ax, ay] = toPixels(current.start);
+    const [bx, by] = toPixels(current.end);
+    const [x0, x1, y0, y1] = [Math.min(ax, bx), Math.max(ax, bx), Math.min(ay, by), Math.max(ay, by)];
+    if (x1 - x0 < 3 && y1 - y0 < 3) return scheduleRender(); // a plain click on empty picture: nothing selected
+    // Every drawing on screen the box touches.
+    const caught = shown().filter((item) => visibleAt(item, currentTime())).filter((item) => {
+      const [l, t, r, b] = itemBounds(item);
+      return r >= x0 && l <= x1 && b >= y0 && t <= y1;
+    }).map((item) => item.id);
+    selectMany([...new Set([...current.keep, ...caught])]);
+  } else if (current.type === "group") {
+    if (current.moved) moveGroup(current);
   } else if (current.type === "box") {
     followFromBox(current.start, current.end);
   } else if (current.type === "resize") {
@@ -2018,12 +2209,57 @@ const endGesture = () => {
   }
   scheduleRender();
 };
+// Several drawings dragged together, as one undo step. Points linked to a player stay with the player;
+// a board token's drag sets its move at this moment, as when it is dragged alone.
+function moveGroup({ bases, previews }) {
+  const changed = new Map(bases.map((base) => [base.id, previews[base.id]]).filter(([, preview]) => preview));
+  let skipped = 0;
+  doc.commit((items) => items.map((original) => {
+    const preview = changed.get(original.id);
+    if (!preview) return original;
+    if (original.points.some(isLinked)) { skipped += 1; return original; }
+    if (original.kind === "token" && original.on !== undefined) return setMove(original, boardSeconds(original), preview.points[0]);
+    return { ...original, points: preview.points };
+  }));
+  if (skipped) trackStatus(`${skipped} drawing${skipped === 1 ? " follows a player, so it stayed" : "s follow players, so they stayed"} with ${skipped === 1 ? "them" : "their players"}.`);
+}
+
+// The pointer for what is under it, as in a design tool: a two-headed arrow on a size handle or a box corner,
+// the four-headed move arrow on a drawing or a point that moves it whole.
+const CORNER_CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize" };
+function cursorAt(at) {
+  const selected = selectedId ? shownItem(selectedId) : null;
+  const handle = selected && nearHandle(selected, at);
+  const corner = nearBoxCorner(at);
+  if (corner && (!handle || corner.distance <= Math.hypot(...toPixels(handle.point).map((v, i) => v - toPixels(at)[i])))) return CORNER_CURSORS[corner.corner];
+  if (handle) {
+    if (handle.index === "r") return "ew-resize";
+    if (handle.index === "h") return "ns-resize";
+    // The centre of a ring, spotlight or text moves it whole; an end or a corner of a line or zone is a point to place.
+    return ["ring", "spotlight", "text"].includes(selected.kind) ? "move" : "crosshair";
+  }
+  const [x, y] = toPixels(at);
+  return itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure) ? "move" : "";
+}
+
 // A drag on a drawing: plain points move; a point linked to a player corrects
 // that player on this frame (a keyframe), and a fixed point dropped on a
 // followed player's feet starts following them.
-function applyEdit({ type, id, index, base, preview }) {
+function applyEdit({ type, id, index, base, preview, end: pointerAt }) {
   const original = doc.find(id);
   if (!original) return;
+  if (original.kind === "text") { // its one handle moves it too
+    // Text that follows a player keeps following: a drag changes where it sits next to them (the player's
+    // box is not touched). Unlinked text dropped on a followed player starts following them.
+    const [dx, dy] = [preview.points[0][0] - base.points[0][0], preview.points[0][1] - base.points[0][1]];
+    const point = original.points[0];
+    const next = isLinked(point)
+      ? { ...point, dx: Math.round((point.dx + dx) * 1e5) / 1e5, dy: Math.round((point.dy + dy) * 1e5) / 1e5 }
+      : linkToPlayerAt(preview.points[0], pointerAt || preview.points[0]) || preview.points[0];
+    doc.replace({ ...original, points: [next] });
+    if (!isLinked(point) && isLinked(next)) trackStatus(`The text now follows ${playerName(trackById(next.track))}. Drag it to change where it sits; Stop following keeps it where it is.`);
+    return;
+  }
   if (type === "handle" && (index === "r" || index === "h")) {
     doc.replace({ ...original, geometry: preview.geometry });
     return;
@@ -2058,7 +2294,7 @@ canvas.addEventListener("pointerup", () => {
 canvas.addEventListener("pointercancel", () => { gesture = null; if (calib) calib.drag = null; scheduleRender(); });
 canvas.addEventListener("pointerleave", () => { if (calib) { pointer = null; scheduleRender(); } });
 canvas.addEventListener("dblclick", (event) => {
-  if (tool === "zone") { if (zoneDraft) zoneDraft.pop(); finishZone(); return; } // the second click added a corner
+  if (tool === "zone") { finishZone(); return; } // the double-click's second corner is a repeat, dropped there
   if (tool !== "select") return;
   const [x, y] = toPixels(toFraction(event));
   const hit = itemAt(shown(), x, y, canvas.width, canvas.height, currentTime(), measure);
@@ -2090,7 +2326,7 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === " " && !event.target.closest("button")) {
     event.preventDefault();
     togglePlay();
-  } else if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+  } else if ((event.key === "Delete" || event.key === "Backspace") && (selectedId || selectedIds.length || selectedFreeze !== null)) {
     event.preventDefault();
     removeSelected();
   } else if ((event.key === "Delete" || event.key === "Backspace") && selectedPart !== null) {
@@ -2105,6 +2341,7 @@ document.addEventListener("keydown", (event) => {
   } else if (event.key === "Escape") {
     if (zoneDraft) zoneDraft = null;
     else if (selectedPart !== null) selectPart(null);
+    else if (selectedFreeze !== null) { selectedFreeze = null; renderFreezes(); renderInspector(); }
     else select(null);
     scheduleRender();
   } else if (TOOL_KEYS[key] && !event.shiftKey) {
@@ -2359,6 +2596,8 @@ const wire = () => {
   doc.onChange(() => {
     refreshTiming();
     if (selectedId && !doc.find(selectedId)) selectedId = null;
+    selectedIds = selectedIds.filter((id) => doc.find(id));
+    if (selectedFreeze !== null && !doc.freezes.some((f) => f.atFrame === selectedFreeze)) selectedFreeze = null;
     if (playing) pause();
     outTime = clampTime(outTime);
     showFrame(); // the parts may have changed what the playhead shows
