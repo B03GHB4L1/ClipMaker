@@ -52,7 +52,9 @@ class AutomationContracts(unittest.TestCase):
         for name in ('"PIL"', '"imageio"', '"moviepy"'):
             self.assertIn(name, excludes)
         import subprocess
-        result = subprocess.run(["git", "grep", "-n", "-E", "(import|from) (moviepy|PIL)", "--", "app", "packaging/*.py"],
+        # Only the engine's own files: packaging/macos/make_dmg.py draws the disk image's
+        # window background with Pillow while the installer is built; it never ships in the app.
+        result = subprocess.run(["git", "grep", "-n", "-E", "(import|from) (moviepy|PIL)", "--", "app", ":(glob)packaging/*.py"],
                                 cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), "", "app code must not import moviepy or Pillow")
 
