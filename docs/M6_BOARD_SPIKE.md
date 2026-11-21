@@ -123,5 +123,9 @@ real frames for what is visible:
   easier, but six tiles would take about 1 s).
 - Real clicks on real frames (the homography numbers are simulated).
 - macOS and Linux speed; ONNX Runtime instead of OpenCV DNN.
-- The training-data terms for the YOLOX weights (COCO) still need the same
-  licence check as the other models in the AI model policy.
+- Training-data terms, checked 2026-11-21: COCO annotations are CC BY 4.0
+  (attribution); the images stay under Flickr's terms, and COCO's terms put no
+  restriction on models trained on it. YOLOX code is Apache 2.0; the release
+  page gives the weights no separate licence, so they are taken as released
+  under the repository's Apache 2.0. Passes the AI model policy, with credit
+  to YOLOX (Megvii) and COCO in the app's licence notices.
