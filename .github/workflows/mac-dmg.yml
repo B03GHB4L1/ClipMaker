@@ -104,3 +104,39 @@ jobs:
           path: build/dmg-evidence/
           retention-days: 7
           if-no-files-found: warn
+
+  # The same disk image, opened on the other macOS version GitHub still offers. macOS 14
+  # runners were retired on 2 November 2026 and 11 to 13 never existed here, so those
+  # versions are covered only by the "needs macOS ..." check in the job above.
+  other-macos:
+    name: Same disk image on macos-15 (Apple Silicon)
+    needs: dmg
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check this runner is Apple Silicon
+        run: |
+          sw_vers
+          uname -m
+          test "$(uname -m)" = "arm64"
+      - uses: actions/download-artifact@v4
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg
+          path: build/dmg/
+      - name: Install from the disk image and open the app
+        timeout-minutes: 15
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          sw_vers | tee -a "$RUNNER_TEMP/os.txt"
+          python tests/macos_dmg_smoke.py --dmg "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --expect-arch arm64 --evidence build/dmg-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg-evidence-macos-15
+          path: build/dmg-evidence/
+          retention-days: 7
+          if-no-files-found: warn
