@@ -46,9 +46,11 @@ and RPM packages are outside the verified candidate scope.
 The Mac download is a disk image (`.dmg`) with VizorPlay's engine inside, so
 there is nothing else to install and no Terminal. It is built for macOS 11 (Big
 Sur) or later. Status: CI builds and tests the Apple Silicon image
-(`.github/workflows/mac-dmg.yml`); the Intel image is not built yet, only a
-test app (`mac-intel-test.yml`). No VizorPlay release is published yet, so these
-steps describe the supported install once it is.
+(`.github/workflows/mac-dmg.yml`) and the Intel image
+(`.github/workflows/mac-dmg-intel.yml`), each on a GitHub Mac of its own chip
+(macOS 15 only; older macOS versions and real Macs are not tested yet). No
+VizorPlay release is published yet, so these steps describe the supported
+install once it is.
 
 1. **Find your Mac's chip.** Apple menu, **About This Mac**. If it says *Chip:
    Apple M1* (or M2, M3, M4), download `VizorPlay_<version>_aarch64.dmg`. If it
