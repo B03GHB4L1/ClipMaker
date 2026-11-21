@@ -217,6 +217,15 @@ class AutomationContracts(unittest.TestCase):
         for forbidden in ("gh release", "git tag", "softwareupdate", "spctl --master-disable"):
             self.assertNotIn(forbidden, workflow)  # builds and tests only; publishes nothing
 
+    def test_intel_mac_dmg_job_builds_tests_and_keeps_the_disk_image(self):
+        workflow = (ROOT / ".github/workflows/mac-dmg-intel.yml").read_text(encoding="utf-8")
+        for needle in ("macos-15-intel", 'test "$(uname -m)" = "x86_64"', "packaging/macos/make_dmg.py",
+                       "tests/macos_dmg_smoke.py", "--expect-arch x86_64", "signingIdentity",
+                       "VizorPlay_${VERSION}_x64.dmg", "upload-artifact"):
+            self.assertIn(needle, workflow)
+        for forbidden in ("aarch64", "arm64", "gh release", "git tag", "softwareupdate", "spctl --master-disable"):
+            self.assertNotIn(forbidden, workflow)  # an Intel image, and it publishes nothing
+
     def test_dmg_background_fits_its_window_and_names_the_extra_step(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("make_dmg", ROOT / "packaging/macos/make_dmg.py")
