@@ -114,8 +114,11 @@ locations were clicked; the rest show their usual "no data" message.
 ### Milestones
 
 - **C1** Code window, instant codes, hotkeys, list with jump and delete, saved;
-  derived CSV; Filter and export work on a coded-only project.
-- **C2** Interval codes, exclusive groups, lead-in/out, nudging, undo.
+  derived CSV; Filter and export work on a coded-only project. Done 2026-11-21.
+- **C2** Interval codes, exclusive groups, lead-in/out, nudging, undo. Done 2026-11-21. Clips of coded
+  rows are cut at their exact video time (`clipmaker_core.coded_video_time`), so
+  shootout codes do not depend on the first-kick marker; a frame nudge uses the
+  video's measured frame length (1/25 s until it has played).
 - **C3** Tags, linked codes, templates (save, import, export), squad list.
 - **C4** Pitch location clicks; "both" source merging with scraped data.
 

@@ -1,7 +1,8 @@
-// Code screen helpers (ui/code/clock.js): the match clock shown for a coded moment must match
+// Code screen helpers (ui/code/clock.js, ui/code/edits.js): the match clock shown for a coded moment must match
 // the engine's table (app/coding/to_events.py), and hotkeys must not fire while typing.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { History, nudged, toggleInterval } from "../ui/code/edits.js";
 import { formatClock, formatVideo, isTyping, parseMarker, place, sources, videoOf } from "../ui/code/clock.js";
 
 const single = { video_path: "match.mp4", period_videos: {}, markers: { "1H": "0:05:00", "2H": "0:55:00", ET1: "1:50:00", ET2: "2:08:00" } };
@@ -44,4 +45,54 @@ test("hotkeys stay quiet while typing in a field", () => {
   assert.equal(isTyping(inside("select")), true);
   assert.equal(isTyping({ closest: () => null }), false);
   assert.equal(isTyping(null), false);
+});
+
+const intervalCodes = [
+  { id: "possession", kind: "interval", group: "possession" },
+  { id: "press", kind: "interval", group: "press" },
+];
+let counter = 0;
+const nextId = () => `c${String(++counter).padStart(6, "0")}`;
+
+test("an interval starts on one press and stops on the next", () => {
+  const first = toggleInterval([], intervalCodes, intervalCodes[0], "home", "1H", 100, nextId);
+  assert.equal(first.started.end, null);
+  const second = toggleInterval([first.started], intervalCodes, intervalCodes[0], "home", "1H", 130.25, nextId);
+  assert.equal(second.started, null);
+  assert.deepEqual(second.changes.map((change) => change.next.end), [130.25]);
+});
+
+test("starting an interval stops the running one of its group, not others", () => {
+  const home = toggleInterval([], intervalCodes, intervalCodes[0], "home", "1H", 100, nextId).started;
+  const press = toggleInterval([home], intervalCodes, intervalCodes[1], "away", "1H", 105, nextId).started;
+  const away = toggleInterval([home, press], intervalCodes, intervalCodes[0], "away", "1H", 120, nextId);
+  assert.deepEqual(away.changes.map((change) => [change.id, change.next.end]),
+    [[home.id, 120], [away.started.id, null]]);
+  // Pressed before its start (the analyst went back): it ends where it began, never before.
+  const back = toggleInterval([away.started], intervalCodes, intervalCodes[0], "away", "1H", 90, nextId);
+  assert.equal(back.changes[0].next.end, 120);
+});
+
+test("nudges keep an interval in order and inside the video", () => {
+  const span = { id: "c1", t: 10, end: 12 };
+  assert.equal(nudged(span, "t", 0.04).t, 10.04);
+  assert.equal(nudged(span, "t", 5).t, 12); // not past its end
+  assert.equal(nudged({ id: "c2", t: 0.02 }, "t", -1).t, 0);
+  assert.equal(nudged({ id: "c3", t: 0 }, "t", -1), null); // nothing to move
+  assert.equal(nudged(span, "end", -5).end, 10);
+  assert.equal(nudged(span, "end", 5, 13).end, 13);
+  assert.equal(nudged({ id: "c4", t: 1, end: null }, "end", 1), null);
+});
+
+test("undo and redo walk the steps; a new step clears redo", () => {
+  const history = new History(2);
+  history.push([{ id: "a" }], "one");
+  history.push([{ id: "b" }], "two");
+  history.push([{ id: "c" }], "three"); // the oldest falls off
+  assert.equal(history.undo().label, "three");
+  assert.equal(history.undo().label, "two");
+  assert.equal(history.undo(), null);
+  assert.equal(history.redo().label, "two");
+  history.push([{ id: "d" }], "four");
+  assert.equal(history.canRedo, false);
 });

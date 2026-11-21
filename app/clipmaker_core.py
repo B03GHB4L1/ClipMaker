@@ -333,6 +333,32 @@ def resolve_period_starts_for_video(df, period_start, log=None):
         )
     return resolved
 
+def _row_number(value, default):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if number == number and abs(number) != float("inf") else default
+
+
+def coded_video_time(row):
+    """A coded event (app/coding) knows its exact place in the video: use that, not the match clock.
+    It is exact to the frame, unaffected by timeline corrections meant for a data feed's clock,
+    and right for shootout codes whatever the first-kick marker says."""
+    if str(row.get("source", "") or "") != "coded":
+        return None
+    return _row_number(row.get("video_time"), None)
+
+
+def row_clip_window(row, timestamp, before, after):
+    """(start, end) of an event's clip. A coded row brings its code's lead-in and lead-out
+    (``before``/``after``) and, for an interval, its ``duration``; other rows use the buffers."""
+    before = _row_number(row.get("before"), before)
+    after = _row_number(row.get("after"), after)
+    duration = max(0.0, _row_number(row.get("duration"), 0.0))
+    return timestamp - before, timestamp + duration + after
+
+
 def safe_clock_int(value):
     try:
         if pd.isna(value):
@@ -961,6 +987,10 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 log(f"  WARNING: Skipping {event_type}{suffix} with missing match clock.")
                 timestamps.append(None)
                 continue
+            coded = coded_video_time(row)
+            if coded is not None:
+                timestamps.append(coded)
+                continue
             try:
                 ts = match_clock_to_video_time(
                     minute, second, period, period_start, period_offset
@@ -996,7 +1026,8 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             player = "" if player.lower() == "nan" else player
             prefix = f"{player} - " if player else ""
             label = f"{prefix}{row['type']} @ {minute}:{second:02d} (P{period})"
-            raw_windows.append((ts - config["before_buffer"], ts + config["after_buffer"], label, period))
+            start, end = row_clip_window(row, ts, config["before_buffer"], config["after_buffer"])
+            raw_windows.append((start, end, label, period))
 
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
         clip_numbers = list(range(1, len(windows) + 1))

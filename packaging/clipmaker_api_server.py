@@ -818,6 +818,8 @@ def compute_clip_windows(config: dict[str, Any]) -> list[dict[str, Any]]:
         normalise_timeline_corrections,
         read_csv_safe,
         resolve_period_starts_for_video,
+        row_clip_window,
+        coded_video_time,
         safe_clock_int,
         to_seconds,
     )
@@ -864,6 +866,10 @@ def compute_clip_windows(config: dict[str, Any]) -> list[dict[str, Any]]:
         if minute is None or second is None or period is None:
             timestamps.append(None)
             continue
+        coded = coded_video_time(row)
+        if coded is not None:
+            timestamps.append(coded)
+            continue
         try:
             timestamp = match_clock_to_video_time(
                 minute,
@@ -907,14 +913,8 @@ def compute_clip_windows(config: dict[str, Any]) -> list[dict[str, Any]]:
         player = "" if player.lower() == "nan" else player
         label = f"{f'{player} - ' if player else ''}{row['type']} @ {minute}:{second:02d} (P{period})"
         timestamp = float(row["video_timestamp"])
-        raw_windows.append(
-            (
-                timestamp - config["before_buffer"],
-                timestamp + config["after_buffer"],
-                label,
-                period,
-            )
-        )
+        start, end = row_clip_window(row, timestamp, config["before_buffer"], config["after_buffer"])
+        raw_windows.append((start, end, label, period))
     merged = merge_overlapping_windows(raw_windows, config["min_gap"])
     return [
         {
@@ -1657,7 +1657,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             project = write_coded_table(self.store, project, document)
         _, unplaced = coded_rows(project, document)
         self.send_json(HTTPStatus.OK, {"codes": coding_store.CODES, "events": document["events"],
-                                       "unplaced": unplaced, "project": project})
+                                       "leads": document.get("leads", {}), "unplaced": unplaced, "project": project})
 
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):

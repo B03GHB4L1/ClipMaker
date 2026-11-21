@@ -2837,3 +2837,49 @@
 :root[data-theme="dark"] .code-main .code-remove:hover {
   color: #ff9c92;
 }
+:root[data-theme="dark"] .code-subhead small {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-grid button .code-elapsed {
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-grid button.is-running {
+  border-color: var(--code-colour);
+  background: color-mix(in srgb, var(--code-colour) 18%, var(--code-panel));
+}
+:root[data-theme="dark"] .code-main .code-history button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-history button:disabled {
+  color: #797b75;
+}
+:root[data-theme="dark"] .code-editor {
+  background: var(--code-hover);
+}
+:root[data-theme="dark"] .code-editor-label {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-main .code-editor button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-editor label {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-editor select {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-editor .code-delete {
+  color: #ff9c92;
+}
+:root[data-theme="dark"] .code-leads thead th {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-leads input {
+  border: 1px solid var(--cm-rule);
+}

@@ -2,12 +2,13 @@
 
 The clip cutter maps match clock to video time with the kick-off markers:
 ``video = kickoff[p] + (clock - period_offset[p])`` (``match_clock_to_video_time``
-in clipmaker_core). This module is its inverse, so a coded event cuts at the
-second it was coded (to within half a second, as the table keeps whole seconds).
+in clipmaker_core). This module is its inverse, so the match clock a coded event
+shows in Filter is the one a feed would give it (to the second).
 
-The penalty shootout marker is the first kick, not the start of the period
-(``resolve_period_starts_for_video``), so shootout codes line up when the first
-of them is coded on that kick."""
+Clips of coded rows are not timed by that clock, though: each row carries its
+exact ``video_time`` and the cutter uses it (``clipmaker_core.coded_video_time``).
+So a shootout code is cut where it was coded even though the penalty marker
+stands for the first kick, not the start of the period."""
 from __future__ import annotations
 
 import csv
@@ -30,7 +31,8 @@ KEY_PERIOD = {key: number for number, key, _, _ in PERIODS}
 
 # The scraped table's core columns first, then what only coded rows carry.
 COLUMNS = ["minute", "second", "type", "outcomeType", "period", "playerName", "team", "x", "y", "endX", "endY",
-           "homeTeam", "awayTeam", "matchName", "source", "code", "coded_id", "video_time"]
+           "homeTeam", "awayTeam", "matchName", "source", "code", "coded_id", "video_time", "video_end",
+           "duration", "end_minute", "end_second", "before", "after"]
 
 
 def parse_marker(value: Any) -> float | None:
@@ -81,13 +83,22 @@ def place(event: dict[str, Any], starts: dict[int, float], video_of: Callable[[i
 
 def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[int], str],
          home: str = "", away: str = "") -> tuple[list[dict[str, Any]], list[str]]:
-    """Event rows in the scraped format, and the ids of events with no kick-off before them."""
+    """Event rows in the scraped format, and the ids of events with no kick-off before them.
+
+    An interval is one row from its start, with ``duration`` and its end on the
+    same period's clock; one still running is left out until it stops. Each row
+    carries its code's lead-in and lead-out as ``before`` and ``after``, and its
+    exact place in the video as ``video_time`` (and ``video_end``), which the
+    clip cutter uses instead of the match clock."""
     codes = {code["id"]: code for code in store.CODES}
     starts = kickoffs(markers)
     names = {number: name for number, _, name, _ in PERIODS}
     home, away = home or "Home", away or "Away"
     table, unplaced = [], []
     for event in document.get("events", []):
+        interval = codes[event["code"]]["kind"] == "interval"
+        if interval and event.get("end") is None:
+            continue
         placed = place(event, starts, video_of)
         if placed is None:
             unplaced.append(event["id"])
@@ -95,12 +106,19 @@ def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[
         period, clock = placed
         code = codes[event["code"]]
         minute, second = divmod(clock, 60)
+        before, after = store.lead(document, event["code"])
+        span = {}
+        if interval:
+            length = round(event["end"] - event["t"], 3)
+            end_minute, end_second = divmod(clock + int(round(length)), 60)
+            span = {"video_end": event["end"], "duration": length, "end_minute": end_minute, "end_second": end_second}
         table.append((period, clock, {
             "minute": minute, "second": second, "type": code["type"], "outcomeType": code["outcome"],
             "period": names[period], "playerName": "", "team": {"home": home, "away": away}.get(event["team"], ""),
             "x": "", "y": "", "endX": "", "endY": "", "homeTeam": home, "awayTeam": away,
             "matchName": f"{home} vs {away}", "source": "coded", "code": code["label"], "coded_id": event["id"],
-            "video_time": event["t"],
+            "video_time": event["t"], "video_end": "", "duration": "", "end_minute": "", "end_second": "",
+            **span, "before": before, "after": after,
         }))
     table.sort(key=lambda item: item[:2])
     return [row for _, _, row in table], unplaced

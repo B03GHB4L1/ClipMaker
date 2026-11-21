@@ -238,7 +238,7 @@ class FallbackMediaTests(unittest.TestCase):
                 patch("analysis_core.video.clip_window", side_effect=lambda *a: next(windows)):
             folder = self.root / "analysis-clips"
             folder.mkdir(exist_ok=True)
-            reel = server.analysis_reel({"video_path": str(self.video)}, SimpleNamespace(df_all=None), events,
+            reel = server.analysis_reel({"video_path": str(self.video)}, SimpleNamespace(df_all=None, timing_frame=None), events,
                                         {}, [], 1, 1, folder)
         self.assertEqual(calls, [ve.NVENC, ve.SOFTWARE, ve.SOFTWARE])
         self.assertAlmostEqual(self.duration(reel), 4.0, delta=0.3)
