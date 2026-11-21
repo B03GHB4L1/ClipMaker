@@ -145,6 +145,8 @@ def clean_client_project(body: dict[str, Any], existing: dict[str, Any] | None) 
     body = dict(body)
     if "csv_path" in body and str(body.get("csv_path") or "") != str(existing.get("csv_path") or ""):
         raise ValueError("Event data is set by scraping a match or importing a CSV.")
+    if "source" in body and str(body.get("source") or "") != str(existing.get("source") or ""):
+        raise ValueError("Event data is set by scraping, importing or coding a match.")
 
     def video(value: Any, previous: Any) -> str:
         text = str(value or "").strip()
@@ -1032,6 +1034,29 @@ def image_suffix(data: bytes) -> str:
     raise ValueError("Only PNG and GIF pictures, or JPEG screenshots, can be saved.")
 
 
+def coded_rows(project: dict[str, Any], document: dict[str, Any]):
+    from coding import to_events
+    return to_events.rows(document, project.get("markers") or {}, lambda period: video_for_period(project, period),
+                          str(project.get("home_team") or ""), str(project.get("away_team") or ""))
+
+
+def write_coded_table(store: Any, project: dict[str, Any], document: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Write the event table of a project whose events are coded, and point the project at it.
+
+    A project with scraped or imported events keeps them: merging codes into
+    them is milestone C4, so its codes are saved but its table is left alone."""
+    from coding import store as coding_store, to_events
+    current = str(project.get("csv_path") or "")
+    if current and project.get("source") != "coded":
+        return project
+    folder = store.project_path(project["id"]).parent
+    if document is None:
+        document = coding_store.read(folder)
+    table, _ = coded_rows(project, document)
+    path = to_events.write_csv(folder / "match-data" / "coded_events.csv", table)
+    return store.upsert({"id": project["id"], "csv_path": str(path), "source": "coded", "event_count": len(table)})
+
+
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
                       default_output_dir: Path | None = None) -> dict[str, Any]:
     csv_path = str(match.get("csv_path") or "").strip()
@@ -1618,6 +1643,22 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         view["has_video"] = bool(str(project.get("video_path") or "").strip())
         return {"view": view}
 
+    def project_codes(self, project_id: str, body: dict[str, Any] | None) -> None:
+        """GET or POST /api/projects/<id>/codes: the project's coded events (app/coding)."""
+        from coding import store as coding_store
+        project = self.store.get(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+        folder = self.store.project_path(project_id).parent
+        if body is None:
+            document = coding_store.read(folder)
+        else:
+            document = coding_store.apply(folder, body)
+            project = write_coded_table(self.store, project, document)
+        _, unplaced = coded_rows(project, document)
+        self.send_json(HTTPStatus.OK, {"codes": coding_store.CODES, "events": document["events"],
+                                       "unplaced": unplaced, "project": project})
+
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
             raise ValueError("Open a project before using the analytical workspace.")
@@ -2104,6 +2145,16 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects":
             self.send_json(HTTPStatus.OK, {"projects": self.store.list(), "directory": str(self.store.data_dir / "projects")})
             return
+        if path.startswith("/api/projects/") and path.endswith("/codes"):
+            parts = path.split("/")
+            try:
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                self.project_codes(parts[3], None)
+            except ValueError as error:
+                self.send_json(HTTPStatus.NOT_FOUND if str(error) == "Project not found" else HTTPStatus.BAD_REQUEST,
+                               {"error": str(error)})
+            return
         if path.startswith("/api/projects/"):
             project = self.store.get(path.rsplit("/", 1)[-1])
             self.send_json(HTTPStatus.OK if project else HTTPStatus.NOT_FOUND, {"project": project} if project else {"error": "Project not found"})
@@ -2199,6 +2250,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 view["has_video"] = bool(str(project.get("video_path") or "").strip())
                 self.send_json(HTTPStatus.OK, {"view": view})
                 return
+            if path.startswith("/api/projects/") and path.endswith("/codes"):
+                parts = path.split("/")
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                self.project_codes(parts[3], body)
+                return
             if path.startswith("/api/projects/") and path.endswith("/delete"):
                 parts = path.split("/")
                 if len(parts) != 5:
@@ -2211,6 +2268,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if self.store.get(project_id) is None:
                     raise ValueError("Project not found")
                 saved = self.store.upsert({**clean_client_project(body, self.store.get(project_id)), "id": project_id})
+                if saved.get("source") == "coded" and set(body) & {"markers", "video_path", "period_videos",
+                                                                    "home_team", "away_team"}:
+                    # Coded events are kept in video time: re-time their table to the new kick-offs.
+                    saved = write_coded_table(self.store, saved)
                 self.send_json(HTTPStatus.OK, {"project": saved})
                 return
             if path == "/api/matches":

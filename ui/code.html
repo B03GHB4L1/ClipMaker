@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="theme.js?v=1"></script>
+  <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
+  <title>VizorPlay - Code</title>
+  <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=3" /><link rel="stylesheet" href="compact.css?v=15" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=1" />
+  <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
+  <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
+  <script type="module" src="code.js?v=1"></script>
+  <script type="module" src="update.js?v=1"></script>
+</head>
+<body class="analysis-page code-page">
+  <header class="filter-topbar">
+    <button type="button" class="filter-brand" data-code-menu aria-label="Open navigation" aria-expanded="false" aria-controls="code-menu"><span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span><span class="menu-dots" aria-hidden="true">•••</span></button>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a class="is-active" href="/code.html" aria-current="page" data-project-navigation>Code</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-project-navigation>Tactical</a><a href="/annotate.html" data-project-navigation>Annotate</a></nav>
+    <span data-code-status role="status">Loading project...</span>
+  </header>
+  <nav id="code-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
+  <main class="analysis-main code-main">
+    <div class="project-bar"><strong data-code-project></strong><span data-project-status role="status">Saved locally</span></div>
+    <p class="code-error" data-code-error role="alert" hidden></p>
+    <section class="code-empty" data-code-empty hidden>
+      <h1>Code a match from its video</h1>
+      <p data-code-empty-text>Choose the match video on Intake first. Then press a key each time something happens, and VizorPlay makes the events for you.</p>
+      <a class="code-primary" href="/" data-project-navigation>Go to Intake</a>
+    </section>
+    <div class="code-workspace" data-code-workspace hidden>
+      <div class="code-centre">
+        <div class="code-stage">
+          <video data-video preload="auto" playsinline></video>
+        </div>
+        <div class="code-transport">
+          <button type="button" data-seek="-5" title="Back 5 seconds (Shift+Left)" aria-label="Back 5 seconds">-5s</button>
+          <button type="button" data-seek="-1" title="Back 1 second (Left)" aria-label="Back 1 second">-1s</button>
+          <button type="button" class="code-play" data-play title="Play or pause (Space)" aria-label="Play"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="code-icon-play" d="M5 3l8 5-8 5z"/><path class="code-icon-pause" d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
+          <button type="button" data-seek="1" title="Forward 1 second (Right)" aria-label="Forward 1 second">+1s</button>
+          <button type="button" data-seek="5" title="Forward 5 seconds (Shift+Right)" aria-label="Forward 5 seconds">+5s</button>
+          <input type="range" data-scrub min="0" max="1" step="0.1" value="0" aria-label="Playhead" />
+          <output class="code-time" data-time>0:00</output>
+          <label class="code-source" data-source-row hidden>Video <select data-source></select></label>
+        </div>
+        <p class="code-warning" data-kickoff-note role="note" hidden></p>
+      </div>
+      <aside class="code-side">
+        <section class="code-panel" aria-labelledby="codes-title">
+          <div class="code-panel-head">
+            <h1 id="codes-title">Codes</h1>
+            <div class="code-teams" role="radiogroup" aria-label="Team for new codes">
+              <button type="button" role="radio" data-team="home" aria-checked="true"><span data-team-name="home">Home</span><kbd>H</kbd></button>
+              <button type="button" role="radio" data-team="away" aria-checked="false"><span data-team-name="away">Away</span><kbd>A</kbd></button>
+            </div>
+          </div>
+          <div class="code-grid" data-code-grid></div>
+          <p class="code-last" data-last role="status" aria-live="polite"></p>
+          <details class="code-details">
+            <summary>Team names and keys</summary>
+            <div class="code-fields">
+              <label>Home <input type="text" data-team-input="home" maxlength="60" placeholder="Home" /></label>
+              <label>Away <input type="text" data-team-input="away" maxlength="60" placeholder="Away" /></label>
+              <p class="code-muted">Each code's letter makes an event at the playhead for the chosen team. H and A choose the team. Space plays and pauses, the arrows move 1 second (with Shift, 5). Backspace removes the last code you made. Keys do nothing while you type in a field.</p>
+            </div>
+          </details>
+        </section>
+        <section class="code-list-panel" aria-labelledby="list-title">
+          <div class="code-panel-head">
+            <h2 id="list-title">Coded events <span class="code-count" data-count>(0)</span></h2>
+            <a class="code-link" href="/filters.html" data-project-navigation data-filter-link hidden>Filter and export</a>
+          </div>
+          <p class="code-muted" data-list-empty>No codes yet. Play the video and press a code's key.</p>
+          <ol class="code-list" data-list></ol>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
+</body>
+</html>

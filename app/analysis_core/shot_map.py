@@ -293,6 +293,14 @@ def build_view(frames, controls, light_mode=True):
     if shots.empty:
         result["empty"] = "No shots match the current filter."
         return result
+    # Coded events have no pitch location until one is clicked (docs/CODING_AND_PITCH_PLAN.md, C4):
+    # count them above, but never draw them at a made-up spot.
+    shots = shots.dropna(subset=["x", "y"])
+    if shots.empty:
+        result["empty"] = "These shots have no pitch location, so they are counted above but not drawn."
+        return result
+    selected = selected if selected in shots.index else None
+    result["controls"]["selected"] = selected
     components = []
     if selected is not None:
         components.append({"role": "aux", "args": goalframe_args(frames, selected, shots.loc[selected], light_mode)})

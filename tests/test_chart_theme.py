@@ -12,7 +12,7 @@ COMPONENT = ROOT / "app" / "smp_component" / "frontend" / "index.html"
 
 class ThemeTests(unittest.TestCase):
     def test_every_screen_loads_the_theme_first_and_its_sheets_last(self):
-        for name in ("index.html", "filters.html", "analysis.html", "annotate.html"):
+        for name in ("index.html", "filters.html", "analysis.html", "annotate.html", "code.html"):
             page = (UI / name).read_text(encoding="utf-8")
             head = page.split("</head>")[0]
             self.assertLess(head.index("theme.js"), head.index('rel="stylesheet"'), name)

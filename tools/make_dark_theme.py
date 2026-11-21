@@ -17,7 +17,7 @@ from pathlib import Path
 import tinycss2
 
 ROOT = Path(__file__).resolve().parents[1]
-SHEETS = ["styles.css", "filters.css", "compact.css", "design.css", "editor.css", "analysis/native.css", "annotate.css"]
+SHEETS = ["styles.css", "filters.css", "compact.css", "design.css", "editor.css", "analysis/native.css", "annotate.css", "code.css"]
 OUT = ROOT / "ui" / "theme-dark.css"
 SCOPE = ':root[data-theme="dark"]'
 COLOR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|\b(white|black)\b")
