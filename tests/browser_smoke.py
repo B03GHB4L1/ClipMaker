@@ -977,7 +977,9 @@ def exercise(page, base, root, evidence, errors):
     exercise_event_tables(page)
     page.screenshot(path=str(evidence / "intake.png"))
     assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "•••"
-    assert page.locator('.brand .cm-logo img').evaluate("(img) => img.complete && img.naturalWidth > 0")
+    # The logo may still be decoding when the page is otherwise ready; wait for it, and fail if it never loads.
+    page.wait_for_function("""() => { const img = document.querySelector('.brand .cm-logo img');
+        return !!img && img.complete && img.naturalWidth > 0; }""", timeout=10000)
     page.get_by_role("button", name="Confirm & continue").click()
     stage("filter and build clip plan")
     page.wait_for_url("**/filters.html?match=*")
