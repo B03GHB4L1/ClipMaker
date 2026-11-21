@@ -226,6 +226,19 @@ class AutomationContracts(unittest.TestCase):
         for forbidden in ("aarch64", "arm64", "gh release", "git tag", "softwareupdate", "spctl --master-disable"):
             self.assertNotIn(forbidden, workflow)  # an Intel image, and it publishes nothing
 
+    def test_mac_images_declare_the_minimum_macos_their_libraries_need(self):
+        # Measured from the files inside each app; the smoke test enforces the same numbers.
+        for workflow, minimum in ((".github/workflows/mac-dmg.yml", "14.0"),
+                                  (".github/workflows/mac-dmg-intel.yml", "12.0")):
+            text = (ROOT / workflow).read_text(encoding="utf-8")
+            self.assertIn(f"MACOSX_DEPLOYMENT_TARGET: '{minimum}'", text)
+            self.assertIn(f'"minimumSystemVersion":"{minimum}"', text)
+        smoke = (ROOT / "tests/macos_dmg_smoke.py").read_text(encoding="utf-8")
+        self.assertIn('{"arm64": (14, 0), "x86_64": (12, 0)}', smoke)
+        guide = (ROOT / "docs/INSTALLATION.md").read_text(encoding="utf-8")
+        self.assertIn("macOS 14 (Sonoma) or", guide)
+        self.assertIn("macOS 12 (Monterey) or", guide)
+
     def test_dmg_background_fits_its_window_and_names_the_extra_step(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location("make_dmg", ROOT / "packaging/macos/make_dmg.py")

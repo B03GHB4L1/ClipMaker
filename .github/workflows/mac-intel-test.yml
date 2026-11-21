@@ -23,8 +23,8 @@ jobs:
     timeout-minutes: 60
     env:
       PYTHONUNBUFFERED: '1'
-      # Build for macOS 11 (Big Sur) and later.
-      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      # OpenCV's libraries are built for macOS 12 (Monterey), the oldest macOS this opens on.
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,7 +63,7 @@ jobs:
         run: |
           mkdir -p build
           # Ad hoc signature: Intel Macs run it, but it is not notarized (no Apple Developer membership).
-          printf '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}\n' > build/mac-config.json
+          printf '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"minimumSystemVersion":"12.0","signingIdentity":"-"}}}\n' > build/mac-config.json
           npm run tauri build -- --bundles app --config "$PWD/build/mac-config.json"
           ls -la src-tauri/target/release/bundle/macos/
 

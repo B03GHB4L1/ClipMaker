@@ -22,8 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 from macos_min_os import format_version, scan  # noqa: E402
 
-# The oldest macOS the install guide promises; nothing inside the app may need a newer one.
-PROMISED_MINIMUM = (11, 0)
+# The oldest macOS the install guide promises for each chip; nothing inside the app may need a
+# newer one, and the app's own declared minimum must say the same so an older Mac is told so.
+PROMISED_MINIMUM = {"arm64": (14, 0), "x86_64": (12, 0)}
 
 
 def run(*command: str, timeout: int = 300) -> subprocess.CompletedProcess:
@@ -96,14 +97,17 @@ def main() -> int:
             stage(evidence, f"app {version} is {args.expect_arch}, minimum macOS {minimum}, signature verifies")
 
             # Hosted CI has no macOS 11 to 13, so read what every file inside the app needs.
+            promised = PROMISED_MINIMUM[args.expect_arch]
+            declared = tuple(int(part) for part in minimum.split(".")) if minimum else None
+            assert declared == promised, f"The app declares minimum macOS {minimum}, the install guide promises {format_version(promised)}"
             minimums = scan(app, args.expect_arch)
             highest = max(minimums.values())
-            too_new = {name: format_version(need) for name, need in sorted(minimums.items()) if need > PROMISED_MINIMUM}
+            too_new = {name: format_version(need) for name, need in sorted(minimums.items()) if need > promised}
             result["files_checked_for_minimum_macos"] = len(minimums)
             result["highest_minimum_macos"] = format_version(highest)
             result["needs_newer_than_promised"] = too_new
             stage(evidence, f"{len(minimums)} programs and libraries inside the app need macOS {format_version(highest)} or newer")
-            assert not too_new, (f"These files need a newer macOS than the promised {format_version(PROMISED_MINIMUM)}, "
+            assert not too_new, (f"These files need a newer macOS than the promised {format_version(promised)}, "
                                  f"so the app would not open there: {dict(list(too_new.items())[:12])}")
 
             # A downloaded copy carries the quarantine flag. Record what Gatekeeper says.

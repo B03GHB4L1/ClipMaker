@@ -44,13 +44,17 @@ and RPM packages are outside the verified candidate scope.
 ## macOS disk image (Apple Silicon and Intel)
 
 The Mac download is a disk image (`.dmg`) with VizorPlay's engine inside, so
-there is nothing else to install and no Terminal. It is built for macOS 11 (Big
-Sur) or later. Status: CI builds and tests the Apple Silicon image
+there is nothing else to install and no Terminal. It needs **macOS 14 (Sonoma) or
+later on an Apple Silicon Mac** and **macOS 12 (Monterey) or later on an Intel Mac**;
+the engine's libraries (numpy, curl_cffi, OpenCV) are built for those versions, and an
+older Mac is told so instead of opening the app. Every Apple Silicon Mac can update to
+macOS 14 or later; an Intel Mac that stops at macOS 11 or earlier cannot run this image.
+Status: CI builds and tests the Apple Silicon image
 (`.github/workflows/mac-dmg.yml`) and the Intel image
 (`.github/workflows/mac-dmg-intel.yml`), each on a GitHub Mac of its own chip
-(macOS 15 only; older macOS versions and real Macs are not tested yet). No
-VizorPlay release is published yet, so these steps describe the supported
-install once it is.
+(macOS 15 or 26 only), and checks the minimum macOS of every file inside each app.
+Real Macs and other macOS versions are not tested yet. No VizorPlay release is
+published yet, so these steps describe the supported install once it is.
 
 1. **Find your Mac's chip.** Apple menu, **About This Mac**. If it says *Chip:
    Apple M1* (or M2, M3, M4), download `VizorPlay_<version>_aarch64.dmg`. If it
