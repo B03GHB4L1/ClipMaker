@@ -217,7 +217,7 @@ def analysis_reel(project, frames, events, kickoffs, corrections, before, after,
     import video_encoder as encoders
     parts: list[Path] = []
     try:
-        windows = [clip_window(frames.df_all, kickoffs, corrections, event["minute"], event["second"],
+        windows = [clip_window(frames.timing_frame, kickoffs, corrections, event["minute"], event["second"],
                                event["period"], before, after) for event in events[:5]]
         encoder = encoders.resolve("auto", encoders.find_ffmpeg())
         try:
@@ -1605,12 +1605,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if event.get("reel"):
             clip = analysis_reel(project, frames, event["reel"], kickoffs, corrections, before, after, folder)
             return self.publish_clip(clip, f"{event['player']}.mp4", before, after, folder)
-        period, start, duration = clip_window(frames.df_all, kickoffs, corrections,
+        period, start, duration = clip_window(frames.timing_frame, kickoffs, corrections,
                                               event["minute"], event["second"], event["period"], before, after)
         if event.get("end"):
             # A sequence: classic cut_build_up_clip runs from the first action minus
             # `before` to the last plus `after`, both on the start period's clock.
-            _, end_start, end_length = clip_window(frames.df_all, kickoffs, corrections, event["end"]["minute"],
+            _, end_start, end_length = clip_window(frames.timing_frame, kickoffs, corrections, event["end"]["minute"],
                                                    event["end"]["second"], event["period"], 0, after)
             start = max(0.0, start)
             duration = max(1.0, max(start, end_start + end_length) - start)
