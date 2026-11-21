@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=3" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=2" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=3" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=2"></script>
+  <script type="module" src="code.js?v=3"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -56,13 +56,46 @@
           <div class="code-grid" data-code-grid></div>
           <h2 class="code-subhead" id="intervals-title">Intervals <small>press to start, again to stop</small></h2>
           <div class="code-grid" data-interval-grid role="group" aria-labelledby="intervals-title"></div>
+          <div data-tag-section hidden>
+            <h2 class="code-subhead" id="tags-title">Tags <small data-tag-hint>Shift+letter labels the chosen event</small></h2>
+            <div class="code-tags" data-tag-grid role="group" aria-labelledby="tags-title"></div>
+          </div>
           <p class="code-last" data-last role="status" aria-live="polite"></p>
           <details class="code-details">
             <summary>Teams and keys</summary>
             <div class="code-fields">
               <label>Home <input type="text" data-team-input="home" maxlength="60" placeholder="Home" /></label>
               <label>Away <input type="text" data-team-input="away" maxlength="60" placeholder="Away" /></label>
-              <p class="code-muted">A code's letter makes an event at the playhead for the chosen team; an interval's letter starts it, and again stops it. H and A choose the team. Space plays and pauses; the arrows move 1 second (with Shift, 5). Comma and full stop nudge the chosen event by a frame (with Shift, a second). Delete removes the chosen event, Backspace the last one you made. Ctrl+Z undoes, Ctrl+Shift+Z redoes. Keys do nothing while you type in a field.</p>
+              <p class="code-muted">A code's letter makes an event at the playhead for the chosen team; an interval's letter starts it, and again stops it. H and A choose the team. Space plays and pauses; the arrows move 1 second (with Shift, 5). Comma and full stop nudge the chosen event by a frame (with Shift, a second). Delete removes the chosen event, Backspace the last one you made. Shift and a tag's letter tags the chosen event (or, with none chosen, the next one); a number typed after a code names its player. Ctrl+Z undoes, Ctrl+Shift+Z redoes. Keys do nothing while you type in a field.</p>
+            </div>
+          </details>
+          <details class="code-details">
+            <summary>Squads</summary>
+            <p class="code-muted code-leads-note">Optional. One player per line, shirt number first ("9 Saka"). Type a number straight after a code, or with an event chosen, to name its player.</p>
+            <div class="code-squads">
+              <label><span data-squad-name="home">Home</span><textarea data-squad="home" rows="5" spellcheck="false" placeholder="1 Keeper&#10;9 Striker"></textarea></label>
+              <label><span data-squad-name="away">Away</span><textarea data-squad="away" rows="5" spellcheck="false" placeholder="1 Keeper&#10;9 Striker"></textarea></label>
+            </div>
+          </details>
+          <details class="code-details">
+            <summary>Code panel: <span data-panel-name>Match: two teams</span></summary>
+            <div class="code-fields">
+              <div class="code-template-row">
+                <label>Panel <select data-template-select aria-label="Code panels"></select></label>
+                <button type="button" data-template-use>Use</button>
+                <button type="button" data-template-delete>Delete</button>
+              </div>
+              <div class="code-template-row">
+                <label>Name <input type="text" data-template-name maxlength="40" placeholder="My panel" /></label>
+                <button type="button" data-template-save>Save as template</button>
+              </div>
+              <div class="code-template-row">
+                <button type="button" data-template-edit>Edit codes and tags</button>
+                <button type="button" data-template-import>Import</button>
+                <button type="button" data-template-export>Export</button>
+                <input type="file" accept=".json,application/json" data-template-file hidden />
+              </div>
+              <p class="code-muted">A panel is the set of codes and tags you code with. Templates are shared by all projects and import and export as JSON files. A project keeps its own copy, so changing a template later never touches its codes.</p>
             </div>
           </details>
           <details class="code-details">
@@ -106,6 +139,11 @@
               <label>Team <select data-edit-team><option value="home">Home</option><option value="away">Away</option><option value="">No team</option></select></label>
               <button type="button" class="code-delete" data-edit-delete>Delete</button>
             </div>
+            <div class="code-editor-row">
+              <label>Player <input type="number" min="0" max="99" step="1" data-edit-player aria-label="Shirt number" /></label>
+              <span class="code-muted" data-edit-player-name></span>
+            </div>
+            <div class="code-editor-tags" data-edit-tags role="group" aria-label="Tags of the chosen event"></div>
           </div>
           <p class="code-muted" data-list-empty>No codes yet. Play the video and press a code's key.</p>
           <ol class="code-list" data-list></ol>
@@ -113,6 +151,34 @@
       </aside>
     </div>
   </main>
+  <dialog class="code-dialog" data-panel-dialog aria-labelledby="panel-dialog-title">
+    <form method="dialog" data-panel-form>
+      <div class="code-dialog-head">
+        <h2 id="panel-dialog-title">Edit codes and tags</h2>
+        <label>Name <input type="text" data-panel-edit-name maxlength="40" required /></label>
+      </div>
+      <div class="code-dialog-body">
+        <h3>Codes</h3>
+        <table class="code-edit-table">
+          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Colour</th><th scope="col">Kind</th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
+          <tbody data-panel-codes></tbody>
+        </table>
+        <div class="code-template-row"><button type="button" data-add-code="instant">Add code</button><button type="button" data-add-code="interval">Add interval</button></div>
+        <h3>Tags</h3>
+        <table class="code-edit-table">
+          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Group</th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
+          <tbody data-panel-tags></tbody>
+        </table>
+        <div class="code-template-row"><button type="button" data-add-tag>Add tag</button></div>
+        <p class="code-muted">Code keys are single letters (not H or A); tag keys are pressed with Shift. Tags in one group exclude each other. Links between codes (a Goal stopping possession) are kept; edit them in an exported file.</p>
+        <p class="code-error" data-panel-error role="alert" hidden></p>
+      </div>
+      <div class="code-dialog-foot">
+        <button type="button" data-panel-cancel>Cancel</button>
+        <button type="submit" class="code-apply" data-panel-apply>Use these codes</button>
+      </div>
+    </form>
+  </dialog>
   <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
 </body>
 </html>

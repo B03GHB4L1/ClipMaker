@@ -2883,3 +2883,91 @@
 :root[data-theme="dark"] .code-leads input {
   border: 1px solid var(--cm-rule);
 }
+:root[data-theme="dark"] .code-main .code-tags button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-tags button[aria-pressed="true"] {
+  border-color: var(--cm-ink);
+  background: var(--cm-ink);
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .code-tags button[aria-pressed="true"] kbd {
+  color: #666962;
+}
+:root[data-theme="dark"] .code-squads textarea {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-template-row select,
+:root[data-theme="dark"] .code-template-row input {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-template-row button,
+:root[data-theme="dark"] .code-dialog .code-template-row button,
+:root[data-theme="dark"] .code-dialog-foot button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel, #2f2f2f);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-template-row button:disabled {
+  color: #797b75;
+}
+:root[data-theme="dark"] .code-editor input[type=number] {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-editor .code-chip::after {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-dialog {
+  --code-panel: #2f2f2f;
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-dialog::backdrop {
+  background: rgba(0,0,0,0.8);
+}
+:root[data-theme="dark"] .code-dialog-head {
+  border-bottom: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .code-dialog input[type=text] {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-edit-table thead th {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-edit-table input[type=color] {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+}
+:root[data-theme="dark"] .code-dialog .code-remove {
+  border: 0;
+  background: transparent;
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-dialog .code-remove svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+:root[data-theme="dark"] .code-dialog-foot {
+  border-top: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .code-dialog .code-dialog-foot .code-apply {
+  border-color: var(--cm-accent);
+  color: #171817;
+  background: var(--cm-accent);
+}
+:root[data-theme="dark"] .code-dialog :is(button,
+:root[data-theme="dark"] input):focus-visible {
+  outline: 2px solid #9dba63;
+}

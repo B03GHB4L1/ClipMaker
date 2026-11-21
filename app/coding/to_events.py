@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from . import store
+from . import store, templates
 
 # period number, marker key, feed period name, match clock at its kick-off (seconds)
 PERIODS = (
@@ -32,7 +32,7 @@ KEY_PERIOD = {key: number for number, key, _, _ in PERIODS}
 # The scraped table's core columns first, then what only coded rows carry.
 COLUMNS = ["minute", "second", "type", "outcomeType", "period", "playerName", "team", "x", "y", "endX", "endY",
            "homeTeam", "awayTeam", "matchName", "source", "code", "coded_id", "video_time", "video_end",
-           "duration", "end_minute", "end_second", "before", "after"]
+           "duration", "end_minute", "end_second", "before", "after", "tags", "shirt", *templates.FLAGS]
 
 
 def parse_marker(value: Any) -> float | None:
@@ -89,8 +89,15 @@ def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[
     same period's clock; one still running is left out until it stops. Each row
     carries its code's lead-in and lead-out as ``before`` and ``after``, and its
     exact place in the video as ``video_time`` (and ``video_end``), which the
-    clip cutter uses instead of the match clock."""
-    codes = {code["id"]: code for code in store.CODES}
+    clip cutter uses instead of the match clock.
+
+    Tags are listed by name; a tag with an outcome sets ``outcomeType`` and a
+    tag with a flag sets that qualifier column, so Filter's Successful and
+    Headers qualifiers work on coded rows. A shirt number becomes the player's
+    name from the project's squad list (or "#9" when the squad has no name)."""
+    codes = store.panel_codes(document)
+    tags = store.panel_tags(document)
+    squads = document.get("squads") or {}
     starts = kickoffs(markers)
     names = {number: name for number, _, name, _ in PERIODS}
     home, away = home or "Home", away or "Away"
@@ -112,13 +119,22 @@ def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[
             length = round(event["end"] - event["t"], 3)
             end_minute, end_second = divmod(clock + int(round(length)), 60)
             span = {"video_end": event["end"], "duration": length, "end_minute": end_minute, "end_second": end_second}
+        chosen = [tags[tag] for tag in event.get("tags", []) if tag in tags]
+        outcome = next((tag["outcome"] for tag in reversed(chosen) if tag.get("outcome")), code["outcome"])
+        flags = {flag: False for flag in templates.FLAGS}
+        flags.update({tag["flag"]: True for tag in chosen if tag.get("flag")})
+        player = ""
+        if event.get("player") is not None:
+            names_by_number = {item["number"]: item["name"] for item in squads.get(event["team"], [])}
+            player = names_by_number.get(event["player"]) or f"#{event['player']}"
         table.append((period, clock, {
-            "minute": minute, "second": second, "type": code["type"], "outcomeType": code["outcome"],
-            "period": names[period], "playerName": "", "team": {"home": home, "away": away}.get(event["team"], ""),
+            "minute": minute, "second": second, "type": code["type"], "outcomeType": outcome,
+            "period": names[period], "playerName": player, "team": {"home": home, "away": away}.get(event["team"], ""),
             "x": "", "y": "", "endX": "", "endY": "", "homeTeam": home, "awayTeam": away,
             "matchName": f"{home} vs {away}", "source": "coded", "code": code["label"], "coded_id": event["id"],
             "video_time": event["t"], "video_end": "", "duration": "", "end_minute": "", "end_second": "",
-            **span, "before": before, "after": after,
+            **span, "before": before, "after": after, "tags": "; ".join(tag["label"] for tag in chosen),
+            "shirt": event.get("player", ""), **flags,
         }))
     table.sort(key=lambda item: item[:2])
     return [row for _, _, row in table], unplaced

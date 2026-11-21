@@ -1656,8 +1656,48 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             document = coding_store.apply(folder, body)
             project = write_coded_table(self.store, project, document)
         _, unplaced = coded_rows(project, document)
-        self.send_json(HTTPStatus.OK, {"codes": coding_store.CODES, "events": document["events"],
+        self.send_json(HTTPStatus.OK, {"codes": document["panel"]["codes"], "panel": document["panel"],
+                                       "squads": document["squads"], "events": document["events"],
                                        "leads": document.get("leads", {}), "unplaced": unplaced, "project": project})
+
+    @property
+    def code_templates(self):
+        from coding import templates
+        return templates.TemplateLibrary(self.store.data_dir / "code-templates")
+
+    def code_template_action(self, action: str, body: dict[str, Any]) -> None:
+        """POST /api/code-templates[/delete|/export]: the analyst's code panels.
+
+        Templates arrive as JSON values (the page reads an imported file itself),
+        and an export is written to the export folder under the panel's name, so
+        the browser never names a path."""
+        from coding import templates
+        library = self.code_templates
+        if action == "":
+            if set(body) - {"template", "replace"}:
+                raise ValueError("Send a code panel as template.")
+            saved = library.save(body.get("template"), replace=body.get("replace") is True)
+            self.send_json(HTTPStatus.OK, {"template": saved, "templates": library.list()})
+        elif action == "delete":
+            library.delete(str(body.get("id") or ""))
+            self.send_json(HTTPStatus.OK, {"templates": library.list()})
+        elif action == "export":
+            value = body.get("template")
+            if isinstance(value, dict):
+                value = {key: item for key, item in value.items() if key != "builtin"}
+            template = templates.clean(value)
+            text = json.dumps(template, indent=1, ensure_ascii=False)
+            folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+
+            def write(temporary: str) -> None:
+                Path(temporary).write_text(text, encoding="utf-8")
+
+            saved = save_to_user_folder(folder, f"{template['name']} codes", ".json", write, fallback="VizorPlay codes")
+            token = uuid.uuid4().hex
+            self.server.saved_clips[token] = saved  # type: ignore[attr-defined]
+            self.send_json(HTTPStatus.OK, {"saved": {"name": saved.name, "folder": str(saved.parent), "id": token}})
+        else:
+            raise ValueError("Unknown code panel action")
 
     def analysis_project(self, project_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
@@ -2145,6 +2185,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects":
             self.send_json(HTTPStatus.OK, {"projects": self.store.list(), "directory": str(self.store.data_dir / "projects")})
             return
+        if path == "/api/code-templates":
+            self.send_json(HTTPStatus.OK, {"templates": self.code_templates.list()})
+            return
         if path.startswith("/api/projects/") and path.endswith("/codes"):
             parts = path.split("/")
             try:
@@ -2249,6 +2292,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                                          "after": clamp_buffer(settings.get("after_buffer", 8))}
                 view["has_video"] = bool(str(project.get("video_path") or "").strip())
                 self.send_json(HTTPStatus.OK, {"view": view})
+                return
+            if path in ("/api/code-templates", "/api/code-templates/delete", "/api/code-templates/export"):
+                self.code_template_action(path[len("/api/code-templates/"):] if path.count("/") == 3 else "", body)
                 return
             if path.startswith("/api/projects/") and path.endswith("/codes"):
                 parts = path.split("/")

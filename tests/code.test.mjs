@@ -2,7 +2,7 @@
 // the engine's table (app/coding/to_events.py), and hotkeys must not fire while typing.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { History, nudged, toggleInterval } from "../ui/code/edits.js";
+import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "../ui/code/edits.js";
 import { formatClock, formatVideo, isTyping, parseMarker, place, sources, videoOf } from "../ui/code/clock.js";
 
 const single = { video_path: "match.mp4", period_videos: {}, markers: { "1H": "0:05:00", "2H": "0:55:00", ET1: "1:50:00", ET2: "2:08:00" } };
@@ -95,4 +95,49 @@ test("undo and redo walk the steps; a new step clears redo", () => {
   assert.equal(history.redo().label, "two");
   history.push([{ id: "d" }], "four");
   assert.equal(history.canRedo, false);
+});
+
+// C3: linked codes, tags and squads
+const panelCodes = [
+  { id: "goal", kind: "instant", stops: ["possession"] },
+  { id: "won", kind: "instant", starts: [{ code: "possession", team: "same" }] },
+  { id: "lost", kind: "instant", starts: [{ code: "possession", team: "other" }] },
+  { id: "possession", kind: "interval", group: "possession" },
+];
+const panelTags = [
+  { id: "left", group: "side" }, { id: "right", group: "side" }, { id: "header" }, { id: "set-piece" },
+];
+let linkCounter = 0;
+const linkId = () => `cnew${(linkCounter += 1).toString().padStart(4, "0")}`;
+
+test("a goal stops the running possession, whoever has it", () => {
+  const running = [{ id: "c1", code: "possession", team: "away", src: "1H", t: 10, end: null }];
+  const changes = linkedChanges(running, panelCodes, panelCodes[0], "home", "1H", 25, linkId);
+  assert.deepEqual(changes, [{ id: "c1", next: { ...running[0], end: 25 } }]);
+});
+
+test("ball won starts possession for the same team, ball lost for the other, stopping the old one", () => {
+  const running = [{ id: "c1", code: "possession", team: "away", src: "1H", t: 10, end: null }];
+  const won = linkedChanges(running, panelCodes, panelCodes[1], "home", "1H", 30, linkId);
+  assert.equal(won.length, 2);
+  assert.equal(won[0].next.end, 30);
+  assert.deepEqual({ ...won[1].next, id: "x" }, { id: "x", code: "possession", team: "home", src: "1H", t: 30, end: null });
+  const lost = linkedChanges([], panelCodes, panelCodes[2], "home", "1H", 40, linkId);
+  assert.equal(lost[0].next.team, "away");
+  // Already running for that team: nothing changes.
+  assert.deepEqual(linkedChanges(running, panelCodes, panelCodes[2], "home", "1H", 50, linkId), []);
+});
+
+test("tags of a group exclude each other, and a code's own tags come first", () => {
+  assert.deepEqual(toggledTags(["left", "header"], panelTags, "right"), ["header", "right"]);
+  assert.deepEqual(toggledTags(["left"], panelTags, "left"), []);
+  assert.deepEqual(startingTags({ tags: ["set-piece"] }, ["left", "right"], panelTags), ["set-piece", "right"]);
+});
+
+test("squad lines read number first and refuse repeats", () => {
+  assert.deepEqual(parseSquad("9 Saka\n\n#1, Raya\n10 - Odegaard"), [
+    { number: 1, name: "Raya" }, { number: 9, name: "Saka" }, { number: 10, name: "Odegaard" }]);
+  assert.equal(squadText([{ number: 4, name: "" }, { number: 7, name: "Ali" }]), "4\n7 Ali");
+  assert.throws(() => parseSquad("Saka"), /shirt number/);
+  assert.throws(() => parseSquad("9 A\n9 B"), /twice/);
 });

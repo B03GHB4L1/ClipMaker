@@ -1,10 +1,13 @@
-// The Code screen (docs/CODING_AND_PITCH_PLAN.md, C1 and C2): press a key while
+// The Code screen (docs/CODING_AND_PITCH_PLAN.md, C1 to C3): press a key while
 // the match video plays and an event is made at the playhead; interval codes
-// start on one press and stop on the next. Events are saved in video time; the
-// engine turns them into the event table Filter and export read.
+// start on one press and stop on the next. Tags (Shift+letter) label an event,
+// a number after a code names its player, and a code can start or stop
+// intervals. Events are saved in video time; the engine turns them into the
+// event table Filter and export read. The panel of codes comes from a template.
 import { projectRequest, newProject, rememberProject, saveProject, beginProjectOperation } from "./projects.js";
 import { formatClock, formatVideo, isTyping, place, sources } from "./code/clock.js";
-import { History, nudged, toggleInterval } from "./code/edits.js";
+import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "./code/edits.js";
+import { showSaved, showSaveError } from "./save-clip.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
@@ -25,6 +28,11 @@ const editor = $("[data-editor]");
 
 let project = null;
 let codes = [];
+let tags = [];
+let panel = null;
+let squads = { home: [], away: [] };
+let armed = []; // tag ids waiting for the next event
+let templates = [];
 const events = new Map(); // id -> event: what the analyst sees, saved or not
 let unplaced = new Set();
 let leads = {};
@@ -70,6 +78,7 @@ const showError = (message) => {
 const dirty = new Map(); // id -> event, or null when deleted
 let saved = new Set(); // ids the engine has
 let leadsDirty = {};
+let pendingSquads = null;
 let sending = null;
 let retryTimer = null;
 
@@ -81,18 +90,21 @@ const showSave = (text, failed = false) => {
 };
 
 const flush = () => {
-  if (sending || (!dirty.size && !Object.keys(leadsDirty).length)) return sending;
+  if (sending || (!dirty.size && !Object.keys(leadsDirty).length && !pendingSquads)) return sending;
   clearTimeout(retryTimer);
   const sent = new Map(dirty);
   const sentLeads = leadsDirty;
+  const sentSquads = pendingSquads;
   dirty.clear();
   leadsDirty = {};
+  pendingSquads = null;
   const batch = { add: [], update: [], delete: [] };
   for (const [id, event] of sent) {
     if (event === null) { if (saved.has(id)) batch.delete.push(id); }
     else (saved.has(id) ? batch.update : batch.add).push(event);
   }
   if (Object.keys(sentLeads).length) batch.leads = sentLeads;
+  if (sentSquads) batch.squads = sentSquads;
   const finish = beginProjectOperation();
   showSave("Saving locally...");
   sending = projectRequest(`/api/projects/${encodeURIComponent(project.id)}/codes`, batch)
@@ -100,6 +112,7 @@ const flush = () => {
       project = result.project;
       unplaced = new Set(result.unplaced);
       saved = new Set(result.events.map((event) => event.id));
+      squads = result.squads || squads;
       showSave("Saved locally");
       showError("");
     })
@@ -107,6 +120,7 @@ const flush = () => {
       // Put back what was sent, unless it changed again meanwhile.
       for (const [id, event] of sent) if (!dirty.has(id)) dirty.set(id, event);
       leadsDirty = { ...sentLeads, ...leadsDirty };
+      if (sentSquads && !pendingSquads) pendingSquads = sentSquads;
       showSave("Save failed", true);
       showError(`${error.message} Your codes are kept here and saving tries again.`);
       retryTimer = setTimeout(flush, 3000);
@@ -121,7 +135,7 @@ const flush = () => {
 };
 
 window.addEventListener("beforeunload", (event) => {
-  if (dirty.size || Object.keys(leadsDirty).length) { event.preventDefault(); event.returnValue = ""; }
+  if (dirty.size || Object.keys(leadsDirty).length || pendingSquads) { event.preventDefault(); event.returnValue = ""; }
 });
 
 // Apply [{id, next}] (next null deletes): one step the analyst can undo.
@@ -170,25 +184,91 @@ const flash = (code) => {
   button?.classList.add("is-fired");
 };
 
+const tagLabel = (id) => tags.find((tag) => tag.id === id)?.label || id;
+const linkText = (changes, ownId) => {
+  const parts = changes.filter((change) => change.id !== ownId).map((change) => {
+    const label = codeOf(change.next)?.label || change.next.code;
+    return change.next.end == null ? `started ${label} for ${teamName(change.next.team)}` : `stopped ${label}`;
+  });
+  return parts.length ? ` (${parts.join(", ")})` : "";
+};
+// Changes to running intervals by the code's links, merged with `own` (later ones win).
+const withLinks = (code, own) => {
+  const linked = linkedChanges([...events.values()], codes, code, team, src, now(), newId);
+  const merged = new Map(linked.map((change) => [change.id, change]));
+  for (const change of own) merged.set(change.id, change);
+  return [...merged.values()];
+};
+
 const addCode = (code) => {
   const event = { id: newId(), code: code.id, team, src, t: now() };
+  const chosen = startingTags(code, armed, tags);
+  if (chosen.length) event.tags = chosen;
+  armed = [];
   madeHere.push(event.id);
   selectedId = event.id;
+  digits.since = performance.now();
   flash(code);
-  lastLine.textContent = `${code.label} · ${teamName(team)} · ${whereText(event)}`;
-  commit([{ id: event.id, next: event }], code.label);
+  const changes = withLinks(code, [{ id: event.id, next: event }]);
+  lastLine.textContent = `${code.label} · ${teamName(team)} · ${whereText(event)}${chosen.length ? ` · ${chosen.map(tagLabel).join(", ")}` : ""}${linkText(changes, event.id)}`;
+  commit(changes, code.label);
 };
 
 const pressInterval = (code) => {
   const { changes, started } = toggleInterval([...events.values()], codes, code, team, src, now(), newId);
-  if (started) { madeHere.push(started.id); selectedId = started.id; }
+  if (started) {
+    madeHere.push(started.id);
+    selectedId = started.id;
+    digits.since = performance.now();
+    const chosen = startingTags(code, armed, tags);
+    if (chosen.length) started.tags = chosen;
+    armed = [];
+  }
   flash(code);
+  const all = started ? withLinks(code, changes) : changes;
   const stopped = changes.filter((change) => change.next.end != null);
   lastLine.textContent = started
-    ? `${code.label} started · ${teamName(team)} · ${whereText(started)}${stopped.length ? ` (stopped ${stopped.map((c) => codeOf(c.next).label).join(", ")})` : ""}`
+    ? `${code.label} started · ${teamName(team)} · ${whereText(started)}${stopped.length ? ` (stopped ${stopped.map((c) => codeOf(c.next).label).join(", ")})` : ""}${linkText(all.filter((c) => !changes.includes(c)), started.id)}`
     : `${code.label} stopped · ${formatVideo(stopped[0].next.end - stopped[0].next.t)} long`;
-  commit(changes, started ? `start ${code.label}` : `stop ${code.label}`);
+  commit(all, started ? `start ${code.label}` : `stop ${code.label}`);
 };
+
+// Shift+letter (or a tag button): tag the chosen event, or arm the tag for the next one.
+const pressTag = (tag) => {
+  const event = events.get(selectedId);
+  if (event) {
+    const next = toggledTags(event.tags, tags, tag.id);
+    const on = next.includes(tag.id);
+    lastLine.textContent = `${on ? "Tagged" : "Untagged"} ${codeOf(event)?.label || "code"}: ${tag.label}.`;
+    commit([{ id: event.id, next: { ...event, tags: next } }], `${on ? "tag" : "untag"} ${tag.label}`);
+    return;
+  }
+  armed = toggledTags(armed, tags, tag.id);
+  lastLine.textContent = armed.length ? `Next code gets: ${armed.map(tagLabel).join(", ")}.` : "No tags waiting.";
+  render();
+};
+
+// Numbers typed within a second of each other build one shirt number ("1", "0": 10),
+// for the chosen event; it is saved once typing pauses.
+const digits = { text: "", timer: null, since: 0 };
+const pressDigit = (digit) => {
+  const event = events.get(selectedId);
+  if (!event) { lastLine.textContent = "Choose or make a code first, then type the player's number."; return; }
+  digits.text = (digits.text + digit).slice(-2);
+  clearTimeout(digits.timer);
+  const number = Number(digits.text);
+  lastLine.textContent = `${codeOf(event)?.label || "Code"}: player ${number}${playerName(event.team, number) ? ` ${playerName(event.team, number)}` : ""}...`;
+  const done = () => {
+    digits.text = "";
+    const current = events.get(event.id);
+    if (!current || current.player === number) return;
+    commit([{ id: current.id, next: { ...current, player: number } }], `player ${number}`);
+    lastLine.textContent = `${codeOf(current)?.label || "Code"} · ${playerText(current.team, number)}.`;
+  };
+  if (digits.text.length >= 2) done(); else digits.timer = setTimeout(done, 900);
+};
+const playerName = (side, number) => (squads[side] || []).find((player) => player.number === number)?.name || "";
+const playerText = (side, number) => `#${number}${playerName(side, number) ? ` ${playerName(side, number)}` : ""}`;
 
 const removeCode = (id) => {
   const event = events.get(id);
@@ -246,6 +326,35 @@ const codeButton = (code) => {
 const renderGrid = () => {
   grid.replaceChildren(...codes.filter((code) => code.kind !== "interval").map(codeButton));
   intervalGrid.replaceChildren(...codes.filter((code) => code.kind === "interval").map(codeButton));
+  intervalGrid.hidden = !codes.some((code) => code.kind === "interval");
+  $("#intervals-title").hidden = intervalGrid.hidden;
+  $("[data-tag-section]").hidden = !tags.length;
+  $("[data-tag-grid]").replaceChildren(...tags.map((tag) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.tag = tag.id;
+    button.setAttribute("aria-pressed", "false");
+    const name = document.createElement("span");
+    name.textContent = tag.label;
+    const key = document.createElement("kbd");
+    key.textContent = `⇧${tag.key}`;
+    button.append(name, key);
+    button.title = `${tag.label} (Shift+${tag.key})${tag.group ? `, one of its group` : ""}`;
+    button.onclick = () => pressTag(tag);
+    return button;
+  }));
+  $("[data-panel-name]").textContent = panel?.name || "";
+};
+
+// A tag is pressed when the chosen event has it, or (with none chosen) when it waits for the next one.
+const renderTags = () => {
+  const event = events.get(selectedId);
+  const on = event ? event.tags || [] : armed;
+  $("[data-tag-hint]").textContent = event ? "Shift+letter tags the chosen event" : "Shift+letter tags the next code";
+  document.querySelectorAll("[data-tag]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(on.includes(button.dataset.tag)));
+    button.classList.toggle("is-armed", !event && on.includes(button.dataset.tag));
+  });
 };
 
 // Running intervals glow and count up with the video.
@@ -266,6 +375,9 @@ const renderRunning = () => {
 const renderTeams = () => {
   for (const side of ["home", "away"]) {
     document.querySelector(`[data-team-name="${side}"]`).textContent = teamName(side);
+    document.querySelector(`[data-squad-name="${side}"]`).textContent = teamName(side);
+    const squadInput = document.querySelector(`[data-squad="${side}"]`);
+    if (document.activeElement !== squadInput && !pendingSquads) squadInput.value = squadText(squads[side]);
     const input = document.querySelector(`[data-team-input="${side}"]`);
     if (document.activeElement !== input) input.value = (side === "home" ? project.home_team : project.away_team) || "";
   }
@@ -327,12 +439,26 @@ const renderEditor = () => {
   select.replaceChildren(...codes.filter((item) => item.kind === code?.kind).map((item) => new Option(item.label, item.id)));
   select.value = event.code;
   $("[data-edit-team]").value = event.team;
+  const player = $("[data-edit-player]");
+  if (document.activeElement !== player) player.value = event.player ?? "";
+  $("[data-edit-player-name]").textContent = event.player != null ? playerName(event.team, event.player) : "";
+  $("[data-edit-tags]").replaceChildren(...(event.tags || []).map((id) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "code-chip";
+    chip.textContent = tagLabel(id);
+    chip.setAttribute("aria-label", `Remove tag ${tagLabel(id)}`);
+    chip.title = "Remove this tag";
+    chip.onclick = () => { const tag = tags.find((item) => item.id === id); if (tag) pressTag(tag); };
+    return chip;
+  }));
 };
 
 const render = () => {
   renderTeams();
   renderRunning();
   renderEditor();
+  renderTags();
   $("[data-undo]").disabled = !history.canUndo;
   $("[data-redo]").disabled = !history.canRedo;
   const sorted = [...events.values()].sort((a, b) => order(a) - order(b));
@@ -358,7 +484,8 @@ const render = () => {
     label.textContent = code?.label || event.code;
     const detail = document.createElement("small");
     const span = code?.kind === "interval" ? (event.end == null ? " · running" : ` · ${formatVideo(event.end - event.t)} long`) : "";
-    detail.textContent = `${teamName(event.team)} · ${where ? where.period.name : "before kick-off"}${span} · ${formatVideo(event.t)}`;
+    const extra = [event.player != null ? playerText(event.team, event.player) : "", ...(event.tags || []).map(tagLabel)].filter(Boolean);
+    detail.textContent = `${teamName(event.team)}${extra.length ? ` · ${extra.join(", ")}` : ""} · ${where ? where.period.name : "before kick-off"}${span} · ${formatVideo(event.t)}`;
     jump.append(clock, label, detail);
     jump.title = "Choose and jump to this moment";
     jump.onclick = () => jumpTo(event);
@@ -465,6 +592,12 @@ editor.querySelectorAll("[data-edge]").forEach((row) => {
 $("[data-edit-code]").onchange = (change) => edit(selectedId, { code: change.target.value }, "change code");
 $("[data-edit-team]").onchange = (change) => edit(selectedId, { team: change.target.value }, "change team");
 $("[data-edit-delete]").onclick = () => removeCode(selectedId);
+$("[data-edit-player]").onchange = (change) => {
+  const text = change.target.value.trim();
+  const number = Math.round(Number(text));
+  if (text && !(Number.isFinite(number) && number >= 0 && number <= 99)) { renderEditor(); return; }
+  edit(selectedId, { player: text ? number : null }, text ? `player ${number}` : "clear player");
+};
 $("[data-undo]").onclick = undo;
 $("[data-redo]").onclick = redo;
 
@@ -501,8 +634,8 @@ document.addEventListener("keydown", (event) => {
     nudge(selectedId, "t", (event.code === "Comma" ? -1 : 1) * (event.shiftKey ? 1 : frameStep));
     return;
   }
-  if (key === "escape") { selectedId = null; render(); return; }
-  if (key === "h" || key === "a") { chooseTeam(key === "h" ? "home" : "away"); return; }
+  if (key === "escape") { selectedId = null; armed = []; render(); return; }
+  if (!event.shiftKey && (key === "h" || key === "a")) { chooseTeam(key === "h" ? "home" : "away"); return; }
   if (key === "delete") {
     if (selectedId) { event.preventDefault(); removeCode(selectedId); }
     return;
@@ -513,11 +646,246 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.repeat) return; // holding a key makes one code, not a burst
+  if (/^[0-9]$/.test(event.key)) { event.preventDefault(); pressDigit(event.key); return; }
+  if (event.shiftKey && /^[a-z]$/.test(key)) {
+    const tag = tags.find((item) => item.key === key.toUpperCase());
+    if (tag) { event.preventDefault(); pressTag(tag); }
+    return;
+  }
   const code = codes.find((item) => item.key === key);
   if (!code) return;
   event.preventDefault();
   if (code.kind === "interval") pressInterval(code); else addCode(code);
 });
+
+// ---------------------------------------------------------------------------
+// Squads and code panels (templates)
+// ---------------------------------------------------------------------------
+document.querySelectorAll("[data-squad]").forEach((input) => {
+  input.addEventListener("change", () => {
+    try {
+      const players = parseSquad(input.value);
+      squads = { ...squads, [input.dataset.squad]: players };
+      pendingSquads = { ...squads };
+      showError("");
+      flush();
+      render();
+    } catch (error) { showError(`${teamName(input.dataset.squad)} squad: ${error.message}`); }
+  });
+});
+
+function usePanel(next, nextSquads) {
+  panel = next;
+  codes = next.codes;
+  tags = next.tags || [];
+  if (nextSquads) squads = nextSquads;
+  armed = armed.filter((id) => tags.some((tag) => tag.id === id));
+  $("[data-leads] tbody").replaceChildren();
+}
+
+const templateSelect = $("[data-template-select]");
+const renderTemplates = () => {
+  const chosen = templateSelect.value;
+  const own = templates.filter((item) => !item.builtin);
+  const group = (label, items) => {
+    const element = document.createElement("optgroup");
+    element.label = label;
+    element.append(...items.map((item) => new Option(item.name, item.id)));
+    return element;
+  };
+  templateSelect.replaceChildren(group("Built in", templates.filter((item) => item.builtin)), ...(own.length ? [group("Yours", own)] : []));
+  templateSelect.value = templates.some((item) => item.id === chosen) ? chosen
+    : templates.some((item) => item.id === panel?.id) ? panel.id : templates[0]?.id || "";
+  syncTemplateButtons();
+};
+const syncTemplateButtons = () => {
+  const chosen = templates.find((item) => item.id === templateSelect.value);
+  $("[data-template-delete]").disabled = !chosen || chosen.builtin;
+  $("[data-template-use]").disabled = !chosen;
+};
+templateSelect.onchange = syncTemplateButtons;
+const loadTemplates = async () => {
+  try { templates = (await projectRequest("/api/code-templates")).templates; renderTemplates(); }
+  catch (error) { showError(error.message); }
+};
+
+// The project's panel changes on the engine first: it refuses a panel that lacks codes the project has used.
+const applyPanel = async (next, label) => {
+  await flush();
+  const { builtin, ...clean } = next;
+  const result = await projectRequest(`/api/projects/${encodeURIComponent(project.id)}/codes`, { panel: clean });
+  project = result.project;
+  unplaced = new Set(result.unplaced);
+  usePanel(result.panel, result.squads);
+  renderGrid();
+  renderLeads();
+  render();
+  lastLine.textContent = `Now coding with ${result.panel.name}${label ? ` (${label})` : ""}.`;
+};
+
+$("[data-template-use]").onclick = async () => {
+  const chosen = templates.find((item) => item.id === templateSelect.value);
+  if (!chosen) return;
+  try { await applyPanel(chosen); showError(""); } catch (error) { showError(error.message); }
+};
+$("[data-template-save]").onclick = async () => {
+  const nameInput = $("[data-template-name]");
+  const name = nameInput.value.trim() || panel.name;
+  try {
+    const result = await projectRequest("/api/code-templates", { template: { ...panel, name } });
+    templates = result.templates;
+    renderTemplates();
+    templateSelect.value = result.template.id;
+    syncTemplateButtons();
+    nameInput.value = "";
+    lastLine.textContent = `Saved the template ${result.template.name}; every project can use it.`;
+    showError("");
+  } catch (error) { showError(error.message); }
+};
+$("[data-template-delete]").onclick = async () => {
+  const chosen = templates.find((item) => item.id === templateSelect.value);
+  if (!chosen || chosen.builtin) return;
+  try {
+    templates = (await projectRequest("/api/code-templates/delete", { id: chosen.id })).templates;
+    renderTemplates();
+    lastLine.textContent = `Deleted the template ${chosen.name}. Projects coded with it keep their own copy.`;
+  } catch (error) { showError(error.message); }
+};
+$("[data-template-export]").onclick = async () => {
+  try {
+    const result = await projectRequest("/api/code-templates/export", { template: panel });
+    showSaved(result.saved, "Code panel");
+  } catch (error) { showSaveError(error.message, "Code panel"); }
+};
+const fileInput = $("[data-template-file]");
+$("[data-template-import]").onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const file = fileInput.files[0];
+  fileInput.value = "";
+  if (!file) return;
+  try {
+    if (file.size > 200000) throw new Error("That file is too large to be a code panel.");
+    let value;
+    try { value = JSON.parse(await file.text()); } catch { throw new Error("That file is not a code panel (it is not JSON)."); }
+    const result = await projectRequest("/api/code-templates", { template: value });
+    templates = result.templates;
+    renderTemplates();
+    templateSelect.value = result.template.id;
+    syncTemplateButtons();
+    lastLine.textContent = `Imported ${result.template.name}. Choose Use to code with it.`;
+    showError("");
+  } catch (error) { showError(`Could not import: ${error.message}`); }
+};
+
+// Editing the panel: names, keys, colours, codes and tags; links stay as they are.
+const dialog = $("[data-panel-dialog]");
+const draft = { codes: [], tags: [] };
+const slug = (text, taken) => {
+  const base = String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "item";
+  let id = base;
+  for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
+  return id;
+};
+const cellInput = (attrs, onInput) => {
+  const input = document.createElement("input");
+  Object.assign(input, attrs);
+  input.addEventListener("input", () => onInput(input.value));
+  const cell = document.createElement("td");
+  cell.append(input);
+  return cell;
+};
+const removeCell = (label, onRemove) => {
+  const cell = document.createElement("td");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "code-remove";
+  button.setAttribute("aria-label", label);
+  button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+  button.onclick = onRemove;
+  cell.append(button);
+  return cell;
+};
+const renderDraft = () => {
+  $("[data-panel-codes]").replaceChildren(...draft.codes.map((code, index) => {
+    const row = document.createElement("tr");
+    row.append(
+      cellInput({ type: "text", value: code.label, maxLength: 40, ariaLabel: "Code name" }, (value) => { code.label = value; }),
+      cellInput({ type: "text", value: code.key, maxLength: 1, className: "code-key-input", ariaLabel: `${code.label}: key` }, (value) => { code.key = value.toLowerCase(); }),
+      cellInput({ type: "color", value: code.colour, ariaLabel: `${code.label}: colour` }, (value) => { code.colour = value; }),
+    );
+    const kind = document.createElement("td");
+    kind.textContent = code.kind === "interval" ? "Interval" : "Instant";
+    row.append(kind, removeCell(`Remove ${code.label}`, () => { draft.codes.splice(index, 1); renderDraft(); }));
+    return row;
+  }));
+  $("[data-panel-tags]").replaceChildren(...draft.tags.map((tag, index) => {
+    const row = document.createElement("tr");
+    row.append(
+      cellInput({ type: "text", value: tag.label, maxLength: 40, ariaLabel: "Tag name" }, (value) => { tag.label = value; }),
+      cellInput({ type: "text", value: tag.key, maxLength: 1, className: "code-key-input", ariaLabel: `${tag.label}: key` }, (value) => { tag.key = value.toUpperCase(); }),
+      cellInput({ type: "text", value: tag.group || "", maxLength: 40, ariaLabel: `${tag.label}: group`, placeholder: "none" }, (value) => { tag.group = value; }),
+      removeCell(`Remove ${tag.label}`, () => { draft.tags.splice(index, 1); renderDraft(); }),
+    );
+    return row;
+  }));
+};
+const freeKey = (used, letters) => [...letters].find((letter) => !used.has(letter)) || "";
+$("[data-template-edit]").onclick = () => {
+  draft.name = panel.name;
+  draft.codes = structuredClone(panel.codes);
+  draft.tags = structuredClone(panel.tags || []);
+  $("[data-panel-edit-name]").value = panel.name;
+  $("[data-panel-error]").hidden = true;
+  renderDraft();
+  dialog.showModal();
+};
+dialog.querySelectorAll("[data-add-code]").forEach((button) => {
+  button.onclick = () => {
+    const interval = button.dataset.addCode === "interval";
+    const label = interval ? "New interval" : "New code";
+    const key = freeKey(new Set(draft.codes.map((code) => code.key)), "qwertyuiopsdfgjklzxcvbnm");
+    draft.codes.push({ id: slug(label, new Set(draft.codes.map((code) => code.id))), label, kind: interval ? "interval" : "instant",
+      type: label, outcome: "Successful", key, colour: "#8fd3ff", before: interval ? 3 : 5, after: interval ? 2 : 5 });
+    renderDraft();
+    $("[data-panel-codes]").lastElementChild?.querySelector("input")?.select();
+  };
+});
+$("[data-add-tag]").onclick = () => {
+  const key = freeKey(new Set(draft.tags.map((tag) => tag.key)), "ABCDEFGIJKLMNOPQRSTUVWXYZ");
+  draft.tags.push({ id: slug("tag", new Set(draft.tags.map((tag) => tag.id))), label: "New tag", key });
+  renderDraft();
+  $("[data-panel-tags]").lastElementChild?.querySelector("input")?.select();
+};
+$("[data-panel-cancel]").onclick = () => dialog.close();
+$("[data-panel-form]").onsubmit = async (submit) => {
+  submit.preventDefault();
+  const ids = new Set(draft.codes.map((code) => code.id));
+  const tagIds = new Set(draft.tags.map((tag) => tag.id));
+  const next = {
+    version: 1, id: panel.id, name: $("[data-panel-edit-name]").value.trim(),
+    // A new code's event type follows its name; links to removed codes or tags are dropped.
+    codes: draft.codes.map((code) => {
+      const item = { ...code, type: code.type === "New code" || code.type === "New interval" ? code.label : code.type };
+      if (item.tags) item.tags = item.tags.filter((id) => tagIds.has(id));
+      if (item.stops) item.stops = item.stops.filter((id) => ids.has(id));
+      if (item.starts) item.starts = item.starts.filter((link) => ids.has(link.code));
+      return item;
+    }),
+    tags: draft.tags.map((tag) => {
+      const item = { ...tag };
+      if (!item.group) delete item.group; else item.group = slug(item.group, new Set());
+      return item;
+    }),
+  };
+  try {
+    await applyPanel(next, "edited");
+    dialog.close();
+  } catch (error) {
+    const box = $("[data-panel-error]");
+    box.textContent = error.message;
+    box.hidden = false;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Start
@@ -533,7 +901,7 @@ const start = async () => {
     const result = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}/codes`);
     project = result.project;
     rememberProject(project);
-    codes = result.codes;
+    usePanel(result.panel, result.squads);
     for (const event of result.events) events.set(event.id, event);
     saved = new Set(result.events.map((event) => event.id));
     leads = result.leads || {};
@@ -549,6 +917,7 @@ const start = async () => {
     $("[data-source-row]").hidden = available.length < 2;
     renderGrid();
     renderLeads();
+    loadTemplates();
     $("[data-code-workspace]").hidden = false;
     render();
     await loadSource(available[0].key);

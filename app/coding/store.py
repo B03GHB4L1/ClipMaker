@@ -14,6 +14,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import templates
+
 FILE_NAME = "coded_events.json"
 VERSION = 1
 MAX_EVENTS = 5000
@@ -30,37 +32,14 @@ EVENT_ID = re.compile(r"^c[0-9a-z]{6,32}$")
 # Analyst Room tabs that need only time and type. `before` and `after` are the
 # lead-in and lead-out a clip of the code gets (a project can change them).
 # Starting an interval stops the running one of its `group` (Possession for one
-# team stops it for the other). Templates replace this list in C3.
-def _instant(code_id, label, kind, outcome, key, colour, before, after):
-    return {"id": code_id, "label": label, "kind": "instant", "type": kind, "outcome": outcome, "key": key,
-            "colour": colour, "before": before, "after": after}
-
-
-def _interval(code_id, label, kind, key, colour, group=None):
-    return {"id": code_id, "label": label, "kind": "interval", "type": kind, "outcome": "Successful", "key": key,
-            "colour": colour, "before": 3, "after": 2, "group": group or code_id}
-
-
-CODES: list[dict[str, Any]] = [
-    _instant("goal", "Goal", "Goal", "Successful", "g", "#c8f135", 10, 6),
-    _instant("shot-on", "Shot on target", "SavedShot", "Successful", "s", "#5fb3ff", 6, 4),
-    _instant("shot-off", "Shot off target", "MissedShot", "Unsuccessful", "d", "#7fa6c9", 6, 4),
-    _instant("save", "Save", "Save", "Successful", "k", "#9b8cff", 6, 4),
-    _instant("corner", "Corner", "CornerAwarded", "Successful", "c", "#ffb84d", 3, 10),
-    _instant("foul", "Foul", "Foul", "Unsuccessful", "f", "#ff8a65", 5, 4),
-    _instant("card", "Card", "Card", "Successful", "y", "#ffd84d", 8, 4),
-    _instant("offside", "Offside", "OffsideGiven", "Successful", "o", "#c9a0dc", 6, 3),
-    _instant("won", "Ball won", "BallRecovery", "Successful", "b", "#4fd1a5", 4, 6),
-    _instant("lost", "Ball lost", "Dispossessed", "Successful", "l", "#e57373", 4, 6),
-    _instant("moment", "Key moment", "Key moment", "Successful", "m", "#e8eae5", 5, 5),
-    _interval("possession", "Possession", "Possession", "p", "#8fd3ff"),
-    _interval("build-up", "Build-up", "Build-up", "u", "#a5e887"),
-    _interval("press", "Pressing", "Pressing phase", "r", "#ffa07a"),
-    _interval("transition", "Transition", "Transition", "x", "#f5c26b"),
-]
+# team stops it for the other). A project codes with its own copy of a template
+# (templates.py, C3); without one it codes with the built-in match panel.
+CODES: list[dict[str, Any]] = templates.built_in()["codes"]
 CODE_IDS = {code["id"] for code in CODES}
 CODE_BY_ID = {code["id"]: code for code in CODES}
 MAX_LEAD = 60
+MAX_SQUAD = 60
+MAX_EVENT_TAGS = 10
 
 _lock = threading.Lock()
 
@@ -70,22 +49,31 @@ def path_for(project_folder: Path) -> Path:
 
 
 def empty() -> dict[str, Any]:
-    return {"version": VERSION, "events": [], "leads": {}}
+    return {"version": VERSION, "events": [], "leads": {}, "panel": templates.built_in(), "squads": {"home": [], "away": []}}
+
+
+def panel_codes(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {code["id"]: code for code in (document.get("panel") or templates.built_in())["codes"]}
+
+
+def panel_tags(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {tag["id"]: tag for tag in (document.get("panel") or templates.built_in()).get("tags", [])}
 
 
 def lead(document: dict[str, Any], code_id: str) -> tuple[int, int]:
     """(before, after) seconds of a code's clips: the project's choice, else the code's default."""
-    code = CODE_BY_ID[code_id]
+    code = panel_codes(document)[code_id]
     chosen = (document.get("leads") or {}).get(code_id) or {}
     return int(chosen.get("before", code["before"])), int(chosen.get("after", code["after"]))
 
 
-def clean_leads(value: Any) -> dict[str, dict[str, int]]:
+def clean_leads(value: Any, code_ids: set[str] | None = None) -> dict[str, dict[str, int]]:
+    code_ids = CODE_IDS if code_ids is None else code_ids
     if not isinstance(value, dict):
         raise ValueError("Lead-in and lead-out must be set per code.")
     clean = {}
     for code_id, item in value.items():
-        if code_id not in CODE_IDS or not isinstance(item, dict) or set(item) - {"before", "after"}:
+        if code_id not in code_ids or not isinstance(item, dict) or set(item) - {"before", "after"}:
             raise ValueError("Lead-in and lead-out are set per known code, as before and after.")
         entry = {}
         for side in ("before", "after"):
@@ -98,18 +86,51 @@ def clean_leads(value: Any) -> dict[str, dict[str, int]]:
     return clean
 
 
-def clean_event(value: Any, max_seconds: float = MAX_SECONDS) -> dict[str, Any]:
-    """One coded event, or ValueError saying what is wrong with it."""
+def _shirt(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) or not 0 <= value <= 99:
+        raise ValueError("A shirt number is a whole number from 0 to 99.")
+    return int(value)
+
+
+def clean_squads(value: Any) -> dict[str, list[dict[str, Any]]]:
+    """Shirt numbers and names of each team, for number keys after a code."""
+    if not isinstance(value, dict) or set(value) - {"home", "away"}:
+        raise ValueError("Squads are a home and an away list.")
+    squads = {}
+    for side in ("home", "away"):
+        players = value.get(side) or []
+        if not isinstance(players, list) or len(players) > MAX_SQUAD:
+            raise ValueError(f"A squad lists at most {MAX_SQUAD} players.")
+        clean, numbers = [], set()
+        for player in players:
+            if not isinstance(player, dict) or set(player) - {"number", "name"}:
+                raise ValueError("Each player has a shirt number and a name.")
+            number = _shirt(player.get("number"))
+            if number in numbers:
+                raise ValueError(f"Shirt number {number} is listed twice in one squad.")
+            numbers.add(number)
+            name = str(player.get("name") or "").strip()
+            if len(name) > 40 or any(ch in name for ch in "<>") or any(ord(ch) < 32 for ch in name):
+                raise ValueError("A player's name is at most 40 characters, without < or >.")
+            clean.append({"number": number, "name": name})
+        squads[side] = sorted(clean, key=lambda player: player["number"])
+    return squads
+
+
+def clean_event(value: Any, max_seconds: float = MAX_SECONDS, document: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One coded event, checked against the project's panel, or ValueError saying what is wrong with it."""
+    codes = panel_codes(document or {})
+    tags = panel_tags(document or {})
     if not isinstance(value, dict):
         raise ValueError("Each coded event must be an object.")
-    unknown = set(value) - {"id", "code", "team", "src", "t", "end"}
+    unknown = set(value) - {"id", "code", "team", "src", "t", "end", "tags", "player"}
     if unknown:
         raise ValueError(f"Unknown coded event field: {sorted(unknown)[0]}.")
     event_id = str(value.get("id") or "")
     if not EVENT_ID.match(event_id):
         raise ValueError("Coded event ids are 'c' followed by 6 to 32 letters or digits.")
     code = str(value.get("code") or "")
-    if code not in CODE_IDS:
+    if code not in codes:
         raise ValueError(f"Unknown code: {code[:40] or '(none)'}.")
     team = str(value.get("team") or "")
     if team not in TEAMS:
@@ -124,7 +145,7 @@ def clean_event(value: Any, max_seconds: float = MAX_SECONDS) -> dict[str, Any]:
     if not math.isfinite(seconds) or seconds < 0 or seconds > max_seconds:
         raise ValueError("A coded event's time must be inside the video.")
     event = {"id": event_id, "code": code, "team": team, "src": src, "t": round(seconds, 3)}
-    if CODE_BY_ID[code]["kind"] == "interval":
+    if codes[code]["kind"] == "interval":
         end = value.get("end")
         if end is not None:  # None: still running
             try:
@@ -137,6 +158,20 @@ def clean_event(value: Any, max_seconds: float = MAX_SECONDS) -> dict[str, Any]:
         event["end"] = end
     elif value.get("end") is not None:
         raise ValueError("Only interval codes have an end.")
+    if value.get("tags"):
+        chosen = value["tags"]
+        if not isinstance(chosen, list) or len(chosen) > MAX_EVENT_TAGS:
+            raise ValueError(f"A coded event has at most {MAX_EVENT_TAGS} tags.")
+        chosen = list(dict.fromkeys(str(tag) for tag in chosen))
+        missing = [tag for tag in chosen if tag not in tags]
+        if missing:
+            raise ValueError(f"The code panel has no tag {missing[0][:40]}.")
+        groups = [tags[tag]["group"] for tag in chosen if tags[tag].get("group")]
+        if len(groups) != len(set(groups)):
+            raise ValueError("A coded event takes one tag of each group (Left or Right, not both).")
+        event["tags"] = chosen
+    if value.get("player") is not None:
+        event["player"] = _shirt(value["player"])
     return event
 
 
@@ -148,6 +183,9 @@ def read(project_folder: Path) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("version") != VERSION or not isinstance(value.get("events"), list):
         raise ValueError("The saved codes are invalid; they have not been overwritten.")
     value.setdefault("leads", {})
+    if value.get("panel") is None:
+        value["panel"] = templates.built_in()
+    value.setdefault("squads", {"home": [], "away": []})
     return value
 
 
@@ -167,13 +205,14 @@ def _write(project_folder: Path, value: dict[str, Any]) -> None:
 
 
 def apply(project_folder: Path, changes: Any, max_seconds: float = MAX_SECONDS) -> dict[str, Any]:
-    """Apply a batch ``{"add": [...], "update": [...], "delete": [ids], "leads": {...}}`` and save.
+    """Apply a batch ``{"add", "update", "delete", "leads", "panel", "squads"}`` and save.
 
     The whole batch is checked before anything is written: one bad event
-    leaves the saved codes as they were."""
-    if not isinstance(changes, dict) or set(changes) - {"add", "update", "delete", "leads"}:
+    leaves the saved codes as they were. A new panel is refused while any
+    event uses a code or tag it does not have. In an update, ``tags: []`` and
+    ``player: null`` clear those fields."""
+    if not isinstance(changes, dict) or set(changes) - {"add", "update", "delete", "leads", "panel", "squads"}:
         raise ValueError("Send codes as add, update and delete lists.")
-    leads = clean_leads(changes["leads"]) if "leads" in changes else None
     add = changes.get("add") or []
     update = changes.get("update") or []
     delete = changes.get("delete") or []
@@ -181,26 +220,42 @@ def apply(project_folder: Path, changes: Any, max_seconds: float = MAX_SECONDS) 
         raise ValueError("Send codes as add, update and delete lists.")
     if len(add) + len(update) + len(delete) > MAX_CHANGES:
         raise ValueError(f"Send at most {MAX_CHANGES} code changes at once.")
+    panel = templates.clean(changes["panel"]) if "panel" in changes else None
+    squads = clean_squads(changes["squads"]) if "squads" in changes else None
     with _lock:
         document = read(project_folder)
+        if panel is not None:
+            document["panel"] = panel
+        if squads is not None:
+            document["squads"] = squads
+        code_ids = set(panel_codes(document))
+        leads = clean_leads(changes["leads"], code_ids) if "leads" in changes else None
         events = {event["id"]: event for event in document["events"] if isinstance(event, dict) and "id" in event}
         for event_id in delete:
             events.pop(str(event_id), None)  # already gone is fine: a repeated delete
         for item in update:
             if not isinstance(item, dict) or str(item.get("id") or "") not in events:
                 raise ValueError("That coded event no longer exists.")
-            events[item["id"]] = clean_event({**events[item["id"]], **item}, max_seconds)
+            events[item["id"]] = clean_event({**events[item["id"]], **item}, max_seconds, document)
         for item in add:
-            event = clean_event(item, max_seconds)
+            event = clean_event(item, max_seconds, document)
             if event["id"] in events:
                 raise ValueError("A coded event with that id already exists.")
             events[event["id"]] = event
+        if panel is not None:
+            for event_id, event in events.items():
+                try:
+                    events[event_id] = clean_event(event, max_seconds, document)
+                except ValueError:
+                    raise ValueError("Some coded events use codes or tags this panel does not have; "
+                                     "delete or recode them first.") from None
         if len(events) > MAX_EVENTS:
             raise ValueError(f"A project holds at most {MAX_EVENTS} coded events.")
         ordered = sorted(events.values(), key=lambda event: (SOURCE_KEYS.index(event["src"]), event["t"], event["id"]))
-        merged_leads = dict(document.get("leads") or {})
+        merged_leads = {code_id: entry for code_id, entry in (document.get("leads") or {}).items() if code_id in code_ids}
         for code_id, entry in (leads or {}).items():
             merged_leads[code_id] = {**merged_leads.get(code_id, {}), **entry}
-        document = {"version": VERSION, "events": ordered, "leads": merged_leads}
+        document = {"version": VERSION, "events": ordered, "leads": merged_leads,
+                    "panel": document["panel"], "squads": document["squads"]}
         _write(project_folder, document)
         return document
