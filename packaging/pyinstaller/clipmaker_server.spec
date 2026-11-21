@@ -44,6 +44,7 @@ hiddenimports = [
     "coding",
     "coding.store",
     "coding.to_events",
+    "coding.templates",
     "cv2",
     "tkinter",
     "tkinter.filedialog",

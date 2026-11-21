@@ -119,7 +119,13 @@ locations were clicked; the rest show their usual "no data" message.
   rows are cut at their exact video time (`clipmaker_core.coded_video_time`), so
   shootout codes do not depend on the first-kick marker; a frame nudge uses the
   video's measured frame length (1/25 s until it has played).
-- **C3** Tags, linked codes, templates (save, import, export), squad list.
+- **C3** Tags, linked codes, templates (save, import, export), squad list. Done 2026-11-21.
+  Panels live in `app/coding/templates.py` (built in: Match, Set pieces, Training,
+  Goalkeeper; the analyst's own in `code-templates/`). A project keeps its own copy
+  and refuses a panel that lacks codes it has used. A tag can set the outcome or one
+  of Filter's qualifier columns; each qualifier still applies to its own event types
+  (Big chances to shots, Headers to passes). The in-app editor changes names, keys,
+  colours, codes and tags; links between codes are edited in an exported file.
 - **C4** Pitch location clicks; "both" source merging with scraped data.
 
 ### Tests
