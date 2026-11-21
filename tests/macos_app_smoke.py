@@ -130,8 +130,13 @@ def main() -> int:
                               headers={"Content-Type": "application/json"}, method="POST")
             with urlopen(created, timeout=10) as response:
                 project = json.loads(response.read())["project"]
-            saved = data_dir / "projects" / project["id"] / "project.json"
-            assert saved.is_file(), "The engine did not save projects in the folder the app was given"
+            # Homebrew's launcher is given --data-dir and saves straight into the folder. The app
+            # with the engine inside runs from that folder and keeps projects in the engine's own
+            # .clipmaker-data subfolder, the same place real installs keep them.
+            candidates = [data_dir / "projects" / project["id"] / "project.json",
+                          data_dir / ".clipmaker-data" / "projects" / project["id"] / "project.json"]
+            saved = next((path for path in candidates if path.is_file()), candidates[0])
+            assert saved.is_file(), f"The engine did not save projects in the folder the app was given: {[str(path) for path in candidates]}"
             stage(evidence, f"project saved at {saved}")
             with urlopen(f"http://127.0.0.1:{port}/", timeout=5) as response:
                 assert b"VizorPlay" in response.read(), "The engine did not serve the VizorPlay page"
