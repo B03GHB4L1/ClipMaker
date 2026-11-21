@@ -128,8 +128,43 @@ export const saveImage = async (image, name) => {
 // Hints such as "Hover points for event details." only make sense in the app.
 const HOVER_HINT = /[^.]*\bhover\b[^.]*\.?/gi;
 const NOTE_ROOM = 40; // bottom margin once a note under the chart is gone
+// Pitch maps: the picture is cropped around the pitch, but stays a landscape frame
+// at least this wide for its height, and wide enough for the title and note.
+const PITCH_PICTURE_RATIO = 1.4;
+const MIN_PICTURE_WIDTH = 760;
+const SIDE = 36; // px of background beside the pitch at least
+const TITLE_ROOM = 78; // title and scope line above the pitch
 
-/** The chart as it is drawn in the app, at its on-screen size, minus hover hints. */
+/** A pitch map cropped to the pitch: the app's wide frame leaves empty bands beside it. */
+const cropToPitch = (chart, layout) => {
+  const full = chart._fullLayout || {};
+  const plot = full._size;
+  const pitchWidth = full.xaxis?._length;
+  const pitchHeight = full.yaxis?._length;
+  if (!plot || !pitchWidth || !pitchHeight) return;
+  const labelRoom = layout.annotations.some((note) => note.text === "ATTACK ->") ? 26 : 0;
+  const note = layout.annotations.some((note) => note.yref === "paper" && note.y < 0);
+  // A side legend widened the right margin; keep that room.
+  const legendRoom = Math.max(0, plot.r - (chart.layout.margin?.r ?? 80));
+  const top = TITLE_ROOM + labelRoom;
+  const bottom = note ? Math.round(pitchHeight * 0.08) + 44 : SIDE;
+  const height = Math.round(pitchHeight + top + bottom);
+  const width = Math.round(Math.max(MIN_PICTURE_WIDTH, pitchWidth + 2 * SIDE + legendRoom, height * PITCH_PICTURE_RATIO));
+  const side = Math.floor((width - legendRoom - pitchWidth) / 2);
+  Object.assign(layout, {
+    width,
+    height,
+    margin: { ...chart.layout.margin, l: side, r: side + legendRoom, t: top, b: bottom, autoexpand: false },
+    // Plotly writes the on-screen shrunken domains back into the layout; the
+    // cropped frame already has the pitch's shape, so the pitch gets all of it.
+    xaxis: { ...layout.xaxis, domain: [0, 1] },
+    yaxis: { ...layout.yaxis, domain: [0, 1] },
+    // Pinned to the top in pixels, so it keeps its place in the shorter frame.
+    title: layout.title && { ...layout.title, y: 1, yref: "container", yanchor: "top", pad: { t: 22 } },
+  });
+};
+
+/** The chart as it is drawn in the app, minus hover hints; pitch maps cropped to the pitch. */
 export const exportFigure = (chart) => {
   const full = chart._fullLayout || {};
   const layout = { ...chart.layout, width: Math.round(full.width || chart.clientWidth || 1200),
@@ -143,6 +178,10 @@ export const exportFigure = (chart) => {
     if (note.yref === "paper" && note.y < 0) droppedBelow = true;
     return [];
   });
+  if (chart.layout.yaxis?.scaleanchor === "x") {
+    cropToPitch(chart, layout);
+    return { data: chart.data, layout, config: { staticPlot: true } };
+  }
   const below = layout.annotations.some((note) => note.yref === "paper" && note.y < 0);
   const bottom = full.margin?.b ?? chart.layout.margin?.b;
   if (droppedBelow && !below && bottom > NOTE_ROOM) {
