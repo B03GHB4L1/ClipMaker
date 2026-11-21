@@ -266,12 +266,27 @@ pub fn run() {
                     } else {
                         "backend/vizorplay-engine"
                     };
-                    let server = app.path().resolve(executable, BaseDirectory::Resource).map_err(|error| {
-                        let resource_dir = app.path().resource_dir();
-                        std::io::Error::other(format!(
-                            "could not locate the bundled engine '{executable}' (resource folder: {resource_dir:?}): {error}"
-                        ))
-                    })?;
+                    let server = match app.path().resolve(executable, BaseDirectory::Resource) {
+                        Ok(server) => server,
+                        Err(error) => {
+                            // Tauri reports every failure here as "unknown path". Look beside the
+                            // running executable ourselves (Contents/MacOS/../Resources on a Mac)
+                            // and keep the underlying error if that fails too.
+                            let beside = std::env::current_exe().and_then(|exe| {
+                                exe.parent()
+                                    .ok_or_else(|| std::io::Error::other("the executable has no folder"))?
+                                    .join("../Resources")
+                                    .join(executable)
+                                    .canonicalize()
+                                    .map_err(|e| std::io::Error::new(e.kind(), format!("{e} (looked in {:?})", exe)))
+                            });
+                            beside.map_err(|fallback| {
+                                std::io::Error::other(format!(
+                                    "could not locate the bundled engine '{executable}': {error}; looking beside the app: {fallback}"
+                                ))
+                            })?
+                        }
+                    };
                     let mut command = Command::new(server);
                     command.args(["--port", &port.to_string()]).current_dir(data_dir);
                     (command, Duration::from_secs(90))
