@@ -675,6 +675,9 @@ and a player in front of the stand.
 Agreed order (2026-11-16). Each step gets its own plan before it starts.
 Steps 1-4 need no AI model.
 
+Steps 3-9 and picture inserts are planned in `docs/CODING_AND_PITCH_PLAN.md` (2026-11-21), where
+live recording and coding moves up to follow coding on recorded footage.
+
 1. **Telestration M0-M5** (this plan), using whichever tracker M0 picks.
 2. **Tactical board and inserts.** Freezes generalise to *inserts*: a segment
    in the exported clip held on a source frame (freeze), an image (for example
@@ -716,10 +719,7 @@ Steps 1-4 need no AI model.
    coding panel.
 9. **Presentation builder.** Ordered annotated clips and boards exported as
    one video, extending the existing reel code (`analysis_reel`).
-10. **Streaming to other devices.** Opt-in "share to bench" mode with a pairing
-    code, read-only clips over the local network. Last because of
-    local-network permission prompts and the AGENTS.md rule against exposing
-    more than the app needs.
+10. ~~**Streaming to other devices.**~~ Dropped by the user on 2026-11-21.
 
 Out of scope even with models: automatic event spotting (overlaps the
 AI-filtering question), real-time tracking of live feeds (needs a GPU), ball
