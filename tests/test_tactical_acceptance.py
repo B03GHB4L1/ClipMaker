@@ -425,7 +425,7 @@ class TacticalMediaAcceptance(unittest.TestCase):
         events = [{"minute": int(row.minute), "second": int(row.second), "period": row.period} for row in top.itertuples()]
         folder = self.root / "analysis-clips"
         folder.mkdir()
-        reel = analysis_reel(project, SimpleNamespace(df_all=frame), events, kickoff_times_from_project(project),
+        reel = analysis_reel(project, SimpleNamespace(df_all=frame, timing_frame=frame), events, kickoff_times_from_project(project),
                              project["filter_settings"]["timeline_corrections"], 1, 1, folder)
         self.assert_video(reel, 4, [(.5, 1), (1.5, 1), (2.5, 0), (3.5, 0)])
 

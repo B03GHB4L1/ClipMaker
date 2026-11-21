@@ -82,6 +82,15 @@ class AnalystFrames:
     source: str = ""
     extras: dict = field(default_factory=dict)
 
+    @property
+    def timing_frame(self) -> pd.DataFrame:
+        """Rows to time clips by. ``df_all`` drops the shootout, but a shootout
+        clip needs its first kick: the penalty marker is set on that kick
+        (clipmaker_core.resolve_period_starts_for_video)."""
+        if self.pso_shots_df is None or self.pso_shots_df.empty:
+            return self.df_all
+        return pd.concat([self.df_all, self.pso_shots_df], ignore_index=True)
+
     def summary(self) -> dict:
         periods = []
         if "period" in self.df_all.columns:

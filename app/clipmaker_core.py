@@ -280,6 +280,9 @@ def _row_period_int(row):
         return period
     return PERIOD_MAP.get(row.get("period"))
 
+_SHOOTOUT_KICK_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "AttemptSaved", "Attempt"}
+
+
 def find_penalty_shootout_anchor_clock(df):
     """Return the match-clock second of the first real penalty kick in period 5."""
     if df is None or getattr(df, "empty", True):
@@ -297,7 +300,11 @@ def find_penalty_shootout_anchor_clock(df):
             continue
         item = (clock, order)
         fallback.append(item)
-        if "penalty" in event_type.lower():
+        # A kick is named as a penalty (Opta "PenaltyScored"), flagged as one
+        # (WhoScored's is_penalty), or is a shot: a card or substitution logged
+        # before the first kick must not become the anchor.
+        flagged = str(row.get("is_penalty", "")).strip().lower() in {"true", "1", "yes"}
+        if "penalty" in event_type.lower() or flagged or event_type in _SHOOTOUT_KICK_TYPES:
             candidates.append(item)
     pool = candidates or fallback
     if not pool:
