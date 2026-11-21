@@ -1,0 +1,19 @@
+[package]
+name = "vizorplay"
+version = "1.0.0"
+description = "Football video clipping and analysis workstation"
+authors = ["B4L1"]
+edition = "2021"
+
+[lib]
+name = "vizorplay_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Signed in-app updates (Windows); see src/lib.rs install_update.
+tauri-plugin-updater = "2"
+serde_json = "1"

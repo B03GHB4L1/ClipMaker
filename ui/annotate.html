@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="theme.js?v=1"></script>
+    <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
+  <title>VizorPlay - Annotate</title>
+  <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=24" />
+    <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
+  <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
+  <script type="module" src="annotate.js?v=19"></script>
+  <script type="module" src="update.js?v=1"></script>
+  <script type="module" src="audio-warm.js?v=2"></script>
+</head>
+<body class="analysis-page annotate-page">
+  <header class="filter-topbar">
+    <button type="button" class="filter-brand" data-analysis-menu aria-label="Open navigation" aria-expanded="false" aria-controls="analysis-menu"><span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span><span class="menu-dots" aria-hidden="true">•••</span></button>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-view="analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-view="tactical" data-project-navigation>Tactical</a><a class="is-active" href="/annotate.html" aria-current="page" data-annotate-nav>Annotate</a></nav>
+    <span data-annotate-status role="status">Loading clip...</span>
+  </header>
+  <nav id="analysis-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
+  <main class="analysis-main annotate-main">
+    <div class="annotate-bar">
+      <a href="/analysis.html" class="annotate-back" data-annotate-back data-project-navigation><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg><span data-back-label>Back</span></a>
+      <div class="annotate-heading">
+        <h1 data-annotate-title>Annotate</h1>
+        <span class="annotate-save" data-save-status role="status"></span>
+      </div>
+      <p class="annotate-hint" data-hint></p>
+      <div class="annotate-commands">
+        <button type="button" class="annotate-command annotate-select" data-tool="select" title="Select and move (V)" aria-pressed="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5l8.5 5-3.7 1L7 12.5z"/></svg>Select<kbd>V</kbd></button>
+        <span class="annotate-divider" aria-hidden="true"></span>
+        <button type="button" class="annotate-command" data-undo disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a3.5 3.5 0 010 7H7"/></svg></button>
+        <button type="button" class="annotate-command" data-redo disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4l3 3-3 3"/><path d="M13 7H6.5a3.5 3.5 0 000 7H9"/></svg></button>
+        <button type="button" class="annotate-command annotate-delete" data-delete disabled title="Delete the selected drawing (Delete)" aria-label="Delete drawing"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M7 7v3.5M9 7v3.5"/></svg></button>
+        <span class="annotate-divider" aria-hidden="true"></span>
+        <select class="annotate-format" data-shot-format title="Picture format" aria-label="Picture format"><option value="png">PNG</option><option value="jpeg">JPEG</option></select>
+        <button type="button" class="annotate-shot" data-screenshot><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4.5" width="12" height="9" rx="1.5"/><path d="M5.5 4.5l1-2h3l1 2"/><circle cx="8" cy="9" r="2.3"/></svg>Save<span class="annotate-wide-only"> screenshot</span></button>
+        <button type="button" class="annotate-export-button" data-export title="Export the clip with its drawings and freezes"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.8 6.8L8 10l3.2-3.2"/><path d="M2.5 11v2.5h11V11"/></svg>Export<span class="annotate-wide-only"> video</span></button>
+      </div>
+    </div>
+    <div class="annotate-export" data-export-panel hidden>
+      <span class="annotate-export-text" data-export-text role="status"></span>
+      <progress data-export-progress max="1" value="0" aria-label="Export progress"></progress>
+      <button type="button" class="annotate-export-cancel" data-export-cancel>Cancel</button>
+    </div>
+    <p class="annotate-warning" data-annotate-changed role="alert" hidden>This clip's video file has changed since it was annotated. Check that the drawings still line up.</p>
+    <p class="annotate-error" data-annotate-error role="alert" hidden></p>
+    <section class="annotate-library" data-library aria-labelledby="library-title" hidden>
+      <div class="annotate-library-head">
+        <h2 id="library-title">Sessions in this project</h2>
+        <p class="annotate-muted">Each session keeps its clips and drawings. To start one, tick clips on the Filter page and choose Annotate, or press Annotate on any clip.</p>
+      </div>
+      <p class="annotate-error" data-library-error role="alert" hidden></p>
+      <p class="annotate-library-empty" data-library-empty hidden>No clips have been annotated in this project yet.</p>
+      <ol class="annotate-sessions" data-library-list></ol>
+    </section>
+    <nav class="annotate-strip" data-clip-strip aria-label="Clips in this session" hidden></nav>
+    <div class="annotate-workspace" data-annotate-workspace hidden>
+      <div class="annotate-tools" role="toolbar" aria-label="Drawing tools" aria-orientation="vertical" data-tools>
+        <div class="annotate-tool-group" role="group" aria-labelledby="tools-draw">
+          <h2 class="annotate-group-title" id="tools-draw">Draw</h2>
+          <button type="button" data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L15.5 4.5M9 4.5h6.5V11"/></svg><span>Arrow</span><kbd>A</kbd></button>
+          <button type="button" data-tool="line" title="Line (L)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 14.5l9-9"/><circle cx="4.5" cy="15.5" r="1.6"/><circle cx="15.5" cy="4.5" r="1.6"/></svg><span>Line</span><kbd>L</kbd></button>
+          <button type="button" data-tool="freehand" title="Freehand (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 14c1.6-4.6 3.6-5.2 4.8-2.2s3 3.2 4.6-1.4 3-4.6 4.6-1.4"/></svg><span>Freehand</span><kbd>F</kbd></button>
+        </div>
+        <div class="annotate-tool-group" role="group" aria-labelledby="tools-highlight">
+          <h2 class="annotate-group-title" id="tools-highlight">Highlight</h2>
+          <button type="button" data-tool="zone" title="Zone (Z): shade an area of the pitch. Click its corners, then press Enter"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7l7.5-3.5L17 10l-5.5 6.5L3.5 13z"/></svg><span>Zone</span><kbd>Z</kbd></button>
+          <button type="button" data-tool="spotlight" title="Spotlight (S): a beam of light on one player"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.2 3h3.6l4 11M8.2 3l-4 11"/><ellipse cx="10" cy="14.6" rx="5.8" ry="2.2"/></svg><span>Spotlight</span><kbd>S</kbd></button>
+        </div>
+        <div class="annotate-tool-group" role="group" aria-labelledby="tools-write">
+          <h2 class="annotate-group-title" id="tools-write">Write</h2>
+          <button type="button" data-tool="text" title="Text (T)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 5h11M10 5v11M7.5 16h5"/></svg><span>Text</span><kbd>T</kbd></button>
+        </div>
+      </div>
+      <div class="annotate-centre">
+        <div class="annotate-stage" data-stage>
+          <video data-video preload="auto" playsinline></video>
+          <canvas data-canvas aria-label="Drawing area over the clip" tabindex="0"></canvas>
+          <textarea class="annotate-text-input" data-text-input rows="1" aria-label="Text on the clip" hidden></textarea>
+        </div>
+        <section class="annotate-calibrate" id="calibrate-panel" data-calibrate aria-labelledby="calibrate-title" hidden>
+          <div class="annotate-calibrate-head">
+            <h2 id="calibrate-title">Board from frame <span data-calib-frame></span></h2>
+            <button type="button" class="annotate-calibrate-close" data-calib-close>Cancel</button>
+          </div>
+          <p class="annotate-muted" data-calib-help></p>
+          <div class="annotate-calibrate-body">
+            <svg class="annotate-pitch" data-calib-pitch viewBox="-56 -37.5 112 75" role="group" aria-label="Pitch marks: pick one, then click it on the video"></svg>
+            <div class="annotate-calibrate-side">
+              <label class="annotate-calibrate-target" data-calib-target-row hidden>Make <select data-calib-target></select></label>
+              <p class="annotate-calibrate-state" data-calib-state role="status"></p>
+              <div class="annotate-calibrate-progress" data-calib-progress hidden>
+                <progress max="1" value="0" aria-label="Progress"></progress>
+                <button type="button" class="annotate-export-cancel" data-calib-stop>Cancel</button>
+              </div>
+              <div class="annotate-calibrate-install" data-calib-install hidden>
+                <p class="annotate-muted" data-calib-install-text></p>
+                <button type="button" class="annotate-primary" data-calib-download>Download</button>
+              </div>
+              <div class="annotate-calibrate-actions">
+                <button type="button" class="annotate-primary" data-calib-find disabled title="Place a token for each player found on this frame">Find players</button>
+                <button type="button" data-calib-empty title="A board with no players; place them with the Token tool">Empty board</button>
+                <button type="button" data-calib-remove disabled title="Remove the selected mark (Delete)">Remove mark</button>
+              </div>
+              <p class="annotate-muted annotate-calibrate-limits">Works on wide shots that show pitch lines. Players hidden behind others or outside the picture are not found; check teams after.</p>
+            </div>
+          </div>
+        </section>
+        <div class="annotate-transport" data-calib-hide>
+          <button type="button" data-step="-1" title="Back one frame (Left arrow; Shift for 1 second)" aria-label="Back one frame"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10"/><path class="is-solid" d="M12.5 3.5L6.5 8l6 4.5z"/></svg></button>
+          <button type="button" class="annotate-play" data-play aria-label="Play" title="Play or pause (Space)"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="is-solid annotate-icon-play" d="M5 3l8 5-8 5z"/><path class="annotate-icon-pause" d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
+          <button type="button" data-step="1" title="Forward one frame (Right arrow; Shift for 1 second)" aria-label="Forward one frame"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10"/><path class="is-solid" d="M3.5 3.5L9.5 8l-6 4.5z"/></svg></button>
+          <input type="range" data-scrub min="0" max="1" step="0.001" value="0" aria-label="Playhead" />
+          <output class="annotate-time" data-time>0:00.00 &middot; frame 1</output>
+        </div>
+        <section class="annotate-timeline" aria-label="Timeline" data-calib-hide>
+          <div class="annotate-row annotate-parts">
+            <span class="annotate-row-name">Parts</span>
+            <div class="annotate-lane" data-parts-lane role="group" aria-label="Parts of the clip"></div>
+            <button type="button" class="annotate-row-action" data-split title="Cut the clip into two parts at the playhead (X)">Split</button>
+          </div>
+          <div class="annotate-row">
+            <span class="annotate-row-name">Freezes</span>
+            <div class="annotate-lane" data-lane data-empty="Freezes and boards show here" aria-hidden="true"><span class="annotate-lane-head" data-lane-head></span></div>
+            <span class="annotate-row-end"></span>
+          </div>
+          <div class="annotate-row annotate-drawings">
+            <span class="annotate-row-name">Drawings</span>
+            <div class="annotate-lane" data-drawing-lane data-empty="Drawings show here as bars" aria-hidden="true"><span class="annotate-lane-head" data-drawing-head></span></div>
+            <span class="annotate-row-end"></span>
+          </div>
+          <div class="annotate-players" data-players></div>
+          <p class="annotate-track-status" data-track-status role="status" hidden></p>
+        </section>
+      </div>
+      <section class="annotate-player-tools" aria-label="Player tools and inserts">
+        <div class="annotate-side-group" role="toolbar" aria-labelledby="players-title">
+          <h2 id="players-title">Mark a player</h2>
+          <div class="annotate-player-buttons">
+            <button type="button" data-tool="ring" title="Ring a player (R)"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6" r="2.2"/><path d="M10 8.5v4"/><ellipse cx="10" cy="14.5" rx="7" ry="2.6"/></svg><span class="annotate-option">Ring<small>Circle under a player</small></span><kbd>R</kbd></button>
+            <button type="button" data-tool="follow" title="Follow a player (P): drag a box around them"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4"/><circle cx="10" cy="8" r="2"/><path d="M6.8 14c.3-1.9 1.6-3 3.2-3s2.9 1.1 3.2 3"/></svg><span class="annotate-option">Follow<small>Ring that tracks them</small></span><kbd>P</kbd></button>
+            <button type="button" data-tool="token" title="Player token (K): click to place a numbered player"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M8.6 7.6L10.4 6.5v7"/></svg><span class="annotate-option">Token<small>Numbered player disc</small></span><kbd>K</kbd></button>
+          </div>
+        </div>
+        <div class="annotate-side-group">
+          <h2>Add at this frame</h2>
+          <div class="annotate-player-buttons">
+            <button type="button" class="annotate-freeze" data-freeze title="Hold this frame still (silent) while drawings animate"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M8.2 7.5v5M11.8 7.5v5"/></svg><span class="annotate-option">Freeze frame<small>Pause the picture</small></span></button>
+            <button type="button" class="annotate-board" data-board aria-expanded="false" aria-controls="calibrate-panel" title="Insert a tactical board after this frame, with the players placed where they stand"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1"/><path d="M10 4v12"/><circle cx="10" cy="10" r="2.2"/></svg><span class="annotate-option">Board from frame<small>Players on a tactics board</small></span></button>
+          </div>
+        </div>
+      </section>
+      <aside class="annotate-inspector" aria-label="Drawing settings">
+        <details open>
+          <summary data-inspector-title>New drawing</summary>
+          <div class="annotate-fields" data-style-fields></div>
+        </details>
+        <details open data-follow-panel hidden>
+          <summary>Follow a player</summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-follow-state></p>
+            <button type="button" class="annotate-primary" data-follow-start>Follow player</button>
+            <label data-follow-linked>Name <input type="text" data-follow-label maxlength="40" placeholder="Player" /></label>
+            <div class="annotate-follow-group" data-follow-linked>
+              <h3>Check the tracking</h3>
+              <p class="annotate-muted">Amber marks on the timeline are frames the tracker was unsure of.</p>
+              <span class="annotate-pair">
+                <button type="button" data-follow-confirm title="The drawing is on the right player on this frame: clear its check">Confirm this frame</button>
+                <button type="button" data-follow-next title="Jump to the next frame the tracker was unsure of">Next frame to check</button>
+              </span>
+            </div>
+            <div class="annotate-follow-group" data-follow-linked>
+              <h3>Fix the tracking</h3>
+              <p class="annotate-muted">Drag a corner of the dashed box to fit it tightly to the player, head to boots. Drag the round foot handle to move it.</p>
+              <button type="button" data-follow-fit title="Find the player's outline on this frame, fit the dashed box to it, and track again from there">Fit box to player</button>
+              <span class="annotate-pair">
+                <button type="button" data-follow-retrack title="Drag the drawing onto the player first, then track the rest of the clip again from this frame">Track again from here</button>
+                <button type="button" data-follow-stop title="Keep the drawing where it is now and stop following">Stop following</button>
+              </span>
+            </div>
+          </div>
+        </details>
+        <details open data-timing hidden>
+          <summary>Timing and animation</summary>
+          <div class="annotate-fields">
+            <label>From (s) <span class="annotate-pair"><input type="number" data-from min="0" step="0.04" /><button type="button" data-from-here title="Set to the current frame">Here</button></span></label>
+            <label>Until (s) <span class="annotate-pair"><input type="number" data-to min="0" step="0.04" /><button type="button" data-to-here title="Set to the current frame">Here</button></span></label>
+            <label>Comes in <select data-anim-in><option value="none">At once</option><option value="fade">Fade</option><option value="draw">Draw on</option><option value="grow">Grow</option><option value="slide">Slide in</option></select></label>
+            <label>Goes out <select data-anim-out><option value="none">At once</option><option value="fade">Fade</option></select></label>
+            <label data-anim-detail>Animation (s) <input type="number" data-anim-seconds min="0.05" max="5" step="0.05" /></label>
+            <label data-anim-detail>Easing <select data-ease><option value="ease-out">Ease out</option><option value="ease-in-out">Ease in and out</option><option value="linear">Even</option></select></label>
+            <label class="annotate-check" data-pulse-row><input type="checkbox" data-pulse /> Pulse</label>
+          </div>
+        </details>
+        <details data-parts-panel>
+          <summary>Parts <span class="annotate-count" data-parts-count>(1)</span></summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-parts-empty>The clip is one part. Press Split (X) at the playhead to cut it, then trim, move, repeat or remove parts.</p>
+            <ol class="annotate-list annotate-parts-list" data-parts-list></ol>
+          </div>
+        </details>
+        <details data-freeze-panel>
+          <summary>Freezes and boards <span class="annotate-count" data-freeze-count>(0)</span></summary>
+          <div class="annotate-fields">
+            <p class="annotate-muted" data-freeze-empty>Freeze frame holds the picture still, without sound, for as long as you set. Board from frame inserts a tactical board.</p>
+            <ol class="annotate-list annotate-freezes" data-freeze-list></ol>
+          </div>
+        </details>
+        <details>
+          <summary>Drawings <span class="annotate-count" data-count>(0)</span></summary>
+          <ol class="annotate-list" data-list></ol>
+        </details>
+      </aside>
+    </div>
+  </main>
+  <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
+</body>
+</html>

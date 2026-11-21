@@ -1,0 +1,46 @@
+/* Theme switch and hand-tuned dark-theme rules. Loads after ui/theme-dark.css,
+   which tools/make_dark_theme.py generates from the other stylesheets. */
+
+.theme-switch {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--cm-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.theme-switch:hover { color: var(--cm-ink); border-color: currentColor; }
+.theme-switch:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --cm-paper: #121412;
+  --cm-ink: #e8eae5;
+  --cm-muted: #9ea39a;
+  --cm-rule: #2f332e;
+  --cm-surface: #1b1e1a;
+}
+:root[data-theme="dark"] body { background: var(--cm-paper); color: var(--cm-ink); }
+:root[data-theme="dark"] :is(input, select, textarea) {
+  background-color: #191c18;
+  color: var(--cm-ink);
+  border-color: var(--cm-rule);
+}
+:root[data-theme="dark"] :is(input, select, textarea):focus { border-color: #6f7769; }
+:root[data-theme="dark"] option { background: #191c18; color: var(--cm-ink); }
+:root[data-theme="dark"] ::placeholder { color: #7b8076; }
+:root[data-theme="dark"] img[src*="vizorplay-wordmark.svg"] { content: url("assets/brand/vizorplay-wordmark-on-dark.svg"); }
+:root[data-theme="dark"] img[src*="vizorplay-lockup.svg"] { content: url("assets/brand/vizorplay-lockup-on-dark.svg"); }
+:root[data-theme="dark"] img[src*="vizorplay-mark.svg"] { content: url("assets/brand/vizorplay-mark-on-dark.svg"); }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a3f38; }
+:root[data-theme="dark"] .app-footer { background: var(--cm-paper); color: var(--cm-muted); }
+/* Lime buttons keep dark text; clips keep a black surround (Annotate sessions, Players across matches). */
+:root[data-theme="dark"] .annotate-main .annotate-session-open,
+:root[data-theme="dark"] .ps-actions .ps-primary { color: #171817; }
+:root[data-theme="dark"] .ps-viewer video { background: #000; }
+:root[data-theme="dark"] .player-search::backdrop { background: rgba(0, 0, 0, 0.6); }

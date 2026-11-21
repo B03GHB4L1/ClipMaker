@@ -1,0 +1,10 @@
+[
+  {"name": "no parts plays the clip once", "frames": 100, "parts": null, "cutFrames": 100,
+   "map": [[0, 0], [37, 37], [99, 99], [150, 99]]},
+  {"name": "a cut closes up", "frames": 100, "parts": [{"from": 0, "to": 30}, {"from": 60, "to": 100}], "cutFrames": 70,
+   "map": [[0, 0], [29, 29], [30, 60], [69, 99]]},
+  {"name": "parts reordered and one repeated", "frames": 100,
+   "parts": [{"from": 60, "to": 100}, {"from": 0, "to": 30}, {"from": 0, "to": 30}], "cutFrames": 100,
+   "map": [[0, 60], [39, 99], [40, 0], [69, 29], [70, 0], [99, 29]],
+   "again": [[0, [40, 70]], [99, [39]], [59, []]]}
+]

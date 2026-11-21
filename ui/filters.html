@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="theme.js?v=1"></script>
+    <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#f4f4f0" />
+    <title>VizorPlay - Filter and Edit</title>
+    <link rel="stylesheet" href="styles.css?v=11" />
+    <link rel="stylesheet" href="filters.css?v=3" />
+    <link rel="stylesheet" href="compact.css?v=15" />
+    <link rel="stylesheet" href="design.css?v=6" />
+    <link rel="stylesheet" href="editor.css?v=14" />
+    <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
+    <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
+    <script type="module" src="filters.js?v=19"></script>
+    <script type="module" src="update.js?v=1"></script>
+    <script type="module" src="audio-warm.js?v=2"></script>
+  </head>
+  <body class="filter-page">
+    <header class="filter-topbar">
+      <button type="button" class="filter-brand" data-filter-menu aria-label="Open navigation" aria-expanded="false" aria-controls="filter-menu">
+        <span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span>
+        <span class="menu-dots" aria-hidden="true">•••</span>
+      </button>
+      <nav aria-label="Workflow">
+        <a href="/" data-project-navigation>Intake</a>
+        <a class="is-active" href="/filters.html" aria-current="page" data-project-navigation>Filter</a>
+        <a href="/analysis.html?view=analyst" data-project-navigation>Analyst</a>
+        <a href="/analysis.html?view=tactical" data-project-navigation>Tactical</a>
+        <a href="/annotate.html" data-project-navigation>Annotate</a>
+      </nav>
+      <span class="engine-state" data-engine-state>
+        <i aria-hidden="true"></i><span>Connecting engine</span>
+      </span>
+    </header>
+    <nav id="filter-menu" class="project-menu" aria-label="Primary navigation" hidden>
+      <a href="/" data-project-navigation>Match intake</a>
+      <a href="/analysis.html?view=analyst" data-project-navigation>Analyst Room</a>
+      <a href="/analysis.html?view=tactical" data-project-navigation>Tactical Lab</a>
+      <a href="/annotate.html" data-project-navigation>Annotate</a>
+      <button type="button" data-open-projects>Local projects</button>
+      <button type="button" data-new-project>New project</button>
+    </nav>
+
+    <main class="filters-main">
+      <div class="project-bar">
+        <label>Project <input data-project-name aria-label="Project name" maxlength="120" value="Untitled project" /></label>
+        <span data-project-status role="status">Local workspace</span>
+      </div>
+
+      <section class="match-context" aria-label="Selected match">
+        <label>
+          <span>Match</span>
+          <select data-match-select aria-label="Choose saved match"></select>
+        </label>
+        <div class="context-score">
+          <strong data-match-name>Loading match</strong>
+          <span data-match-score>--</span>
+        </div>
+        <div class="context-stat">
+          <span>Events</span><strong data-match-events>--</strong>
+        </div>
+        <div class="context-stat">
+          <span>Footage</span><strong data-match-video>--</strong>
+        </div>
+        <a class="context-edit" href="/">Edit intake</a>
+      </section>
+
+      <div class="workbench">
+        <form class="filter-rail" data-filter-form aria-labelledby="rail-title">
+          <header class="rail-head">
+            <h1 id="rail-title">Find clips</h1>
+            <button type="button" class="text-button" data-reset-filters>Reset all</button>
+          </header>
+          <dl class="rail-summary" aria-label="Current selection">
+            <div><dt>Team</dt><dd data-summary-team>Both teams</dd></div>
+            <div><dt>Players</dt><dd data-summary-players>All players</dd></div>
+            <div><dt>Period</dt><dd data-summary-half>Both halves</dd></div>
+            <div><dt>Actions</dt><dd data-summary-actions>All actions</dd></div>
+            <div><dt>Qualifiers</dt><dd data-summary-qualifiers>None</dd></div>
+          </dl>
+          <div class="preset-chips" role="group" aria-label="Presets">
+            <button type="button" data-preset="set-pieces">Set pieces</button>
+            <button type="button" data-preset="progression">Ball progression</button>
+            <button type="button" data-preset="attacking">Attacking chaos</button>
+            <button type="button" data-preset="defensive">Defensive display</button>
+          </div>
+
+          <div class="filter-flow">
+            <details class="filter-band" id="scope">
+              <summary class="filter-band-summary">
+                <h2>Team, players and period</h2>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content">
+                <fieldset>
+                  <legend>Team</legend>
+                  <div class="segmented-control" data-team-options></div>
+                </fieldset>
+                <fieldset>
+                  <legend>Match period</legend>
+                  <div class="segmented-control">
+                    <label><input type="radio" name="half" value="Both halves" checked /><span>Both</span></label>
+                    <label><input type="radio" name="half" value="1st half only" /><span>1st half</span></label>
+                    <label><input type="radio" name="half" value="2nd half only" /><span>2nd half</span></label>
+                  </div>
+                </fieldset>
+                <fieldset class="players-fieldset">
+                  <div class="legend-row">
+                    <legend>Players</legend>
+                    <div>
+                      <button type="button" data-select-all-players>All</button><button type="button" data-clear-players>Clear</button>
+                    </div>
+                  </div>
+                  <p class="field-note">None ticked includes every player.</p>
+                  <div class="choice-grid player-grid" data-player-options></div>
+                </fieldset>
+              </div>
+            </details>
+
+            <details class="filter-band" id="actions">
+              <summary class="filter-band-summary">
+                <h2>Action types</h2>
+                <strong class="availability" data-action-count>All</strong>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content">
+                <div class="section-tools">
+                  <button type="button" data-select-all-actions>Select all</button><button type="button" data-clear-actions>Clear</button>
+                </div>
+                <p class="field-note">Counts show the events left in your scope.</p>
+                <div class="choice-grid action-grid" data-action-options></div>
+              </div>
+            </details>
+
+            <details class="filter-band" id="qualifiers">
+              <summary class="filter-band-summary">
+                <h2>Qualifiers</h2>
+                <strong class="availability" data-qualifier-availability>Checking data</strong>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content">
+                <fieldset class="logic-control">
+                  <legend>When several apply to one action</legend>
+                  <div class="segmented-control compact">
+                    <label><input type="radio" name="qualifier-logic" value="any" checked /><span>Match any</span></label>
+                    <label><input type="radio" name="qualifier-logic" value="all" /><span>Match all</span></label>
+                  </div>
+                </fieldset>
+                <div class="qualifier-groups" data-qualifier-groups></div>
+              </div>
+            </details>
+
+            <details class="filter-band" id="location">
+              <summary class="filter-band-summary">
+                <h2>Pitch area and xT</h2>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content control-grid two-up">
+                <label><span>Pitch lane</span><select data-pitch-zone>
+                  <option value="">Any lane</option>
+                  <option>Entire Left Side</option>
+                  <option>Left Wing</option>
+                  <option>Left Half Space</option>
+                  <option>Centre</option>
+                  <option>Right Half Space</option>
+                  <option>Right Wing</option>
+                  <option>Entire Right Side</option>
+                </select></label>
+                <label><span>Pitch depth</span><select data-depth-zone>
+                  <option value="">Any depth</option>
+                  <option>Defensive Third</option>
+                  <option>Middle Third</option>
+                  <option>Attacking Third</option>
+                </select></label>
+                <label><span>Minimum xT</span><input type="number" min="0" step="0.001" value="0" data-xt-min /></label>
+                <label><span>Top N by xT</span><input type="number" min="0" step="1" value="0" data-top-n /></label>
+              </div>
+            </details>
+
+            <details class="filter-band" id="timing">
+              <summary class="filter-band-summary">
+                <h2>Clip length</h2>
+                <strong class="availability" data-timing-summary>5s + 8s</strong>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content">
+                <div class="control-grid three-up">
+                  <label><span>Seconds before</span><input type="number" min="0" max="60" value="5" data-before-buffer /></label>
+                  <label><span>Seconds after</span><input type="number" min="0" max="60" value="8" data-after-buffer /></label>
+                  <label><span>Merge gap</span><input type="number" min="0" max="60" value="6" data-min-gap /></label>
+                </div>
+                <p class="field-note">These set every clip's starting length. Fine-tune single clips on the timeline.</p>
+              </div>
+            </details>
+
+            <details class="filter-band" id="corrections">
+              <summary class="filter-band-summary">
+                <h2>Timing corrections</h2>
+                <strong class="availability" data-correction-count>None active</strong>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content">
+                <p class="field-note">If the recording doesn't match the match clock from some point on, move every event after that point in the period, so it lines back up with the recording.</p>
+                <div class="correction-list" data-correction-list></div>
+                <div class="control-grid correction-grid">
+                  <label><span>Period</span><select data-correction-period>
+                    <option value="" selected>Choose period</option>
+                    <option value="1">P1</option>
+                    <option value="2">P2</option>
+                    <option value="3">P3</option>
+                    <option value="4">P4</option>
+                    <option value="5">P5</option>
+                  </select></label>
+                  <label><span>From match clock</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-clock /></label>
+                  <label class="wide"><span>What happened to the recording</span><select data-correction-direction>
+                    <option value="" selected>Choose what happened</option>
+                    <option value="subtract">Footage is missing (stream cut out): events come earlier</option>
+                    <option value="add">Extra footage: events come later</option>
+                  </select></label>
+                  <label><span>How long</span><input type="text" placeholder="MM:SS" inputmode="numeric" data-correction-amount /></label>
+                  <label><span>Note</span><input type="text" placeholder="Optional" data-correction-note /></label>
+                  <button type="button" data-add-correction>Add correction</button>
+                </div>
+              </div>
+            </details>
+
+            <details class="filter-band snapshot-details" id="snapshots">
+              <summary class="filter-band-summary">
+                <h2 id="snapshot-title">Saved filters</h2>
+                <i aria-hidden="true"></i>
+              </summary>
+              <div class="filter-band-content snapshot-band" aria-labelledby="snapshot-title">
+                <label><span>Snapshot name</span><input type="text" placeholder="e.g. Wing attacks" data-snapshot-name /></label>
+                <button type="button" data-save-snapshot>Save</button>
+                <label><span>Saved snapshots</span><select data-snapshot-select>
+                  <option value="">No snapshots saved</option>
+                </select></label>
+                <button type="button" data-load-snapshot disabled>Load</button>
+                <button type="button" data-delete-snapshot disabled>Delete</button>
+              </div>
+            </details>
+          </div>
+
+          <div class="rail-foot">
+            <button type="submit" class="primary-button filter-preview-button">Find clips</button>
+            <p class="summary-note" data-summary-note>Find clips to build the timeline.</p>
+          </div>
+        </form>
+
+        <section class="editor" aria-labelledby="editor-title">
+          <div class="editor-empty" data-editor-empty>
+            <h2>No clips yet</h2>
+            <p>Choose what to look for, then press Find clips. Every matching moment lands on a timeline here, where you can watch it, trim it and pick what to export.</p>
+          </div>
+
+          <div class="editor-body" data-preview-results hidden>
+            <header class="editor-head">
+              <h2 id="editor-title"><span data-preview-count>0</span> <span data-preview-noun>clips</span> <span class="editor-total" data-total-duration></span></h2>
+              <button type="button" class="text-button" data-undo-remove hidden>Undo remove</button>
+              <button type="button" class="text-button" data-clear-preview>Clear timeline</button>
+            </header>
+
+            <div class="viewer">
+              <div class="viewer-frame">
+                <video data-editor-video playsinline preload="metadata" aria-label="Clip preview"></video>
+                <div class="viewer-message" data-viewer-message hidden></div>
+              </div>
+              <div class="transport">
+                <button type="button" data-prev-clip aria-label="Previous clip" title="Previous clip (Up arrow)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M13 3 6 8l7 5z" /></svg></button>
+                <button type="button" class="play-toggle" data-play-clip aria-label="Play clip" title="Play or pause (Space)"><svg viewBox="0 0 16 16" aria-hidden="true"><path data-play-icon d="M5 3l8 5-8 5z" /></svg></button>
+                <button type="button" data-next-clip aria-label="Next clip" title="Next clip (Down arrow)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10M3 3l7 5-7 5z" /></svg></button>
+                <label class="play-all"><input type="checkbox" data-play-all /><span>Play on through every clip</span></label>
+                <output class="clip-clock" data-clip-clock>0:00.0 / 0:00.0</output>
+              </div>
+            </div>
+
+            <aside class="inspector" aria-label="Selected clip">
+              <div class="trim-panel" data-trim-panel>
+                <p class="trim-title"><strong data-trim-number>Clip 1</strong> <span data-trim-label></span></p>
+                <div class="trim-fields">
+                  <fieldset class="trim-edge">
+                    <legend>Start</legend>
+                    <button type="button" data-nudge="start" data-step="-1" aria-label="Start 1 second earlier">−1s</button>
+                    <input type="text" inputmode="decimal" data-edge-input="start" aria-label="Clip start (video time)" />
+                    <button type="button" data-nudge="start" data-step="1" aria-label="Start 1 second later">+1s</button>
+                    <button type="button" data-set-edge="start" title="Shortcut: I">Set to playhead</button>
+                  </fieldset>
+                  <fieldset class="trim-edge">
+                    <legend>End</legend>
+                    <button type="button" data-nudge="end" data-step="-1" aria-label="End 1 second earlier">−1s</button>
+                    <input type="text" inputmode="decimal" data-edge-input="end" aria-label="Clip end (video time)" />
+                    <button type="button" data-nudge="end" data-step="1" aria-label="End 1 second later">+1s</button>
+                    <button type="button" data-set-edge="end" title="Shortcut: O">Set to playhead</button>
+                  </fieldset>
+                  <p class="trim-length"><span>Length</span><strong data-clip-duration>0.0s</strong></p>
+                  <div class="trim-actions">
+                    <button type="button" class="text-button" data-reset-clip>Reset timing</button>
+                    <button type="button" class="text-button danger" data-remove-clip>Remove clip</button>
+                  </div>
+                </div>
+                <div class="editor-keys">
+                  <p>Drag a clip's edges on the bar or timeline to trim it. Tick clips to build a set.</p>
+                  <dl>
+                    <div><dt><kbd>Space</kbd></dt><dd>Play or pause</dd></div>
+                    <div><dt><kbd>I</kbd> <kbd>O</kbd></dt><dd>Set start / end</dd></div>
+                    <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Seek 1 second</dd></div>
+                    <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Previous / next clip</dd></div>
+                  </dl>
+                </div>
+                <div class="render-fallback" data-render-fallback hidden>
+                  <button type="button" data-render-clip>Render this clip</button>
+                  <button type="button" data-render-download hidden>Save clip</button><button type="button" data-render-annotate hidden>Annotate</button>
+                  <span role="status" data-render-status></span>
+                </div>
+              </div>
+            </aside>
+
+            <div class="trim-strip" aria-label="Trim the selected clip">
+              <span class="trim-edge-time" data-trim-from></span>
+              <div class="trim-bar" data-trim-bar>
+                <div class="trim-region" data-trim-region></div>
+                <button type="button" class="trim-handle" data-trim-handle="start" aria-label="Drag clip start"></button>
+                <button type="button" class="trim-handle" data-trim-handle="end" aria-label="Drag clip end"></button>
+                <i class="trim-playhead" data-trim-playhead aria-hidden="true"></i>
+              </div>
+              <span class="trim-edge-time" data-trim-to></span>
+            </div>
+
+            <div class="clip-timeline">
+              <div class="timeline-head">
+                <h3>Timeline</h3>
+                <label class="zoom"><span>Zoom</span><input type="range" min="3" max="30" step="1" value="8" data-zoom aria-label="Timeline zoom" /></label>
+                <span class="timeline-select">
+                  <output data-selection-count>0 selected</output>
+                  <button type="button" class="text-button" data-select-all-clips>Select all</button>
+                  <button type="button" class="text-button" data-select-no-clips>Select none</button>
+                </span>
+              </div>
+              <ol class="timeline-track" data-clip-list aria-label="Clips in export order"></ol>
+            </div>
+
+            <div class="export-bar">
+              <fieldset>
+                <legend>Export</legend>
+                <div class="segmented-control compact">
+                  <label><input type="radio" name="export-scope" value="all" checked data-export-scope /><span data-scope-all>All clips</span></label>
+                  <label><input type="radio" name="export-scope" value="selected" data-export-scope /><span data-scope-selected>Selected</span></label>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>As</legend>
+                <div class="segmented-control compact">
+                  <label><input type="radio" name="export-as" value="reel" checked data-export-as /><span>One reel</span></label>
+                  <label><input type="radio" name="export-as" value="files" data-export-as /><span>Separate files</span></label>
+                </div>
+              </fieldset>
+              <button type="button" class="annotate-button" data-annotate-focused disabled title="Draw on the clip in the player in the analyst editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/></svg>Annotate clip</button>
+              <button type="button" class="primary-button export-button" data-export-button disabled>Export reel</button>
+
+              <details class="export-settings" id="export-settings">
+                <summary>File name, folder and quality</summary>
+                <div class="export-settings-body">
+                  <div class="folder-control">
+                    <label><span>Output folder</span><input type="text" placeholder="Videos/VizorPlay" data-output-dir /></label>
+                    <button type="button" data-browse-output>Browse</button>
+                  </div>
+                  <div class="control-grid four-up export-grid">
+                    <label><span>Reel name</span><input type="text" value="Highlights" data-output-name /></label>
+                    <label><span>Format</span><select data-output-format>
+                      <option value=".mp4">MP4 (.mp4)</option>
+                      <option value=".mov">MOV (.mov)</option>
+                      <option value=".mkv">MKV (.mkv)</option>
+                    </select></label>
+                    <label><span>Quality</span><select data-quality>
+                      <option value="balanced">Balanced (recommended)</option>
+                      <option value="small">Smaller file</option>
+                      <option value="high">High quality</option>
+                      <option value="custom">Custom</option>
+                    </select></label>
+                    <label><span>Encoder</span><select data-video-encoder>
+                      <option value="auto" selected>Automatic (graphics card when available)</option>
+                      <option value="software">Software (x264)</option>
+                    </select></label>
+                    <label><span>Encoder speed (software)</span><select data-encoder-preset>
+                      <option>ultrafast</option>
+                      <option>superfast</option>
+                      <option selected>veryfast</option>
+                      <option>faster</option>
+                      <option>fast</option>
+                      <option>medium</option>
+                      <option>slow</option>
+                    </select></label>
+                    <label><span>Video quality (CRF)</span><input type="number" min="16" max="30" value="20" data-video-crf /></label>
+                    <label><span>Audio bitrate</span><select data-audio-bitrate>
+                      <option>96k</option>
+                      <option selected>128k</option>
+                      <option>160k</option>
+                      <option>192k</option>
+                      <option>256k</option>
+                    </select></label>
+                  </div>
+                </div>
+              </details>
+
+              <section class="export-job" data-plan-output data-job-status="queued" hidden aria-label="Export progress">
+                <div class="export-job-head">
+                  <span class="export-job-icon" aria-hidden="true"></span>
+                  <div class="export-job-title" aria-live="polite">
+                    <strong data-job-state>Calculating</strong>
+                    <span data-job-detail></span>
+                  </div>
+                  <span class="export-job-percent" data-job-percent></span>
+                  <button type="button" class="text-button" data-cancel-job hidden>Cancel</button>
+                </div>
+                <div class="export-job-bar" role="progressbar" aria-label="Export progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-job-bar><i data-job-progress></i></div>
+                <p class="export-job-meta" data-job-meta></p>
+                <div class="export-done" data-export-done hidden>
+                  <div class="export-folder">
+                    <span class="export-folder-label">Saved to</span>
+                    <span class="export-folder-path" data-export-folder></span>
+                    <button type="button" data-reveal-export>Open folder</button>
+                  </div>
+                  <div class="export-files" data-export-files></div>
+                </div>
+                <details class="export-log" data-job-log>
+                  <summary>Engine log</summary>
+                  <pre data-job-logs></pre>
+                </details>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
+  </body>
+</html>

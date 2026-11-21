@@ -1,0 +1,24 @@
+name: Ubuntu package mirror fallback
+description: >
+  GitHub's Ubuntu runners download packages from an Azure mirror. When that
+  mirror cannot be reached (it has failed DNS for hours at a time), switch apt
+  to Ubuntu's main archive so the job can continue. Package signatures are
+  still checked as normal. Does nothing on other operating systems.
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        mirror_file=/etc/apt/apt-mirrors.txt
+        if [ ! -f "$mirror_file" ]; then
+          echo "No runner mirror list; apt uses its normal sources."
+          exit 0
+        fi
+        url="$(awk 'NF { print $1; exit }' "$mirror_file")"
+        if [ -n "$url" ] && curl -fsS --retry 2 --max-time 15 -o /dev/null "${url%/}/dists/$(lsb_release -cs)/Release"; then
+          echo "Runner mirror $url is reachable; keeping it."
+        else
+          echo "::warning::Runner mirror ${url:-unknown} is unreachable; using archive.ubuntu.com instead."
+          printf 'https://archive.ubuntu.com/ubuntu\n' | sudo tee "$mirror_file" >/dev/null
+        fi

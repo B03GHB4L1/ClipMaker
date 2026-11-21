@@ -1,0 +1,1087 @@
+"""CI-only browser regression for the shared desktop UI."""
+import json
+import re
+import argparse
+import os
+import struct
+from pathlib import Path
+import sys
+import tempfile
+import shutil
+import subprocess
+import imageio_ffmpeg
+import traceback
+import faulthandler
+from urllib.parse import parse_qs, urlparse
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "packaging"))
+from smoke_test import backend, fixture_csv, request
+from playwright.sync_api import sync_playwright, expect
+
+
+def stage(message):
+    print(f"E2E: {message}", flush=True)
+
+
+class SavedPicture:
+    """A chart picture the engine saved in Videos/VizorPlay, shaped like a Playwright download."""
+
+    def __init__(self, path):
+        self.path = path
+        self.suggested_filename = path.name
+
+    def failure(self):
+        return None if self.path.is_file() else f"{self.path} was not saved"
+
+    def save_as(self, destination):
+        shutil.copyfile(self.path, destination)
+
+
+def saved_picture(page, timeout=30000):
+    """Wait for the "Picture saved" pop-up and return the file it names."""
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Picture saved", timeout=timeout)
+    name = popup.locator("[data-saved-file]").text_content()
+    folder = Path(os.environ["VIZORPLAY_EXPORT_DIR"])
+    assert Path(popup.locator("[data-saved-folder]").get_attribute("title")) == folder.resolve(), "saved outside Videos/VizorPlay"
+    popup.get_by_role("button", name="Close").click()
+    expect(page.locator(".saved-popup.is-visible")).to_have_count(0)
+    return SavedPicture(folder / name)
+
+
+def validate_chart_download(download, destination, image_format):
+    """Accept a real browser download, including decoding when Pillow is installed."""
+    assert download.failure() is None, f"{image_format} download failed"
+    assert Path(download.suggested_filename).suffix.lower() == "." + image_format.lower(), download.suggested_filename
+    download.save_as(str(destination))
+    data = destination.read_bytes()
+    assert len(data) > 1024, f"{destination.name}: suspiciously small ({len(data)} bytes)"
+    if image_format == "PNG":
+        assert data.startswith(b"\x89PNG\r\n\x1a\n"), f"{destination.name}: invalid PNG signature"
+        assert data[12:16] == b"IHDR", f"{destination.name}: missing PNG header"
+        assert data.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"), f"{destination.name}: incomplete PNG"
+        dimensions = struct.unpack(">II", data[16:24])
+    else:
+        assert image_format == "GIF", image_format
+        assert data[:6] in (b"GIF87a", b"GIF89a"), f"{destination.name}: invalid GIF signature"
+        # gif.js emits a final fixed-size byte page with NUL padding after the
+        # trailer. Accept that padding; Pillow below still decodes every frame.
+        assert data.rstrip(b"\0").endswith(b";"), f"{destination.name}: incomplete GIF"
+        dimensions = struct.unpack("<HH", data[6:10])
+    assert min(dimensions) >= 200, f"{destination.name}: unexpected chart dimensions {dimensions}"
+    result = {"filename": download.suggested_filename, "bytes": len(data), "dimensions": dimensions,
+              "format": image_format, "pillow_decoded": False}
+    try:
+        from PIL import Image
+    except ImportError:
+        stage(f"{destination.name}: signature/size/dimensions passed; Pillow unavailable for decoding")
+    else:
+        with Image.open(destination) as image:
+            assert image.format == image_format and image.size == dimensions, destination.name
+            image.verify()
+        # Reopen after verify(), then force every frame to decode, not just its header.
+        with Image.open(destination) as image:
+            frames = getattr(image, "n_frames", 1)
+            if image_format == "GIF":
+                assert frames >= 2, f"{destination.name}: expected a multi-frame GIF, got {frames}"
+            for index in range(frames):
+                image.seek(index)
+                image.load()
+            assert any(low < high for low, high in image.convert("RGB").getextrema()), f"{destination.name}: blank chart"
+        result.update(pillow_decoded=True, frames=frames)
+    return result
+
+
+def exercise_event_tables(page):
+    stage("search intake events and filter the full event dialog by period")
+    page.locator('.event-browser summary').click()
+    rows = page.locator('[data-event-body] tr:visible')
+    expect(rows).to_have_count(2)
+    page.locator('[data-event-search]').fill("  gOaL  ")
+    expect(rows).to_have_count(1)
+    expect(rows.first).to_contain_text("One")
+    page.locator('[data-period-filter]').select_option("2")
+    expect(rows).to_have_count(0)
+    page.locator('[data-period-filter]').select_option("1")
+    expect(rows).to_have_count(1)
+    page.locator('[data-event-search]').fill("")
+    page.locator('[data-period-filter]').select_option("all")
+    expect(rows).to_have_count(2)
+
+    page.locator('[data-open-table]').click()
+    dialog = page.locator('[data-event-dialog]')
+    expect(dialog).to_be_visible()
+    expect(dialog.locator('[data-table-title]')).to_have_text("Home vs Away")
+    full_rows = dialog.locator('[data-full-event-body] tr:visible')
+    count = dialog.locator('[data-full-row-count]')
+    expect(count).to_have_text("2 rows shown", timeout=30000)
+    expect(full_rows).to_have_count(2)
+    dialog.locator('[data-full-event-search]').fill("  tWo  ")
+    expect(full_rows).to_have_count(1)
+    expect(full_rows.first).to_contain_text("Pass")
+    expect(count).to_have_text("1 rows shown")
+    dialog.locator('[data-full-period-filter]').select_option("2")
+    expect(full_rows).to_have_count(0)
+    expect(count).to_have_text("0 rows shown")
+    dialog.locator('[data-full-period-filter]').select_option("1")
+    expect(full_rows).to_have_count(1)
+    dialog.locator('[data-full-event-search]').fill("no matching fixture event")
+    expect(count).to_have_text("0 rows shown")
+    expect(full_rows).to_have_count(0)
+    dialog.locator('[data-full-event-search]').fill("")
+    dialog.locator('[data-full-period-filter]').select_option("all")
+    expect(full_rows).to_have_count(2)
+    expect(count).to_have_text("2 rows shown")
+    page.keyboard.press("Escape")
+    expect(dialog).not_to_be_visible()
+    page.locator('[data-open-table]').click()
+    expect(count).to_have_text("2 rows shown")
+    expect(full_rows).to_have_count(2)
+    dialog.get_by_role("button", name="Done", exact=True).click()
+    expect(dialog).not_to_be_visible()
+    page.locator('.event-browser summary').click()
+
+
+def exercise_snapshot_restore(page):
+    stage("save filter snapshot, change selection/timing, and restore after reload")
+    snapshot_name = "Browser goal timing"
+    page.locator('#snapshots summary').click()
+    page.locator('[data-snapshot-name]').fill(snapshot_name)
+    page.locator('[data-save-snapshot]').click()
+    expect(page.locator('[data-toast]')).to_have_text("Saved snapshot: " + snapshot_name)
+    expect(page.locator('[data-snapshot-select]')).to_have_value(snapshot_name)
+    page.locator('input[name="action"][value="Goal"]').uncheck()
+    page.locator('input[name="action"][value="Pass"]').check()
+    page.get_by_role("spinbutton", name="Seconds before", exact=True).fill("4")
+    page.get_by_role("spinbutton", name="Seconds after", exact=True).fill("2")
+    page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("2")
+    expect(page.locator('[data-summary-actions]')).to_have_text("Pass")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    # Wait for project restoration as well as the snapshot library before using it.
+    expect(page.locator('[data-summary-actions]')).to_have_text("Pass")
+    expect(page.locator('input[name="action"][value="Pass"]')).to_be_checked()
+    page.locator('#snapshots summary').click()
+    page.locator('[data-snapshot-select]').select_option(snapshot_name)
+    expect(page.locator('[data-load-snapshot]')).to_be_enabled()
+    page.locator('[data-load-snapshot]').click()
+    expect(page.locator('[data-toast]')).to_have_text("Loaded snapshot: " + snapshot_name)
+    expect(page.locator('[data-snapshot-select]')).to_have_value(snapshot_name)
+    expect(page.locator('[data-load-snapshot]')).to_be_enabled()
+    expect(page.locator('[data-delete-snapshot]')).to_be_enabled()
+    expect(page.locator('input[name="action"][value="Goal"]')).to_be_checked()
+    expect(page.locator('input[name="action"][value="Pass"]')).not_to_be_checked()
+    # Reload collapses the detailed controls; assert their saved values directly.
+    expect(page.locator('[data-before-buffer]')).to_have_value("1")
+    expect(page.locator('[data-after-buffer]')).to_have_value("1")
+    expect(page.locator('[data-min-gap]')).to_have_value("0")
+    expect(page.locator('[data-summary-actions]')).to_have_text("Goal")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.locator('#snapshots summary').click()
+
+
+
+def decode(path):
+    decoded = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-i", str(path), "-f", "null", "-"],
+                             capture_output=True, timeout=60)
+    assert decoded.returncode == 0 and path.stat().st_size > 0, decoded.stderr
+
+
+def duration_of(path):
+    probe = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(path)], capture_output=True, text=True, timeout=60)
+    hours, minutes, seconds = re.search(r"Duration: (\d+):(\d+):([\d.]+)", probe.stderr).groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+TIMELINE_RULES = """async () => {
+  const t = await import('/timeline.js');
+  const [clip] = t.normaliseClips([{ start: 10, end: 20, period: 2, label: 'A' }]);
+  const clips = t.normaliseClips([{ id: 4, start: 1, end: 3 }, { id: 4, start: 5, end: 9 }, { start: 11, end: 12 }]);
+  return {
+    clip,
+    ids: clips.map((item) => item.id),
+    tooShort: t.trimClip(clip, 'end', 10.2).end,
+    pastStart: t.trimClip(clip, 'start', 25).start,
+    beforeZero: t.trimClip(clip, 'start', -4).start,
+    pastFootage: t.trimClip(clip, 'end', 99, 30).end,
+    tooLong: t.trimClip(clip, 'end', 2000).end,
+    legacyRange: [...t.restoreSelection({ first: 2, last: 3 }, clips)],
+    legacyAll: [...t.restoreSelection({ first: 1, last: null }, clips)],
+    saved: [...t.restoreSelection({ selected: [5, 99] }, clips)],
+    chosen: t.exportWindows(clips, 'selected', new Set([5, 6])).map((w) => w.number),
+    all: t.exportWindows(clips, 'all').map((w) => w.number),
+    clocks: [t.parseClock('54:31.5'), t.parseClock('1:02:03'), t.parseClock('12.5'), String(t.parseClock('1:75'))],
+    formatted: [t.formatClock(3271.5), t.formatClock(3723)],
+  };
+}"""
+
+
+def exercise_timeline_rules(page):
+    """The editor's clip rules (ui/timeline.js), checked directly."""
+    stage("timeline rules: trim limits, saved selections and export numbering")
+    result = page.evaluate(TIMELINE_RULES)
+    assert result["clip"]["source_start"] == 10 and result["clip"]["source_end"] == 20, result
+    assert result["ids"] == [4, 5, 6], result  # duplicate and missing ids are replaced
+    assert result["tooShort"] == 11 and result["pastStart"] == 19 and result["beforeZero"] == 0, result
+    assert result["pastFootage"] == 30 and result["tooLong"] == 610, result
+    assert result["legacyRange"] == [5, 6] and result["legacyAll"] == [] and result["saved"] == [5], result
+    assert result["chosen"] == [2, 3] and result["all"] == [1, 2, 3], result
+    assert result["clocks"] == [3271.5, 3723, 12.5, "NaN"], result
+    assert result["formatted"] == ["54:31.5", "1:02:03.0"], result
+
+
+def exercise_clip_editor(page, evidence):
+    """Find clips, then watch, trim and export them in the timeline editor."""
+    exercise_timeline_rules(page)
+    stage("find clips and land them on the timeline")
+    page.get_by_role("button", name="Find clips", exact=True).click()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    # Rendering the timeline precedes the awaited project write; hard refresh must
+    # wait for the same completion state a user sees after saving.
+    expect(page.locator('[data-summary-note]')).to_have_text("1 clip ready to review.", timeout=30000)
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    assert page.locator('input[name="action"][value="Goal"]').is_checked()
+    expect(page.locator('[data-summary-note]')).to_have_text("1 clip ready to review.")
+    expect(page.locator('[data-editor-empty]')).to_be_hidden()
+    expect(page.locator('.clip-block')).to_have_count(1)
+    expect(page.locator('.clip-block .clip-label')).to_have_text("One - Goal @ 0:02 (P1)")
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.0s")
+
+    stage("the clip plays straight from the match footage and stops at its end")
+    video = page.locator('[data-editor-video]')
+    page.wait_for_function("document.querySelector('[data-editor-video]').readyState >= 1")
+    page.get_by_role("button", name="Play clip").click()
+    page.wait_for_function("""() => { const v = document.querySelector('[data-editor-video]');
+        return v.paused && v.currentTime >= 2.9 && v.videoWidth > 0; }""", timeout=30000)
+    assert abs(video.evaluate("(v) => v.currentTime") - 3.0) < 0.15
+    expect(page.locator('[data-trim-to]')).to_have_text("0:08")  # bounded by the 8 second footage
+
+    stage("drag the trim bar's end handle, then nudge and reset the clip")
+    handle = page.locator('[data-trim-handle="end"]')
+    box = handle.bounding_box()
+    bar = page.locator('[data-trim-bar]').bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(bar["x"] + bar["width"] - 2, box["y"] + box["height"] / 2, steps=6)
+    page.mouse.up()
+    dragged = float(page.locator('[data-clip-duration]').inner_text().rstrip("s"))
+    assert 2.5 < dragged <= 7.0, dragged  # longer, but never past the end of the 8 second footage
+    expect(page.locator('.clip-block')).to_have_class(re.compile("is-trimmed"))
+    page.get_by_role("button", name="Reset timing").click()
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.0s")
+    page.get_by_role("button", name="End 1 second later").click()
+    expect(page.locator('[data-clip-duration]')).to_have_text("3.0s")
+    page.get_by_role("slider", name="Clip 1 end").focus()
+    page.keyboard.press("ArrowLeft")
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.5s")
+    end = page.get_by_role("textbox", name="Clip end (video time)")
+    expect(end).to_have_value("0:03.5")
+    end.fill("not a time")
+    end.press("Tab")
+    expect(end).to_have_attribute("aria-invalid", "true")
+    end.fill("3.5")
+    end.press("Tab")
+    expect(end).to_have_value("0:03.5")
+
+    stage("remove a clip and undo it")
+    page.get_by_role("button", name="Remove clip").click()
+    expect(page.locator('.clip-block')).to_have_count(0)
+    page.get_by_role("button", name="Undo remove").click()
+    expect(page.locator('.clip-block')).to_have_count(1)
+    expect(page.locator('[data-clip-duration]')).to_have_text("2.5s")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+
+    stage("export the reel and decode the download")
+    with page.expect_response(lambda response: urlparse(response.url).path == "/api/jobs"
+                              and response.request.method == "POST") as started:
+        page.get_by_role("button", name="Export reel", exact=True).click()
+    assert started.value.request.post_data_json["options"]["clip_windows"][0]["end"] == 3.5
+    page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
+    # The finished card names the folder (Videos/VizorPlay by default), offers to open it,
+    # lists each file with its size and keeps the engine log folded away.
+    job = page.locator(".export-job")
+    expect(job.locator("[data-job-detail]")).to_have_text("1 file saved")
+    folder = page.locator("[data-export-folder]").text_content()
+    assert Path(folder) == Path(os.environ["VIZORPLAY_EXPORT_DIR"]).resolve(), folder  # a reel goes straight in
+    expect(job.get_by_role("button", name="Open folder")).to_be_visible()
+    expect(job.locator(".export-file span").first).to_have_text(re.compile(r"\d+(\.\d)? (B|KB|MB)$"))
+    assert job.locator("[data-job-log]").evaluate("element => !element.open")
+    with page.expect_download() as download:
+        page.locator('[data-export-files] a').first.click()
+    exported = evidence / "export.mp4"
+    download.value.save_as(str(exported))
+    decode(exported)
+    assert abs(duration_of(exported) - 2.5) < 0.3, duration_of(exported)
+
+    stage("export a ticked set as separate files, named by timeline number")
+    # With nothing ticked, "Selected" has nothing to export and cannot be chosen.
+    expect(page.locator('input[name="export-scope"][value="selected"]')).to_be_disabled()
+    expect(page.locator('[data-scope-all] .seg-count')).to_have_text("1")
+    page.get_by_role("checkbox", name="Select clip 1").check()
+    expect(page.locator('[data-scope-selected] .seg-count')).to_have_text("1")
+    expect(page.locator('input[name="export-scope"][value="selected"]')).to_be_checked()
+    page.locator('.export-bar label').filter(has_text="Separate files").click()
+    page.get_by_role("button", name="Export 1 clip", exact=True).click()
+    page.locator('[data-job-state]').filter(has_text="Export complete").wait_for(timeout=90000)
+    expect(page.locator('[data-export-files] a')).to_have_text(["01_One_-_Goal.mp4"])
+
+    stage("trim, selection and export choice survive a reload")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    page.locator('[data-preview-count]').filter(has_text="1").wait_for()
+    expect(page.get_by_role("textbox", name="Clip end (video time)")).to_have_value("0:03.5")
+    expect(page.get_by_role("checkbox", name="Select clip 1")).to_be_checked()
+    expect(page.locator('input[name="export-as"][value="files"]')).to_be_checked()
+    expect(page.get_by_role("button", name="Export 1 clip", exact=True)).to_be_enabled()
+    page.screenshot(path=str(evidence / "filters.png"))
+
+    stage("footage the player cannot decode falls back to rendering the clip")
+    page.route("**/api/files/reopen", lambda route: route.fulfill(
+        json={"file": {"name": "x.mp4", "path": "unplayable", "url": "/api/media/unplayable"}}))
+    page.reload()
+    expect(page.locator('[data-viewer-message]')).to_contain_text("cannot be played", timeout=30000)
+    page.get_by_role("button", name="Render this clip").click()
+    expect(page.locator('[data-render-status]')).to_have_text("Clip ready", timeout=60000)
+    page.wait_for_function("document.querySelector('[data-editor-video]')?.videoWidth > 0")
+    assert 2.3 <= video.evaluate("(v) => v.duration") <= 2.7
+    # "Save clip" has the engine copy the clip into Videos/VizorPlay (desktop windows
+    # ignore browser downloads) and a pop-up says where it went.
+    page.get_by_role("button", name="Save clip", exact=True).click()
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Clip saved", timeout=30000)
+    saved_name = popup.locator("[data-saved-file]").text_content()
+    assert saved_name.endswith(".mp4") and "Goal" in saved_name, saved_name
+    expect(popup.get_by_role("button", name="Open folder")).to_be_visible()
+    preview = Path(os.environ["VIZORPLAY_EXPORT_DIR"]) / saved_name
+    decode(preview)
+    shutil.copyfile(preview, evidence / "preview.mp4")
+    popup.get_by_role("button", name="Close").click()
+    expect(page.locator(".saved-popup.is-visible")).to_have_count(0)
+    page.unroute("**/api/files/reopen")
+    page.locator('.export-bar label').filter(has_text="One reel").click()
+    page.get_by_role("button", name="Select none").click()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+
+
+def exercise_native_workspace(page, base, project_id, evidence, errors):
+    stage("open native analysis workspace shell (now the Analyst Room default)")
+    console_errors = []
+    listener = lambda message: console_errors.append(message.text) if message.type == "error" else None
+    page.on("console", listener)
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
+    tabs = page.get_by_role("tablist", name="Analyst Room").get_by_role("tab")
+    expect(tabs).to_have_count(8)
+    expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
+    expect(page.locator(".native-summary")).to_contain_text("Home vs Away")
+    expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
+    assert page.locator("iframe[data-analysis-frame]").count() == 0  # No classic workspace since Phase 5.
+
+    stage("keyboard tab navigation updates URL and saved project state")
+    page.get_by_role("tab", name="Shot Map").focus()
+    page.keyboard.press("ArrowRight")
+    expect(page.get_by_role("tab", name="Pass Map")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_role("tab", name="Pass Map")).to_be_focused()
+    assert "tab=pass-map" in page.url
+    page.keyboard.press("End")
+    expect(page.get_by_role("tab", name="Comparison")).to_have_attribute("aria-selected", "true")
+    page.keyboard.press("ArrowRight")
+    expect(page.get_by_role("tab", name="Shot Map")).to_have_attribute("aria-selected", "true")
+    page.keyboard.press("ArrowLeft")
+    expect(page.get_by_role("tab", name="Comparison")).to_have_attribute("aria-selected", "true")
+    page.get_by_role("tab", name="Build-Up").click()
+    # The save starts on click (no debounce), so "Saved locally" means it landed.
+    expect(page.locator("[data-project-status]")).to_have_text("Saved locally", timeout=30000)
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
+    saved = request(base, f"/api/projects/{project_id}")["project"]["analysis_state"]
+    assert saved["analyst"]["tab"] == "build-up", saved
+    expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
+
+    stage("Tactical Lab Style Profile draws its charts")
+    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=style-profile")
+    expect(page.get_by_role("tab", name="Style Profile")).to_have_attribute("aria-selected", "true")
+    expect(page.locator(".native-tactical")).to_contain_text("Style Profile")
+    expect(page.locator(".native-tactical")).to_contain_text("Strength Signals")
+    page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 1", timeout=60000)
+    expect(page.get_by_role("link", name="Classic workspace")).to_have_count(0)
+    page.screenshot(path=str(evidence / "tactical.png"))
+
+    stage("Tactical Lab transition maps draw their points beside the controls")
+    # The pitch used to sit small in a full-width strip. This two-event project has
+    # no transitions, so the tab's view is given a small pitch map in the shape the
+    # engine sends (test_tactical_native checks real maps carry plain lists).
+    def transition_view(route):
+        result = route.fetch().json()
+        pitch = {"height": 510, "margin": {"l": 36, "r": 36, "t": 92, "b": 116},
+                 "xaxis": {"range": [0, 100], "visible": False},
+                 "yaxis": {"range": [0, 100], "visible": False, "scaleanchor": "x", "scaleratio": 0.68}}
+        result["view"].update(empty=None, elements=[
+            {"kind": "Subheader", "value": "Transitions"},
+            {"kind": "Slider", "key": "dt_seconds", "label": "Reaction window", "min": 4, "max": 15, "value": 8},
+            {"kind": "Metric", "label": "Losses Tracked", "value": "3", "delta": "", "help": ""},
+            {"kind": "Metric", "label": "Recovered", "value": "33%", "delta": "", "help": ""},
+            {"kind": "plotly", "config": {}, "figure": {"layout": pitch, "data": [
+                {"type": "scatter", "mode": "markers", "name": "Recovered", "x": [20, 50], "y": [30, 70]},
+                {"type": "scatter", "mode": "markers", "name": "Shot conceded", "x": [80], "y": [40]}]}},
+            {"kind": "Caption", "value": "Where the losses happen."}])
+        route.fulfill(json=result)
+    page.route("**/api/analysis/tactical/*-transitions", transition_view)
+    for slug, name in (("defensive-transitions", "Defensive Transitions"), ("attacking-transitions", "Attacking Transitions")):
+        page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab={slug}")
+        expect(page.get_by_role("tab", name=name)).to_have_attribute("aria-selected", "true")
+        page.wait_for_function("document.querySelectorAll('.native-pitch-layout .native-figure .scatterlayer .point').length > 0",
+                               timeout=60000)
+        shape = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          const pitch = box('.native-pitch-main .nsewdrag');
+          return {side: box('.native-pitch-side').width, main: box('.native-pitch-main').width,
+                  ratio: pitch.width / pitch.height, sideTop: box('.native-pitch-side').top, mainTop: box('.native-pitch-main').top};
+        }""")
+        assert abs(shape["ratio"] - 100 / 68) < 0.03, ("pitch is not drawn to scale", shape)
+        assert shape["main"] > 2 * shape["side"] and abs(shape["sideTop"] - shape["mainTop"]) < 2, ("map not beside the rail", shape)
+    page.screenshot(path=str(evidence / "tactical-transitions.png"))
+    page.unroute("**/api/analysis/tactical/*-transitions")
+
+    stage("Video Lab: pick a moment straight from the list, ten per page")
+    # The two-event fixture ranks no moments, so the engine's view is given 23 of them
+    # in the shape it sends (test_tactical_native checks the real rows and ids).
+    picked = []
+    def video_lab_view(route):
+        controls = json.loads(route.request.post_data or "{}").get("controls", {})
+        picked.append(controls.get("vl_selected_moment_Restarts"))
+        ids = [f"[1, {n}]" for n in range(23)]
+        result = route.fetch().json()
+        result["view"].update(empty=None, elements=[
+            {"kind": "Subheader", "value": "Video Lab"},
+            {"kind": "Selectbox", "key": "vl_playlist", "label": "Playlist", "options": ["Restarts"], "values": ["Restarts"], "value": "Restarts"},
+            {"kind": "Selectbox", "key": "vl_selected_moment_Restarts", "label": "Moment", "options": [f"m{n}" for n in range(23)],
+             "values": ids, "value": controls.get("vl_selected_moment_Restarts") or ids[0]},
+            {"kind": "Markdown", "value": "", "html": True},
+            {"kind": "MomentList", "rows": [{"id": ids[n], "pick": f"0-{n}", "time": f"{n}'00\" 1H", "player": f"Player {n}",
+                                             "moment": "Pass | Corner", "score": 1 - n / 100} for n in range(23)]},
+            {"kind": "Slider", "key": "vl_before", "label": "Before clip", "min": 0, "max": 30, "value": 8},
+            {"kind": "Slider", "key": "vl_after", "label": "After clip", "min": 4, "max": 45, "value": 14},
+            {"kind": "Button", "key": "vl_cut", "label": "Cut Moment", "disabled": False},
+            {"kind": "Button", "key": "vl_reel", "label": "Build Reel", "disabled": True}])
+        route.fulfill(json=result)
+    page.route("**/api/analysis/tactical/video-lab", video_lab_view)
+    page.goto(base + f"/analysis.html?view=tactical&project={project_id}&tab=video-lab")
+    moments = page.locator(".native-moment-list")
+    expect(moments.locator(".native-moment-rows button")).to_have_count(10)
+    expect(page.get_by_label("Moment", exact=True)).to_have_count(0)  # no separate dropdown
+    expect(moments.locator(".native-moment-rows button").first).to_have_attribute("aria-pressed", "true")
+    expect(moments.get_by_role("button", name="Show moments 21–23")).to_be_visible()
+    moments.get_by_role("button", name="Show moments 11–20").click()
+    expect(moments.locator(".native-moment-rows .native-moment-rank").first).to_have_text("11")
+    moments.locator(".native-moment-rows button").nth(2).click()
+    expect(moments.locator('.native-moment-row[aria-pressed="true"] .native-moment-rank')).to_have_text("13")
+    assert picked[-1] == "[1, 12]", picked
+    expect(moments.get_by_role("button", name="Show moments 11–20")).to_have_attribute("aria-pressed", "true")
+
+    stage("Video Lab: the reel is the moments ticked in the list")
+    build = page.get_by_role("button", name=re.compile(r"^Build reel"))
+    expect(build).to_have_text("Build reel")
+    expect(build).to_be_disabled()  # nothing ticked yet
+    summary = moments.locator(".native-reel-summary")
+    expect(summary).to_contain_text("Tick moments to add them to the reel")
+    expect(page.get_by_label("Reel moments")).to_have_count(0)  # the old slider is gone
+    moments.get_by_role("checkbox", name="Add moment 13 to the reel").check()
+    moments.get_by_role("checkbox", name="Add moment 11 to the reel").check()
+    expect(build).to_have_text("Build reel · 2")
+    expect(build).to_be_enabled()
+    expect(summary).to_contain_text("2 moments · about 0:44 · plays in match order")
+    expect(moments.locator(".native-moment-rows .native-moment-row[aria-pressed=true] .native-moment-rank")).to_have_text("13")  # ticking does not change the preview
+    expect(moments.get_by_role("button", name="Show moments 11–20, 2 in the reel")).to_be_visible()
+    moments.get_by_role("button", name="Add top 5").click()
+    expect(build).to_have_text("Build reel · 7")
+    expect(moments.get_by_role("button", name="Show moments 1–10, 5 in the reel")).to_be_visible()
+    moments.get_by_role("button", name="Clear").click()
+    expect(build).to_be_disabled()
+    moments.get_by_role("checkbox", name="Add moment 12 to the reel").check()
+    moments.get_by_role("checkbox", name="Add moment 14 to the reel").check()
+    # Picks are saved with the project, so they survive a reload.
+    page.evaluate("import('/projects.js').then((projects) => projects.flushProject())")
+    page.reload()
+    expect(build).to_have_text("Build reel · 2")
+    sent = []
+    def reel_request(route):
+        sent.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(status=400, json={"error": "No video in this test"})
+    page.route("**/api/analysis/tactical/video-lab/clip", reel_request)
+    build.click()
+    expect(page.locator(".native-tactical-media")).to_contain_text("No video in this test")
+    # That refusal was this test's own; the browser logs it as a failed request.
+    console_errors[:] = [text for text in console_errors if "status of 400" not in text]
+    assert sent[-1]["action"] == "vl_reel" and sent[-1]["controls"]["vl_reel_moments_Restarts"] == ["0-11", "0-13"], sent
+    page.unroute("**/api/analysis/tactical/video-lab/clip")
+    page.unroute("**/api/analysis/tactical/video-lab")
+
+    stage("native Shot Map: real click, detail, clip at saved buffers, PNG export")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=shot-map")
+    expect(page.locator("[data-analysis-status]")).to_have_text("Workspace ready")
+    panel = page.locator(".native-panel")
+    expect(panel.get_by_role("radiogroup", name="Team")).to_be_visible()
+    expect(page.locator(".native-stats")).to_contain_text("Goals")
+    # The shot map comes first; the xG race sits under it.
+    component = page.frame_locator(".native-map-box .native-component:nth-child(1) iframe")
+    plot = component.locator("#plot")
+    expect(plot.locator("canvas")).not_to_have_count(0, timeout=60000)
+    page.wait_for_function("parseInt(document.querySelector('.native-map-box iframe').style.height) > 200")
+    expect(page.locator(".native-stats")).to_contain_text("xG")
+    race = page.frame_locator(".native-map-box .native-component:nth-child(2) iframe").locator("#plot")
+    expect(race.locator("canvas")).not_to_have_count(0, timeout=60000)
+    assert "xG" in race.evaluate("element => window.echarts.getInstanceByDom(element).getOption().title[0].text")
+    position = plot.evaluate("""element => {
+        const chart = window.echarts.getInstanceByDom(element);
+        for (const [seriesIndex, series] of chart.getOption().series.entries()) {
+            const point = (series.data || []).find(point => point && point.customdata === 0);
+            if (point) {
+                const [x, y] = chart.convertToPixel({seriesIndex}, point.value);
+                return {x, y};
+            }
+        }
+        throw new Error('Fixture goal missing from the native shot map');
+    }""")
+    # Before anything is picked there is no Clear button, and nothing else (it used to print "null").
+    expect(page.locator(".native-picker:visible").first).not_to_contain_text("null")
+    plot.click(position=position)
+    detail = page.locator(".native-detail")
+    expect(detail).to_contain_text("One")
+    expect(detail).to_contain_text("GOAL")
+    expect(page.locator(".native-aux-box iframe")).to_be_visible()
+    expect(page.locator(".native-watch input[type=range]").first).to_have_value("1")
+    page.get_by_role("button", name="Watch", exact=True).click()
+    page.wait_for_function("document.querySelector('.native-watch video')?.duration > 0", timeout=120000)
+    duration = page.evaluate("document.querySelector('.native-watch video').duration")
+    assert 1.5 <= duration <= 2.6, duration  # 1 s before + 1 s after the 0'02" goal
+    # The clip player keeps the footage's shape (no black bars) and gets the wide column.
+    player = page.evaluate("""() => { const v = document.querySelector('.native-watch video'); const r = v.getBoundingClientRect();
+        return {width: r.width, bars: Math.abs(r.width - r.height * v.videoWidth / v.videoHeight),
+                panel: document.querySelector('.native-detail').getBoundingClientRect().width}; }""")
+    assert player["bars"] <= 2, player
+    assert player["width"] >= player["panel"] * 0.6 or player["width"] >= 640, player
+    page.get_by_role("button", name="Save clip", exact=True).click()
+    popup = page.locator(".saved-popup.is-visible")
+    expect(popup).to_contain_text("Clip saved", timeout=30000)
+    expect(popup.locator("[data-saved-file]")).to_have_text("One 0'.mp4")
+    decode(Path(os.environ["VIZORPLAY_EXPORT_DIR"]) / "One 0'.mp4")
+    page.set_viewport_size({"width": 390, "height": 844})
+    box = popup.bounding_box()
+    assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, box  # fits a phone-width window
+    page.screenshot(path=str(evidence / "clip-saved-390.png"))
+    page.set_viewport_size({"width": 1280, "height": 800})
+    popup.get_by_role("button", name="Close").click()
+    # Chart pictures are saved by the engine into Videos/VizorPlay (the desktop
+    # windows ignore browser downloads); a pop-up says where they went.
+    component.locator('[data-export="png"]').click()
+    downloads = [validate_chart_download(saved_picture(page), evidence / "native-shot-map.png", "PNG")]
+    # The GIF animations: Pulse, Still and Build are gone; Shot Flight leads on a shot map.
+    expect(component.locator('[data-export-animation] option')).to_have_text(["Shot Flight", "Match Clock"])
+    # Preview plays the animation on the chart; Stop puts the chart back. No file is made.
+    preview = component.locator('[data-export="preview"]')
+    preview.click()
+    expect(preview).to_have_text("Stop")
+    expect(component.locator('[data-export="gif"]')).to_be_disabled()
+    preview.click()
+    expect(preview).to_have_text("Preview")
+    expect(component.locator('[data-export="gif"]')).to_be_enabled()
+    # Shot Flight exercises the worker encoder and frame capture through the actual UI.
+    component.locator('[data-export-animation]').select_option("flight")
+    gif_button = component.locator('[data-export="gif"]')
+    gif_button.click()
+    downloads.append(validate_chart_download(saved_picture(page, timeout=90000), evidence / "native-shot-map.gif", "GIF"))
+    expect(gif_button).to_be_enabled()
+    expect(gif_button).to_have_text("GIF")
+    (evidence / "analyst-downloads.json").write_text(json.dumps(downloads, indent=2), encoding="utf-8")
+    page.screenshot(path=str(evidence / "native-shot-map.png"))
+    page.get_by_role("button", name="Clear selection").click()
+    expect(detail).to_be_hidden()
+
+    stage("native Comparison draws its Plotly charts and Top 5 tables")
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}&tab=comparison")
+    page.wait_for_function("document.querySelectorAll('.native-figure .main-svg').length >= 3", timeout=60000)
+    expect(page.locator(".native-table").first).to_be_visible()
+    expect(page.get_by_role("button", name="Show top moments").first).to_be_visible()
+    # Role only ranks the Top 5 Moments, so its picker sits in each moment column, not the filters.
+    expect(page.locator(".native-comparison-controls").get_by_text("Role", exact=False)).to_have_count(0)
+    rank_as = page.locator(".native-moments").get_by_text("Rank moments as")
+    assert rank_as.count() <= 2, rank_as.count()  # one per non-goalkeeper column
+    page.screenshot(path=str(evidence / "native-comparison.png"))
+    # Plotly's camera button (it downloads) is replaced by one that saves through the engine.
+    expect(page.locator('.native-figure [data-title="Download plot as a png"]')).to_have_count(0)
+    radar_save = page.locator('.native-figure [data-title="Save as PNG"]').first
+    radar_save.scroll_into_view_if_needed()
+    page.locator(".native-figure").first.hover()
+    radar_save.click()
+    radar = saved_picture(page)
+    radar.save_as(str(evidence / "native-radar.png"))
+    assert (evidence / "native-radar.png").read_bytes().startswith(b"\x89PNG"), radar.suggested_filename
+
+    stage("native workspace at narrow width")
+    page.set_viewport_size({"width": 390, "height": 700})
+    page.goto(base + f"/analysis.html?view=analyst&project={project_id}")
+    expect(page.get_by_role("tab", name="Build-Up")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_role("tab", name="Build-Up")).to_be_in_viewport()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    assert page.locator(".app-footer").is_visible()
+    page.screenshot(path=str(evidence / "native-390.png"))
+    page.set_viewport_size({"width": 1280, "height": 800})
+
+    assert not console_errors, console_errors
+    stage("native workspace error state")
+    empty_id = page.evaluate("""async () => {
+        const response = await fetch("/api/projects", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+        return (await response.json()).project.id;
+    }""")
+    page.goto(base + f"/analysis.html?view=tactical&project={empty_id}")
+    alert = page.locator(".native-error")
+    expect(alert).to_contain_text("Scrape or import a match")
+    expect(alert.get_by_role("button", name="Try again")).to_be_visible()
+    expect(page.locator("[data-analysis-status]")).to_have_text("Setup needs attention")
+    page.remove_listener("console", listener)
+    # Only the deliberate 400 from the summary of a project without match data.
+    unexpected = [text for text in console_errors if "status of 400" not in text]
+    assert not unexpected, unexpected
+    assert not errors, errors
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    choice = parser.add_mutually_exclusive_group()
+    choice.add_argument("--server", type=Path, help="Frozen backend executable")
+    choice.add_argument("--launcher", type=Path, help="Installed Homebrew launcher")
+    parser.add_argument("--evidence", type=Path, default=ROOT / "build" / "browser-evidence")
+    parser.add_argument("--timeout-seconds", type=int, default=600)
+    args = parser.parse_args()
+    if args.timeout_seconds < 1:
+        parser.error("timeout must be positive")
+    faulthandler.dump_traceback_later(args.timeout_seconds, exit=True)
+    evidence = args.evidence.resolve()
+    evidence.mkdir(parents=True, exist_ok=True)
+    command = ([str(args.server.resolve())] if args.server else
+               [str(args.launcher.resolve()), "--no-browser"] if args.launcher else
+               [sys.executable, str(ROOT / "packaging" / "clipmaker_api_server.py")])
+    with tempfile.TemporaryDirectory() as directory:
+        # The engine defaults exports to the user's Videos/VizorPlay; keep test exports out of it.
+        os.environ["VIZORPLAY_EXPORT_DIR"] = str(Path(directory) / "Videos" / "VizorPlay")
+        stage("starting isolated backend")
+        with backend(command, Path(directory) / "data", evidence, startup_timeout=600 if args.launcher else 90) as base:
+            stage("backend ready; launching Chromium")
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chromium", timeout=60000)
+                context = browser.new_context(viewport={"width": 1280, "height": 800},
+                                              reduced_motion="reduce",
+                                              record_video_dir=str(evidence / "video"),
+                                              record_video_size={"width": 640, "height": 400})
+                context.tracing.start(screenshots=True, snapshots=True, sources=False)
+                page = context.new_page()
+                page.set_default_timeout(60000)
+                page.set_default_navigation_timeout(60000)
+                errors = []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                def log_console(message):
+                    with (evidence / "console.log").open("a", encoding="utf-8") as output:
+                        output.write(f"{message.type}: {message.text}\n")
+                page.on("console", log_console)
+                # Save diagnostics even when an assertion or navigation times out.
+                def save_evidence():
+                    try:
+                        stage("saving screenshot and trace")
+                        page.screenshot(path=str(evidence / "last-screen.png"))
+                        (evidence / "last-page.html").write_text(page.content(), encoding="utf-8")
+                        context.tracing.stop(path=str(evidence / "trace.zip"))
+                        stage("closing browser context and recording")
+                        context.close()
+                    finally:
+                        browser.close()
+                try:
+                    exercise(page, base, Path(directory), evidence, errors)
+                except BaseException:
+                    print(traceback.format_exc(), flush=True)
+                    (evidence / "failure.txt").write_text(traceback.format_exc(), encoding="utf-8")
+                    (evidence / "result.json").write_text(json.dumps({"errors": errors, "status": "failed"}), encoding="utf-8")
+                    raise
+                finally:
+                    save_evidence()
+    faulthandler.cancel_dump_traceback_later()
+    stage("finished")
+
+
+def exercise_kickoff_player(page, base, root):
+    """Step, zoom, period markers and set-kick-off in the intake player, in its own project."""
+    stage("kick-off player: own project with a 3-minute 25 fps video")
+    page.get_by_role("button", name="New project", exact=True).click()
+    page.locator('[data-toast]').filter(has_text="New local project created").wait_for()
+    video = root / "kickoff-player.mp4"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=160x90:rate=25", "-t", "180", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video)],
+                   check=True, capture_output=True)
+    page.locator('[data-video-input]').set_input_files(str(video))
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
+    page.wait_for_function("document.querySelector('[data-match-video]').duration > 179")
+    current = lambda: page.locator('[data-match-video]').evaluate("(video) => video.currentTime")
+    controls = page.get_by_role("group", name="Playback controls")
+    kickoff = page.get_by_role("textbox", name="Selected period kick-off time")
+
+    def switch_period(name):
+        # Every period here plays the same file, so switching must not reload the video.
+        page.locator('[data-match-video]').evaluate(
+            "(video) => { window.__periodLoads = 0; video.addEventListener('loadedmetadata',"
+            " () => { window.__periodLoads += 1; }, { once: true }); }")
+        page.get_by_role("tab", name=name, exact=True).click()
+        expect(page.get_by_role("tab", name=name, exact=True)).to_have_attribute("aria-selected", "true")
+        page.wait_for_timeout(300)
+        assert page.evaluate("window.__periodLoads") == 0, ("period switch reloaded the video", name)
+
+    stage("kick-off player: second, minute and frame steps by button and key")
+    controls.get_by_role("button", name="+1m").click()
+    controls.get_by_role("button", name="+10s").click()
+    controls.get_by_role("button", name="+1s").click()
+    assert abs(current() - 71) < 0.01, current()
+    controls.get_by_role("button", name="Forward 1 frame").click()
+    controls.get_by_role("button", name="Forward 1 frame").click()
+    controls.get_by_role("button", name="Back 1 frame").click()
+    # Frame steps land mid-frame (71.06 is inside frame 1776 at 25 fps), never a
+    # hair before a frame boundary, which would show the previous frame.
+    assert abs(current() - 71.06) < 0.005, current()
+    expect(page.locator('[data-timeline-time]')).to_have_text("00:01:11.0")
+    # Focus is on a player button, where step keys still work.
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Shift+ArrowLeft")
+    page.keyboard.press("Control+ArrowRight")
+    page.keyboard.press(",")
+    assert abs(current() - 120.02) < 0.005, current()
+
+    stage("kick-off player: set kick-offs and see them as timeline markers")
+    page.get_by_role("button", name="Set 1H kick-off here").click()
+    expect(kickoff).to_have_value("00:02:00")
+    switch_period("2H")
+    expect(page.get_by_role("button", name="Set 2H kick-off here")).to_be_visible()
+    # 2H has no kick-off yet, so the playhead stays where it was instead of going back to 0.
+    assert abs(current() - 120.02) < 0.05, ("switching to an unset period moved the playhead", current())
+    kickoff.fill("00:02:50")
+    kickoff.press("Tab")
+    first = page.get_by_role("button", name="Jump to first-half kick-off at 00:02:00")
+    second = page.get_by_role("button", name="Jump to second-half kick-off at 00:02:50")
+    expect(second).to_have_class("timeline-marker is-active")
+    expect(first).to_have_class("timeline-marker")
+    first.click()
+    assert abs(current() - 120) < 0.01, current()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    project_id = parse_qs(urlparse(page.url).query)["project"][0]
+    saved = request(base, f"/api/projects/{project_id}")["project"]["markers"]
+    assert saved == {"1H": "00:02:00", "2H": "00:02:50"}, saved
+
+    stage("kick-off player: 2-minute zoom follows the playhead and hides far markers")
+    controls.get_by_role("button", name="−1m").click()
+    controls.get_by_role("button", name="−1m").click()
+    page.get_by_role("button", name="2 min").click()
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:02:00")
+    expect(first).to_be_visible()
+    expect(second).to_be_hidden()
+    controls.get_by_role("button", name="+1m").click()
+    controls.get_by_role("button", name="+1m").click()  # 2:00 is the window's edge: it stays.
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    controls.get_by_role("button", name="+10s").click()  # 2:10 leaves it: it recentres.
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:01:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
+    expect(second).to_be_visible()
+    page.get_by_role("button", name="Full").click()
+    expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
+    expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
+
+    stage("kick-off player: switching to a period with a kick-off lands on it")
+    switch_period("2H")
+    page.wait_for_function("Math.abs(document.querySelector('[data-match-video]').currentTime - 170) < 0.01")
+    switch_period("1H")
+    page.wait_for_function("Math.abs(document.querySelector('[data-match-video]').currentTime - 120) < 0.01")
+
+    stage("kick-off player: speed, mute and play")
+    speed = page.get_by_role("combobox", name="Playback speed")
+    speed.select_option("4")
+    mute = controls.get_by_role("button", name="Mute")
+    mute.click()
+    expect(mute).to_have_attribute("aria-pressed", "true")
+    controls.get_by_role("button", name="Play", exact=True).click()
+    page.wait_for_function("document.querySelector('[data-match-video]').currentTime > 121")
+    state = page.locator('[data-match-video]').evaluate(
+        "(video) => ({rate: video.playbackRate, muted: video.muted, paused: video.paused})")
+    assert state == {"rate": 4, "muted": True, "paused": False}, state
+    controls.get_by_role("button", name="Pause", exact=True).click()
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_visible()
+    speed.select_option("1")
+    mute.click()
+
+
+def exercise_scope_counts(page):
+    """Action type and qualifier counts follow the team, period, players and
+    chosen action types. The fixture has a Home Goal (One, 1st half) and an
+    Away Pass (Two, 1st half); a Successful qualifier on both is added to the
+    engine's answer because the fixture has no qualifier columns."""
+    stage("filter counts follow the scope")
+
+    def add_qualifier(route):
+        response = route.fetch()
+        data = response.json()
+        data["qualifiers"] = [
+            {"flag": "successful_only", "label": "Successful", "group": "Outcome & movement",
+             "available": True, "count": 2},
+            *[item for item in data["qualifiers"] if item["flag"] != "successful_only"],
+        ]
+        data["events"]["qualifiers"]["successful_only"] = [0, 1]
+        route.fulfill(response=response, json=data)
+
+    page.route("**/api/filter-options", add_qualifier)
+    page.reload()
+    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+    for band in ("#scope", "#actions", "#qualifiers"):
+        page.locator(band + " > summary").click()
+    page.locator('#qualifiers .qualifier-group summary').first.click()
+
+    def counts(name):
+        return page.evaluate("""(name) => Object.fromEntries([...document.querySelectorAll(
+            `input[name="${name}"]`)].map((input) => [input.value,
+            input.closest("label").querySelector("small")?.textContent]))""", name)
+
+    availability = page.locator("[data-qualifier-availability]")
+    assert counts("action") == {"Goal": "1", "Pass": "1"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "2"}, counts("qualifier")
+    expect(availability).to_contain_text(re.compile(r"^1 of \d+ available$"))
+
+    page.locator("[data-team-options] label").filter(has_text="Home").click()
+    assert counts("action") == {"Goal": "1", "Pass": "0"}, counts("action")
+    expect(page.locator('label:has(input[name="action"][value="Pass"])')).to_have_class(re.compile("is-empty"))
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+
+    page.locator('input[name="action"][value="Pass"]').check()
+    assert counts("qualifier") == {"successful_only": "0"}, counts("qualifier")
+    expect(availability).to_contain_text(re.compile(r"^0 of \d+ available$"))
+    page.locator('input[name="action"][value="Goal"]').check()
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+    page.locator("[data-clear-actions]").click()
+
+    page.locator("[data-team-options] label").filter(has_text="Both teams").click()
+    page.locator('#scope').scroll_into_view_if_needed()
+    page.locator('label:has(input[name="half"][value="2nd half only"])').click()
+    assert counts("action") == {"Goal": "0", "Pass": "0"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "0"}, counts("qualifier")
+    page.locator('label:has(input[name="half"][value="Both halves"])').click()
+    page.locator('input[name="player"][value="Two"]').check()
+    assert counts("action") == {"Goal": "0", "Pass": "1"}, counts("action")
+    assert counts("qualifier") == {"successful_only": "1"}, counts("qualifier")
+    page.locator("[data-clear-players]").click()
+    assert counts("action") == {"Goal": "1", "Pass": "1"}, counts("action")
+
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.unroute("**/api/filter-options", add_qualifier)
+    page.reload()
+    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+
+
+def exercise_update_notice(page, base):
+    """The footer offers a newer release the way this kind of install updates (ui/update.js)."""
+    def offer(install):
+        status = {"available": True, "current": "1.0.0", "latest": "1.0.1", "install": install,
+                  "release_url": "https://github.com/B03GHB4L1/ClipMaker/releases/latest"}
+        page.route("**/api/update", lambda route: route.fulfill(json={"update": status}))
+    notice = page.locator("[data-update-notice]")
+
+    stage("update notice: Windows desktop installs in the app")
+    offer("in-app")
+    page.goto(base + "/filters.html")
+    expect(notice).to_contain_text("VizorPlay 1.0.1 is available.")
+    page.get_by_role("button", name="Update and restart").click()
+    # Outside the desktop shell the engine answers 204, so the page stays put.
+    expect(notice).to_contain_text("Downloading VizorPlay 1.0.1")
+    assert page.url.endswith("/filters.html"), page.url
+    page.evaluate("window.vizorplayUpdateStatus('error', 'the signature did not match')")
+    expect(notice).to_contain_text("The update did not install: the signature did not match")
+    expect(page.get_by_role("button", name="Try again")).to_be_enabled()
+    page.unroute("**/api/update")
+
+    stage("update notice: Linux opens the download page; Homebrew shows its command")
+    offer("download")
+    page.route("**/api/update/open-release", lambda route: route.fulfill(json={"opened": True}))
+    page.goto(base + "/analysis.html")
+    page.get_by_role("button", name="Download").click()
+    expect(notice).to_contain_text("download page opened in your browser")
+    page.unroute("**/api/update")
+    page.unroute("**/api/update/open-release")
+    offer("homebrew")
+    page.goto(base)
+    expect(notice.locator("code")).to_have_text("brew upgrade vizorplay")
+    page.unroute("**/api/update")
+
+    stage("update notice: hidden when there is nothing newer")
+    page.route("**/api/update", lambda route: route.fulfill(json={"update": {"available": False}}))
+    page.goto(base)
+    page.locator('[data-project-name]').wait_for()
+    expect(notice).to_be_hidden()
+    page.unroute("**/api/update")
+
+
+def exercise(page, base, root, evidence, errors):
+    stage("open intake and create project")
+    page.goto(base)
+    page.locator('[data-project-name]').wait_for()
+    exercise_update_notice(page, base)
+    page.goto(base)
+    page.locator('[data-project-name]').wait_for()
+    exercise_kickoff_player(page, base, root)
+    assert page.locator('[data-workflow-progress]').count() == 0
+    page.evaluate('document.fonts.load(\'400 13px "Geist Mono"\')')
+    assert page.evaluate('document.fonts.check(\'400 13px "Geist Mono"\')')
+    assert "Geist Mono" in page.locator('body').evaluate('(element) => getComputedStyle(element).fontFamily')
+    assert page.locator('#nav-drawer').get_attribute('inert') is not None
+    expect(page.locator('#nav-drawer')).not_to_contain_text("No cloud upload")
+    page.get_by_role("button", name="New project", exact=True).click()
+    page.locator('[data-toast]').filter(has_text="New local project created").wait_for()
+    page.get_by_role("textbox", name="Project name").fill("Browser test project")
+    page.get_by_role("textbox", name="Project name").press("Tab")
+    page.get_by_role("status").filter(has_text="Saved locally").wait_for()
+    project_id = parse_qs(urlparse(page.url).query)["project"][0]
+    video = root / "keyboard-fixture.mp4"
+    subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=320x180:rate=24", "-t", "8", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", str(video)], check=True, capture_output=True)
+    csv = root / "fixture.csv"
+    csv.write_bytes(fixture_csv())
+    stage("upload CSV and footage")
+    # A quiet OR separates pasting a match link from importing a CSV, just above the import.
+    divider = page.get_by_role("separator", name="or")
+    expect(divider).to_be_visible()
+    assert divider.evaluate("e => e.nextElementSibling.classList.contains('csv-import')")
+    page.locator('[data-csv-input]').set_input_files(str(csv))
+    page.get_by_text("2 events found", exact=True).wait_for()
+    page.locator('[data-video-input]').set_input_files(str(video))
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
+    for period in ("2H", "1H"):
+        page.get_by_role("tab", name=period, exact=True).click()
+        page.get_by_role("textbox", name="Selected period kick-off time").fill("00:00:00")
+        page.get_by_role("textbox", name="Selected period kick-off time").press("Tab")
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    page.reload()
+    stage("verify saved intake and keyboard menu")
+    expect(page.get_by_role("textbox", name="Project name")).to_have_value("Browser test project")
+    expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
+    menu = page.get_by_role("button", name="Open navigation", exact=True)
+    menu.press("Space")
+    expect(menu).to_have_attribute("aria-expanded", "true")
+    page.keyboard.press("Escape")
+    expect(menu).to_have_attribute("aria-expanded", "false")
+    assert page.locator('video[data-match-video]').evaluate('(video) => video.paused')
+    exercise_event_tables(page)
+    page.screenshot(path=str(evidence / "intake.png"))
+    assert page.locator('.brand').inner_text().replace("\n", "").replace(" ", "") == "•••"
+    assert page.locator('.brand .cm-logo img').evaluate("(img) => img.complete && img.naturalWidth > 0")
+    page.get_by_role("button", name="Confirm & continue").click()
+    stage("filter and build clip plan")
+    page.wait_for_url("**/filters.html?match=*")
+    page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+    exercise_scope_counts(page)
+    page.locator('#actions summary').click()
+    page.locator('input[name="action"][value="Goal"]').check()
+    page.locator('#timing summary').click()
+    page.get_by_role("spinbutton", name="Seconds before", exact=True).fill("1")
+    page.get_by_role("spinbutton", name="Seconds after", exact=True).fill("1")
+    page.get_by_role("spinbutton", name="Merge gap", exact=True).fill("0")
+    exercise_snapshot_restore(page)
+    exercise_clip_editor(page, evidence)
+    exercise_native_workspace(page, base, project_id, evidence, errors)
+    stage("timeline sync gives the video most of the row and fits the player on screen")
+    # The player used to be capped at 610px beside a wide text column.
+    for width, height, min_video in ((1366, 768, 700), (760, 1000, 600)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(base + "/?project=" + project_id)
+        page.evaluate("document.querySelector('.sync-section').scrollIntoView({block: 'start'})")
+        sizes = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          return {video: box('.match-frame').width, shell: box('.preview-shell'), section: box('.sync-section'),
+                  setKickoff: box('[data-set-marker]').bottom, footer: box('.app-footer').top};
+        }""")
+        assert sizes["video"] >= min_video, (width, sizes)
+        if width > 800:
+            # Everything used while scrubbing stays on screen; Confirm may sit below the fold.
+            assert sizes["setKickoff"] <= sizes["footer"], ("Set kick-off runs under the footer", sizes)
+        else:
+            assert sizes["shell"]["width"] >= sizes["section"]["width"] - 1, ("stacked player is not full width", sizes)
+    stage("the clip editor keeps the video, trim bar and timeline together")
+    # The old page stacked eight sections above a list of clips.
+    for width, height in ((1440, 900), (1366, 768), (1024, 768)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(base + "/filters.html?match=" + project_id)
+        page.locator('.clip-block').first.wait_for()
+        page.evaluate("window.scrollTo(0, 0)")
+        sizes = page.evaluate("""() => {
+          const box = selector => document.querySelector(selector).getBoundingClientRect();
+          return {video: box('.viewer-frame'), track: box('.timeline-track'), footer: box('.app-footer').top,
+                  rail: box('.filter-rail'), editor: box('.editor'), inspector: box('.inspector'),
+                  export: box('.export-bar'), transport: box('.transport')};
+        }""")
+        assert sizes["rail"]["right"] <= sizes["editor"]["left"], ("filters stacked above the editor", width, sizes)
+        # The play controls sit right under a true 16:9 video, with no gap or overlap.
+        assert abs(sizes["transport"]["top"] - sizes["video"]["bottom"] - 8) <= 1, ("gap under the video", width, sizes)
+        assert abs(sizes["video"]["width"] / sizes["video"]["height"] - 16 / 9) < 0.02, ("video not 16:9", width, sizes)
+        assert sizes["video"]["width"] >= 560, ("video too small", width, sizes)
+        if width == 1440:
+            assert sizes["track"]["bottom"] <= sizes["footer"] + 1, ("timeline runs under the footer", sizes)
+            assert sizes["export"]["bottom"] <= sizes["footer"] + 1, ("export runs under the footer", sizes)
+            assert sizes["inspector"]["left"] >= sizes["video"]["right"], ("clip controls not beside the video", sizes)
+        # Every toggle in the narrow rail keeps room for its words (Match any / Match all was squeezed to 30px).
+        for summary in page.locator('.filter-rail details > summary').all():
+            summary.click()
+        cramped = page.evaluate("""() => [...document.querySelectorAll('.filter-rail .segmented-control span')]
+          .filter((span) => span.offsetParent && (span.scrollWidth > span.clientWidth + 1 || span.clientWidth < 60))
+          .map((span) => span.textContent.trim())""")
+        assert cramped == [], ("rail toggles squeezed", width, cramped)
+        # Qualifier and action tiles keep room for whole words (they were ~80px, one letter per line).
+        page.evaluate("document.querySelectorAll('.qualifier-group').forEach((group) => { group.open = true; })")
+        narrow = page.evaluate("""() => [...document.querySelectorAll('.filter-rail :is(.qualifier-group, .choice-grid) label')]
+          .filter((label) => label.offsetParent && (label.clientWidth < 120 || label.clientHeight > 80))
+          .map((label) => [label.textContent.trim(), label.clientWidth, label.clientHeight])""")
+        assert narrow == [], ("rail tiles squeezed", width, narrow[:5])
+        page.screenshot(path=str(evidence / f"editor-{width}x{height}.png"))
+    stage("timing corrections start blank and ask for each missing field")
+    for name in ("period", "clock", "direction", "amount"):
+        assert page.locator(f'[data-correction-{name}]').input_value() == "", name
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('.toast')).to_have_text("Choose the period the recording problem is in.")
+    page.locator('[data-correction-period]').select_option("2")
+    page.locator('[data-correction-clock]').fill("10:00")
+    page.locator('[data-correction-direction]').select_option("add")
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('.toast')).to_have_text("Enter how much footage is missing or extra, as MM:SS.")
+    page.locator('[data-correction-amount]').fill("00:20")
+    page.get_by_role("button", name="Add correction").click()
+    expect(page.locator('[data-correction-count]')).to_have_text("1 active")
+    expect(page.locator('[data-correction-list]')).to_contain_text("P2 from 10:00: extra footage, events after that point move 0:20 later")
+    assert page.locator('[data-correction-clock]').input_value() == ""
+    page.locator('[data-correction-list] button').first.click()
+    expect(page.locator('[data-correction-count]')).to_have_text("None active")
+    # A correction changes clip timing, so it clears the timeline; find the clips again.
+    page.get_by_role("button", name="Find clips", exact=True).click()
+    page.locator('.clip-block').first.wait_for()
+    expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
+    stage("check responsive layouts")
+    for width, height in ((1021, 572), (614, 542), (390, 700)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(base + "/?project=" + project_id)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert page.locator('.app-footer').is_visible()
+        page.screenshot(path=str(evidence / f"intake-{width}.png"))
+        page.goto(base + "/filters.html?match=" + project_id)
+        page.locator('[data-match-name]').filter(has_text="Home vs Away").wait_for()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        expect(page.get_by_role("navigation", name="Workflow").get_by_role("link")).to_have_count(5)  # Intake, Filter, Analyst, Tactical, Annotate
+        page.locator('#export-settings summary').click()
+        page.screenshot(path=str(evidence / f"filters-{width}.png"))
+    assert not errors, errors
+    (evidence / "result.json").write_text(json.dumps({"errors": errors, "status": "passed"}), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
