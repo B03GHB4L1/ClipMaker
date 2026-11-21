@@ -471,6 +471,15 @@
   let _exportBrandColor = "#DFFF00";
   const ECHARTS_RENDERER = "canvas";
   let _cmChart = null;
+  // Redraw the shared chart from scratch. ECharts re-shows an open tooltip from a
+  // zero-delay timer after each update; rebuilding the chart destroys that tooltip
+  // without cancelling the timer, so the timer then writes into a tooltip that is
+  // gone ("Cannot set properties of null (setting 'innerHTML')"). Hiding the tip
+  // first clears the remembered pointer position, which turns that timer into a no-op.
+  function cmReplaceOption(chart, option) {
+    try { chart.dispatchAction({ type: "hideTip" }); } catch (error) { /* nothing to hide */ }
+    chart.setOption(option, true);
+  }
   let _cmPlotlyClickHandler = null;
   let _cmLastRender = null;
   let _cmResizeHandler = null;
@@ -2000,12 +2009,12 @@
         const id = params && params.data && params.data.customdata;
         if (id !== undefined && id !== null && typeof id !== "object") Streamlit.setValue([id, Date.now()]);
       });
-      _cmChart.setOption(option, true);
+      cmReplaceOption(_cmChart, option);
       installResizeHandler(() => {
         if (_cmChart && _cmChart.getDom() === plotEl) {
           fitNativePitchOption(option, plotEl, Number(args.height || 520) || 520);
           _cmChart.resize();
-          _cmChart.setOption(option, true);
+          cmReplaceOption(_cmChart, option);
           Streamlit.setHeight(plotEl.offsetHeight + 4);
         }
       });
@@ -2038,13 +2047,13 @@
         if (!_cmPlotlyClickHandler || !params || !params.data) return;
         _cmPlotlyClickHandler({ points: [{ customdata: params.data.customdata, data: params.data.value }] });
       });
-      _cmChart.setOption(option, true);
+      cmReplaceOption(_cmChart, option);
       installResizeHandler(() => {
         if (_cmChart && _cmChart.getDom() === plotEl) {
           const resizedHeight = autoHeightForHorizontalPitch(layout || {}, args || {}, plotEl);
           if (resizedHeight) plotEl.style.height = `${resizedHeight}px`;
           _cmChart.resize();
-          _cmChart.setOption(renderOption(), true);
+          cmReplaceOption(_cmChart, renderOption());
           Streamlit.setHeight(plotEl.offsetHeight + 4);
         }
       });
