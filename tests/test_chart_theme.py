@@ -42,10 +42,30 @@ class ThemeTests(unittest.TestCase):
         except ModuleNotFoundError:
             self.skipTest("tinycss2 is not installed")
         lum = lambda hex_: module.to_oklch(*(int(hex_[i:i + 2], 16) for i in (1, 3, 5)))[0]
-        self.assertLess(lum(module.dark("#ffffff")), 0.3)       # paper goes dark
+        self.assertLess(lum(module.dark("#ffffff")), 0.33)      # paper goes dark
         self.assertGreater(lum(module.dark("#171817")), 0.8)    # ink goes light
         self.assertEqual(module.dark("#c8f135"), "#c8f135")      # the lime accent already reads on dark
         self.assertTrue(module.dark("rgba(0,0,0,0.2)").startswith("rgba("))
+        # Graphite, not near-black: the page and cards sit mid-dark, cards above the page.
+        self.assertGreater(lum(module.dark("#f7f7f7")), 0.25)
+        self.assertGreater(lum(module.dark("#ffffff")), lum(module.dark("#f7f7f7")))
+        # Pale tints become a see-through wash of their hue, not an opaque olive block.
+        self.assertTrue(module.dark("#e6f2c5").startswith("rgba("))
+
+    def test_dark_twins_keep_the_light_cascade(self):
+        # A twin of a plain rule must not out-rank a more specific light rule that uses a
+        # variable: the play button once lost its dark fill and its icon disappeared.
+        sheet = (UI / "theme-dark.css").read_text(encoding="utf-8")
+        self.assertRegex(sheet, r'\.transport \.play-toggle \{[^}]*background: var\(--cm-ink\)')
+        # Text on a solid lime fill stays dark.
+        self.assertRegex(sheet, r'\.export-bar \.export-button \{[^}]*color: #171817')
+
+    def test_dark_charts_use_the_graphite_palette(self):
+        sources = [COMPONENT, ROOT / "app/analysis_core/comparison_helpers.py", ROOT / "app/analysis_core/tactical_page.py"]
+        for path in sources:
+            text = path.read_text(encoding="utf-8")
+            for old in ("#071008", "#0b0e14", "rgba(11,14,20,", "142,255,113"):
+                self.assertNotIn(old, text, f"{path.name}: {old}")
 
     def test_analysis_requests_carry_the_theme_and_redraw_on_change(self):
         projects = (UI / "projects.js").read_text(encoding="utf-8")
