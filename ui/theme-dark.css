@@ -1536,3 +1536,41 @@
 :root[data-theme="dark"] .annotate-main .annotate-session-drop:hover:not(:disabled) {
   color: #ff8c7b;
 }
+
+/* code.css */
+:root[data-theme="dark"] .code-main {
+  --code-panel: #202020;
+  --code-hover: #1e1f1c;
+}
+:root[data-theme="dark"] .code-main :is(button,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] a,
+:root[data-theme="dark"] summary):focus-visible {
+  outline: 2px solid #99bd4d;
+}
+:root[data-theme="dark"] .code-error {
+  background: #261f1e;
+  color: #ffa79c;
+}
+:root[data-theme="dark"] .code-warning {
+  color: #e0bc74;
+}
+:root[data-theme="dark"] .code-stage {
+  background: #f0f0f0;
+}
+:root[data-theme="dark"] .code-main .code-play {
+  color: #202020;
+}
+:root[data-theme="dark"] .code-main .code-play:hover {
+  background: #bdbfbc;
+}
+:root[data-theme="dark"] .code-main .code-teams button[aria-checked="true"] {
+  color: #202020;
+}
+:root[data-theme="dark"] .code-teams button[aria-checked="true"] kbd {
+  color: #5b5e57;
+}
+:root[data-theme="dark"] .code-main .code-remove:hover {
+  color: #ff9288;
+}
