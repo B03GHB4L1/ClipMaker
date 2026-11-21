@@ -1,0 +1,112 @@
+name: Mac disk image (Intel)
+
+# Builds VizorPlay_<version>_x64.dmg: the app with its engine inside, plus an
+# Applications shortcut, so installing is one drag. Tests it the way a user meets it
+# (mount, copy out, open, close). It is ad hoc signed and not notarized (there is no
+# Apple Developer membership), so the first launch needs "Open Anyway"; the image and
+# docs/INSTALLATION.md say so. This job builds and tests only: it publishes nothing.
+#
+# Runs on pushes that change the packaging, or by hand from the Actions tab.
+
+on:
+  push:
+    branches: ["codex/release-packaging"]
+    paths:
+      - ".github/workflows/mac-dmg-intel.yml"
+      - "packaging/macos/**"
+      - "tests/macos_dmg_smoke.py"
+      - "tests/macos_app_smoke.py"
+      - "src-tauri/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    name: VizorPlay.dmg for Intel Macs
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      # Build for macOS 11 (Big Sur) and later.
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check this runner is an Intel Mac
+        run: |
+          uname -m
+          test "$(uname -m)" = "x86_64"
+
+      - name: Install the engine's packages (Intel Mac versions)
+        run: |
+          # requirements.txt pins curl-cffi 0.14.0 and opencv-python-headless 4.10.0.84,
+          # which have no Intel Mac wheels, and OpenCV 4.9 needs numpy 1.x. These versions
+          # do have Intel wheels; the unit tests pass with them (the one Windows-only
+          # failure is numpy 1.x's 32-bit default integer on Windows).
+          python -m pip install --upgrade pip
+          # Pillow and dmgbuild only build the disk image (window background and layout).
+          python -m pip install dmgbuild==1.6.5 pillow==11.3.0
+          python -m pip install pyinstaller==6.19.0 numpy==1.26.4 pandas==2.3.3 plotly==6.6.0 \
+            imageio-ffmpeg==0.6.0 opencv-python-headless==4.9.0.80 curl-cffi==0.15.0
+          python -c "import platform, numpy, cv2; print(platform.machine(), numpy.__version__, cv2.__version__)"
+
+      - name: Freeze the engine
+        run: |
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+          file dist/vizorplay-engine/vizorplay-engine
+          mkdir -p src-tauri/resources/backend
+          cp -a dist/vizorplay-engine/. src-tauri/resources/backend/
+
+      - name: Check the frozen engine (media, cancellation, server)
+        run: python packaging/smoke_test.py --server dist/vizorplay-engine/vizorplay-engine
+
+      - run: npm ci
+
+      - name: Build VizorPlay.app
+        run: |
+          mkdir -p build
+          # Ad hoc signature (the same as the Apple Silicon image). Not notarized: no Apple Developer membership.
+          printf '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"signingIdentity":"-"}}}\n' > build/mac-config.json
+          npm run tauri build -- --bundles app --config "$PWD/build/mac-config.json"
+          ls -la src-tauri/target/release/bundle/macos/
+
+      - name: Build the disk image
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          mkdir -p build/dmg
+          python packaging/macos/make_dmg.py \
+            --app src-tauri/target/release/bundle/macos/VizorPlay.app \
+            --output "build/dmg/VizorPlay_${VERSION}_x64.dmg"
+          ls -la build/dmg
+          (cd build/dmg && shasum -a 256 "VizorPlay_${VERSION}_x64.dmg" > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Install from the disk image and open the app
+        timeout-minutes: 15
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          python tests/macos_dmg_smoke.py --dmg "build/dmg/VizorPlay_${VERSION}_x64.dmg" --expect-arch x86_64 --evidence build/dmg-evidence
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VizorPlay-macOS-Intel-dmg
+          path: build/dmg/
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VizorPlay-macOS-Intel-dmg-evidence
+          path: build/dmg-evidence/
+          retention-days: 7
+          if-no-files-found: warn
