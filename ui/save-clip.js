@@ -125,6 +125,34 @@ export const saveImage = async (image, name) => {
   }
 };
 
+// Hints such as "Hover points for event details." only make sense in the app.
+const HOVER_HINT = /[^.]*\bhover\b[^.]*\.?/gi;
+const NOTE_ROOM = 40; // bottom margin once a note under the chart is gone
+
+/** The chart as it is drawn in the app, at its on-screen size, minus hover hints. */
+export const exportFigure = (chart) => {
+  const full = chart._fullLayout || {};
+  const layout = { ...chart.layout, width: Math.round(full.width || chart.clientWidth || 1200),
+    height: Math.round(full.height || chart.clientHeight || 700) };
+  let droppedBelow = false;
+  layout.annotations = (chart.layout.annotations || []).flatMap((note) => {
+    const text = String(note.text || "");
+    if (!/\bhover\b/i.test(text)) return [note];
+    const kept = text.replace(/<br\s*\/?>/gi, " ").replace(HOVER_HINT, "").replace(/\s{2,}/g, " ").trim();
+    if (kept) return [{ ...note, text: kept }];
+    if (note.yref === "paper" && note.y < 0) droppedBelow = true;
+    return [];
+  });
+  const below = layout.annotations.some((note) => note.yref === "paper" && note.y < 0);
+  const bottom = full.margin?.b ?? chart.layout.margin?.b;
+  if (droppedBelow && !below && bottom > NOTE_ROOM) {
+    // The note's room goes too, so the picture keeps the chart's own size and shape.
+    layout.margin = { ...chart.layout.margin, b: NOTE_ROOM };
+    layout.height -= bottom - NOTE_ROOM;
+  }
+  return { data: chart.data, layout, config: { staticPlot: true } };
+};
+
 // Plotly's camera button downloads through <a download>, which the desktop
 // windows ignore; swap it for one that saves through the engine.
 export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
@@ -137,11 +165,16 @@ export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
       name: "saveImage",
       title: "Save as PNG",
       icon: Plotly.Icons.camera,
-      // Only sizes that are set: toImage never finishes when given width: undefined.
-      // The picture gets the VizorPlay credit strip (analysis/brand-export.js).
-      click: (chart) => saveImage(import("./analysis/brand-export.js").then(({ brandPicture }) => brandPicture(Plotly.toImage(chart, { format: "png", scale: options.scale || 2,
-        ...(options.width ? { width: options.width } : {}), ...(options.height ? { height: options.height } : {}) }))),
-      `${options.filename || "VizorPlay chart"}.png`),
+      // The picture is the chart as drawn in the app (Plotly's own default is a
+      // 700px-wide box), without hover hints, plus the VizorPlay credit strip
+      // (analysis/brand-export.js). A size set in the config still wins.
+      click: (chart) => {
+        const figure = exportFigure(chart);
+        return saveImage(import("./analysis/brand-export.js").then(({ brandPicture }) => brandPicture(Plotly.toImage(figure, {
+          format: "png", scale: options.scale || 2,
+          width: options.width || figure.layout.width, height: options.height || figure.layout.height }))),
+        `${options.filename || "VizorPlay chart"}.png`);
+      },
     }],
   };
 };

@@ -86,16 +86,16 @@ def brand_plotly_export(fig, light: bool = False):
         hover_br  = "rgba(120,100,60,0.35)"
         hover_fc  = "#1a1a1a"
     else:
-        bg        = "#0b0e14"
-        plot_bg   = "#071008"
-        font_col  = "#ecedf6"
+        bg        = "#2b2b2a"
+        plot_bg   = "#262625"
+        font_col  = "#eceee9"
         grid_col  = "rgba(214,236,206,0.13)"
         zero_col  = "rgba(214,236,206,0.22)"
         line_col  = "rgba(214,236,206,0.3)"
         tick_col  = "#c4c8bf"
-        hover_bg  = "#10131a"
-        hover_br  = "rgba(142,255,113,0.35)"
-        hover_fc  = "#ecedf6"
+        hover_bg  = "#333432"
+        hover_br  = "rgba(222,226,214,0.35)"
+        hover_fc  = "#eceee9"
     fig.update_layout(
         paper_bgcolor=bg,
         plot_bgcolor=plot_bg,
@@ -132,9 +132,9 @@ def _plotly_header(fig, title, subtitle="", note="", light=False, height=None):
         import textwrap
         return "<br>".join(textwrap.wrap(str(text or ""), width=width, break_long_words=False))
 
-    font_col = "#1a1a1a" if light else "#ecedf6"
-    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(11,14,20,0.78)"
-    note_border = "rgba(120,100,60,0.30)" if light else "rgba(142,255,113,0.24)"
+    font_col = "#1a1a1a" if light else "#eceee9"
+    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(43,43,42,0.78)"
+    note_border = "rgba(120,100,60,0.30)" if light else "rgba(222,226,214,0.24)"
     title_text = f"<b>{title}</b>"
     if subtitle:
         title_text += f"<br><sup>{_wrap_export_text(subtitle, 96)}</sup>"

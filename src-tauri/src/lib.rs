@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::path::BaseDirectory;
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -227,7 +228,27 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 
 const START_FAILED: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>VizorPlay could not start</h1><p>The local engine stopped or did not answer. Close this window and open VizorPlay again. If it keeps happening, reinstall VizorPlay; security software may have blocked or quarantined part of it.</p></main>';";
 
-const PREPARING: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>Preparing VizorPlay</h1><p>The first launch after installing or upgrading sets up VizorPlay&#39;s engine. This can take a few minutes and needs internet access. VizorPlay opens here when it is ready.</p></main>';";
+/// The window opens hidden: until the engine answers it would only show the
+/// webview's empty white page (a white flash, even in the dark theme). It is
+/// shown once the app's own page has loaded, which paints the user's theme
+/// itself. If the engine is slow, the window is shown sooner on this blank
+/// page in the computer's light or dark colour, so the app never looks unopened.
+const STARTING: &str = "document.documentElement.style.colorScheme = 'light dark'; document.documentElement.style.background = matchMedia('(prefers-color-scheme: dark)').matches ? '#242424' : '#f7f7f7';";
+const SHOW_WITHOUT_ENGINE_AFTER: Duration = Duration::from_millis(2500);
+
+fn reveal(window: &WebviewWindow) {
+    if window.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = window.show();
+    // Windows apps open filling the screen; a hidden window may forget it.
+    if cfg!(windows) {
+        let _ = window.maximize();
+    }
+    let _ = window.set_focus();
+}
+
+const PREPARING: &str = "document.body.innerHTML ='<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>Preparing VizorPlay</h1><p>The first launch after installing or upgrading sets up VizorPlay&#39;s engine. This can take a few minutes and needs internet access. VizorPlay opens here when it is ready.</p></main>';";
 
 /// Set when Homebrew builds the macOS app on the Mac: the formula's engine
 /// launcher, used instead of a frozen engine bundled in the app.
@@ -320,6 +341,12 @@ pub fn run() {
             let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
                 // Windows apps open filling the screen; Mac and Linux keep the configured size.
                 .maximized(cfg!(windows) || config.maximized)
+                .visible(false)
+                .on_page_load(move |window, payload| {
+                    if matches!(payload.event(), PageLoadEvent::Finished) && payload.url().port() == Some(port) {
+                        reveal(&window);
+                    }
+                })
                 .on_navigation(move |url| {
                     if !is_install_request(url, port) {
                         return true;
@@ -347,7 +374,13 @@ pub fn run() {
                 let started = Instant::now();
                 let deadline = started + startup_limit;
                 let mut told_preparing = false;
+                let mut shown = false;
                 loop {
+                    if !shown && started.elapsed() > SHOW_WITHOUT_ENGINE_AFTER {
+                        shown = true;
+                        let _ = window.eval(STARTING);
+                        reveal(&window);
+                    }
                     if ENGINE_LAUNCHER.is_some() && !told_preparing && started.elapsed() > Duration::from_secs(3) {
                         told_preparing = true;
                         let _ = window.eval(PREPARING);
@@ -370,7 +403,9 @@ pub fn run() {
                         })
                         .unwrap_or(true);
                     if exited || Instant::now() >= deadline {
+                        let _ = window.eval(STARTING);
                         let _ = window.eval(START_FAILED);
+                        reveal(&window);
                         return;
                     }
                     thread::sleep(Duration::from_millis(250));

@@ -184,9 +184,9 @@ def _annotate_plotly_export(fig, title="", subtitle="", note="", height=None, to
         return "<br>".join(textwrap.wrap(str(text or ""), width=width, break_long_words=False))
 
     light = _is_light()
-    font = "#111111" if light else "#ecedf6"
-    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(11,14,20,0.78)"
-    note_border = "rgba(120,100,60,0.30)" if light else "rgba(142,255,113,0.24)"
+    font = "#111111" if light else "#eceee9"
+    note_bg = "rgba(245,240,232,0.86)" if light else "rgba(43,43,42,0.78)"
+    note_border = "rgba(120,100,60,0.30)" if light else "rgba(222,226,214,0.24)"
     title = str(title or "").strip()
     subtitle = str(subtitle or "").strip()
     if title:
@@ -239,9 +239,9 @@ def _brand_fig(fig, height=None, note=""):
         grid = "rgba(80,60,30,0.14)"
         line = "rgba(80,60,30,0.28)"
     else:
-        paper = "#0b0e14"
-        plot = "#10131a"
-        font = "#ecedf6"
+        paper = "#2b2b2a"
+        plot = "#262625"
+        font = "#eceee9"
         grid = "rgba(214,236,206,0.13)"  # neutral, so grids never compete with team colours
         line = "rgba(214,236,206,0.3)"
     fig.update_layout(
@@ -269,8 +269,8 @@ def _pitch_layout(fig, title="", height=520, attack_right=False):
         # The label gets its own room; the chart grows so the pitch keeps its size.
         height += ATTACK_ROOM
     light = _is_light()
-    paper = "#f5f0e8" if light else "#0b0e14"
-    pitch = "#d4e8c2" if light else "#172617"
+    paper = "#f5f0e8" if light else "#2b2b2a"
+    pitch = "#d4e8c2" if light else "#243024"
     line = "rgba(30,70,10,0.58)" if light else "rgba(220,220,220,0.42)"
     fig.update_layout(
         height=height,
@@ -278,11 +278,11 @@ def _pitch_layout(fig, title="", height=520, attack_right=False):
         yaxis=dict(range=[0, 100], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=0.68),
         plot_bgcolor=pitch,
         paper_bgcolor=paper,
-        font=dict(color="#111111" if light else "#ecedf6", family="Geist Mono, monospace"),
+        font=dict(color="#111111" if light else "#eceee9", family="Geist Mono, monospace"),
         hoverlabel=dict(
-            bgcolor="#f0ebe2" if light else "#10131a",
+            bgcolor="#f0ebe2" if light else "#333432",
             bordercolor=line,
-            font=dict(color="#111111" if light else "#ecedf6"),
+            font=dict(color="#111111" if light else "#eceee9"),
         ),
     )
     shapes = [
@@ -298,9 +298,9 @@ def _pitch_layout(fig, title="", height=520, attack_right=False):
         # Which way the team plays, just above the pitch's top-left corner.
         fig.add_annotation(
             text="ATTACK ->", x=0, y=100, xref="x", yref="y", xanchor="left", yanchor="bottom", yshift=6,
-            showarrow=False, font=dict(size=12, color="#2f5d16" if light else "#8eff71", family="Geist Mono, monospace"),
-            bgcolor="rgba(245,240,232,0.72)" if light else "rgba(11,14,20,0.72)",
-            bordercolor="rgba(47,93,22,0.22)" if light else "rgba(142,255,113,0.28)", borderwidth=1, borderpad=4,
+            showarrow=False, font=dict(size=12, color="#2f5d16" if light else "#c8f135", family="Geist Mono, monospace"),
+            bgcolor="rgba(245,240,232,0.72)" if light else "rgba(43,43,42,0.72)",
+            bordercolor="rgba(47,93,22,0.22)" if light else "rgba(222,226,214,0.28)", borderwidth=1, borderpad=4,
         )
     _annotate_plotly_export(
         fig,
@@ -1008,11 +1008,11 @@ def _playlist_rows(df, team, dt_seconds, dt_events, at_seconds, at_events):
 
 def _moment_list_html(rows):
     light = _is_light()
-    bg = "#f0ebe2" if light else "#10131a"
-    border = "rgba(80,60,30,0.22)" if light else "rgba(142,255,113,0.16)"
-    head = "#ded7ca" if light else "#171b24"
-    text = "#111111" if light else "#ecedf6"
-    sub = "#5d5a52" if light else "#aaaeb8"
+    bg = "#f0ebe2" if light else "#333432"
+    border = "rgba(80,60,30,0.22)" if light else "rgba(222,226,214,0.16)"
+    head = "#ded7ca" if light else "#3a3b39"
+    text = "#111111" if light else "#eceee9"
+    sub = "#5d5a52" if light else "#a7aaa7"
     line = "rgba(80,60,30,0.12)" if light else "rgba(255,255,255,0.08)"
     html = [
         f'<div style="border:1px solid {border};background:{bg};border-radius:4px;overflow:hidden">',
@@ -1421,7 +1421,7 @@ def _radar_chart(dims, team_name):
     fig.update_layout(
         title=f"Style Profile Radar - {team_name}",
         polar=dict(
-            radialaxis=dict(visible=True, range=[0, 100], gridcolor="rgba(142,255,113,0.14)"),
+            radialaxis=dict(visible=True, range=[0, 100], gridcolor="rgba(222,226,214,0.14)"),
             angularaxis=dict(tickfont=dict(size=11)),
         ),
         showlegend=False,
@@ -1432,10 +1432,10 @@ def _radar_chart(dims, team_name):
 
 def _radar_legend_html(raw):
     light = _is_light()
-    bg = "#f0ebe2" if light else "#10131a"
-    border = "rgba(80,60,30,0.22)" if light else "rgba(142,255,113,0.16)"
-    text = "#111111" if light else "#ecedf6"
-    sub = "#5d5a52" if light else "#aaaeb8"
+    bg = "#f0ebe2" if light else "#333432"
+    border = "rgba(80,60,30,0.22)" if light else "rgba(222,226,214,0.16)"
+    text = "#111111" if light else "#eceee9"
+    sub = "#5d5a52" if light else "#a7aaa7"
     wide_actions = raw.get("wide_in_possession_actions", 0)
     wide_pct = raw.get("wide_in_possession_action_pct", 0)
     possession_actions = raw.get("in_possession_actions", 0)

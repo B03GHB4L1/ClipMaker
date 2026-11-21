@@ -23,6 +23,7 @@ SCOPE = ':root[data-theme="dark"]'
 COLOR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|\b(white|black)\b")
 SKIP_PROPS = {"box-shadow", "text-shadow", "filter", "-webkit-box-shadow", "caret-color"}
 COLOR_PROPS = re.compile(r"(^|-)(color|background|border|outline|fill|stroke|shadow|accent|decoration)|^--")
+NOT_COLOR_PROPS = re.compile(r"-(radius|width|style|collapse|spacing|size|position|repeat|attachment|origin|clip|offset|blend-mode|line|thickness)$|^border-image")
 
 
 def _lin(c):
@@ -86,28 +87,57 @@ def dark(text):
         return text
     r, g, b, alpha = parsed
     L, C, h = to_oklch(r, g, b)
+    if L > 0.8 and 0.015 <= C < 0.11:
+        # Pale tints (notices, selections, warning borders) become a see-through
+        # wash of their own hue, so they tint whatever surface sits below instead
+        # of turning into an opaque olive or brown block.
+        r2, g2, b2 = from_oklch(0.8, min(0.15, max(C * 2.5, 0.07)), h)
+        # The palest (backgrounds) become a light wash; the deeper ones (borders) stay visible.
+        return f"rgba({r2},{g2},{b2},{round(alpha * (0.2 if L > 0.9 else 0.5), 3)})"
+    if C < 0.045 and L < 0.35 and 0.2 <= alpha < 0.999:
+        # A heavy see-through dark is a scrim behind a drawer or dialog: it stays
+        # dark (flipped, it would wash the page out). Faint ones are hover tints
+        # and rules, and flip with the other greys below.
+        return f"rgba(0,0,0,{round(min(0.8, alpha * 1.8), 3)})"
     if C < 0.045:
-        # Greys flip. Pure white (cards, fields) sits a step above the page, so
-        # raised surfaces stay raised; page greys and rules spread over the darks;
-        # ink and muted text land on the light end.
-        C2 = min(C, 0.012)
+        # Greys flip onto a graphite ramp, not near-black. Pure white (cards,
+        # fields) sits a step above the page so raised surfaces stay raised;
+        # page greys and rules spread over the darks; ink and muted text land
+        # on the light end with comfortable contrast.
+        C2 = min(C, 0.01)
         if L >= 0.99:
-            L2 = 0.245
+            L2 = 0.305
         elif L > 0.9:
-            L2 = 0.2 + (0.99 - L) * 1.5
+            L2 = 0.262 + max(0.0, 0.975 - L) * 1.2
         else:
-            L2 = 0.335 + 0.62 * ((0.9 - L) / 0.9) ** 0.7
-    elif L > 0.88 and C < 0.11:
-        L2, C2 = 0.29, C * 0.55  # pale tints (notices, hovers) become dark tints
+            L2 = min(0.94, 0.375 + 0.565 * ((0.9 - L) / 0.7) ** 0.75)
     elif L > 0.72:
         L2, C2 = L, C  # bright colours (the lime accent) already read on dark
     else:
-        L2 = min(0.86, max(0.7, 1.08 - L * 0.55))
-        C2 = C
+        # Dark brand, team and status colours are lifted so they read on
+        # graphite, with a little chroma taken off so they do not glare.
+        L2 = min(0.84, max(0.72, 1.08 - L * 0.55))
+        C2 = C * 0.82
     r2, g2, b2 = from_oklch(L2, C2, h)
     if alpha >= 0.999:
         return f"#{r2:02x}{g2:02x}{b2:02x}"
     return f"rgba({r2},{g2},{b2},{round(alpha, 3)})"
+
+
+ACCENT_INK = "#171817"
+
+
+def is_accent(value):
+    """A solid lime fill: text on it stays dark in both themes."""
+    if "var(--cm-accent)" in value:
+        return True
+    for match in COLOR.finditer(value):
+        parsed = parse(match.group(0))
+        if parsed and parsed[3] > 0.9:
+            L, C, _ = to_oklch(*parsed[:3])
+            if L > 0.8 and C > 0.15:
+                return True
+    return False
 
 
 def convert(value):
@@ -119,18 +149,29 @@ def rules(nodes, out, wrap=None):
         if node.type == "qualified-rule":
             selectors = tinycss2.serialize(node.prelude).strip()
             decls = []
+            on_accent = False
             for item in tinycss2.parse_declaration_list(node.content, skip_comments=True, skip_whitespace=True):
                 if item.type != "declaration":
                     continue
                 name = item.lower_name
                 value = tinycss2.serialize(item.value).strip()
-                if name in SKIP_PROPS or not COLOR_PROPS.search(name) or not COLOR.search(value):
+                if name in SKIP_PROPS or not COLOR_PROPS.search(name) or "url(" in value:
                     continue
-                if "url(" in value:
+                # Every colour declaration gets a twin, converted or not. A twin
+                # carries the extra :root[data-theme] specificity, so if only
+                # rules with literal colours were twinned, a dark "button
+                # { background: #fff }" would beat a more specific light
+                # ".play-toggle { background: var(--cm-ink) }" (or "none") and
+                # leave a dark icon on a dark button.
+                if NOT_COLOR_PROPS.search(name) or (name.startswith("--") and not COLOR.search(value)):
                     continue
-                new = convert(value)
-                if new != value:
-                    decls.append(f"  {name}: {new}{' !important' if item.important else ''};")
+                if name == "color" and on_accent:
+                    continue
+                if name in ("background", "background-color") and is_accent(value):
+                    on_accent = True
+                    decls = [d for d in decls if not d.startswith("  color:")]
+                    decls.append(f"  color: {ACCENT_INK};")
+                decls.append(f"  {name}: {convert(value)}{' !important' if item.important else ''};")
             if not decls:
                 continue
             scoped = []

@@ -22,17 +22,17 @@
       align-items: center;
     }
     .cm-export-controls button {
-      border: 1px solid rgba(142,255,113,0.28);
-      background: rgba(7,16,8,0.78);
-      color: #dfff00;
+      border: 1px solid rgba(222,226,214,0.28);
+      background: rgba(43,43,42,0.78);
+      color: #e9eae9;
       height: 28px;
       padding: 0 9px;
       border-radius: 5px;
       font: 500 11px 'Geist Mono', monospace;
       cursor: pointer;
     }
-    .cm-export-controls button:hover { border-color: rgba(142,255,113,0.72); }
-    .cm-export-controls button[aria-pressed="true"] { background: #dfff00; color: #071008; border-color: #dfff00; }
+    .cm-export-controls button:hover { border-color: rgba(222,226,214,0.72); }
+    .cm-export-controls button[aria-pressed="true"] { background: #dfff00; color: #2b2b2a; border-color: #dfff00; }
     .cm-export-controls button:disabled { opacity: .5; cursor: default; }
     .cm-export-controls button:focus-visible, .cm-export-controls select:focus-visible { outline: 2px solid #dfff00; outline-offset: 1px; }
     body.cm-light .cm-export-controls button[aria-pressed="true"] { background: #2f5d16; color: #f8f6f0; border-color: #2f5d16; }
@@ -42,8 +42,8 @@
       .cm-export-controls { position: static; order: -1; justify-content: flex-end; flex-wrap: wrap; padding: 0 0 6px; }
     }
     .cm-export-controls select {
-      border: 1px solid rgba(142,255,113,0.22);
-      background: rgba(7,16,8,0.72);
+      border: 1px solid rgba(222,226,214,0.22);
+      background: rgba(43,43,42,0.72);
       color: #f4f7f2;
       height: 28px;
       padding: 0 7px;
@@ -74,12 +74,12 @@
       max-width: calc(100% - 220px);
       padding: 5px;
       border-radius: 6px;
-      background: rgba(7,16,8,0.54);
-      box-shadow: 0 0 0 1px rgba(142,255,113,0.08);
+      background: rgba(43,43,42,0.54);
+      box-shadow: 0 0 0 1px rgba(222,226,214,0.08);
     }
     .cm-network-controls select {
-      border: 1px solid rgba(142,255,113,0.22);
-      background: rgba(7,16,8,0.72);
+      border: 1px solid rgba(222,226,214,0.22);
+      background: rgba(43,43,42,0.72);
       color: #f4f7f2;
       height: 28px;
       padding: 0 7px;
@@ -158,10 +158,10 @@
   const AWAY_HEX   = "#ff7076";
   const SUCC_HEX   = "#00affe";
   const FAIL_HEX   = "#ff7076";
-  const HUD_GREEN  = "#8eff71";
-  const PITCH_BG   = "#071008";
-  const PITCH_LINE = "rgba(142,255,113,0.32)";
-  const PITCH_THICK= "rgba(142,255,113,0.62)";
+  const HUD_GREEN  = "#c8f135";
+  const PITCH_BG   = "#243024";
+  const PITCH_LINE = "rgba(222,226,214,0.32)";
+  const PITCH_THICK= "rgba(222,226,214,0.62)";
   const LIGHT_PITCH_BG   = "#d7edca";
   const LIGHT_PITCH_LINE = "rgba(25,61,9,0.62)";
   const LIGHT_PITCH_THICK= "rgba(25,61,9,0.88)";
@@ -255,17 +255,17 @@
       x: 0.94, y: 0.94, xref: "paper", yref: "paper",
       xanchor: "right", yanchor: "bottom", showarrow: false,
       font: { size: 12, color: _hud, family: "Geist Mono, monospace" },
-      bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(11,14,20,0.72)",
-      bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(142,255,113,0.28)",
+      bgcolor: _isLight ? "rgba(245,240,232,0.72)" : "rgba(43,43,42,0.72)",
+      bordercolor: _isLight ? "rgba(47,93,22,0.22)" : "rgba(222,226,214,0.28)",
       borderwidth: 1, borderpad: 4,
     };
   }
 
   function horizontalPitchShapes(pl, pt, pb, gf, gridColor, zoneFill, zoneLine) {
     const shapes = pitchShapes(pl, pt, pb, gf);
-    const _grid = gridColor || "rgba(142,255,113,0.045)";
-    const _zoneFill = zoneFill || "rgba(142,255,113,0.035)";
-    const _zoneLine = zoneLine || "rgba(142,255,113,0.10)";
+    const _grid = gridColor || "rgba(222,226,214,0.045)";
+    const _zoneFill = zoneFill || "rgba(222,226,214,0.035)";
+    const _zoneLine = zoneLine || "rgba(222,226,214,0.10)";
     for (let x = 10; x < 100; x += 10) {
       shapes.push({ type:"line", x0:x, y0:0, x1:x, y1:100, line:{color:_grid, width:1}, layer:"below" });
     }
@@ -556,7 +556,7 @@
   function withExportBrand(layout, args) {
     const branded = Object.assign({}, layout || {});
     const ctx = contextFromArgs(args || {});
-    const paperColor = ctx.isLight ? "#f8f6f0" : "#071008";
+    const paperColor = ctx.isLight ? "#f8f6f0" : "#2b2b2a";
     const margin = Object.assign({}, branded.margin || {});
     const annotations = Array.isArray(branded.annotations) ? branded.annotations.slice() : [];
     const shapes = Array.isArray(branded.shapes) ? branded.shapes.slice() : [];
@@ -607,8 +607,8 @@
         showarrow: false,
         align: "left",
         font: { size: 10, color: ctx.isLight ? "#3f3a32" : "#cfd4d8", family: "Geist Mono, monospace" },
-        bgcolor: ctx.isLight ? "rgba(245,240,232,0.94)" : "rgba(7,16,8,0.94)",
-        bordercolor: ctx.isLight ? "rgba(80,60,30,0.24)" : "rgba(142,255,113,0.20)",
+        bgcolor: ctx.isLight ? "rgba(245,240,232,0.94)" : "rgba(43,43,42,0.94)",
+        bordercolor: ctx.isLight ? "rgba(80,60,30,0.24)" : "rgba(222,226,214,0.20)",
         borderwidth: 1,
         borderpad: 4,
       });
@@ -1026,7 +1026,7 @@
           position: trace.textposition || "inside",
           color: trace.textfont && trace.textfont.color || layout.font && layout.font.color || (isLight ? "#101510" : "#f4f7f2"),
           fontSize: trace.textfont && trace.textfont.size || 9,
-          backgroundColor: trace.textfont && trace.textfont.bgcolor || (isLight ? "rgba(248,246,240,0.88)" : "rgba(7,16,8,0.58)"),
+          backgroundColor: trace.textfont && trace.textfont.bgcolor || (isLight ? "rgba(248,246,240,0.88)" : "rgba(43,43,42,0.58)"),
           borderRadius: 3,
           padding: [2, 4],
           textBorderColor: isLight ? "rgba(248,246,240,0.86)" : "rgba(0,0,0,0.55)",
@@ -1202,7 +1202,7 @@
     const title = branded.title && branded.title.text ? stripHtml(branded.title.text) : "";
     const legendData = legendDataFromTraces(sourceTraces);
     return {
-      backgroundColor: branded.paper_bgcolor || branded.plot_bgcolor || (ctx.isLight ? "#f8f6f0" : "#071008"),
+      backgroundColor: branded.paper_bgcolor || branded.plot_bgcolor || (ctx.isLight ? "#f8f6f0" : "#2b2b2a"),
       textStyle: { fontFamily: "Geist Mono, monospace" },
       animation: !exporting,
       animationDuration: exporting ? 0 : 450,
@@ -1228,8 +1228,8 @@
       tooltip: {
         trigger: "item",
         confine: true,
-        backgroundColor: ctx.isLight ? "rgba(255,255,255,0.96)" : "rgba(8,12,10,0.96)",
-        borderColor: ctx.isLight ? "rgba(0,0,0,0.16)" : "rgba(142,255,113,0.22)",
+        backgroundColor: ctx.isLight ? "rgba(255,255,255,0.96)" : "rgba(51,52,50,0.96)",
+        borderColor: ctx.isLight ? "rgba(0,0,0,0.16)" : "rgba(222,226,214,0.22)",
         textStyle: { color: ctx.isLight ? "#111111" : "#f4f7f2" },
         formatter(params) {
           const data = params.data || {};
@@ -1485,7 +1485,7 @@
     // Bottom left: the VizorPlay mark sits bottom right and the legend in the middle.
     if (label) items.push({ type: "text", left: 16, bottom: 12, z: 102, silent: true,
       style: { text: label, fill: isLight ? "#1f3214" : "#f4f7f2", font: "600 24px 'Geist Mono', monospace",
-        stroke: isLight ? "rgba(248,246,240,0.9)" : "rgba(7,16,8,0.85)", lineWidth: 4 } });
+        stroke: isLight ? "rgba(248,246,240,0.9)" : "rgba(43,43,42,0.85)", lineWidth: 4 } });
     return items;
   }
 
@@ -1803,7 +1803,7 @@
   // PNG / animation / Preview / GIF for one chart. `stepsFor(mode)` gives the
   // frames; `restore()` puts the full chart back afterwards.
   function wireExportControls(controls, chart, args, stepsFor, restore) {
-    const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#071008";
+    const bg = contextFromArgs(args || {}).isLight ? "#f8f6f0" : "#2b2b2a";
     const selector = controls.querySelector("[data-export-animation]");
     const previewButton = controls.querySelector('[data-export="preview"]');
     const gifButton = controls.querySelector('[data-export="gif"]');
@@ -2496,7 +2496,7 @@
             line:{color:displayHex,width:isLight ? 2.4 : 2},
           },
           text:starters.map(([name])=>name.split(" ").pop()),
-          textposition:"top center", textfont:{size:9,color:_starterColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(7,16,8,0.60)"},
+          textposition:"top center", textfont:{size:9,color:_starterColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(43,43,42,0.60)"},
           hovertext:starters.map(([name,n])=>`${name}<br>${n.count} passes`),
           hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
         });
@@ -2514,7 +2514,7 @@
             line:{color:displayHex,width:isLight ? 2 : 1.5},
           },
           text:subs.map(([name])=>name.split(" ").pop()),
-          textposition:"top center", textfont:{size:8,color:_subColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(7,16,8,0.60)"},
+          textposition:"top center", textfont:{size:8,color:_subColor,bgcolor:isLight ? "rgba(248,246,240,0.92)" : "rgba(43,43,42,0.60)"},
           hovertext:subs.map(([name,n])=>`${name} (sub)<br>${n.count} passes`),
           hovertemplate:"%{hovertext}<extra></extra>", showlegend:false,
         });

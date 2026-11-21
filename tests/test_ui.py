@@ -76,6 +76,16 @@ class SharedUiTests(unittest.TestCase):
         shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertIn(".maximized(cfg!(windows) || config.maximized)", shell)
 
+    def test_window_stays_hidden_until_the_app_page_loads(self):
+        # Shown early, the window flashes the webview's empty white page while the engine starts.
+        shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn(".visible(false)", shell)
+        self.assertIn("PageLoadEvent::Finished", shell)
+        self.assertIn("payload.url().port() == Some(port)", shell)
+        # A slow engine and a failed start still show the window, in the computer's colour.
+        self.assertIn("prefers-color-scheme: dark", shell)
+        self.assertGreaterEqual(shell.count("reveal(&window)"), 3)
+
     def test_open_folder_brings_the_folder_window_to_the_front(self):
         # Explorer opens on the engine's behalf; the app lets it take the foreground first.
         shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
