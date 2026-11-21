@@ -256,7 +256,9 @@ pub fn run() {
                 None => {
                     let data_dir = match data_override {
                         Some(data_dir) => data_dir,
-                        None => app.path().app_local_data_dir()?,
+                        None => app.path().app_local_data_dir().map_err(|error| {
+                            std::io::Error::other(format!("could not find the app data folder: {error}"))
+                        })?,
                     };
                     std::fs::create_dir_all(&data_dir)?;
                     let executable = if cfg!(windows) {
@@ -264,7 +266,12 @@ pub fn run() {
                     } else {
                         "backend/vizorplay-engine"
                     };
-                    let server = app.path().resolve(executable, BaseDirectory::Resource)?;
+                    let server = app.path().resolve(executable, BaseDirectory::Resource).map_err(|error| {
+                        let resource_dir = app.path().resource_dir();
+                        std::io::Error::other(format!(
+                            "could not locate the bundled engine '{executable}' (resource folder: {resource_dir:?}): {error}"
+                        ))
+                    })?;
                     let mut command = Command::new(server);
                     command.args(["--port", &port.to_string()]).current_dir(data_dir);
                     (command, Duration::from_secs(90))
