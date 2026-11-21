@@ -118,6 +118,73 @@ class StoreTests(unittest.TestCase):
         self.assertTrue({"Goal", "SavedShot", "MissedShot", "CornerAwarded"} <= {code["type"] for code in store.CODES})
 
 
+class IntervalAndLeadTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.folder = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_intervals_run_open_then_close(self):
+        store.apply(self.folder, {"add": [{**event("c000001", 400, code="possession"), "end": None}]})
+        self.assertIsNone(store.read(self.folder)["events"][0]["end"])
+        store.apply(self.folder, {"update": [{"id": "c000001", "end": 430.5}]})
+        self.assertEqual(store.read(self.folder)["events"][0]["end"], 430.5)
+        for bad in ({"id": "c000002", "code": "possession", "team": "home", "src": "1H", "t": 10, "end": 5},  # ends before it starts
+                    {**event("c000003", 10), "end": 12}):  # an instant code has no end
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                store.apply(self.folder, {"add": [bad]})
+
+    def test_leads_are_validated_and_kept(self):
+        store.apply(self.folder, {"leads": {"goal": {"before": 12}}})
+        store.apply(self.folder, {"leads": {"goal": {"after": 3}}})
+        document = store.read(self.folder)
+        self.assertEqual(store.lead(document, "goal"), (12, 3))
+        self.assertEqual(store.lead(document, "corner"), (3, 10))  # the code's default
+        for bad in ({"dance": {"before": 1}}, {"goal": {"before": 61}}, {"goal": {"before": 1.5}},
+                    {"goal": {"before": True}}, {"goal": {"later": 1}}, []):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                store.apply(self.folder, {"leads": bad})
+
+    def test_table_rows_carry_span_and_leads_and_skip_running_intervals(self):
+        document = {"leads": {"possession": {"before": 1, "after": 0}}, "events": [
+            {**event("c000001", 400, code="possession"), "end": 461.4},
+            {**event("c000002", 500, code="press", team="away"), "end": None},
+            event("c000003", 410, code="corner")]}
+        table, _ = to_events.rows(document, MARKERS, single_video)
+        self.assertEqual([row["coded_id"] for row in table], ["c000001", "c000003"])
+        possession, corner = table
+        self.assertEqual((possession["minute"], possession["second"], possession["end_minute"], possession["end_second"]),
+                         (1, 40, 2, 41))
+        self.assertEqual((possession["duration"], possession["video_end"], possession["before"], possession["after"]),
+                         (61.4, 461.4, 1, 0))
+        self.assertEqual((corner["before"], corner["after"], corner["duration"]), (3, 10, ""))
+
+    def test_cutter_uses_coded_video_time_leads_and_interval_end(self):
+        from app.clipmaker_core import coded_video_time, row_clip_window
+        coded = {"source": "coded", "video_time": 400.48, "before": 2, "after": 1, "duration": 30}
+        self.assertEqual(coded_video_time(coded), 400.48)
+        self.assertEqual(row_clip_window(coded, 400.48, 5, 8), (398.48, 431.48))
+        feed = {"source": "", "video_time": float("nan"), "before": float("nan"), "after": "", "duration": ""}
+        self.assertIsNone(coded_video_time(feed))
+        self.assertEqual(row_clip_window(feed, 100, 5, 8), (95, 108))
+
+    def test_shootout_codes_cut_where_they_were_coded(self):
+        # The PEN marker stands for the first kick; coded rows ignore it and use their own video time.
+        with tempfile.TemporaryDirectory() as folder:
+            markers = {"1H": "0:00:05", "2H": "0:00:20", "ET1": "0:00:35", "ET2": "0:00:45", "PEN": "0:00:55"}
+            document = {"events": [event("c000001", 60.0, code="goal"), event("c000002", 80.0, code="save")]}
+            table, _ = to_events.rows(document, markers, single_video)
+            path = to_events.write_csv(Path(folder) / "coded.csv", table)
+            from packaging.clipmaker_api_server import compute_clip_windows
+            config = {"data_file": str(path), "period_column": "period", "fallback_row": None, "half1_time": "0:00:05",
+                      "half2_time": "0:00:20", "half3_time": "0:00:35", "half4_time": "0:00:45", "half5_time": "0:00:55",
+                      "before_buffer": 5, "after_buffer": 8, "min_gap": 0, "half_filter": "Both halves"}
+            windows = compute_clip_windows(config)
+        self.assertEqual([(w["start"], w["end"]) for w in windows], [(50.0, 66.0), (74.0, 84.0)])
+
+
 class DerivedTableTests(unittest.TestCase):
     def test_table_matches_the_scraped_schema_and_reads_back(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -192,7 +259,8 @@ class CodesApiTests(unittest.TestCase):
         plan = self.request("/api/previews", {"match_id": project_id, "options": {"before_buffer": 3, "after_buffer": 2,
                                                                                     "filter_types": ["Goal"]}})
         self.assertEqual(len(plan["windows"]), 1)
-        self.assertAlmostEqual(plan["windows"][0]["start"], 17.0, delta=0.6)
+        # The Goal code's own lead-in (10 s) and lead-out (6 s) replace Filter's buffers.
+        self.assertEqual((plan["windows"][0]["start"], plan["windows"][0]["end"]), (10.0, 26.0))
 
         # Moving a kick-off re-times the table: the codes themselves stay in video time.
         moved = self.request(f"/api/projects/{project_id}", {"markers": {"1H": "0:00:10", "2H": "0:00:40"}})["project"]

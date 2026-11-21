@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=3" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=1" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=2" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=1"></script>
+  <script type="module" src="code.js?v=2"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -54,20 +54,58 @@
             </div>
           </div>
           <div class="code-grid" data-code-grid></div>
+          <h2 class="code-subhead" id="intervals-title">Intervals <small>press to start, again to stop</small></h2>
+          <div class="code-grid" data-interval-grid role="group" aria-labelledby="intervals-title"></div>
           <p class="code-last" data-last role="status" aria-live="polite"></p>
           <details class="code-details">
-            <summary>Team names and keys</summary>
+            <summary>Teams and keys</summary>
             <div class="code-fields">
               <label>Home <input type="text" data-team-input="home" maxlength="60" placeholder="Home" /></label>
               <label>Away <input type="text" data-team-input="away" maxlength="60" placeholder="Away" /></label>
-              <p class="code-muted">Each code's letter makes an event at the playhead for the chosen team. H and A choose the team. Space plays and pauses, the arrows move 1 second (with Shift, 5). Backspace removes the last code you made. Keys do nothing while you type in a field.</p>
+              <p class="code-muted">A code's letter makes an event at the playhead for the chosen team; an interval's letter starts it, and again stops it. H and A choose the team. Space plays and pauses; the arrows move 1 second (with Shift, 5). Comma and full stop nudge the chosen event by a frame (with Shift, a second). Delete removes the chosen event, Backspace the last one you made. Ctrl+Z undoes, Ctrl+Shift+Z redoes. Keys do nothing while you type in a field.</p>
             </div>
+          </details>
+          <details class="code-details">
+            <summary>Clip lead-in and lead-out</summary>
+            <p class="code-muted code-leads-note">Seconds each code's clip starts before and runs after the moment; an interval's clip runs from its start to its end. These replace Filter's clip length for coded events.</p>
+            <table class="code-leads" data-leads>
+              <thead><tr><th scope="col">Code</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
+              <tbody></tbody>
+            </table>
           </details>
         </section>
         <section class="code-list-panel" aria-labelledby="list-title">
           <div class="code-panel-head">
             <h2 id="list-title">Coded events <span class="code-count" data-count>(0)</span></h2>
-            <a class="code-link" href="/filters.html" data-project-navigation data-filter-link hidden>Filter and export</a>
+            <div class="code-history">
+              <button type="button" data-undo disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a3.5 3.5 0 010 7H7"/></svg></button>
+              <button type="button" data-redo disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4l3 3-3 3"/><path d="M13 7H6.5a3.5 3.5 0 000 7H9"/></svg></button>
+              <a class="code-link" href="/filters.html" data-project-navigation data-filter-link hidden>Filter and export</a>
+            </div>
+          </div>
+          <div class="code-editor" data-editor hidden>
+            <p class="code-editor-title" data-editor-title></p>
+            <div class="code-editor-row" data-edge="t">
+              <span class="code-editor-label">Start</span>
+              <button type="button" data-nudge="-1" aria-label="Start 1 second earlier">-1s</button>
+              <button type="button" data-nudge="-0.04" aria-label="Start one frame earlier">-1f</button>
+              <button type="button" data-nudge="0.04" aria-label="Start one frame later">+1f</button>
+              <button type="button" data-nudge="1" aria-label="Start 1 second later">+1s</button>
+              <button type="button" data-here title="Move to the playhead">Here</button>
+            </div>
+            <div class="code-editor-row" data-edge="end" data-end-row>
+              <span class="code-editor-label">End</span>
+              <button type="button" data-nudge="-1" aria-label="End 1 second earlier">-1s</button>
+              <button type="button" data-nudge="-0.04" aria-label="End one frame earlier">-1f</button>
+              <button type="button" data-nudge="0.04" aria-label="End one frame later">+1f</button>
+              <button type="button" data-nudge="1" aria-label="End 1 second later">+1s</button>
+              <button type="button" data-here title="Move to the playhead, or stop a running interval there">Here</button>
+            </div>
+            <div class="code-editor-row">
+              <label>Code <select data-edit-code></select></label>
+              <label>Team <select data-edit-team><option value="home">Home</option><option value="away">Away</option><option value="">No team</option></select></label>
+              <button type="button" class="code-delete" data-edit-delete>Delete</button>
+            </div>
           </div>
           <p class="code-muted" data-list-empty>No codes yet. Play the video and press a code's key.</p>
           <ol class="code-list" data-list></ol>
