@@ -2743,11 +2743,6 @@
   border-color: #ff8d80;
   color: #ffaea4;
 }
-:root[data-theme="dark"] .code-live-note {
-  border: 1px solid var(--cm-rule);
-  background: var(--code-panel);
-  color: var(--cm-muted);
-}
 :root[data-theme="dark"] .code-stage {
   background: #ebebeb;
 }

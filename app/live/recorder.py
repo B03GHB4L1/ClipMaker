@@ -459,6 +459,50 @@ def join(ffmpeg: str, folder: Path, output: Path, run: Callable[..., Any] = subp
     return length
 
 
+CLIP_LIMIT = 300  # seconds: a clip, not a half
+
+
+def cut(ffmpeg: str, folder: Path, start: float, end: float, output: str,
+        run: Callable[..., Any] = subprocess.run) -> tuple[float, float]:
+    """Cut [start, end) of a recording still in segments into an MP4 at ``output`` (L2: clips
+    during the match). Re-encoded so it starts on the exact frame; a clip stays inside one
+    part, so one that runs into a break in the stream ends where the break starts.
+    Returns the (start, end) actually cut."""
+    if not (isinstance(start, (int, float)) and isinstance(end, (int, float))) or start != start or end != end:
+        raise ValueError("A clip needs a start and an end in seconds.")
+    start = max(0.0, float(start))
+    if end - start < 0.2:
+        raise ValueError("The clip is too short.")
+    if end - start > CLIP_LIMIT:
+        raise ValueError("Clips during a recording can be up to 5 minutes long.")
+    found = segments(folder)
+    recorded = found[-1]["start"] + found[-1]["duration"] if found else 0.0
+    if start >= recorded:
+        raise ValueError("That moment has not been recorded yet.")
+    if end > recorded + 0.05:
+        raise ValueError(f"The end of this clip is recorded in {max(1, round(end - recorded))} s. Try again then.")
+    first = next(item for item in found if item["start"] + item["duration"] > start)
+    chosen = [item for item in found if item["part"] == first["part"]
+              and item["start"] < end and item["start"] + item["duration"] > start]
+    end = min(end, chosen[-1]["start"] + chosen[-1]["duration"])
+    part = folder / first["part"]
+    playlist = part / f"clip-{os.getpid()}-{threading.get_ident()}.m3u8"
+    lines = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{SEGMENT_SECONDS + 1}",
+             "#EXT-X-MEDIA-SEQUENCE:0", '#EXT-X-MAP:URI="init.mp4"']
+    for item in chosen:
+        lines += [f"#EXTINF:{item['duration']:.6f},", item["file"]]
+    playlist.write_text("\n".join(lines + ["#EXT-X-ENDLIST", ""]), encoding="utf-8")
+    try:
+        _ffmpeg(run, [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-allowed_extensions", "ALL",
+                      "-i", playlist.name, "-ss", f"{start - chosen[0]['start']:.3f}", "-t", f"{end - start:.3f}",
+                      "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                      "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+                      "-f", "mp4", str(output)], cwd=part)
+    finally:
+        playlist.unlink(missing_ok=True)
+    return round(start, 3), round(end, 3)
+
+
 def _ffmpeg(run: Callable[..., Any], command: list[str], cwd: Path | None = None) -> None:
     result = run(command, cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                  timeout=3600, creationflags=_NO_WINDOW)
@@ -605,6 +649,15 @@ class LiveRecordings:
             inits[part] = codecs(folder / part / "init.mp4")
         status["codecs"] = inits
         return status
+
+    def clip(self, project_id: str, start: Any, end: Any, output: str) -> tuple[float, float]:
+        """A clip of a recording still in progress (or not yet saved)."""
+        folder = self.folder(project_id)
+        if self.joining.get(project_id, {}).get("state") == "joining":
+            raise ValueError("The recording is being saved. Cut clips from it on Filter once it is.")
+        if not segments(folder):
+            raise ValueError("Nothing has been recorded yet.")
+        return cut(self.find_ffmpeg(), folder, start, end, output)
 
     def close(self) -> None:
         """Stop every recording when the engine shuts down; the segments stay to be joined."""

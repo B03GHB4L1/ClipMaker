@@ -3,7 +3,16 @@
 // Extensions, so the analyst can pause and rewind behind the live edge. Only the segments
 // around the playhead are kept in memory: a 90-minute match does not fit in the browser's
 // media buffer, so going back further fetches those segments again.
-import { formatVideo } from "./clock.js";
+import { PERIODS, formatVideo } from "./clock.js";
+
+/** The first period without a kick-off marker, or null when every one has one. */
+export const nextKickoff = (markers) => PERIODS.find((period) => !(markers || {})[period.key]) || null;
+
+/** Whole seconds as the H:MM:SS the project's kick-off markers use. */
+export const markerText = (seconds) => {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 3600)}:${String(Math.floor(whole / 60) % 60).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
+};
 
 export const AHEAD = 30;   // seconds buffered past the playhead
 export const BEHIND = 90;  // seconds kept before it

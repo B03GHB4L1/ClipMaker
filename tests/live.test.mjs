@@ -1,7 +1,17 @@
 // Live playback helpers on the Code screen (ui/code/live.js, L1).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AHEAD, formatBytes, holeEnd, liveSummary, wanted } from "../ui/code/live.js";
+import { AHEAD, formatBytes, holeEnd, liveSummary, markerText, nextKickoff, wanted } from "../ui/code/live.js";
+
+test("kick-off marks the next period in the marker format", () => {
+  assert.equal(nextKickoff({}).key, "1H");
+  assert.equal(nextKickoff(undefined).key, "1H");
+  assert.equal(nextKickoff({ "1H": "0:00:05" }).key, "2H");
+  assert.equal(nextKickoff({ "1H": "0:00:05", "2H": "0:50:00", ET1: "1:40:00", ET2: "1:56:00", PEN: "2:15:00" }), null);
+  assert.equal(markerText(5.9), "0:00:05");
+  assert.equal(markerText(3723), "1:02:03");
+  assert.equal(markerText(-2), "0:00:00");
+});
 
 const segments = [0, 2, 4, 6, 8].map((start, i) => ({ i, part: "part01", file: `seg_0000${i}.m4s`, start, duration: 2 }));
 const ranges = (...pairs) => ({ length: pairs.length, start: (i) => pairs[i][0], end: (i) => pairs[i][1] });

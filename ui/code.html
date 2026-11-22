@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=9" />
-  <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=10" />
+  <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=2" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=9"></script>
+  <script type="module" src="code.js?v=10"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -55,6 +55,7 @@
         <div class="code-live-bar" data-live-bar hidden>
           <span class="code-live-dot" aria-hidden="true"></span>
           <p data-live-text role="status" aria-live="polite"></p>
+          <button type="button" data-live-kickoff title="Mark the kick-off at the playhead">Kick-off: 1st half</button>
           <button type="button" data-live-edge title="Jump to what is happening now">Live</button>
           <button type="button" data-live-stop>Stop and save</button>
         </div>
@@ -94,7 +95,6 @@
         </details>
       </div>
       <aside class="code-side">
-        <p class="code-live-note" data-live-note hidden>You can code this match once the recording is saved. Until then, play it back and rewind while it records.</p>
         <section class="code-panel" aria-labelledby="codes-title">
           <div class="code-panel-head">
             <h1 id="codes-title">Codes</h1>
