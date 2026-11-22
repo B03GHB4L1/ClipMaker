@@ -1,11 +1,12 @@
-// The Code screen (docs/CODING_AND_PITCH_PLAN.md, C1 to C3): press a key while
+// The Code screen (docs/CODING_AND_PITCH_PLAN.md, C1 to C4): press a key while
 // the match video plays and an event is made at the playhead; interval codes
 // start on one press and stop on the next. Tags (Shift+letter) label an event,
 // a number after a code names its player, and a code can start or stop
-// intervals. Events are saved in video time; the engine turns them into the
+// intervals; a click on the pitch places the chosen event. Events are saved in video time; the engine turns them into the
 // event table Filter and export read. The panel of codes comes from a template.
 import { projectRequest, newProject, rememberProject, saveProject, beginProjectOperation } from "./projects.js";
 import { formatClock, formatVideo, isTyping, place, sources } from "./code/clock.js";
+import { pitchPoint, placed } from "./code/pitch.js";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "./code/edits.js";
 import { showSaved, showSaveError } from "./save-clip.js";
 
@@ -459,12 +460,13 @@ const render = () => {
   renderRunning();
   renderEditor();
   renderTags();
+  renderPitch();
   $("[data-undo]").disabled = !history.canUndo;
   $("[data-redo]").disabled = !history.canRedo;
   const sorted = [...events.values()].sort((a, b) => order(a) - order(b));
   $("[data-count]").textContent = `(${sorted.length})`;
   $("[data-list-empty]").hidden = sorted.length > 0;
-  $("[data-filter-link]").hidden = !sorted.length || (project.source && project.source !== "coded");
+  $("[data-filter-link]").hidden = !sorted.length || (project.source && !["coded", "both"].includes(project.source));
   list.replaceChildren(...sorted.map((event) => {
     const code = codeOf(event);
     const item = document.createElement("li");
@@ -509,7 +511,11 @@ const renderKickoffNote = (sorted) => {
   const before = sorted.filter((event) => !place(project, event.src, event.t)).length;
   const scraped = project.source && project.source !== "coded" && project.csv_path;
   let text = "";
-  if (scraped) text = "This project's events come from a match feed, so Filter keeps using them. Your codes are saved; adding them to the feed's events comes in a later version.";
+  if (project.source === "both" && !(project.markers || {})["1H"]) text = "Set the first-half kick-off on Intake so your codes join the match feed's events in Filter.";
+  else if (project.source === "both") text = before
+    ? `Your codes join the match feed's events in Filter and export; ${before} before the first kick-off on this video ${before === 1 ? "is" : "are"} left out. The Analyst Room keeps using the feed alone.`
+    : "Your codes join the match feed's events in Filter and export. The Analyst Room keeps using the feed alone, so nothing is counted twice.";
+  else if (scraped) text = "This project's events come from a match feed. Your first code adds your codes to them in Filter and export.";
   else if (!(project.markers || {})["1H"]) text = "Set the first-half kick-off on Intake to give codes a match clock. They are saved meanwhile.";
   else if (before) text = `${before} ${before === 1 ? "code is" : "codes are"} before the first kick-off on this video, so ${before === 1 ? "it is" : "they are"} left out of Filter and export.`;
   note.textContent = text;
@@ -657,6 +663,78 @@ document.addEventListener("keydown", (event) => {
   event.preventDefault();
   if (code.kind === "interval") pressInterval(code); else addCode(code);
 });
+
+// ---------------------------------------------------------------------------
+// Pitch location (C4): click where the chosen event happened, drag to its end.
+// The pitch is drawn with the event's team attacking to the right, in the feeds'
+// scale (x along, y across from the right touchline), so lane and depth filters work.
+// ---------------------------------------------------------------------------
+const pitch = $("[data-pitch]");
+const marks = $("[data-pitch-marks]");
+const svgPoint = (pointer) => {
+  const point = pitch.createSVGPoint();
+  point.x = pointer.clientX;
+  point.y = pointer.clientY;
+  return point.matrixTransform(pitch.getScreenCTM().inverse());
+};
+const svg = (tag, attrs) => {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
+  return element;
+};
+const drawMarks = (start, end) => {
+  const parts = [];
+  if (start && end) parts.push(svg("line", { class: "code-pitch-path", x1: start.sx, y1: start.sy, x2: end.sx, y2: end.sy }),
+    svg("circle", { class: "code-pitch-end", cx: end.sx, cy: end.sy, r: 1.3 }));
+  if (start) parts.push(svg("circle", { class: "code-pitch-start", cx: start.sx, cy: start.sy, r: 1.7 }));
+  marks.replaceChildren(...parts);
+};
+let dragStart = null;
+const renderPitch = () => {
+  const event = events.get(selectedId);
+  pitch.classList.toggle("is-idle", !event);
+  $("[data-pitch-direction]").textContent = event ? `${teamName(event.team)} attack →` : "";
+  $("[data-pitch-clear]").hidden = !event || event.x == null;
+  $("[data-pitch-status]").textContent = !event ? "· choose or make a code first"
+    : event.x == null ? "· not placed" : `· ${placed(event)}`;
+  if (dragStart) return;
+  const at = event && event.x != null ? pitchPoint.toSvg(event.x, event.y) : null;
+  const end = event && event.endX != null ? pitchPoint.toSvg(event.endX, event.endY) : null;
+  drawMarks(at, end);
+};
+pitch.addEventListener("pointerdown", (pointer) => {
+  if (pointer.button !== 0) return;
+  if (!events.get(selectedId)) { lastLine.textContent = "Choose or make a code, then click where it happened."; return; }
+  pitch.setPointerCapture(pointer.pointerId);
+  const { x, y } = svgPoint(pointer);
+  dragStart = pitchPoint.fromSvg(x, y);
+  drawMarks(pitchPoint.toSvg(dragStart.x, dragStart.y), null);
+});
+pitch.addEventListener("pointermove", (pointer) => {
+  if (!dragStart) return;
+  const { x, y } = svgPoint(pointer);
+  const end = pitchPoint.fromSvg(x, y);
+  drawMarks(pitchPoint.toSvg(dragStart.x, dragStart.y), pitchPoint.moved(dragStart, end) ? pitchPoint.toSvg(end.x, end.y) : null);
+});
+const finishDrag = (pointer, cancelled = false) => {
+  if (!dragStart) return;
+  const start = dragStart;
+  dragStart = null;
+  const event = events.get(selectedId);
+  if (cancelled || !event) { renderPitch(); return; }
+  const { x, y } = svgPoint(pointer);
+  const end = pitchPoint.fromSvg(x, y);
+  const next = { ...event, x: start.x, y: start.y, endX: null, endY: null };
+  if (pitchPoint.moved(start, end)) Object.assign(next, { endX: end.x, endY: end.y });
+  commit([{ id: event.id, next }], `place ${codeOf(event)?.label || "code"}`);
+  lastLine.textContent = `${codeOf(event)?.label || "Code"} placed: ${placed(next)}.`;
+};
+pitch.addEventListener("pointerup", (pointer) => finishDrag(pointer));
+pitch.addEventListener("pointercancel", (pointer) => finishDrag(pointer, true));
+$("[data-pitch-clear]").onclick = () => {
+  const event = events.get(selectedId);
+  if (event) commit([{ id: event.id, next: { ...event, x: null, y: null, endX: null, endY: null } }], "clear location");
+};
 
 // ---------------------------------------------------------------------------
 // Squads and code panels (templates)

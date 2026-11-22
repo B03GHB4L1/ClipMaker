@@ -123,7 +123,7 @@ def clean_event(value: Any, max_seconds: float = MAX_SECONDS, document: dict[str
     tags = panel_tags(document or {})
     if not isinstance(value, dict):
         raise ValueError("Each coded event must be an object.")
-    unknown = set(value) - {"id", "code", "team", "src", "t", "end", "tags", "player"}
+    unknown = set(value) - {"id", "code", "team", "src", "t", "end", "tags", "player", "x", "y", "endX", "endY"}
     if unknown:
         raise ValueError(f"Unknown coded event field: {sorted(unknown)[0]}.")
     event_id = str(value.get("id") or "")
@@ -172,7 +172,30 @@ def clean_event(value: Any, max_seconds: float = MAX_SECONDS, document: dict[str
         event["tags"] = chosen
     if value.get("player") is not None:
         event["player"] = _shirt(value["player"])
+    event.update(_location(value))
     return event
+
+
+def _coordinate(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 100:
+        raise ValueError("A pitch location is from 0 to 100 across and along the pitch.")
+    return round(float(value), 1)
+
+
+def _location(value: dict[str, Any]) -> dict[str, float]:
+    """Where on the pitch (C4), in the scraped feeds' scale: x 0 to 100 from the event's
+    team's own goal to the opponent's, y 0 to 100 from its right touchline to its left.
+    An end point (a pass's target) needs a start; either both of a pair or neither."""
+    pairs = {}
+    for first, second in (("x", "y"), ("endX", "endY")):
+        given = [value.get(first) is not None, value.get(second) is not None]
+        if any(given) and not all(given):
+            raise ValueError("A pitch location needs both its across and along values.")
+        if all(given):
+            pairs[first], pairs[second] = _coordinate(value[first]), _coordinate(value[second])
+    if "endX" in pairs and "x" not in pairs:
+        raise ValueError("An end point needs a start point on the pitch.")
+    return pairs
 
 
 def read(project_folder: Path) -> dict[str, Any]:
@@ -209,8 +232,8 @@ def apply(project_folder: Path, changes: Any, max_seconds: float = MAX_SECONDS) 
 
     The whole batch is checked before anything is written: one bad event
     leaves the saved codes as they were. A new panel is refused while any
-    event uses a code or tag it does not have. In an update, ``tags: []`` and
-    ``player: null`` clear those fields."""
+    event uses a code or tag it does not have. In an update, ``tags: []``,
+    ``player: null`` and ``x: null`` (with ``y``, ``endX``, ``endY``) clear those fields."""
     if not isinstance(changes, dict) or set(changes) - {"add", "update", "delete", "leads", "panel", "squads"}:
         raise ValueError("Send codes as add, update and delete lists.")
     add = changes.get("add") or []

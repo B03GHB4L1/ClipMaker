@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "../ui/code/edits.js";
 import { formatClock, formatVideo, isTyping, parseMarker, place, sources, videoOf } from "../ui/code/clock.js";
+import { pitchPoint, placed } from "../ui/code/pitch.js";
 
 const single = { video_path: "match.mp4", period_videos: {}, markers: { "1H": "0:05:00", "2H": "0:55:00", ET1: "1:50:00", ET2: "2:08:00" } };
 
@@ -140,4 +141,22 @@ test("squad lines read number first and refuse repeats", () => {
   assert.equal(squadText([{ number: 4, name: "" }, { number: 7, name: "Ali" }]), "4\n7 Ali");
   assert.throws(() => parseSquad("Saka"), /shirt number/);
   assert.throws(() => parseSquad("9 A\n9 B"), /twice/);
+});
+
+// C4: the pitch drawing to the feeds' scale and back
+
+test("a click on the drawn pitch becomes the feeds' x and y", () => {
+  assert.deepEqual(pitchPoint.fromSvg(0, 68), { x: 0, y: 0 }); // own goal line, right touchline
+  assert.deepEqual(pitchPoint.fromSvg(105, 0), { x: 100, y: 100 }); // opponent's goal line, left touchline
+  assert.deepEqual(pitchPoint.fromSvg(-3, 80), { x: 0, y: 0 }); // outside the lines: clamped
+  const back = pitchPoint.toSvg(40, 75);
+  assert.deepEqual(pitchPoint.fromSvg(back.sx, back.sy), { x: 40, y: 75 });
+  assert.equal(pitchPoint.moved({ x: 50, y: 50 }, { x: 51, y: 50 }), false); // about a metre: a click
+  assert.equal(pitchPoint.moved({ x: 50, y: 50 }, { x: 53, y: 50 }), true);
+});
+
+test("a placed event reads in the Filter's lanes and thirds", () => {
+  assert.equal(placed({ x: 80, y: 90 }), "left wing, attacking third");
+  assert.equal(placed({ x: 20, y: 50, endX: 70, endY: 10 }), "centre, defensive third to right wing, attacking third");
+  assert.equal(placed({}), "");
 });

@@ -268,14 +268,17 @@ class CodesApiTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual((rows[0]["minute"], rows[0]["second"]), ("0", "10"))
 
-    def test_scraped_projects_keep_their_event_table(self):
+    def test_scraped_projects_keep_their_feed_untouched(self):
+        # C4 merges codes into a copy of the feed (tests/test_code_merge.py); the feed file never changes.
         project = self.request("/api/projects", {})["project"]
         table = self.root / "scraped.csv"
         table.write_text("minute,second,type,period\n1,0,Pass,FirstHalf\n", encoding="utf-8")
+        before = table.read_bytes()
         self.server.match_store.upsert({"id": project["id"], "csv_path": str(table), "source": "whoscored"})  # type: ignore[attr-defined]
         result = self.request(f"/api/projects/{project['id']}/codes", {"add": [event("c000001", 3)]})
-        self.assertEqual(result["project"]["csv_path"], str(table))
-        self.assertEqual(result["project"]["source"], "whoscored")
+        self.assertEqual(result["project"]["feed_csv_path"], str(table))
+        self.assertEqual(result["project"]["feed_source"], "whoscored")
+        self.assertEqual(table.read_bytes(), before)
         with self.assertRaises(HTTPError) as error:
             self.request(f"/api/projects/{project['id']}", {"source": "coded"})
         self.assertEqual(error.exception.code, 400)

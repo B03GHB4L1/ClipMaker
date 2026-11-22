@@ -189,3 +189,20 @@ body.code-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .code-dialog .code-dialog-foot .code-apply { border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
 .code-dialog :is(button, input):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
 @media (max-width: 480px) { .code-squads { grid-template-columns: minmax(0, 1fr); } }
+
+/* C4: pitch location */
+.code-pitch-panel { padding: 10px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--code-panel); }
+.code-pitch-panel summary { font-size: 12px; font-weight: 600; cursor: pointer; }
+.code-pitch-panel summary .code-muted { display: inline; font-weight: 400; }
+.code-pitch-wrap { display: flex; flex-direction: column; gap: 4px; max-width: 460px; margin-top: 8px; }
+.code-pitch-direction { min-height: 1.3em; margin: 0; color: var(--cm-muted); font-size: 11px; text-align: right; }
+.code-main .code-pitch { display: block; width: 100%; height: auto; fill: initial; stroke: none; border-radius: 6px; touch-action: none; cursor: crosshair; user-select: none; }
+.code-main .code-pitch.is-idle { cursor: not-allowed; }
+.code-pitch-grass { fill: #e9f0dc; }
+.code-pitch-lines :is(rect, path, circle) { fill: none; stroke: #9aaa86; stroke-width: 0.35; }
+.code-pitch-start { fill: var(--cm-ink); stroke: #fff; stroke-width: 0.5; }
+.code-pitch-end { fill: #fff; stroke: var(--cm-ink); stroke-width: 0.5; }
+.code-pitch-path { stroke: var(--cm-ink); stroke-width: 0.6; stroke-dasharray: 1.4 0.8; }
+.code-pitch-foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.code-pitch-foot .code-muted { flex: 1; }
+.code-main .code-pitch-foot button { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }

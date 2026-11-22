@@ -902,3 +902,6 @@ fieldset legend,
   .ps-body { grid-template-columns: 1fr; overflow: auto; }
   .ps-pick { border-right: 0; border-bottom: 1px solid var(--cm-rule, #dedfdd); }
 }
+
+/* Coded events without a pitch location (Code screen, C4). */
+.filter-unlocated { grid-column: 1 / -1; margin: 0; }

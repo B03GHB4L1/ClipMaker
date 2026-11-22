@@ -300,6 +300,12 @@ const renderMatchContext = () => {
     activeMatch.video_name || "Not selected";
   document.querySelector("[data-xt-min]").disabled = !filterMetadata.has_xt;
   document.querySelector("[data-top-n]").disabled = !filterMetadata.has_xt;
+  const unlocated = Number(filterMetadata.unlocated || 0);
+  const note = document.querySelector("[data-unlocated]");
+  note.hidden = !unlocated;
+  note.textContent = unlocated
+    ? `${unlocated.toLocaleString()} coded ${unlocated === 1 ? "event has" : "events have"} no pitch location, so a lane or depth filter leaves ${unlocated === 1 ? "it" : "them"} out. Click the pitch on the Code screen to place ${unlocated === 1 ? "it" : "them"}.`
+    : "";
 };
 
 const updateSummary = () => {
