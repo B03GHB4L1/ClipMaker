@@ -85,7 +85,7 @@ TYPE_ID_TO_EVENT = {
 }
 
 QUALIFIER_RULES = {
-    1: "is_long_ball", 2: "is_cross", 4: "is_through_ball",
+    1: "is_long_ball", 2: "is_cross", 3: "is_header", 4: "is_through_ball",  # 3 is a headed pass, 15 any other header
     5: "is_freekick", 6: "is_corner", 9: "is_penalty", 15: "is_header",
     20: "is_right_foot", 23: "is_fast_break", 28: "is_own_goal",
     31: "is_yellow_card", 32: "is_second_yellow", 33: "is_red_card",

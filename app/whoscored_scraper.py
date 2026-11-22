@@ -36,6 +36,11 @@ def _pitch_zone(y, flip=False):
     return "Right Wing"
 
 
+def _is_header(qualifier_names):
+    """Shots, clearances and the like carry "Head" (Opta 15); headed passes carry "HeadPass" (Opta 3)."""
+    return "Head" in qualifier_names or "HeadPass" in qualifier_names
+
+
 def _depth_zone(x):
     """Depth zone from x coordinate (0=own goal, 100=opponent goal, per-team normalised)."""
     try:
@@ -797,7 +802,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_through_ball": "Throughball" in qualifier_names,
                     "is_corner": "CornerTaken" in qualifier_names,
                     "is_freekick": "FreekickTaken" in qualifier_names,
-                    "is_header": "Head" in qualifier_names,
+                    "is_header": _is_header(qualifier_names),
                     "is_own_goal": "OwnGoal" in qualifier_names,
                     "is_big_chance": "BigChanceCreated" in qualifier_names,
                     "is_big_chance_shot": "BigChance" in qualifier_names,
