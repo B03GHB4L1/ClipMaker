@@ -2995,8 +2995,8 @@
 :root[data-theme="dark"] .code-links-kind {
   color: var(--cm-muted);
 }
-:root[data-theme="dark"] .code-dialog :is(select,
-:root[data-theme="dark"] input[type=checkbox]):focus-visible {
+:root[data-theme="dark"] .code-dialog select:focus-visible,
+:root[data-theme="dark"] .code-dialog input[type=checkbox]:focus-visible {
   outline: 2px solid #9dba63;
 }
 :root[data-theme="dark"] .code-dialog-foot {
