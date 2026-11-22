@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=10" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=14" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=2" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=10"></script>
+  <script type="module" src="code.js?v=11"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -29,9 +29,11 @@
       <form class="code-live-form" data-live-form hidden>
         <h2>Or record it live</h2>
         <fieldset class="code-live-kind">
-          <legend>The stream comes from</legend>
+          <legend>Record from</legend>
           <label><input type="radio" name="live-kind" value="url" checked /> A stream address</label>
           <label><input type="radio" name="live-kind" value="listen" /> OBS or a phone app on this computer</label>
+          <label><input type="radio" name="live-kind" value="device" /> A camera or capture card</label>
+          <label><input type="radio" name="live-kind" value="screen" /> This computer's screen</label>
         </fieldset>
         <label class="code-live-field" data-live-url-row>Stream address
           <input type="text" data-live-url placeholder="rtmp://, srt://, rtsp:// or https://" autocomplete="off" spellcheck="false" />
@@ -40,7 +42,14 @@
           <label>Protocol <select data-live-protocol></select></label>
           <label>Port <input type="number" data-live-port min="1024" max="65535" inputmode="numeric" /></label>
         </div>
-        <p class="code-muted">Record only streams you have the right to record. VizorPlay saves the stream in 2-second pieces as it goes, so a crash loses a few seconds at most.</p>
+        <div class="code-live-field code-live-devices" data-live-devices-row hidden>
+          <label data-live-camera-row>Camera <select data-live-camera></select></label>
+          <label data-live-screen-row>Screen <select data-live-screen></select></label>
+          <label>Sound <select data-live-audio></select></label>
+          <button type="button" data-live-rescan>Look again</button>
+        </div>
+        <p class="code-muted" data-live-device-note hidden></p>
+        <p class="code-muted">Record only what you have the right to record; recording a broadcast from the screen is your responsibility. VizorPlay saves the stream in 2-second pieces as it goes, so a crash loses a few seconds at most.</p>
         <p class="code-error" data-live-form-error role="alert" hidden></p>
         <button type="submit" class="code-primary">Start recording</button>
       </form>

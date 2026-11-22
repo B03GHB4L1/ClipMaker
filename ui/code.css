@@ -30,6 +30,12 @@ body.code-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .code-live-listen { flex-direction: row; flex-wrap: wrap; gap: 10px; }
 .code-live-listen label { display: flex; flex-direction: column; gap: 4px; }
 .code-live-listen input { width: 9ch; }
+.code-live-devices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 10px; align-items: end; }
+.code-live-devices label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.code-live-devices select { width: 100%; min-width: 0; }
+.code-live-devices [hidden] { display: none; }
+.code-empty .code-live-form .code-live-devices button { height: 32px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-ink); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; justify-self: start; }
+.code-empty .code-live-form .code-live-devices button:disabled { opacity: 0.55; cursor: default; }
 .code-live-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--code-panel); }
 .code-live-bar p { flex: 1 1 220px; margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
 .code-live-bar.is-low-disk p { color: #8c2725; }

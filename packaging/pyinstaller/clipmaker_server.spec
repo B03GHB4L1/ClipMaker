@@ -47,6 +47,7 @@ hiddenimports = [
     "coding.templates",
     "live",
     "live.recorder",
+    "live.devices",
     "cv2",
     "tkinter",
     "tkinter.filedialog",
