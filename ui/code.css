@@ -206,7 +206,7 @@ body.code-page { overflow-y: auto; height: auto; min-height: 100vh; }
   .code-edit-table:has([data-panel-codes]) :is(th, td):nth-child(4) { display: none; }
   .code-links-kind { display: block; }
 }
-.code-dialog :is(select, input[type=checkbox]):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
+.code-dialog select:focus-visible, .code-dialog input[type=checkbox]:focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
 .code-dialog-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px 14px; border-top: 1px solid var(--cm-rule); }
 .code-dialog .code-dialog-foot .code-apply { border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
 .code-dialog :is(button, input):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
