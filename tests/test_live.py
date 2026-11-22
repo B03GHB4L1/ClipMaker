@@ -39,11 +39,19 @@ def ffmpeg():
 
 
 def push(port, seconds):
-    """A test pattern with sound, sent over RTMP the way OBS sends it."""
-    subprocess.run([ffmpeg(), "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
-                    "-f", "lavfi", "-i", "sine", "-t", str(seconds), "-c:v", "libx264", "-preset", "ultrafast", "-g", "25",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "flv", f"rtmp://127.0.0.1:{port}/live/any-key"],
-                   check=True, timeout=60, stdin=subprocess.DEVNULL)
+    """A test pattern with sound, sent over RTMP the way OBS sends it. Like OBS, it tries
+    again while the recorder's FFmpeg is still starting to listen (slower on Linux and macOS)."""
+    command = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
+               "-f", "lavfi", "-i", "sine", "-t", str(seconds), "-c:v", "libx264", "-preset", "ultrafast", "-g", "25",
+               "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "flv", f"rtmp://127.0.0.1:{port}/live/any-key"]
+    end = time.time() + 20
+    while True:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        if result.returncode == 0:
+            return
+        if "refused" not in result.stderr.lower() or time.time() > end:
+            raise AssertionError(f"push failed: {result.stderr[-300:]}")
+        time.sleep(0.3)
 
 
 def wait_for(check, timeout=30):
