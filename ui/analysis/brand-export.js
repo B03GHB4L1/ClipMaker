@@ -43,9 +43,10 @@ const toCanvas = async (source) => {
   }
 };
 
-// The chart's background: the colour of its bottom-left corner.
+// The chart's background: the colour of its top-left corner. Not the bottom edge:
+// animated frames draw a progress bar along it, which would tint the strip.
 const backgroundOf = (canvas) => {
-  const [r, g, b, a] = canvas.getContext("2d", { willReadFrequently: true }).getImageData(1, canvas.height - 2, 1, 1).data;
+  const [r, g, b, a] = canvas.getContext("2d", { willReadFrequently: true }).getImageData(1, 1, 1, 1).data;
   if (a < 200) return { fill: "#ffffff", dark: false };
   const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   return { fill: `rgb(${r},${g},${b})`, dark: luminance < 0.5 };
