@@ -218,6 +218,21 @@ adapter and checked on all three systems in a spike:
   - The page reads only `init.mp4` and `seg_NNNNN.m4s` by fixed names; addresses
     must be rtmp(s), srt, rtsp(s) or http(s), never files.
 - **L2** Live coding, live kick-off markers, cutting clips while recording.
+  *Done 2026-11-22.*
+  - The code panel works while it records. Codes stamp the playhead in recording time,
+    which is the joined video's time, so nothing moves when the recording is saved;
+    the coded table is rewritten against the file then.
+  - "Kick-off" in the live bar marks the next period without a marker (1st half,
+    2nd half, extra time, penalties) at the playhead, in whole seconds, after the
+    earlier one. Intake corrects them as before. The model stores kick-offs only,
+    so there is no separate half-time button.
+  - Each finished code gets a "save clip" button while it records: the code's lead-in
+    and lead-out, re-encoded from the segments so it starts on the exact frame, saved
+    to the export folder like other clips. Up to 5 minutes; a clip whose end is not
+    recorded yet says how many seconds to wait; one that runs into a break in the
+    stream ends where the break starts. Reels (a whole half) stay on Filter once
+    the recording is saved.
+  - The video stage stays black in the dark theme (it showed grey before a video loaded).
 - **L3** Capture devices and screen capture per OS.
 
 ---

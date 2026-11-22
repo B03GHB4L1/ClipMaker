@@ -5,12 +5,12 @@
 // intervals; a click on the pitch places the chosen event. Events are saved in video time; the engine turns them into the
 // event table Filter and export read. The panel of codes comes from a template.
 import { projectRequest, newProject, rememberProject, saveProject, beginProjectOperation } from "./projects.js";
-import { formatClock, formatVideo, isTyping, place, sources } from "./code/clock.js";
+import { PERIODS, formatClock, formatVideo, isTyping, parseMarker, place, sources } from "./code/clock.js";
 import { pitchPoint, placed } from "./code/pitch.js";
 import { LINK_LIMITS, linkSummary, linkTargets, pruneLinks, setStart, toggleLink } from "./code/links.js";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "./code/edits.js";
 import { showSaved, showSaveError } from "./save-clip.js";
-import { LivePlayer, RECORDING_STATES, liveSummary } from "./code/live.js";
+import { LivePlayer, RECORDING_STATES, liveSummary, markerText, nextKickoff } from "./code/live.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
@@ -499,7 +499,18 @@ const render = () => {
     remove.setAttribute("aria-label", `Delete ${code?.label || "code"} at ${clock.textContent}`);
     remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg>';
     remove.onclick = () => removeCode(event.id);
-    item.append(jump, remove);
+    item.append(jump);
+    if (liveMode && event.end !== null) {
+      const clip = document.createElement("button");
+      clip.type = "button";
+      clip.className = "code-remove code-clip";
+      clip.title = "Save this moment as a clip now";
+      clip.setAttribute("aria-label", `Save a clip of ${code?.label || "code"} at ${clock.textContent}`);
+      clip.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M3 12.5h10"/></svg>';
+      clip.onclick = () => saveLiveClip(event, clip);
+      item.append(clip);
+    }
+    item.append(remove);
     if (unplaced.has(event.id) || !where) item.classList.add("is-unplaced");
     if (event.end === null) item.classList.add("is-running");
     return item;
@@ -513,7 +524,8 @@ const renderKickoffNote = (sorted) => {
   const before = sorted.filter((event) => !place(project, event.src, event.t)).length;
   const scraped = project.source && project.source !== "coded" && project.csv_path;
   let text = "";
-  if (project.source === "both" && !(project.markers || {})["1H"]) text = "Set the first-half kick-off on Intake so your codes join the match feed's events in Filter.";
+  if (liveMode && !(project.markers || {})["1H"]) text = "Press Kick-off above when the match starts, so your codes get a match clock. They are saved meanwhile.";
+  else if (project.source === "both" && !(project.markers || {})["1H"]) text = "Set the first-half kick-off on Intake so your codes join the match feed's events in Filter.";
   else if (project.source === "both") text = before
     ? `Your codes join the match feed's events in Filter and export; ${before} before the first kick-off on this video ${before === 1 ? "is" : "are"} left out. The Analyst Room keeps using the feed alone.`
     : "Your codes join the match feed's events in Filter and export. The Analyst Room keeps using the feed alone, so nothing is counted twice.";
@@ -625,7 +637,6 @@ document.addEventListener("keydown", (event) => {
   if (!project || isTyping(event.target) || event.altKey) return;
   if (document.querySelector("dialog[open]")) return;
   const key = event.key.toLowerCase();
-  if (liveMode && !(key === " " || key === "arrowleft" || key === "arrowright")) return; // no coding until it is saved
   if (event.ctrlKey || event.metaKey) {
     if (key === "z" && !event.shiftKey) { event.preventDefault(); undo(); }
     else if ((key === "z" && event.shiftKey) || key === "y") { event.preventDefault(); redo(); }
@@ -1047,10 +1058,57 @@ let liveMode = false;
 const setLiveMode = (on) => {
   liveMode = on;
   liveBar.hidden = !on;
-  $("[data-live-note]").hidden = !on;
-  for (const part of $(".code-side").children) if (!part.matches("[data-live-note]")) part.inert = on;
-  $(".code-pitch-panel").inert = on;
   $("[data-code-workspace]").classList.toggle("is-live", on);
+  if (on) showKickoff();
+  if (project) render();
+};
+
+// Kick-offs while it records (L2): each press marks the next period's kick-off at the playhead,
+// so codes get a match clock from the first one. Intake can still correct them afterwards.
+const kickoffButton = $("[data-live-kickoff]");
+const showKickoff = () => {
+  const next = nextKickoff(project?.markers);
+  kickoffButton.textContent = next ? `Kick-off: ${next.name}` : "All kick-offs marked";
+  kickoffButton.disabled = !next;
+};
+kickoffButton.onclick = async () => {
+  const next = nextKickoff(project.markers);
+  if (!next) return;
+  const seconds = Math.floor(video.currentTime);
+  const earlier = PERIODS.slice(0, PERIODS.indexOf(next)).map((period) => parseMarker((project.markers || {})[period.key])).filter((value) => value != null);
+  if (earlier.some((value) => value >= seconds)) {
+    showError(`The ${next.name} kick-off must come after the earlier one. Move the playhead to it first.`);
+    return;
+  }
+  try {
+    const result = await saveProject(project.id, { markers: { ...(project.markers || {}), [next.key]: markerText(seconds) } });
+    project = result || project;
+    rememberProject(project);
+    showError("");
+    showKickoff();
+    render();
+    lastLine.textContent = `${next.name} kick-off marked at ${formatVideo(seconds)} in the recording. Intake can correct it.`;
+  } catch (error) { showError(error.message); }
+};
+
+/** Cut the clip of one coded event from the recording, with its code's lead-in and lead-out. */
+const saveLiveClip = async (event, button) => {
+  const lead = leadOf(event.code);
+  const end = (event.end ?? event.t) + Number(lead.after || 0);
+  button.disabled = true;
+  try {
+    const code = codeOf(event);
+    const where = place(project, event.src, event.t);
+    const result = await projectRequest(`${liveApi()}/clip`, {
+      start: Math.max(0, event.t - Number(lead.before || 0)), end,
+      name: `${code?.label || "Clip"} ${where ? formatClock(where.clock) : formatVideo(event.t)}`.replace(/:/g, "."),
+    });
+    showSaved(result.saved, "Clip");
+  } catch (error) {
+    showSaveError(error.message, "Clip");
+  } finally {
+    button.disabled = false;
+  }
 };
 
 const showLiveForm = async () => {

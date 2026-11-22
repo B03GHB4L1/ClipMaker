@@ -141,6 +141,28 @@ class SegmentTests(unittest.TestCase):
         (self.folder / "notes").mkdir()
         self.assertEqual([part.name for part in recorder.parts_of(self.folder)], ["part01"])
 
+    def test_a_clip_is_checked_and_stays_inside_one_part(self):
+        # L2: clips while recording. Two parts of 2 s + 2 s, then 2 s after a break.
+        self.part("part01", [("seg_00000.m4s", 2.0), ("seg_00001.m4s", 2.0)])
+        self.part("part02", [("seg_00000.m4s", 2.0)])
+        for start, end, message in ((1, 1.1, "too short"), (0, 400, "up to 5 minutes"), (7, 9, "not been recorded"),
+                                    (5, 8, "recorded in 2 s"), ("1", 3, "start and an end"), (float("nan"), 3, "start and an end")):
+            with self.assertRaisesRegex(ValueError, message):
+                recorder.cut("ffmpeg", self.folder, start, end, "out.mp4", run=None)
+        commands = []
+
+        def run(command, **options):
+            commands.append((command, options))
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        span = recorder.cut("ffmpeg", self.folder, 2.5, 5.5, "out.mp4", run=run)
+        self.assertEqual(span, (2.5, 4.0))  # ends where the break starts
+        command, options = commands[0]
+        self.assertEqual(options["cwd"], self.folder / "part01")
+        self.assertEqual(command[command.index("-ss") + 1], "0.500")
+        self.assertEqual(command[command.index("-t") + 1], "1.500")
+        self.assertEqual(list((self.folder / "part01").glob("clip-*.m3u8")), [])  # its playlist is cleaned up
+
     def test_codecs_come_from_the_init_segment(self):
         init = self.folder / "init.mp4"
         init.write_bytes(b"....avcC\x01\x64\x00\x1f....mp4a....")
@@ -205,6 +227,15 @@ class RecordingTests(unittest.TestCase):
             self.start()
         self.assertEqual(self.finish()["state"], "done")
         self.assertAlmostEqual(recorder.media_seconds(self.ffmpeg, self.joined[0][1]), 4, delta=1)
+
+    def test_a_clip_can_be_cut_while_it_records(self):
+        self.start()
+        push(self.port, 6)
+        output = self.root / "clip.mp4"
+        self.assertEqual(self.live.clip("match1", 1.0, 3.5, str(output)), (1.0, 3.5))
+        self.assertAlmostEqual(recorder.media_seconds(self.ffmpeg, output), 2.5, delta=0.15)
+        with self.assertRaisesRegex(ValueError, "recorded in"):
+            self.live.clip("match1", 2.0, 30.0, str(self.root / "later.mp4"))
 
     def test_stopping_before_any_stream_records_nothing(self):
         self.start()
@@ -301,6 +332,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Stop the live recording", self.refused(f"/api/projects/{self.project}/delete", {}))
         push(port, 3)
         wait_for(lambda: self.request(f"/api/projects/{self.project}/live")["live"]["state"] == "reconnecting")
+        # L2: a kick-off and a code while it records, and a clip of it saved straight away.
+        self.request(f"/api/projects/{self.project}", {"markers": {"1H": "0:00:01"}})
+        self.request(f"/api/projects/{self.project}/codes", {"add": [{"id": "c000001", "code": "goal", "team": "home", "src": "1H", "t": 2}]})
+        clip = self.request(f"/api/projects/{self.project}/live/clip", {"start": 0.5, "end": 2.5, "name": "Goal 0.01"})
+        self.assertEqual((clip["start"], clip["end"]), (0.5, 2.5))
+        self.assertTrue(clip["saved"]["name"].startswith("Live Goal 0.01"))
+        self.assertTrue((self.root / "exports" / clip["saved"]["name"]).is_file())
+        self.assertIn("5 minutes", self.refused(f"/api/projects/{self.project}/live/clip", {"start": 0, "end": 900}))
+        self.assertIn("start, end and name", self.refused(f"/api/projects/{self.project}/live/clip", {"start": 0, "end": 1, "path": "x"}))
         push(port, 3)
         live = self.request(f"/api/projects/{self.project}/live")["live"]
         self.assertGreaterEqual(live["recorded_seconds"], 5)
@@ -316,6 +356,13 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(Path(project["video_path"]).is_file())
         self.assertEqual(len(project["live_gaps"]), 1)
         self.assertEqual(set(project["live_gaps"][0]), {"at", "length"})
+        # The code made while it recorded now plays from the joined file at the same moment.
+        import pandas as pd
+        table = pd.read_csv(project["csv_path"])
+        self.assertEqual(project["source"], "coded")
+        self.assertEqual((float(table.loc[0, "video_time"]), int(table.loc[0, "minute"]), int(table.loc[0, "second"])), (2.0, 0, 1))
+        from packaging.clipmaker_api_server import video_for_period
+        self.assertEqual(video_for_period(project, 1), project["video_path"])
 
 
 if __name__ == "__main__":

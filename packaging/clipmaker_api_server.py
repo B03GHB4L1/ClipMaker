@@ -2162,6 +2162,24 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         job = self.tracking_jobs.start(work)
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
+    def live_clip(self, project: dict[str, Any], body: dict[str, Any]) -> None:
+        """POST /api/projects/<id>/live/clip {start, end, name}: a clip cut from the recording
+        while it records (L2), saved to the user's export folder like any other clip."""
+        if set(body) - {"start", "end", "name"}:
+            raise ValueError("Send a clip as start, end and name.")
+        folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+        span: list[tuple[float, float]] = []
+
+        def write(temporary: str) -> None:
+            span.append(self.live.clip(project["id"], body.get("start"), body.get("end"), temporary))
+
+        name = str(body.get("name") or "")[:100]
+        saved = save_to_user_folder(folder, f"{project.get('project_name') or 'Live'} {name}".strip(), ".mp4", write)
+        token = uuid.uuid4().hex
+        self.server.saved_clips[token] = saved  # type: ignore[attr-defined]
+        self.send_json(HTTPStatus.OK, {"saved": {"name": saved.name, "folder": str(saved.parent), "id": token},
+                                       "start": span[0][0], "end": span[0][1]})
+
     def send_live_file(self, path: str) -> None:
         """/api/live/<project>/<partNN>/<init.mp4|seg_NNNNN.m4s>: nothing else in the folder is served."""
         parts = path.split("/")
@@ -2419,11 +2437,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     raise ValueError("Unknown project action")
                 self.project_codes(parts[3], body)
                 return
-            if path.startswith("/api/projects/") and (path.endswith("/live/start") or path.endswith("/live/stop")):
+            if path.startswith("/api/projects/") and path.rsplit("/", 2)[-2:] in (["live", "start"], ["live", "stop"], ["live", "clip"]):
                 parts = path.split("/")
                 project = self.store.get(parts[3]) if len(parts) == 6 else None
                 if project is None:
                     raise ValueError("Project not found")
+                if parts[5] == "clip":
+                    self.live_clip(project, body)
+                    return
                 if parts[5] == "start":
                     if project.get("video_path"):
                         raise ValueError("This project already has a video. Start a new project to record live.")
@@ -2748,7 +2769,10 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
         project = store.get(project_id)
         if project is None or project.get("video_path"):
             return  # deleted, or given another video meanwhile: the file stays where it was saved
-        store.upsert({"id": project_id, "video_path": str(path), "video_name": path.name, "live_gaps": gaps})
+        saved = store.upsert({"id": project_id, "video_path": str(path), "video_name": path.name, "live_gaps": gaps})
+        if saved.get("source") in ("coded", "both"):
+            # Codes made while it recorded (L2) are in recording time, which is the joined video's time.
+            write_coded_table(store, saved)
 
     server.live = LiveRecordings(data_dir / "live", _find_ffmpeg, recording_folder, use_recording)  # type: ignore[attr-defined]
     return server

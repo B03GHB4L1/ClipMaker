@@ -42,8 +42,6 @@ body.code-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .code-main .code-live-bar button { height: 30px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
 .code-main .code-live-bar button.is-armed { border-color: #c62f2a; color: #8c2725; }
 .code-main .code-live-bar button:disabled { opacity: 0.55; cursor: default; }
-.code-live-note { margin: 0; padding: 8px 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-muted); font-size: 11px; line-height: 1.45; }
-.code-workspace.is-live :is(.code-side > [inert], .code-pitch-panel) { opacity: 0.5; }
 
 .code-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 12px; align-items: start; }
 .code-centre { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
