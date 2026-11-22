@@ -335,7 +335,8 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn(">Add at this frame</h2>", side)
         self.assertIn("data-freeze ", side)
         self.assertIn("data-board ", side)
-        self.assertEqual(side.count("<small>"), 5)  # every player and insert button says what it does
+        self.assertIn("data-pitch ", side)
+        self.assertEqual(side.count("<small>"), 6)  # every player and insert button says what it does (P1 adds Mark the pitch)
         transport = html[html.index('<div class="annotate-transport"'):html.index("</div>", html.index('<div class="annotate-transport"'))]
         self.assertNotIn("data-freeze", transport)  # it overflowed the transport row
         # Vague tracking labels are gone; the buttons name their action.

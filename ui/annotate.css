@@ -114,6 +114,10 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-player-buttons button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
 .annotate-player-buttons button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
 .annotate-player-buttons button[aria-pressed="true"] kbd { color: #b9bcb4; }
+.annotate-pitch-saved { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.annotate-pitch-saved button { flex: 1 1 auto; min-height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.annotate-pitch-saved button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
+.annotate-pitch-saved button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
 
 /* The column is as wide as the video, so transport and timeline line up with it.
    The video's height leaves room for the bars, transport and timeline in one window. */

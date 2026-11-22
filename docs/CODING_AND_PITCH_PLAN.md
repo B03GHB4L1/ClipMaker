@@ -295,7 +295,28 @@ metres and player speed.
 ### Milestones
 
 - **P1** Calibrate one frame in the editor and show the projected pitch lines
-  to check it; shapes flat on the pitch at that frame.
+  to check it; shapes flat on the pitch at that frame. *Done 2026-11-22.*
+  - "Mark the pitch" (Add at this frame) opens the board's calibration panel in a
+    pitch mode: the same marks, loupe, drag and fit grading in metres, with "Save
+    pitch" and "Remove pitch". Reopened on the marked frame, it shows the saved marks.
+  - The clip's document keeps `pitch: {keys: [{frame, pairs}]}`. The frame is the clip's
+    recorded frame, not its place after cutting, so splitting or trimming keeps it.
+    One key for now; P2 adds a key per camera move. The engine checks the frame, 4 to
+    40 marks, their names and positions; marks off the landmark list are ignored by
+    the fit.
+  - "Pitch lines" and "Go to frame N" under the button: the fitted lines are drawn on
+    the marked frame, as during marking.
+  - "Flat on the pitch" in a ring's or arrow's settings (offered once the clip has a
+    pitch). A flat ring is a true circle on the grass, its size read out in metres; a
+    flat arrow's head lies on the grass, smaller further away, with the arrow's length
+    in metres. Drawn by `ui/annotate/flat.js` through the calibration, in the editor,
+    screenshots and exports alike. A ring on a followed player stays an ordinary ring.
+  - Until P2 the calibration is the one frame's: on other frames flat drawings keep
+    their shape where they were drawn, like every drawing, rather than following the
+    pitch as the camera moves.
+  - Checked in the browser with marks from a known camera (fit 0.0 m), a flat ring and
+    arrow, saved and reopened, and an export whose frames show them as on screen.
+    Not yet tried: marking a real frame by hand on several matches.
 - **P2** Camera following, confidence, re-click correction, saved per clip.
 - **P3** Offside line, minimap, distances and speed.
 
