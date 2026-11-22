@@ -26,7 +26,7 @@ This checklist records evidence, not a guarantee that software has no bugs.
 | Public Windows package updates | WinGet manifests prepared; community submission/acceptance still needed |
 | Linux updates | Download and install newer DEB; no automatic update repository configured |
 | Unsigned installation expectations | Windows security warnings possible; the Homebrew-built macOS app is not notarized and is not a Gatekeeper bypass guarantee |
-| Release notes / support / licenses | Existing license and bundled font licenses; final candidate limitations must accompany publication |
+| Release notes / support / licenses | PolyForm Strict 1.0.0 from VizorPlay 1.0 (noncommercial; commercial licences from B4L1), earlier MIT notice in LICENSE-MIT-EARLIER.md, bundled font and model licences; final candidate limitations must accompany publication |
 
 Candidate scope: Windows x64 NSIS, Ubuntu 22.04 x64 DEB, and a macOS Homebrew
 formula that builds VizorPlay.app on the Mac (ad hoc signed, not notarized; its

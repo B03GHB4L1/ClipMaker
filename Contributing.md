@@ -112,6 +112,14 @@ toy rows. WhoScored and Scoresway do not expose identical tags or qualifiers.
 
 ## Pull requests
 
+VizorPlay is source-available under the PolyForm Strict License 1.0.0
+(`LICENSE`), which does not allow changes to the software. Outside code
+contributions can only be accepted under a separate written agreement with
+B4L1 (granvskaia@gmail.com), so get in touch or open an issue first to discuss
+a change. Bug reports and suggestions are welcome without one.
+
+With that agreement in place:
+
 1. Create a descriptive branch.
 2. Make the change and add a focused regression test for it.
 3. Run the relevant tests above; check desktop and narrow layouts for
