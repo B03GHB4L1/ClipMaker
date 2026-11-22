@@ -252,7 +252,10 @@ adapter and checked on all three systems in a spike:
     Screen recording is allowed under Privacy & Security, Screen Recording.
   - Checked on Windows 11 (the laptop camera with its microphone, and the desktop):
     record, play behind the live edge, stop and save. CI records the screen on Windows
-    and Linux. Not checked by hand: macOS and Linux devices, a capture card, a
+    only (the Linux job has no X display, and macOS needs a permission a runner cannot
+    give). The bundled FFmpeg has the inputs on all three: Windows dshow and gdigrab;
+    macOS avfoundation; Linux v4l2, x11grab and ALSA (no PulseAudio, so the default ALSA
+    microphone). Not checked by hand: macOS and Linux devices, a capture card, a
     30-minute run on each system.
 
 ---
