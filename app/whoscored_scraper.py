@@ -46,20 +46,87 @@ OPTA_QUALIFIER_COLUMNS = {
     179: "is_diving_save", 182: "is_save_hands", 183: "is_save_feet",
     173: "is_parried", 174: "is_parried", 176: "is_caught", 177: "is_caught",
     286: "is_attacking_duel", 285: "is_defending_duel",
+    # Added after a second live check the same day (PSG v Slovan Bratislava on WhoScored,
+    # Viking v Sabah on Scoresway), where both feeds carried these ids under the same numbers.
+    # 178 is Opta's "standing": the feeds put it on tackles as well as saves, and only saves
+    # keep it here. 11115-11117 are WhoScored's own ids and say where the saved shot was taken
+    # from, not where the keeper stood; Scoresway has none, so scoresway_scraper derives them.
+    8: "is_goal_disallowed", 178: "is_standing_save", 88: "is_high_claim",
+    100: "is_six_yard_block", 211: "is_overrun",
+    11115: "is_keeper_save_in_box", 11116: "is_keeper_save_six_yard",
+    11117: "is_keeper_save_outside_box",
 }
 OPTA_COLUMNS = list(dict.fromkeys(OPTA_QUALIFIER_COLUMNS.values()))
+# Events both scrapers leave out: Opta 43, a record the provider later withdrew.
+SKIPPED_EVENT_TYPES = {"DeletedEvent"}
 RELATED_EVENT = 55  # on an assisted shot, the eventId (per team) of the pass before it
+SAVE_ONLY_COLUMNS = {"is_standing_save"}
+
+# Qualifiers that carry a value rather than a yes/no, read the same way by both scrapers.
+# Lists (131, 30) are comma-separated and line up slot by slot; player ids are each feed's own.
+OPTA_VALUE_COLUMNS = [
+    "blocked_x", "blocked_y", "caught_offside_player",
+    "formation", "formation_lineup", "formation_slot", "captain",
+]
+BLOCKED_X, BLOCKED_Y = 146, 147          # where a shot was blocked, on the 0-100 pitch
+CAUGHT_OFFSIDE = 7                       # on an offside pass, the player caught offside
+TEAM_FORMATION, FORMATION_SLOTS, INVOLVED_PLAYERS = 130, 131, 30
+FORMATION_SLOT, CAPTAIN = 145, 194       # a substitute's slot; the captain's player id
+# Opta formation ids. 4 (433) and 7 (4141) were checked against WhoScored's own formation
+# names; the rest follow Opta's list.
+FORMATIONS = {
+    2: "4-4-2", 3: "4-1-2-1-2", 4: "4-3-3", 5: "4-5-1", 6: "4-4-1-1", 7: "4-1-4-1",
+    8: "4-2-3-1", 9: "4-3-2-1", 10: "5-3-2", 11: "5-4-1", 12: "3-5-2", 13: "3-4-3",
+    14: "3-1-3-1-2", 15: "4-2-2-2", 16: "3-5-1-1", 17: "3-4-2-1", 18: "3-4-1-2",
+    19: "3-1-4-2", 20: "3-1-2-1-3", 21: "4-1-3-2", 22: "4-2-4-0", 23: "4-3-1-2",
+    24: "3-2-4-1", 25: "3-3-3-1",
+}
 
 
-def opta_flags(qualifier_ids):
+def opta_flags(qualifier_ids, event_type=None):
     """The shared columns for one event, from its Opta qualifier ids (a dict id -> value)."""
     flags = dict.fromkeys(OPTA_COLUMNS, False)
     for qid, column in OPTA_QUALIFIER_COLUMNS.items():
         if qid in qualifier_ids:
             flags[column] = True
+    if event_type is not None and event_type != "Save":
+        for column in SAVE_ONLY_COLUMNS:
+            flags[column] = False
     related = qualifier_ids.get(RELATED_EVENT) if 29 in qualifier_ids else None
     flags["assist_event_id"] = "" if related in (None, "") else str(related)
     return flags
+
+
+def _split_list(value):
+    return [part.strip() for part in str(value or "").split(",")]
+
+
+def opta_values(qualifier_ids, player_name=lambda player_id: ""):
+    """The shared value columns for one event; player_name turns a feed player id into a name.
+    Only qualifiers the event carries are returned, so each scraper keeps its own blanks."""
+    values = {}
+    name = lambda player_id: player_name(str(player_id).strip()) or str(player_id).strip()
+    for qid, column in ((BLOCKED_X, "blocked_x"), (BLOCKED_Y, "blocked_y")):
+        try:
+            values[column] = float(qualifier_ids[qid])
+        except (KeyError, TypeError, ValueError):
+            pass
+    if qualifier_ids.get(CAUGHT_OFFSIDE) not in (None, ""):
+        values["caught_offside_player"] = name(qualifier_ids[CAUGHT_OFFSIDE])
+    if qualifier_ids.get(TEAM_FORMATION) not in (None, ""):
+        raw = str(qualifier_ids[TEAM_FORMATION]).strip()
+        values["formation"] = FORMATIONS.get(int(raw), raw) if raw.isdigit() else raw
+    if qualifier_ids.get(FORMATION_SLOTS) and qualifier_ids.get(INVOLVED_PLAYERS):
+        slots = _split_list(qualifier_ids[FORMATION_SLOTS])
+        players = _split_list(qualifier_ids[INVOLVED_PLAYERS])
+        starters = sorted((int(slot), player) for slot, player in zip(slots, players)
+                          if slot.isdigit() and int(slot) > 0 and player)
+        values["formation_lineup"] = "; ".join(f"{slot} {name(player)}" for slot, player in starters)
+    if qualifier_ids.get(FORMATION_SLOT) not in (None, ""):
+        values["formation_slot"] = str(qualifier_ids[FORMATION_SLOT]).strip()
+    if qualifier_ids.get(CAPTAIN) not in (None, ""):
+        values["captain"] = name(qualifier_ids[CAPTAIN])
+    return values
 
 
 def _is_assist(qualifier_names):
@@ -236,7 +303,7 @@ def _fuzzy_player_match(ws_name, fm_name):
 NON_CARRY_EVENT_TYPES = {
     "BlockedShot", "Card", "CollectionEnd", "CornerAwarded", "DeletedEvent",
     "End", "EndDelay", "Foul", "FoulThrowIn", "FormationChange", "Goal",
-    "MissedShot", "MissedShots", "Out", "PlayerChangedPosition", "PlayerOff",
+    "FormationSet", "MissedShot", "MissedShots", "Out", "PlayerChangedPosition", "PlayerOff",
     "PlayerOn", "PlayerRetired", "PlayerReturns", "RefereeDropBall",
     "SavedShot", "ShotOnPost", "Start", "StartDelay", "Substitution",
     "TeamSetUp",
@@ -328,6 +395,9 @@ def insert_ball_carries(events_df, log_func=None, home_team=None):
 
             valid_carry = (
                 prev_evt_team == next_evt.get("team", "")
+                # Team-level events (formations, starts, ends) have a team but no player or ball.
+                and str(match_event.get("playerName", "") or "").strip() != ""
+                and str(next_evt.get("playerName", "") or "").strip() != ""
                 and match_event.get("type") != "BallTouch"
                 and dx**2 + dy**2 >= 3.0**2
                 and dx**2 + dy**2 <= 100.0**2
@@ -689,10 +759,14 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                         goalkeeper_names.add(pname)
 
         match_name = f"{home_team} vs {away_team}" if home_team or away_team else "WhoScored Match"
+        # Team-level events (formations, starts and ends) carry a teamId but no player.
+        team_by_id = {str(side.get("teamId")): name for side, name in ((home_data, home_team), (away_data, away_team))
+                      if isinstance(side, dict) and side.get("teamId") is not None}
         period_display = {1: "FirstHalf", 2: "SecondHalf", 3: "ExtraTimeFirstHalf", 4: "ExtraTimeSecondHalf", 5: "PenaltyShootout"}
         valid_periods = {"FirstHalf", "SecondHalf", "ExtraTimeFirstHalf", "ExtraTimeSecondHalf", "FirstPeriodOfExtraTime", "SecondPeriodOfExtraTime", "PenaltyShootout"}
 
         rows = []
+        skipped_types = {}
         for event in events:
             try:
                 player_id = str(event.get("playerId", ""))
@@ -710,12 +784,19 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                         period_disp = period_display.get(int(period_raw), "FirstHalf")
                     except (ValueError, TypeError):
                         period_disp = str(period_raw)
+                event_type = event.get("type", {})
+                type_name = event_type.get("displayName", "Unknown") if isinstance(event_type, dict) else str(event_type)
+                if period_disp == "PreMatch" and type_name == "FormationSet":
+                    # The starting formation, captain and line-up: kept at kick-off, as
+                    # Scoresway's TeamSetUp events are, rather than dropped with PreMatch.
+                    period_disp, minute, second = "FirstHalf", 0, 0
                 if period_disp not in valid_periods:
                     continue
+                if type_name in SKIPPED_EVENT_TYPES:
+                    skipped_types[type_name] = skipped_types.get(type_name, 0) + 1
+                    continue
 
-                event_type = event.get("type", {})
                 outcome = event.get("outcomeType", {})
-                type_name = event_type.get("displayName", "Unknown") if isinstance(event_type, dict) else str(event_type)
                 outcome_name = outcome.get("displayName", "") if isinstance(outcome, dict) else str(outcome)
                 display_type_name = "Foul Drawn" if type_name == "Foul" and outcome_name == "Successful" else type_name
 
@@ -746,7 +827,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "outcomeType": outcome_name,
                     "period": period_disp,
                     "playerName": player,
-                    "team": player_team.get(player_id, ""),
+                    "team": player_team.get(player_id, "") or team_by_id.get(str(event.get("teamId", "")), ""),
                     "x": event.get("x", ""),
                     "y": event.get("y", ""),
                     "endX": event.get("endX", ""),
@@ -822,14 +903,16 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_shot_weak":          ("Weak" in qualifier_names),
                     "is_individual_play":    ("IndividualPlay" in qualifier_names),
                     "is_follows_dribble":    ("FollowsADribble" in qualifier_names),
-                    "is_1on1":               ("1on1" in qualifier_names),
+                    # The feed names Opta 89 "OneOnOne"; "1on1" never matched it.
+                    "is_1on1":               ("1on1" in qualifier_names or 89 in qualifier_ids),
                     "is_deflected":          ("Deflection" in qualifier_names),
                     "is_hit_woodwork":       ("HitWoodwork" in qualifier_names),
                     "is_back_heel":          ("BackHeel" in qualifier_names),
                     "is_1on1_chip":          ("1on1Chip" in qualifier_names),
                     "is_def_block":          ("DefBlock" in qualifier_names),
                     # --- Defensive qualifiers ---
-                    "is_last_line":          ("LastLine" in qualifier_names),
+                    # The feed names Opta 14 "LastMan"; "LastLine" never matched it.
+                    "is_last_line":          ("LastLine" in qualifier_names or 14 in qualifier_ids),
                     "is_forced_out":         ("OutOfPlay" in qualifier_names),
                     "is_blocked_cross":      ("BlockedCross" in qualifier_names),
                     # --- Error event qualifiers ---
@@ -872,7 +955,9 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_success_in_box": type_name == "TakeOn" and outcome_name == "Successful" and _in_box(event.get("x", ""), event.get("y", "")),
                     # Shot situation, first-time shots, save kinds, duels, goal-line clearances,
                     # and the assisting pass of an assisted shot (by event_id within the team).
-                    **opta_flags(qualifier_ids),
+                    **opta_flags(qualifier_ids, type_name),
+                    **dict.fromkeys(OPTA_VALUE_COLUMNS, ""),
+                    **opta_values(qualifier_ids, lambda pid: player_dict.get(pid, "")),
                     "event_id": str(event.get("eventId", "") or ""),
                     "pitch_zone": _pitch_zone(event.get("y", ""),
                                               flip=(home_team != "")),
@@ -929,6 +1014,8 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
         df["type"] = df.apply(reclassify_save, axis=1)
         df["type"] = df["type"].replace("MissedShots", "MissedShot")
 
+        for skipped_type, count in skipped_types.items():
+            log(f"Skipped {count} {skipped_type} events.")
         log("Primary event data loaded from WhoScored.")
 
         df = _apply_xt_and_progressive(df, app_dir, log)
