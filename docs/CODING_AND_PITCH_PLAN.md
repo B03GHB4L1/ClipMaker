@@ -197,7 +197,26 @@ adapter and checked on all three systems in a spike:
   test devices, so a manual checklist plus a CI test with a generated stream).
 - C5 (the code-link editor) comes first, so live panels can carry their own links.
 - **L1** Network and localhost-push recording, segmented, play behind the live
-  edge, join at the end.
+  edge, join at the end. *Done 2026-11-22.* The network half of the L0 spike was
+  done here: the bundled Windows FFmpeg (7.1) reads RTMP, SRT, RTSP and HLS and listens
+  for an RTMP or SRT push on 127.0.0.1; a CI test pushes a generated stream over RTMP.
+  Device listing and the 30-minute run per OS move to L3.
+  - `app/live/recorder.py`: 2-second fMP4 segments per connection ("part"); H.264 is
+    copied, anything else is encoded to H.264; audio becomes AAC. A drop starts a new
+    part when the source returns and notes the gap (`live_gaps` on the project: where
+    in the joined video, and how many seconds were lost). Below 2 GB free the page
+    warns; below 300 MB the recording stops. Sources are checked against FFmpeg's own
+    protocol list, and a missing one is reported.
+  - Stop joins the parts without re-encoding into Videos/VizorPlay/Recordings, and the
+    file becomes the project's video. Segments left by a crash or by closing the app show
+    as an unfinished recording that can still be saved. One recording at a time;
+    a project that already has a video cannot record over it.
+  - Code screen: a record form on a project without a video, and a live bar (time,
+    free space, breaks, Live, Stop and save). Playback uses Media Source Extensions
+    and keeps only about two minutes around the playhead in memory. Coding is locked
+    until the recording is saved (that is L2).
+  - The page reads only `init.mp4` and `seg_NNNNN.m4s` by fixed names; addresses
+    must be rtmp(s), srt, rtsp(s) or http(s), never files.
 - **L2** Live coding, live kick-off markers, cutting clips while recording.
 - **L3** Capture devices and screen capture per OS.
 

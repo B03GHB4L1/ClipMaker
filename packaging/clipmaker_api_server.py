@@ -52,6 +52,7 @@ else:
     import update_check
     import user_folders
 from telestration.clips import CLIP_ID, SESSION_ID, EditorClips
+from live.recorder import PART as LIVE_PART, SEGMENT_FILE as LIVE_FILE, LiveRecordings
 
 
 # Navigating here asks the Windows desktop shell to install the update
@@ -150,6 +151,8 @@ def clean_client_project(body: dict[str, Any], existing: dict[str, Any] | None) 
     for key in ("feed_csv_path", "feed_source"):
         if key in body and str(body.get(key) or "") != str(existing.get(key) or ""):
             raise ValueError("Event data is set by scraping, importing or coding a match.")
+    if "live_gaps" in body and body.get("live_gaps") != existing.get("live_gaps", []):
+        raise ValueError("Recording gaps are set by the live recorder.")
 
     def video(value: Any, previous: Any) -> str:
         text = str(value or "").strip()
@@ -359,6 +362,9 @@ class MatchStore:
             "filter_snapshots": match.get("filter_snapshots") if isinstance(match.get("filter_snapshots"), dict) else {},
             "export_history": match.get("export_history") if isinstance(match.get("export_history"), list) else [],
             "analysis_state": clean_analysis_state(match.get("analysis_state")),
+            # Breaks in a live recording (L1): at = seconds into the joined video, length = seconds lost.
+            "live_gaps": [{"at": float(gap["at"]), "length": float(gap["length"])} for gap in (match.get("live_gaps") or [])
+                          if isinstance(gap, dict) and isinstance(gap.get("at"), (int, float)) and isinstance(gap.get("length"), (int, float))],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if not clean["id"]:
@@ -1583,6 +1589,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         return self.server.jobs  # type: ignore[attr-defined]
 
     @property
+    def live(self) -> LiveRecordings:
+        return self.server.live  # type: ignore[attr-defined]
+
+    @property
     def media_files(self) -> dict[str, Path]:
         return self.server.media_files  # type: ignore[attr-defined]
 
@@ -2152,6 +2162,24 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         job = self.tracking_jobs.start(work)
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
+    def send_live_file(self, path: str) -> None:
+        """/api/live/<project>/<partNN>/<init.mp4|seg_NNNNN.m4s>: nothing else in the folder is served."""
+        parts = path.split("/")
+        if len(parts) != 6 or not LIVE_PART.match(parts[4]) or not LIVE_FILE.match(parts[5]):
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
+            return
+        try:
+            data = (self.live.folder(parts[3]) / parts[4] / parts[5]).read_bytes()
+        except (ValueError, OSError):
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "That part of the recording is not available"})
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def send_media(self, token: str) -> None:
         media_path = self.media_files.get(token)
         if media_path is None or not media_path.is_file():
@@ -2262,6 +2290,20 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path == "/api/code-templates":
             self.send_json(HTTPStatus.OK, {"templates": self.code_templates.list()})
+            return
+        if path == "/api/live/capabilities":
+            self.send_json(HTTPStatus.OK, self.live.capabilities())
+            return
+        if path.startswith("/api/live/"):
+            self.send_live_file(path)
+            return
+        if path.startswith("/api/projects/") and path.endswith("/live"):
+            parts = path.split("/")
+            if len(parts) != 5 or self.store.get(parts[3]) is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "Project not found"})
+                return
+            after = parse_qs(urlparse(self.path).query).get("after", ["0"])[0]
+            self.send_json(HTTPStatus.OK, {"live": self.live.status(parts[3], int(after) if after.isdigit() else 0)})
             return
         if path.startswith("/api/projects/") and path.endswith("/codes"):
             parts = path.split("/")
@@ -2377,10 +2419,25 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     raise ValueError("Unknown project action")
                 self.project_codes(parts[3], body)
                 return
+            if path.startswith("/api/projects/") and (path.endswith("/live/start") or path.endswith("/live/stop")):
+                parts = path.split("/")
+                project = self.store.get(parts[3]) if len(parts) == 6 else None
+                if project is None:
+                    raise ValueError("Project not found")
+                if parts[5] == "start":
+                    if project.get("video_path"):
+                        raise ValueError("This project already has a video. Start a new project to record live.")
+                    live = self.live.start(parts[3], body.get("source"))
+                else:
+                    live = self.live.stop(parts[3], project.get("project_name") or "Live recording")
+                self.send_json(HTTPStatus.OK, {"live": live})
+                return
             if path.startswith("/api/projects/") and path.endswith("/delete"):
                 parts = path.split("/")
                 if len(parts) != 5:
                     raise ValueError("Unknown project action")
+                if parts[3] in self.live.recordings and self.live.recordings[parts[3]].active:
+                    raise ValueError("Stop the live recording before deleting this project.")
                 self.store.delete(parts[3])
                 self.send_json(HTTPStatus.OK, {"deleted": parts[3], "projects": self.store.list()})
                 return
@@ -2681,6 +2738,19 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.tracking_jobs = None  # type: ignore[attr-defined]  # see Handler.tracking_jobs
     server.tracking_lock = threading.Lock()  # type: ignore[attr-defined]
     server.editor_exports = None  # type: ignore[attr-defined]  # see Handler.editor_exports
+    store = server.match_store
+
+    def recording_folder() -> Path:
+        # Next to the user's exports (Videos/VizorPlay/Recordings), so the match video is theirs to keep.
+        return Path(server.default_export_dir or data_dir / "exports") / "Recordings"
+
+    def use_recording(project_id: str, path: Path, gaps: list[dict[str, float]]) -> None:
+        project = store.get(project_id)
+        if project is None or project.get("video_path"):
+            return  # deleted, or given another video meanwhile: the file stays where it was saved
+        store.upsert({"id": project_id, "video_path": str(path), "video_name": path.name, "live_gaps": gaps})
+
+    server.live = LiveRecordings(data_dir / "live", _find_ffmpeg, recording_folder, use_recording)  # type: ignore[attr-defined]
     return server
 
 
@@ -2713,6 +2783,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        server.live.close()  # its segments stay on disk and can be saved next time
         if not server.jobs.close():
             print("Export workers did not finish within the shutdown deadline", file=sys.stderr)
         server.server_close()

@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=5" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=9" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=5"></script>
+  <script type="module" src="code.js?v=9"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -26,9 +26,38 @@
       <h1>Code a match from its video</h1>
       <p data-code-empty-text>Choose the match video on Intake first. Then press a key each time something happens, and VizorPlay makes the events for you.</p>
       <a class="code-primary" href="/" data-project-navigation>Go to Intake</a>
+      <form class="code-live-form" data-live-form hidden>
+        <h2>Or record it live</h2>
+        <fieldset class="code-live-kind">
+          <legend>The stream comes from</legend>
+          <label><input type="radio" name="live-kind" value="url" checked /> A stream address</label>
+          <label><input type="radio" name="live-kind" value="listen" /> OBS or a phone app on this computer</label>
+        </fieldset>
+        <label class="code-live-field" data-live-url-row>Stream address
+          <input type="text" data-live-url placeholder="rtmp://, srt://, rtsp:// or https://" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="code-live-field code-live-listen" data-live-listen-row hidden>
+          <label>Protocol <select data-live-protocol></select></label>
+          <label>Port <input type="number" data-live-port min="1024" max="65535" inputmode="numeric" /></label>
+        </div>
+        <p class="code-muted">Record only streams you have the right to record. VizorPlay saves the stream in 2-second pieces as it goes, so a crash loses a few seconds at most.</p>
+        <p class="code-error" data-live-form-error role="alert" hidden></p>
+        <button type="submit" class="code-primary">Start recording</button>
+      </form>
+      <div class="code-live-form" data-live-unfinished hidden>
+        <h2>Unfinished recording</h2>
+        <p data-live-unfinished-text></p>
+        <button type="button" class="code-primary" data-live-save>Save the recording</button>
+      </div>
     </section>
     <div class="code-workspace" data-code-workspace hidden>
       <div class="code-centre">
+        <div class="code-live-bar" data-live-bar hidden>
+          <span class="code-live-dot" aria-hidden="true"></span>
+          <p data-live-text role="status" aria-live="polite"></p>
+          <button type="button" data-live-edge title="Jump to what is happening now">Live</button>
+          <button type="button" data-live-stop>Stop and save</button>
+        </div>
         <div class="code-stage">
           <video data-video preload="auto" playsinline></video>
         </div>
@@ -65,6 +94,7 @@
         </details>
       </div>
       <aside class="code-side">
+        <p class="code-live-note" data-live-note hidden>You can code this match once the recording is saved. Until then, play it back and rewind while it records.</p>
         <section class="code-panel" aria-labelledby="codes-title">
           <div class="code-panel-head">
             <h1 id="codes-title">Codes</h1>

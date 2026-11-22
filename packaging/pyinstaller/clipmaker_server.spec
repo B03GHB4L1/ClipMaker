@@ -45,6 +45,8 @@ hiddenimports = [
     "coding.store",
     "coding.to_events",
     "coding.templates",
+    "live",
+    "live.recorder",
     "cv2",
     "tkinter",
     "tkinter.filedialog",
