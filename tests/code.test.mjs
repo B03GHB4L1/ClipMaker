@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "../ui/code/edits.js";
 import { formatClock, formatVideo, isTyping, parseMarker, place, sources, videoOf } from "../ui/code/clock.js";
 import { pitchPoint, placed } from "../ui/code/pitch.js";
+import { LINK_LIMITS, linkSummary, linkTargets, pruneLinks, setStart, toggleLink } from "../ui/code/links.js";
 
 const single = { video_path: "match.mp4", period_videos: {}, markers: { "1H": "0:05:00", "2H": "0:55:00", ET1: "1:50:00", ET2: "2:08:00" } };
 
@@ -159,4 +160,54 @@ test("a placed event reads in the Filter's lanes and thirds", () => {
   assert.equal(placed({ x: 80, y: 90 }), "left wing, attacking third");
   assert.equal(placed({ x: 20, y: 50, endX: 70, endY: 10 }), "centre, defensive third to right wing, attacking third");
   assert.equal(placed({}), "");
+});
+
+// The panel dialog's link editor (ui/code/links.js); app/coding/templates.py checks the same rules on save.
+const editorCodes = [
+  { id: "goal", label: "Goal", kind: "instant" },
+  { id: "possession", label: "Possession", kind: "interval" },
+  { id: "press", label: "Pressing", kind: "interval" },
+  { id: "a", label: "A", kind: "interval" }, { id: "b", label: "B", kind: "interval" },
+];
+const editorTags = [{ id: "header", label: "Header" }, { id: "big", label: "Big chance" }];
+
+test("a code links only to the other interval codes", () => {
+  assert.deepEqual(linkTargets(editorCodes, editorCodes[0]).map((code) => code.id), ["possession", "press", "a", "b"]);
+  assert.deepEqual(linkTargets(editorCodes, editorCodes[1]).map((code) => code.id), ["press", "a", "b"]);
+});
+
+test("starting an interval picks a team, changes it in place, and stops at four", () => {
+  let goal = setStart(editorCodes[0], "possession", "same");
+  goal = setStart(goal, "press", "other");
+  goal = setStart(goal, "possession", "other");
+  assert.deepEqual(goal.starts, [{ code: "possession", team: "other" }, { code: "press", team: "other" }]);
+  assert.equal(setStart(goal, "possession", "").starts.length, 1);
+  assert.equal("starts" in setStart(setStart(goal, "possession", ""), "press", ""), false);
+  const full = ["possession", "press", "a", "b"].reduce((code, id) => setStart(code, id, "same"), editorCodes[0]);
+  assert.equal(full.starts.length, 4);
+  assert.equal(setStart(full, "a", "other").starts.find((link) => link.code === "a").team, "other"); // a change is not a fifth
+  assert.equal(setStart({ ...full, starts: full.starts.slice(0, 3) }, "zzz", "same").starts.length, 4);
+  assert.equal(setStart({ ...full, starts: [...full.starts.slice(0, 3), { code: "c", team: "same" }] }, "b", "same"), null);
+});
+
+test("stops and tags toggle, keep their order, and respect their limits", () => {
+  let goal = toggleLink(editorCodes[0], "stops", "possession", true);
+  goal = toggleLink(goal, "stops", "press", true);
+  goal = toggleLink(goal, "stops", "possession", true); // already on
+  assert.deepEqual(goal.stops, ["possession", "press"]);
+  assert.equal("stops" in toggleLink(toggleLink(goal, "stops", "possession", false), "stops", "press", false), false);
+  const tagged = { ...editorCodes[0], tags: Array.from({ length: LINK_LIMITS.tags }, (_, n) => `t${n}`) };
+  assert.equal(toggleLink(tagged, "tags", "header", true), null);
+  assert.equal(toggleLink(tagged, "tags", "t0", false).tags.length, LINK_LIMITS.tags - 1);
+});
+
+test("links to removed codes and tags are dropped, and the summary reads them", () => {
+  const goal = { ...editorCodes[0], starts: [{ code: "possession", team: "other" }, { code: "gone", team: "same" }],
+    stops: ["press", "goal"], tags: ["header", "gone"] };
+  const kept = pruneLinks(goal, editorCodes, editorTags);
+  assert.deepEqual([kept.starts, kept.stops, kept.tags], [[{ code: "possession", team: "other" }], ["press"], ["header"]]);
+  assert.equal(linkSummary(kept, editorCodes, editorTags), "Starts Possession (other team) · Stops Pressing · Adds Header");
+  assert.equal(linkSummary(editorCodes[0], editorCodes, editorTags), "");
+  const bare = pruneLinks({ ...editorCodes[0], stops: ["goal"] }, editorCodes, editorTags);
+  assert.equal("stops" in bare, false);
 });

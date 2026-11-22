@@ -70,6 +70,39 @@ class TemplateValidationTests(unittest.TestCase):
         broken(lambda v: v.update(version=2))
         broken(lambda v: v.update(codes=[]))
 
+    def test_links_point_only_at_the_panels_own_intervals_and_tags(self):
+        # The panel dialog's link editor (ui/code/links.js) writes these; anything else is refused.
+        def refused(**links):
+            value = templates.built_in("match")
+            value["codes"][0].update(links)  # Goal, an instant code
+            with self.subTest(links=links), self.assertRaises(ValueError):
+                templates.clean(value)
+
+        refused(starts=[{"code": "no-such-code", "team": "same"}])
+        refused(starts=[{"code": "corner", "team": "same"}])      # an instant code cannot be started
+        refused(starts=[{"code": "possession"}, {"code": "build-up"}, {"code": "press"}, {"code": "transition"},
+                        {"code": "possession", "team": "other"}])  # at most 4
+        refused(starts=[{"code": "possession", "team": "same", "when": "always"}])
+        refused(starts=["possession"])
+        refused(stops=["no-such-code"])
+        refused(stops=["corner"])
+        refused(tags=["header"] * 11)
+        refused(tags=[{}])                                         # not a name: refused, not a crash
+        refused(stops=[{}])
+        refused(starts=[{"code": {}}])
+        refused(starts=[{"code": "possession", "team": "both"}])
+        value = templates.built_in("match")
+        value["codes"][11]["stops"] = ["possession"]                # an interval cannot stop itself
+        with self.assertRaises(ValueError):
+            templates.clean(value)
+
+        edited = templates.built_in("match")
+        edited["codes"][0].update(starts=[{"code": "press", "team": "other"}], stops=["possession", "build-up"],
+                                  tags=["big-chance", "header"])
+        saved = templates.clean(edited)["codes"][0]
+        self.assertEqual((saved["starts"], saved["stops"], saved["tags"]),
+                         ([{"code": "press", "team": "other"}], ["possession", "build-up"], ["big-chance", "header"]))
+
 
 class LibraryTests(unittest.TestCase):
     def setUp(self):

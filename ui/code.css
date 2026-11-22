@@ -185,6 +185,28 @@ body.code-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .code-edit-table input[type=color] { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--cm-rule); border-radius: 5px; background: var(--code-panel); }
 .code-dialog .code-remove { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--cm-muted); cursor: pointer; }
 .code-dialog .code-remove svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.code-dialog .code-links-toggle { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.code-dialog .code-links-toggle[aria-expanded=true] { border-color: var(--cm-ink); }
+.code-links-count:not(:empty) { min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--cm-accent); color: #141613; font-size: 10px; font-weight: 600; text-align: center; }
+.code-edit-table .code-links-row > td { padding: 4px 4px 10px; }
+.code-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.code-links-group { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0; padding: 6px 8px 8px; border: 1px solid var(--cm-rule); border-radius: 6px; }
+.code-links-group legend { padding: 0 4px; color: var(--cm-muted); font-weight: 500; }
+.code-links-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; margin: 0; font-weight: 400; }
+.code-links-item input[type=checkbox] { flex: none; width: 14px; height: 14px; min-height: 0; margin: 0; accent-color: #6e8f12; }
+.code-links-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-links-check { justify-content: flex-start; }
+.code-links-item select { height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--code-panel); color: var(--cm-ink); font: inherit; font-size: 11px; }
+.code-links-empty, .code-links-note { margin: 0; color: var(--cm-muted); }
+.code-links-note:empty { display: none; }
+.code-links-note { margin-top: 6px; color: #ac302e; }
+.code-links-kind { display: none; margin: 0 0 6px; color: var(--cm-muted); }
+@media (max-width: 480px) {
+  /* Room for the code's name: the read-only Kind column moves into the links row. */
+  .code-edit-table:has([data-panel-codes]) :is(th, td):nth-child(4) { display: none; }
+  .code-links-kind { display: block; }
+}
+.code-dialog :is(select, input[type=checkbox]):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
 .code-dialog-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 16px 14px; border-top: 1px solid var(--cm-rule); }
 .code-dialog .code-dialog-foot .code-apply { border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
 .code-dialog :is(button, input):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }

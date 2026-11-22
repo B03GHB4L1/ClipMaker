@@ -2959,6 +2959,46 @@
   stroke: currentColor;
   stroke-linecap: round;
 }
+:root[data-theme="dark"] .code-dialog .code-links-toggle {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-dialog .code-links-toggle[aria-expanded=true] {
+  border-color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-links-count:not(:empty) {
+  color: #171817;
+  background: var(--cm-accent);
+}
+:root[data-theme="dark"] .code-links-group {
+  border: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .code-links-group legend {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-links-item input[type=checkbox] {
+  accent-color: #9dba63;
+}
+:root[data-theme="dark"] .code-links-item select {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-links-empty,
+:root[data-theme="dark"] .code-links-note {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-links-note {
+  color: #ff9c92;
+}
+:root[data-theme="dark"] .code-links-kind {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-dialog :is(select,
+:root[data-theme="dark"] input[type=checkbox]):focus-visible {
+  outline: 2px solid #9dba63;
+}
 :root[data-theme="dark"] .code-dialog-foot {
   border-top: 1px solid var(--cm-rule);
 }

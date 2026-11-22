@@ -221,7 +221,8 @@ def clean(value: Any) -> dict[str, Any]:
         elif item.get("group") not in (None, ""):
             _fail(f"Code {label}: only interval codes have a group.")
         if item.get("tags"):
-            if not isinstance(item["tags"], list) or len(item["tags"]) > 10 or not set(item["tags"]) <= tag_ids:
+            if not isinstance(item["tags"], list) or len(item["tags"]) > 10 \
+                    or not all(isinstance(tag, str) for tag in item["tags"]) or not set(item["tags"]) <= tag_ids:
                 _fail(f"Code {label}: it can add up to 10 of the panel's tags.")
             code["tags"] = list(dict.fromkeys(item["tags"]))
         for link in ("starts", "stops"):
@@ -234,11 +235,12 @@ def clean(value: Any) -> dict[str, Any]:
     kinds = {code["id"]: code["kind"] for code in codes}
     for code in codes:
         for target in code.get("stops", []):
-            if kinds.get(target) != "interval" or target == code["id"]:
+            if not isinstance(target, str) or kinds.get(target) != "interval" or target == code["id"]:
                 _fail(f"Code {code['label']}: it can only stop another interval code of this panel.")
         starts = []
         for link in code.get("starts", []):
-            if not isinstance(link, dict) or set(link) - {"code", "team"} or kinds.get(link.get("code")) != "interval" \
+            if not isinstance(link, dict) or set(link) - {"code", "team"} or not isinstance(link.get("code"), str) \
+                    or kinds.get(link["code"]) != "interval" \
                     or link.get("code") == code["id"] or link.get("team", "same") not in TEAMS:
                 _fail(f"Code {code['label']}: it can only start another interval code, for the same or the other team.")
             starts.append({"code": link["code"], "team": link.get("team", "same")})

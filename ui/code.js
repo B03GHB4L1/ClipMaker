@@ -7,6 +7,7 @@
 import { projectRequest, newProject, rememberProject, saveProject, beginProjectOperation } from "./projects.js";
 import { formatClock, formatVideo, isTyping, place, sources } from "./code/clock.js";
 import { pitchPoint, placed } from "./code/pitch.js";
+import { LINK_LIMITS, linkSummary, linkTargets, pruneLinks, setStart, toggleLink } from "./code/links.js";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "./code/edits.js";
 import { showSaved, showSaveError } from "./save-clip.js";
 
@@ -855,9 +856,11 @@ fileInput.onchange = async () => {
   } catch (error) { showError(`Could not import: ${error.message}`); }
 };
 
-// Editing the panel: names, keys, colours, codes and tags; links stay as they are.
+// Editing the panel: names, keys, colours, codes, tags, and the links between them
+// (a code starting or stopping interval codes, or adding tags).
 const dialog = $("[data-panel-dialog]");
 const draft = { codes: [], tags: [] };
+const openLinks = new Set(); // codes whose links row is open
 const slug = (text, taken) => {
   const base = String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "item";
   let id = base;
@@ -883,18 +886,86 @@ const removeCell = (label, onRemove) => {
   cell.append(button);
   return cell;
 };
+const element = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  node.append(...children);
+  return node;
+};
+const LINK_LIMIT_TEXT = { starts: `A code starts at most ${LINK_LIMITS.starts} intervals.`,
+  stops: `A code stops at most ${LINK_LIMITS.stops} intervals.`, tags: `A code adds at most ${LINK_LIMITS.tags} tags.` };
+const linkCount = (code) => [code.starts, code.stops, code.tags].reduce((sum, list) => sum + (list?.length || 0), 0);
+// One code's links: which intervals it starts (and for which team), stops, and which tags it adds.
+const linksEditor = (index) => {
+  const code = draft.codes[index];
+  const targets = linkTargets(draft.codes, code);
+  const note = element("p", { className: "code-links-note" });
+  note.setAttribute("role", "status");
+  const update = (next, field, revert) => {
+    if (!next) { note.textContent = LINK_LIMIT_TEXT[field]; revert(); return; }
+    note.textContent = "";
+    draft.codes[index] = next;
+    const toggle = $(`[data-links-for="${CSS.escape(code.id)}"]`);
+    if (toggle) {
+      const summary = linkSummary(next, draft.codes, draft.tags);
+      toggle.querySelector(".code-links-count").textContent = linkCount(next) || "";
+      toggle.title = summary || "No links";
+    }
+  };
+  const group = (title, items, empty, build) => element("fieldset", { className: "code-links-group" },
+    element("legend", {}, title), ...(items.length ? items.map(build) : [element("p", { className: "code-links-empty" }, empty)]));
+  const teamOf = (target) => (draft.codes[index].starts || []).find((link) => link.code === target.id)?.team || "";
+  const starts = group("Starts", targets, "Add an interval code to start it from here.", (target) => {
+    const select = element("select", {}, new Option("No", ""), new Option("Same team", "same"), new Option("Other team", "other"));
+    select.setAttribute("aria-label", `${code.label} starts ${target.label}`);
+    select.value = teamOf(target);
+    let before = select.value;
+    select.onchange = () => {
+      update(setStart(draft.codes[index], target.id, select.value), "starts", () => { select.value = before; });
+      before = select.value;
+    };
+    return element("label", { className: "code-links-item" }, element("span", {}, target.label), select);
+  });
+  const checks = (field) => (item) => {
+    const box = element("input", { type: "checkbox", checked: (draft.codes[index][field] || []).includes(item.id) });
+    box.onchange = () => update(toggleLink(draft.codes[index], field, item.id, box.checked), field, () => { box.checked = !box.checked; });
+    return element("label", { className: "code-links-item code-links-check" }, box, element("span", {}, item.label));
+  };
+  const stops = group("Stops", targets, "Add an interval code to stop it from here.", checks("stops"));
+  const tags = group("Adds tags", draft.tags, "Add a tag to the panel first.", checks("tags"));
+  return element("tr", { className: "code-links-row", id: `links-${code.id}` },
+    element("td", { colSpan: 6 }, element("p", { className: "code-links-kind" }, code.kind === "interval" ? "Interval code" : "Instant code"),
+      element("div", { className: "code-links" }, starts, stops, tags), note));
+};
 const renderDraft = () => {
-  $("[data-panel-codes]").replaceChildren(...draft.codes.map((code, index) => {
+  // Links to codes or tags that were removed go with them.
+  draft.codes = draft.codes.map((code) => pruneLinks(code, draft.codes, draft.tags));
+  $("[data-panel-codes]").replaceChildren(...draft.codes.flatMap((code, index) => {
     const row = document.createElement("tr");
     row.append(
-      cellInput({ type: "text", value: code.label, maxLength: 40, ariaLabel: "Code name" }, (value) => { code.label = value; }),
-      cellInput({ type: "text", value: code.key, maxLength: 1, className: "code-key-input", ariaLabel: `${code.label}: key` }, (value) => { code.key = value.toLowerCase(); }),
-      cellInput({ type: "color", value: code.colour, ariaLabel: `${code.label}: colour` }, (value) => { code.colour = value; }),
+      cellInput({ type: "text", value: code.label, maxLength: 40, ariaLabel: "Code name" }, (value) => { draft.codes[index].label = value; }),
+      cellInput({ type: "text", value: code.key, maxLength: 1, className: "code-key-input", ariaLabel: `${code.label}: key` }, (value) => { draft.codes[index].key = value.toLowerCase(); }),
+      cellInput({ type: "color", value: code.colour, ariaLabel: `${code.label}: colour` }, (value) => { draft.codes[index].colour = value; }),
     );
     const kind = document.createElement("td");
     kind.textContent = code.kind === "interval" ? "Interval" : "Instant";
-    row.append(kind, removeCell(`Remove ${code.label}`, () => { draft.codes.splice(index, 1); renderDraft(); }));
-    return row;
+    const open = openLinks.has(code.id);
+    const summary = linkSummary(code, draft.codes, draft.tags);
+    const toggle = element("button", { type: "button", className: "code-links-toggle", title: summary || "No links" },
+      "Links", element("span", { className: "code-links-count" }, String(linkCount(code) || "")));
+    toggle.dataset.linksFor = code.id;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-controls", `links-${code.id}`);
+    toggle.setAttribute("aria-label", `${code.label}: links`);
+    toggle.onclick = () => {
+      // Read the current state: a rename or a link change since this row was drawn must not be lost.
+      if (openLinks.has(code.id)) openLinks.delete(code.id); else openLinks.add(code.id);
+      renderDraft();
+      $(`[data-links-for="${CSS.escape(code.id)}"]`)?.focus();
+    };
+    row.append(kind, element("td", {}, toggle),
+      removeCell(`Remove ${code.label}`, () => { draft.codes.splice(index, 1); renderDraft(); }));
+    return open ? [row, linksEditor(index)] : [row];
   }));
   $("[data-panel-tags]").replaceChildren(...draft.tags.map((tag, index) => {
     const row = document.createElement("tr");
@@ -912,6 +983,7 @@ $("[data-template-edit]").onclick = () => {
   draft.name = panel.name;
   draft.codes = structuredClone(panel.codes);
   draft.tags = structuredClone(panel.tags || []);
+  openLinks.clear();
   $("[data-panel-edit-name]").value = panel.name;
   $("[data-panel-error]").hidden = true;
   renderDraft();
@@ -937,18 +1009,11 @@ $("[data-add-tag]").onclick = () => {
 $("[data-panel-cancel]").onclick = () => dialog.close();
 $("[data-panel-form]").onsubmit = async (submit) => {
   submit.preventDefault();
-  const ids = new Set(draft.codes.map((code) => code.id));
-  const tagIds = new Set(draft.tags.map((tag) => tag.id));
   const next = {
     version: 1, id: panel.id, name: $("[data-panel-edit-name]").value.trim(),
     // A new code's event type follows its name; links to removed codes or tags are dropped.
-    codes: draft.codes.map((code) => {
-      const item = { ...code, type: code.type === "New code" || code.type === "New interval" ? code.label : code.type };
-      if (item.tags) item.tags = item.tags.filter((id) => tagIds.has(id));
-      if (item.stops) item.stops = item.stops.filter((id) => ids.has(id));
-      if (item.starts) item.starts = item.starts.filter((link) => ids.has(link.code));
-      return item;
-    }),
+    codes: draft.codes.map((code) => pruneLinks(
+      { ...code, type: code.type === "New code" || code.type === "New interval" ? code.label : code.type }, draft.codes, draft.tags)),
     tags: draft.tags.map((tag) => {
       const item = { ...tag };
       if (!item.group) delete item.group; else item.group = slug(item.group, new Set());
