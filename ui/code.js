@@ -10,6 +10,7 @@ import { pitchPoint, placed } from "./code/pitch.js";
 import { LINK_LIMITS, linkSummary, linkTargets, pruneLinks, setStart, toggleLink } from "./code/links.js";
 import { History, linkedChanges, nudged, parseSquad, squadText, startingTags, toggleInterval, toggledTags } from "./code/edits.js";
 import { showSaved, showSaveError } from "./save-clip.js";
+import { LivePlayer, RECORDING_STATES, liveSummary } from "./code/live.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
@@ -624,6 +625,7 @@ document.addEventListener("keydown", (event) => {
   if (!project || isTyping(event.target) || event.altKey) return;
   if (document.querySelector("dialog[open]")) return;
   const key = event.key.toLowerCase();
+  if (liveMode && !(key === " " || key === "arrowleft" || key === "arrowright")) return; // no coding until it is saved
   if (event.ctrlKey || event.metaKey) {
     if (key === "z" && !event.shiftKey) { event.preventDefault(); undo(); }
     else if ((key === "z" && event.shiftKey) || key === "y") { event.preventDefault(); redo(); }
@@ -1031,6 +1033,172 @@ $("[data-panel-form]").onsubmit = async (submit) => {
 };
 
 // ---------------------------------------------------------------------------
+// Live recording (L1): a project without a video can record a stream, play it back while it
+// records, and gets the joined recording as its match video when it is saved.
+// ---------------------------------------------------------------------------
+const liveForm = $("[data-live-form]");
+const liveBar = $("[data-live-bar]");
+const liveText = $("[data-live-text]");
+const liveApi = () => `/api/projects/${encodeURIComponent(projectId)}/live`;
+let livePlayer = null;
+let liveTimer = 0;
+let liveMode = false;
+
+const setLiveMode = (on) => {
+  liveMode = on;
+  liveBar.hidden = !on;
+  $("[data-live-note]").hidden = !on;
+  for (const part of $(".code-side").children) if (!part.matches("[data-live-note]")) part.inert = on;
+  $(".code-pitch-panel").inert = on;
+  $("[data-code-workspace]").classList.toggle("is-live", on);
+};
+
+const showLiveForm = async () => {
+  $("[data-code-empty-text]").textContent = "Choose the match video on Intake, or record a live stream here. Then press a key each time something happens, and VizorPlay makes the events for you.";
+  try {
+    const capabilities = await projectRequest("/api/live/capabilities");
+    const protocol = $("[data-live-protocol]");
+    protocol.replaceChildren(...capabilities.listen.map((name) => new Option(name.toUpperCase(), name)));
+    const setPort = () => { $("[data-live-port]").value = String(capabilities.ports[protocol.value] || ""); };
+    protocol.onchange = setPort;
+    setPort();
+    const listen = liveForm.querySelector('input[value="listen"]');
+    listen.disabled = !capabilities.listen.length;
+    liveForm.hidden = false;
+  } catch (error) {
+    showError(error.message);
+  }
+};
+
+liveForm.addEventListener("change", () => {
+  const kind = liveForm.querySelector('input[name="live-kind"]:checked').value;
+  $("[data-live-url-row]").hidden = kind !== "url";
+  $("[data-live-listen-row]").hidden = kind !== "listen";
+});
+
+liveForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formError = $("[data-live-form-error]");
+  formError.hidden = true;
+  const kind = liveForm.querySelector('input[name="live-kind"]:checked').value;
+  const source = kind === "url"
+    ? { kind, url: $("[data-live-url]").value.trim() }
+    : { kind, protocol: $("[data-live-protocol]").value, port: Number($("[data-live-port]").value) };
+  const button = liveForm.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const { live } = await projectRequest(`${liveApi()}/start`, { source });
+    enterLive(live);
+  } catch (error) {
+    formError.textContent = error.message;
+    formError.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+const enterLive = (live) => {
+  $("[data-code-empty]").hidden = true;
+  $("[data-code-workspace]").hidden = false;
+  sourceSelect.replaceChildren(new Option("Live recording", "1H"));
+  $("[data-source-row]").hidden = true;
+  setLiveMode(true);
+  livePlayer = new LivePlayer(video, (item) => `/api/live/${encodeURIComponent(projectId)}/${item.part}/${item.file}`);
+  status.textContent = "Recording live";
+  showLive(live);
+  clearInterval(liveTimer);
+  liveTimer = setInterval(pollLive, 1000);
+};
+
+const showLive = (live) => {
+  if (!livePlayer) return;
+  livePlayer.add(live.new_segments || [], live.codecs);
+  liveText.textContent = liveSummary(live);
+  liveBar.dataset.state = live.state;
+  liveBar.classList.toggle("is-low-disk", Boolean(live.low_disk));
+  $("[data-live-stop]").disabled = live.state === "joining";
+  scrub.max = String(livePlayer.end || 1);
+  livePlayer.pump().catch((error) => showError(error.message));
+};
+
+const pollLive = async () => {
+  if (!livePlayer) return;
+  try {
+    const { live } = await projectRequest(`${liveApi()}?after=${livePlayer.segments.length}`);
+    if (live.state === "done") return finishLive(live);
+    if (live.state === "failed" || live.state === "join_failed" || live.state === "idle") return leaveLive(live);
+    showLive(live);
+  } catch (error) {
+    liveText.textContent = error.message;
+  }
+};
+
+const stopLive = () => { clearInterval(liveTimer); livePlayer?.close(); livePlayer = null; setLiveMode(false); };
+
+const finishLive = async (live) => {
+  stopLive();
+  const result = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
+  project = result.project;
+  rememberProject(project);
+  if (!project.video_path) return leaveLive({ error: `The recording was saved as ${live.video_path}, but this project already had a video.` });
+  sourceSelect.replaceChildren(new Option("Main video", "1H"));
+  renderLeads();
+  loadTemplates();
+  await loadSource("1H");
+  status.textContent = "Ready to code";
+  lastLine.textContent = `Recording saved as ${live.video_name}. It is now this match's video.`;
+  render();
+};
+
+const leaveLive = (live) => {
+  stopLive();
+  $("[data-code-workspace]").hidden = true;
+  $("[data-code-empty]").hidden = false;
+  status.textContent = "No video";
+  if (live.error) showError(live.error);
+  showLiveStart(live);
+};
+
+/** The empty screen of a project without a video: the record form, or the unfinished recording to save. */
+const showLiveStart = (live) => {
+  const unfinished = live.state === "interrupted" || live.state === "join_failed";
+  $("[data-live-unfinished]").hidden = !unfinished;
+  if (unfinished) {
+    $("[data-live-unfinished-text]").textContent = `${formatVideo(live.recorded_seconds)} of a live recording was not saved${live.state === "join_failed" ? " because saving failed" : " before VizorPlay closed"}. Save it to use it as this match's video.`;
+    liveForm.hidden = true;
+  } else {
+    showLiveForm();
+  }
+};
+
+$("[data-live-save]").onclick = async () => {
+  try {
+    const { live } = await projectRequest(`${liveApi()}/stop`, {});
+    showError("");
+    enterLive(live);
+  } catch (error) { showError(error.message); }
+};
+// Stopping ends the recording for good, so it takes a second press within a few seconds.
+let stopArmed = 0;
+$("[data-live-stop]").onclick = async (event) => {
+  const button = event.currentTarget;
+  if (!stopArmed) {
+    button.textContent = "Press again to stop";
+    button.classList.add("is-armed");
+    stopArmed = setTimeout(() => { stopArmed = 0; button.textContent = "Stop and save"; button.classList.remove("is-armed"); }, 4000);
+    return;
+  }
+  clearTimeout(stopArmed);
+  stopArmed = 0;
+  button.textContent = "Stop and save";
+  button.classList.remove("is-armed");
+  try { showLive((await projectRequest(`${liveApi()}/stop`, {})).live); } catch (error) { showError(error.message); }
+};
+$("[data-live-edge]").onclick = () => livePlayer?.toEdge();
+video.addEventListener("seeking", () => livePlayer?.pump().catch(() => {}));
+video.addEventListener("waiting", () => livePlayer?.skipHole());
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 const start = async () => {
@@ -1052,8 +1220,15 @@ const start = async () => {
     $("[data-code-project]").textContent = project.project_name || "Untitled project";
     const available = sources(project);
     if (!available.length) {
+      renderGrid();
+      const { live } = await projectRequest(liveApi());
+      if (RECORDING_STATES.has(live.state) || live.state === "joining") {
+        enterLive(live);
+        return;
+      }
       status.textContent = "No video";
       $("[data-code-empty]").hidden = false;
+      showLiveStart(live);
       return;
     }
     sourceSelect.replaceChildren(...available.map((item) => new Option(item.key === "1H" ? "Main video" : `${item.key} video`, item.key)));

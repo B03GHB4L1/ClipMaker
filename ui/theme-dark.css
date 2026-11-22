@@ -2697,6 +2697,57 @@
   background: var(--cm-accent);
   text-decoration: none;
 }
+:root[data-theme="dark"] .code-live-form {
+  border-top: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .code-live-form .code-primary {
+  border: 0;
+}
+:root[data-theme="dark"] .code-live-kind {
+  border: 0;
+}
+:root[data-theme="dark"] .code-live-kind legend {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-live-kind input {
+  accent-color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-live-field {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-live-field input,
+:root[data-theme="dark"] .code-live-field select {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-live-bar {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+}
+:root[data-theme="dark"] .code-live-bar.is-low-disk p {
+  color: #ffaea4;
+}
+:root[data-theme="dark"] .code-live-dot {
+  background: #ff8d80;
+}
+:root[data-theme="dark"] .code-live-bar:not([data-state="recording"]) .code-live-dot {
+  background: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-main .code-live-bar button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-main .code-live-bar button.is-armed {
+  border-color: #ff8d80;
+  color: #ffaea4;
+}
+:root[data-theme="dark"] .code-live-note {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-muted);
+}
 :root[data-theme="dark"] .code-stage {
   background: #ebebeb;
 }
