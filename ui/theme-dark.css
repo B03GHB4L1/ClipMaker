@@ -2264,6 +2264,19 @@
 :root[data-theme="dark"] .annotate-player-buttons button[aria-pressed="true"] kbd {
   color: #666962;
 }
+:root[data-theme="dark"] .annotate-pitch-saved button {
+  border: 1px solid var(--cm-rule);
+  background: #2f2f2f;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-pitch-saved button:hover:not([aria-pressed="true"]) {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-pitch-saved button[aria-pressed="true"] {
+  border-color: var(--cm-ink);
+  background: var(--cm-ink);
+  color: #2f2f2f;
+}
 :root[data-theme="dark"] .annotate-stage {
   background: #eaece9;
 }

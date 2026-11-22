@@ -102,6 +102,38 @@ class DocumentTests(unittest.TestCase):
         with self.assertRaises(ValueError):  # without the freezes it would run past the clip
             annotations.clean_document({**value, "freezes": []}, duration=2, frames=50)
 
+    def test_the_pitch_is_kept_on_one_frame_and_rings_and_arrows_can_lie_flat(self):
+        # P1 (docs/CODING_AND_PITCH_PLAN.md section P): the clip's pitch marks and flat drawings.
+        marks = [{"id": "half-far", "at": [0.3, 0.22]}, {"id": "circle-right", "at": [0.1756, 0.5733]},
+                 {"id": "box-r-far", "at": [0.8774, 0.3636]}, {"id": "box-r-near", "at": [0.6291, 0.9506]}]
+        pitch = {"keys": [{"frame": 40, "pairs": marks}]}
+        flat = [ring(style={"stroke": "#ffd400", "width": 4, "flat": True}),
+                {"id": "a1", "kind": "arrow", "points": [[0.1, 0.1], [0.5, 0.5]], "style": {"flat": True},
+                 "show": {"from": 0, "to": 1}}]
+        clean = annotations.clean_document({**document(*flat), "pitch": pitch}, duration=2, frames=50)
+        self.assertEqual(clean["pitch"], pitch)
+        self.assertTrue(all(item["style"]["flat"] for item in clean["items"]))
+        self.assertNotIn("pitch", annotations.clean_document(document(ring()), duration=2, frames=50))
+        zone = {"id": "z1", "kind": "zone", "points": [[0.1, 0.5], [0.4, 0.5], [0.4, 0.8]], "style": {"flat": True},
+                "show": {"from": 0, "to": 2}}
+        for bad, message in (
+                ({"keys": []}, "1 calibrated frame"),
+                ({"keys": [{"frame": 40, "pairs": marks}, {"frame": 41, "pairs": marks}]}, "1 calibrated frame"),
+                ({"keys": [{"frame": 50, "pairs": marks}]}, "not in the clip"),  # frame 51 of 50
+                ({"keys": [{"frame": True, "pairs": marks}]}, "not in the clip"),
+                ({"keys": [{"frame": 1, "pairs": marks[:3]}]}, "4 to 40"),
+                ({"keys": [{"frame": 1, "pairs": marks + [marks[0]]}]}, "placed twice"),
+                ({"keys": [{"frame": 1, "pairs": [{"id": "../x", "at": [0, 0]}] + marks[1:]}]}, "its name"),
+                ({"keys": [{"frame": 1, "pairs": [{"id": "centre", "at": [9, 0]}] + marks[1:]}]}, "between"),
+                ({"keys": [{"frame": 1, "pairs": marks, "note": "x"}]}, "frame and its pitch marks"),
+                ({"keys": [], "extra": 1}, "list its calibrated frames")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document({**document(ring()), "pitch": bad}, duration=2, frames=50)
+        with self.assertRaisesRegex(ValueError, "cannot lie flat"):
+            annotations.clean_document(document(zone), duration=2, frames=50)
+        with self.assertRaisesRegex(ValueError, "true or false"):
+            annotations.clean_document(document(ring(style={"flat": "yes"})), duration=2, frames=50)
+
     def test_no_animation_stores_no_animation_settings(self):
         clean = annotations.clean_document(document(ring(show={"from": 0, "to": 1, "animSeconds": 2, "ease": "linear"})),
                                            duration=2, frames=50)
@@ -193,6 +225,18 @@ class EditorApiTests(unittest.TestCase):
         self.assertEqual(opened["items"][0]["show"]["animate"], "grow")
         status, _ = self.call(path, {"annotations": {**value, "freezes": [{"atFrame": 50, "seconds": 1}]}})  # frame 51 of 50
         self.assertEqual(status, 400)
+
+    def test_the_pitch_saves_and_reopens(self):
+        clip = self.annotate()
+        path = f"/api/editor/{self.project['id']}/{clip['id']}"
+        marks = [{"id": mark, "at": at} for mark, at in
+                 (("half-far", [0.1, 0.3]), ("box-r-far", [0.3, 0.4]), ("box-r-near", [0.5, 0.3]), ("spot-r", [0.7, 0.4]))]
+        value = {**document(ring(style={"flat": True})), "pitch": {"keys": [{"frame": 3, "pairs": marks}]}}
+        status, saved = self.call(path, {"annotations": value})
+        self.assertEqual(status, 200, saved)
+        opened = self.call(path)[1]["annotations"]
+        self.assertEqual(opened["pitch"], value["pitch"])
+        self.assertTrue(opened["items"][0]["style"]["flat"])
 
     def test_bad_drawings_leave_the_saved_ones_untouched(self):
         clip = self.annotate()

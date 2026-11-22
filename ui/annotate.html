@@ -6,10 +6,10 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=24" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=25" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=19"></script>
+  <script type="module" src="annotate.js?v=20"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -83,7 +83,7 @@
         </div>
         <section class="annotate-calibrate" id="calibrate-panel" data-calibrate aria-labelledby="calibrate-title" hidden>
           <div class="annotate-calibrate-head">
-            <h2 id="calibrate-title">Board from frame <span data-calib-frame></span></h2>
+            <h2 id="calibrate-title"><span data-calib-title>Board from frame</span> <span data-calib-frame></span></h2>
             <button type="button" class="annotate-calibrate-close" data-calib-close>Cancel</button>
           </div>
           <p class="annotate-muted" data-calib-help></p>
@@ -103,9 +103,11 @@
               <div class="annotate-calibrate-actions">
                 <button type="button" class="annotate-primary" data-calib-find disabled title="Place a token for each player found on this frame">Find players</button>
                 <button type="button" data-calib-empty title="A board with no players; place them with the Token tool">Empty board</button>
+                <button type="button" class="annotate-primary" data-calib-save disabled hidden title="Keep these marks as the clip's pitch">Save pitch</button>
+                <button type="button" class="annotate-danger" data-calib-forget hidden title="Remove the clip's pitch; flat drawings are drawn as usual again">Remove pitch</button>
                 <button type="button" data-calib-remove disabled title="Remove the selected mark (Delete)">Remove mark</button>
               </div>
-              <p class="annotate-muted annotate-calibrate-limits">Works on wide shots that show pitch lines. Players hidden behind others or outside the picture are not found; check teams after.</p>
+              <p class="annotate-muted annotate-calibrate-limits" data-calib-board-note>Works on wide shots that show pitch lines. Players hidden behind others or outside the picture are not found; check teams after.</p>
             </div>
           </div>
         </section>
@@ -150,6 +152,11 @@
           <div class="annotate-player-buttons">
             <button type="button" class="annotate-freeze" data-freeze title="Hold this frame still (silent) while drawings animate"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M8.2 7.5v5M11.8 7.5v5"/></svg><span class="annotate-option">Freeze frame<small>Pause the picture</small></span></button>
             <button type="button" class="annotate-board" data-board aria-expanded="false" aria-controls="calibrate-panel" title="Insert a tactical board after this frame, with the players placed where they stand"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1"/><path d="M10 4v12"/><circle cx="10" cy="10" r="2.2"/></svg><span class="annotate-option">Board from frame<small>Players on a tactics board</small></span></button>
+            <button type="button" class="annotate-board" data-pitch aria-expanded="false" aria-controls="calibrate-panel" title="Mark the pitch on this frame, so rings and arrows can lie flat on it"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16l3.5-11h9L18 16z"/><path d="M10 5v11"/><path d="M4.6 11.5h10.8" stroke-dasharray="1.6 1.6"/></svg><span class="annotate-option">Mark the pitch<small>Flat rings and arrows</small></span></button>
+          </div>
+          <div class="annotate-pitch-saved" data-pitch-saved hidden>
+            <button type="button" data-pitch-lines aria-pressed="false" title="Show the pitch lines on the marked frame">Pitch lines</button>
+            <button type="button" data-pitch-go title="Go to the frame where the pitch is marked">Go to frame <span data-pitch-frame></span></button>
           </div>
         </div>
       </section>

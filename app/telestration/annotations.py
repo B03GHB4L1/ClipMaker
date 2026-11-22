@@ -50,7 +50,12 @@ STYLE_RULES: dict[str, tuple[str, float, float]] = {
     "size": ("number", 8, 160),
 }
 COLOUR_KEYS = {"stroke", "fill", "color", "background"}
-FLAG_KEYS = {"dashed", "bold"}
+FLAG_KEYS = {"dashed", "bold", "flat"}
+FLAT_KINDS = {"ring", "arrow"}  # drawn flat on the pitch through the clip's calibration (P1)
+# The clip's pitch calibration (P1): pitch marks clicked on one frame. P2 adds a key per camera move.
+MAX_PITCH_KEYS = 1
+PITCH_MARKS = (4, 40)
+MARK_ID = re.compile(r"^[a-z0-9-]{3,32}$")
 CHOICE_KEYS = {"pattern": {"solid", "lines", "cross"}}  # zone fill: a wash, or hatching
 
 
@@ -296,6 +301,8 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[
         "style": _style(value.get("style")),
         "show": _show(value.get("show"), limit, kind),
     }
+    if clean["style"].get("flat") and kind not in FLAT_KINDS:
+        raise ValueError(f"A {kind} cannot lie flat on the pitch.")
     geometry = _geometry(kind, value.get("geometry"))
     if geometry:
         clean["geometry"] = geometry
@@ -340,6 +347,35 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[
     return clean
 
 
+def _pitch(value: Any, frames: int) -> dict[str, Any]:
+    """The clip's pitch calibration: {"keys": [{"frame", "pairs": [{"id", "at": [x, y]}]}]}.
+    `frame` is a frame of the clip as recorded (not as cut), so cutting the clip keeps it."""
+    if not isinstance(value, dict) or set(value) != {"keys"} or not isinstance(value["keys"], list):
+        raise ValueError("The pitch calibration must list its calibrated frames.")
+    if not 1 <= len(value["keys"]) <= MAX_PITCH_KEYS:
+        raise ValueError(f"A clip can keep {MAX_PITCH_KEYS} calibrated frame.")
+    keys = []
+    for key in value["keys"]:
+        if not isinstance(key, dict) or set(key) != {"frame", "pairs"}:
+            raise ValueError("A calibrated frame needs its frame and its pitch marks.")
+        frame = key["frame"]
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
+            raise ValueError("The calibrated frame is not in the clip.")
+        pairs = key["pairs"]
+        if not isinstance(pairs, list) or not PITCH_MARKS[0] <= len(pairs) <= PITCH_MARKS[1]:
+            raise ValueError(f"A calibration needs {PITCH_MARKS[0]} to {PITCH_MARKS[1]} pitch marks.")
+        clean_pairs = []
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {"id", "at"} or not isinstance(pair["id"], str)                     or not MARK_ID.match(pair["id"]):
+                raise ValueError("Each pitch mark needs its name and where it was clicked.")
+            at = _point(pair["at"], "A pitch mark", set())
+            clean_pairs.append({"id": pair["id"], "at": at})
+        if len({pair["id"] for pair in clean_pairs}) != len(clean_pairs):
+            raise ValueError("A pitch mark is placed twice.")
+        keys.append({"frame": frame, "pairs": clean_pairs})
+    return {"keys": keys}
+
+
 def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     """The document to store, or ValueError explaining what is wrong.
 
@@ -365,7 +401,7 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")
-    extra = set(value) - {"version", "items", "freezes", "tracks", "parts"}
+    extra = set(value) - {"version", "items", "freezes", "tracks", "parts", "pitch"}
     if extra:
         raise ValueError(f"Unknown annotation setting: {sorted(extra)[0]}.")
     clean = {"version": VERSION, "items": clean_items, "freezes": freezes}
@@ -373,6 +409,8 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
         clean["tracks"] = tracks
     if parts:
         clean["parts"] = parts
+    if value.get("pitch") is not None:
+        clean["pitch"] = _pitch(value["pitch"], frames)
     return clean
 
 

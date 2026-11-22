@@ -8,9 +8,9 @@ import { animation } from "./timeline.js";
 export const TEXT_FONT = '"Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
 
 export const DEFAULT_STYLE = {
-  ring: { stroke: "#ffd400", width: 4 },
+  ring: { stroke: "#ffd400", width: 4, flat: false },
   spotlight: { fill: "#ffffff", fillOpacity: 0.3, stroke: "#ffffff", width: 3 },
-  arrow: { stroke: "#ffd400", width: 5, dashed: false },
+  arrow: { stroke: "#ffd400", width: 5, dashed: false, flat: false },
   line: { stroke: "#ffffff", width: 4, dashed: true },
   freehand: { stroke: "#ff4d4d", width: 5 },
   text: { color: "#ffffff", background: "#171817", size: 40, bold: false },
@@ -142,6 +142,17 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
   ctx.setLineDash(style.dashed ? [width * 3, width * 2.2] : []);
   switch (item.kind) {
     case "ring": {
+      if (item.projected?.outline) {
+        // Flat on the pitch (P1): a true circle on the grass, seen through the calibration.
+        const outline = item.projected.outline.map((point) => px(point, w, h));
+        tracePath(ctx, outline);
+        ctx.closePath();
+        ctx.fillStyle = rgba(style.stroke, 0.18 * state.draw);
+        ctx.fill();
+        tracePath(ctx, partialPath(outline, state.draw));
+        ctx.stroke();
+        break;
+      }
       const [cx, cy] = points[0];
       const { rx, ry } = item.geometry;
       ctx.beginPath();
@@ -181,6 +192,18 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
       ctx.stroke();
       break;
     case "arrow": {
+      if (item.projected?.head && state.draw >= 1) {
+        // Flat on the pitch (P1): the head lies on the grass, smaller the further away it is.
+        const [tip, left, right] = item.projected.head.map((point) => px(point, w, h));
+        tracePath(ctx, [points[0], px(item.projected.neck, w, h)]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = style.stroke;
+        tracePath(ctx, [tip, left, right]);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
       // The head rides the tip of the drawn part; the shaft stops short of it so
       // a thick line does not poke through.
       const drawn = partialPath(points, state.draw);
