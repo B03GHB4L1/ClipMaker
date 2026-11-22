@@ -36,6 +36,37 @@ def _pitch_zone(y, flip=False):
     return "Right Wing"
 
 
+# Opta qualifier ids read the same way by both scrapers. WhoScored's qualifiers carry
+# the Opta id as type.value (Head is 15, HeadPass 3), so ids are safer than its display
+# names. Checked against a WhoScored and a Scoresway match on 2026-11-22; 174 (parried to
+# danger) and 176 (caught) come from Opta's list and were not in either match.
+OPTA_QUALIFIER_COLUMNS = {
+    22: "is_regular_play", 24: "is_set_piece_shot", 25: "is_from_corner", 26: "is_direct_freekick",
+    328: "is_first_time", 29: "is_assisted", 101: "is_saved_off_line",
+    179: "is_diving_save", 182: "is_save_hands", 183: "is_save_feet",
+    173: "is_parried", 174: "is_parried", 176: "is_caught", 177: "is_caught",
+    286: "is_attacking_duel", 285: "is_defending_duel",
+}
+OPTA_COLUMNS = list(dict.fromkeys(OPTA_QUALIFIER_COLUMNS.values()))
+RELATED_EVENT = 55  # on an assisted shot, the eventId (per team) of the pass before it
+
+
+def opta_flags(qualifier_ids):
+    """The shared columns for one event, from its Opta qualifier ids (a dict id -> value)."""
+    flags = dict.fromkeys(OPTA_COLUMNS, False)
+    for qid, column in OPTA_QUALIFIER_COLUMNS.items():
+        if qid in qualifier_ids:
+            flags[column] = True
+    related = qualifier_ids.get(RELATED_EVENT) if 29 in qualifier_ids else None
+    flags["assist_event_id"] = "" if related in (None, "") else str(related)
+    return flags
+
+
+def _is_assist(qualifier_names):
+    """A goal's last pass: WhoScored marks it IntentionalGoalAssist; an older name was Assist."""
+    return "Assist" in qualifier_names or "IntentionalGoalAssist" in qualifier_names
+
+
 def _is_header(qualifier_names):
     """Shots, clearances and the like carry "Head" (Opta 15); headed passes carry "HeadPass" (Opta 3)."""
     return "Head" in qualifier_names or "HeadPass" in qualifier_names
@@ -691,6 +722,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                 qualifiers = event.get("qualifiers", [])
                 qualifier_map = {}
                 qualifier_names = set()
+                qualifier_ids = {}
                 if isinstance(qualifiers, list):
                     for qualifier in qualifiers:
                         if not isinstance(qualifier, dict):
@@ -701,6 +733,11 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                         if qname:
                             qualifier_names.add(qname)
                             qualifier_map[qname] = qvalue
+                        try:
+                            qualifier_ids[int(qtype.get("value"))] = qvalue
+                        except (AttributeError, TypeError, ValueError):
+                            pass
+                assist = _is_assist(qualifier_names)
 
                 rows.append({
                     "minute": int(minute),
@@ -775,7 +812,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_lay_off":            ("LayOff" in qualifier_names),
                     "is_flick_on":           ("FlickOn" in qualifier_names),
                     "is_launch":             (type_name == "Pass" and "Launch" in qualifier_names),
-                    "is_assist":             ("Assist" in qualifier_names),
+                    "is_assist":             assist,
                     "is_attacking_pass":     (type_name == "Pass" and "AttackingPass" in qualifier_names),
                     # --- Shot context qualifiers ---
                     "is_scramble":           ("Scramble" in qualifier_names),
@@ -801,7 +838,7 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     # --- Original pass/shot/misc qualifiers ---
                     "is_through_ball": "Throughball" in qualifier_names,
                     "is_corner": "CornerTaken" in qualifier_names,
-                    "is_freekick": "FreekickTaken" in qualifier_names,
+                    "is_freekick": "FreekickTaken" in qualifier_names or "IndirectFreekickTaken" in qualifier_names,
                     "is_header": _is_header(qualifier_names),
                     "is_own_goal": "OwnGoal" in qualifier_names,
                     "is_big_chance": "BigChanceCreated" in qualifier_names,
@@ -818,10 +855,13 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     "is_fast_break": "FastBreak" in qualifier_names,
                     "is_touch_in_box": _in_box(event.get("x", ""), event.get("y", "")),
                     # Assist qualifiers
-                    "is_assist_throughball": "AssistThroughball" in qualifier_names,
-                    "is_assist_cross": "AssistCross" in qualifier_names,
-                    "is_assist_corner": "AssistCorner" in qualifier_names,
-                    "is_assist_freekick": "AssistFreekick" in qualifier_names,
+                    # The Assist* names were not in the feed checked on 2026-11-22, so the kind
+                    # of assist also comes from the assisting pass's own qualifiers, as for Scoresway.
+                    "is_assist_throughball": "AssistThroughball" in qualifier_names or (assist and "Throughball" in qualifier_names),
+                    "is_assist_cross": "AssistCross" in qualifier_names or (assist and "Cross" in qualifier_names),
+                    "is_assist_corner": "AssistCorner" in qualifier_names or (assist and "CornerTaken" in qualifier_names),
+                    "is_assist_freekick": "AssistFreekick" in qualifier_names or (assist and (
+                        "FreekickTaken" in qualifier_names or "IndirectFreekickTaken" in qualifier_names)),
                     "is_intentional_assist": "IntentionalAssist" in qualifier_names,
                     # Card subtypes
                     "is_yellow_card": "Yellow" in qualifier_names,
@@ -830,6 +870,10 @@ def scrape_whoscored(url, log_queue, app_dir, enrich_xg=True):
                     # TakeOn qualifiers
                     "is_nutmeg": "Nutmeg" in qualifier_names,
                     "is_success_in_box": type_name == "TakeOn" and outcome_name == "Successful" and _in_box(event.get("x", ""), event.get("y", "")),
+                    # Shot situation, first-time shots, save kinds, duels, goal-line clearances,
+                    # and the assisting pass of an assisted shot (by event_id within the team).
+                    **opta_flags(qualifier_ids),
+                    "event_id": str(event.get("eventId", "") or ""),
                     "pitch_zone": _pitch_zone(event.get("y", ""),
                                               flip=(home_team != "")),
                     "depth_zone": _depth_zone(event.get("x", "")),
