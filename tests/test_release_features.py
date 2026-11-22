@@ -4,7 +4,8 @@ Baseline reviewed: older versions/{Windows,Linux,Mac}/clipmaker_core.py, all
 SHA256 11b6ade0fba4cdeef086bb09a4be9de1918dc93db14f9792a7537bb76facafc0,
 and the historical filtering page's PASS_TYPE_MAP and qualifier-logic help.
 The explicit manifest below is the parity checklist for all 64 non-AI flags,
-plus Headed shots (added 2026-11-22, when headed passes started reaching is_header).
+plus Headed shots (added 2026-11-22, when headed passes started reaching is_header) and
+14 shot-situation, save and duel qualifiers read from Opta ids the same day.
 It deliberately does not derive expected semantics from the implementation.
 
 Historical behavior combined ANY/ALL within identical action scopes. Intended
@@ -48,6 +49,7 @@ SCOPES = {
     "goal": frozenset({"Goal"}), "save": frozenset({"Save"}),
     "card": frozenset({"Card"}), "takeon": frozenset({"TakeOn"}),
     "carry": frozenset({"Carry"}), "global": None,
+    "duel": frozenset({"Aerial", "Tackle", "Challenge", "TakeOn", "Dispossessed"}),
 }
 
 # Explicit baseline checklist: flag, backing column, historical scope.
@@ -118,6 +120,20 @@ forced_out_only is_forced_out global
 blocked_cross_only is_blocked_cross global
 errors_to_shot_only is_error_led_to_shot global
 errors_to_goal_only is_error_led_to_goal global
+open_play_shots_only is_regular_play shot
+set_piece_shots_only is_set_piece_shot shot
+from_corner_shots_only is_from_corner shot
+direct_freekick_shots_only is_direct_freekick shot
+first_time_shots_only is_first_time shot
+assisted_shots_only is_assisted shot
+saved_off_line_only is_saved_off_line shot
+diving_saves_only is_diving_save save
+hand_saves_only is_save_hands save
+feet_saves_only is_save_feet save
+parried_saves_only is_parried save
+caught_saves_only is_caught save
+attacking_duels_only is_attacking_duel duel
+defending_duels_only is_defending_duel duel
 """.strip().splitlines())
 BOOLEAN_COLUMNS = {column for _, column, _ in CHECKLIST if column.startswith("is_")}
 
@@ -140,10 +156,10 @@ class FilterAcceptance(unittest.TestCase):
         self.assertEqual(removed, len(rows) - len(expected))
         self.assertNotIn("_xt_num", result.columns)
 
-    def test_catalog_matches_all_65_explicit_non_ai_semantics(self):
-        self.assertEqual(len(CHECKLIST), 65)
-        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 65)
-        self.assertEqual(len(FILTER_QUALIFIERS), 65)
+    def test_catalog_matches_all_79_explicit_non_ai_semantics(self):
+        self.assertEqual(len(CHECKLIST), 79)
+        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 79)
+        self.assertEqual(len(FILTER_QUALIFIERS), 79)
         self.assertEqual({flag: column for flag, column, _ in CHECKLIST},
                          {flag: column for flag, column, *_ in FILTER_QUALIFIERS})
 
@@ -383,10 +399,11 @@ def qualifier_case(flag, column, kind):
                     self.assert_selection(rows, options, expected)
                     if scope:
                         # A true bit on an unrelated action cannot satisfy a scoped qualifier.
+                        other = "Tackle" if "Tackle" not in scope else "Pass"
                         rows = [event("yes", event_types[0], **{column: True}),
-                                event("no", event_types[0]), event("unrelated", "Tackle", **{column: True})]
+                                event("no", event_types[0]), event("unrelated", other, **{column: True})]
                         self.assert_selection(rows, options, ["yes"])
-                        self.assert_selection(rows, {**options, "filter_types": [*event_types, "Tackle"]},
+                        self.assert_selection(rows, {**options, "filter_types": [*event_types, other]},
                                               ["yes", "unrelated"])
                         peer = next(((f, c) for f, c, k in CHECKLIST if k == kind and f != flag), None)
                         if peer:

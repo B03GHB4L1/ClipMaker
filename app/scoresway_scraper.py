@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 
 from whoscored_scraper import (
+    OPTA_COLUMNS,
+    OPTA_QUALIFIER_COLUMNS,
+    RELATED_EVENT,
+    opta_flags,
     _apply_xt_and_progressive,
     _depth_zone,
     _in_box,
@@ -54,6 +58,7 @@ EXPECTED_COLUMNS = [
     "is_assist_throughball", "is_assist_cross", "is_assist_corner",
     "is_assist_freekick", "is_intentional_assist", "is_yellow_card",
     "is_red_card", "is_second_yellow", "is_nutmeg", "is_success_in_box",
+    *OPTA_COLUMNS, "event_id", "assist_event_id",
     "pitch_zone", "depth_zone", "xT", "prog_pass", "prog_carry",
     "matchName", "homeTeam", "awayTeam", "matchDate",
 ]
@@ -86,7 +91,7 @@ TYPE_ID_TO_EVENT = {
 
 QUALIFIER_RULES = {
     1: "is_long_ball", 2: "is_cross", 3: "is_header", 4: "is_through_ball",  # 3 is a headed pass, 15 any other header
-    5: "is_freekick", 6: "is_corner", 9: "is_penalty", 15: "is_header",
+    5: "is_freekick", 6: "is_corner", 9: "is_penalty", 15: "is_header", 241: "is_freekick",  # 241: indirect
     20: "is_right_foot", 23: "is_fast_break", 28: "is_own_goal",
     31: "is_yellow_card", 32: "is_second_yellow", 33: "is_red_card",
     72: "is_left_foot", 89: "is_1on1", 94: "is_def_block",
@@ -103,7 +108,7 @@ QUALIFIER_RULES = {
     263: "is_direct_from_corner",
 }
 
-KNOWN_QUALIFIERS = set(QUALIFIER_RULES) | {22, 24, 25, 26, 82, 102, 103, 132, 140, 141, 146, 147, 210}
+KNOWN_QUALIFIERS = set(QUALIFIER_RULES) | set(OPTA_QUALIFIER_COLUMNS) | {RELATED_EVENT, 82, 102, 103, 132, 140, 141, 146, 147, 210}
 SHOT_TYPES = {"MissedShot", "ShotOnPost", "SavedShot", "Goal", "BlockedShot"}
 PERIOD_MAP = {
     1: "FirstHalf",
@@ -458,6 +463,7 @@ def apply_qualifier_flags(row, q, event_type, outcome, home_team):
     for qid, column in QUALIFIER_RULES.items():
         if qid in q and column in row:
             row[column] = True
+    row.update(opta_flags(q))
 
     q210 = to_int(q_value(q, 210), default=None)
     row["is_key_pass"] = q210 in {13, 14, 15, 16}
@@ -849,6 +855,7 @@ def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, 
             "playerName": player_name,
             "team": team_name,
             "playerId": player_id,
+            "event_id": str(get_first(event, "eventId", "event_id", default="") or ""),
             "player_position": context.player_id_to_position.get(str(player_id), ""),
             "shirtNumber": context.player_id_to_shirt_number.get(str(player_id), np.nan),
             "x": to_float(get_first(event, "x", "xCoord", "x_coordinate")),

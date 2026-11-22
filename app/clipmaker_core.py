@@ -101,6 +101,21 @@ INTENT_FLAG_TO_BOOL_COL = {
     # Errors
     "errors_to_shot_only":          "is_error_led_to_shot",
     "errors_to_goal_only":          "is_error_led_to_goal",
+    # Shot situation, saves and duels (Opta qualifiers both scrapers read since 2026-11-22)
+    "open_play_shots_only":          "is_regular_play",
+    "set_piece_shots_only":          "is_set_piece_shot",
+    "from_corner_shots_only":        "is_from_corner",
+    "direct_freekick_shots_only":    "is_direct_freekick",
+    "first_time_shots_only":         "is_first_time",
+    "assisted_shots_only":           "is_assisted",
+    "saved_off_line_only":           "is_saved_off_line",
+    "diving_saves_only":             "is_diving_save",
+    "hand_saves_only":               "is_save_hands",
+    "feet_saves_only":               "is_save_feet",
+    "parried_saves_only":            "is_parried",
+    "caught_saves_only":             "is_caught",
+    "attacking_duels_only":          "is_attacking_duel",
+    "defending_duels_only":          "is_defending_duel",
 }
 
 
@@ -108,6 +123,7 @@ INTENT_FLAG_TO_BOOL_COL = {
 # to shots): the clip filter narrows those types only, and Filter's counts use the
 # same scopes (packaging/clipmaker_api_server.qualifier_mask).
 SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
+DUEL_TYPES = {"Aerial", "Tackle", "Challenge", "TakeOn", "Dispossessed"}
 SCOPED_QUALIFIERS = [
     ("key_passes_only",              "is_key_pass",                "Key passes",              {"Pass"}),
     ("crosses_only",                 "is_cross",                   "Crosses",                 {"Pass"}),
@@ -154,6 +170,20 @@ SCOPED_QUALIFIERS = [
     ("success_in_box_only",          "is_success_in_box",          "Success in box",          {"TakeOn"}),
     ("box_entry_carry_only",         "is_box_entry_carry",         "Box entry (carry)",       {"Carry"}),
     ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final third entry (carry)", {"Carry"}),
+    ("open_play_shots_only",           "is_regular_play",             "Open-play shots",          SHOT_TYPES),
+    ("set_piece_shots_only",           "is_set_piece_shot",           "Set-piece shots",          SHOT_TYPES),
+    ("from_corner_shots_only",         "is_from_corner",              "Shots from corners",       SHOT_TYPES),
+    ("direct_freekick_shots_only",     "is_direct_freekick",          "Direct free kicks",        SHOT_TYPES),
+    ("first_time_shots_only",          "is_first_time",               "First-time shots",         SHOT_TYPES),
+    ("assisted_shots_only",            "is_assisted",                 "Assisted shots",           SHOT_TYPES),
+    ("saved_off_line_only",            "is_saved_off_line",           "Cleared off the line",     SHOT_TYPES),
+    ("diving_saves_only",              "is_diving_save",              "Diving saves",             {"Save"}),
+    ("hand_saves_only",                "is_save_hands",               "Saves with hands",         {"Save"}),
+    ("feet_saves_only",                "is_save_feet",                "Saves with feet",          {"Save"}),
+    ("parried_saves_only",             "is_parried",                  "Parried saves",            {"Save"}),
+    ("caught_saves_only",              "is_caught",                   "Caught or collected",      {"Save"}),
+    ("attacking_duels_only",           "is_attacking_duel",           "Attacking duels",          DUEL_TYPES),
+    ("defending_duels_only",           "is_defending_duel",           "Defending duels",          DUEL_TYPES),
 ]
 
 
@@ -965,7 +995,11 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                       "intentional_assists_only", "yellow_cards_only",
                       "red_cards_only", "second_yellow_only",
                        "nutmegs_only", "success_in_box_only",
-                       "throw_ins_only"]:
+                       "throw_ins_only", "open_play_shots_only", "set_piece_shots_only",
+                       "from_corner_shots_only", "direct_freekick_shots_only", "first_time_shots_only",
+                       "assisted_shots_only", "saved_off_line_only", "diving_saves_only", "hand_saves_only",
+                       "feet_saves_only", "parried_saves_only", "caught_saves_only", "attacking_duels_only",
+                       "defending_duels_only"]:
             if config.get(flag):
                 active_filters.append(flag)
         if active_filters:
