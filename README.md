@@ -150,6 +150,20 @@ Updating never deletes your projects.
 - **1.1:** more ways to filter, support for videos split into halves
 - **1.0:** first version
 
+## Licence
+
+VizorPlay is source-available, not open source. It is free for noncommercial
+use: personal study, hobby and amateur analysis, charities, schools, public
+research and government. The licence, the
+[PolyForm Strict License 1.0.0](LICENSE), does not allow changing VizorPlay or
+sharing copies of it.
+
+Professional clubs, paid analysts and coaching businesses need a commercial
+licence: email [granvskaia@gmail.com](mailto:granvskaia@gmail.com).
+
+ClipMaker 1.x and earlier VizorPlay code were released under the MIT License,
+which still applies to them ([LICENSE-MIT-EARLIER.md](LICENSE-MIT-EARLIER.md)).
+
 ---
 
 <p align="center">VizorPlay by B4L1 · <a href="https://x.com/B03GHB4L1">@B03GHB4L1</a></p>

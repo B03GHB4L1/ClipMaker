@@ -3,7 +3,7 @@ class Vizorplay < Formula
   homepage "https://github.com/B03GHB4L1/ClipMaker"
   url "https://github.com/B03GHB4L1/ClipMaker/archive/refs/tags/v@VERSION@.tar.gz"
   sha256 "@SHA256@"
-  license "MIT"
+  license :cannot_represent # PolyForm Strict 1.0.0 (noncommercial, source-available); see LICENSE
 
   depends_on "node" => :build
   depends_on "rust" => :build
