@@ -199,8 +199,8 @@ class RecordingTests(unittest.TestCase):
         wait_for(lambda: self.live.status("match1")["state"] == "reconnecting")
         push(self.port, 4)
         # The recorder may still be writing part02's first segment when the push ends (slow CI runners).
-        status = wait_for(lambda: (lambda status: status if "part02" in status["codecs"] else None)(self.live.status("match1", after=1)))
-        self.assertEqual(status["new_segments"][0]["i"], 1)
+        status = wait_for(lambda: (lambda status: status if "part02" in status["codecs"] else None)(self.live.status("match1")))
+        self.assertEqual(self.live.status("match1", after=1)["new_segments"][0]["i"], 1)
         self.assertEqual(set(status["codecs"]), {"part01", "part02"})
         self.assertTrue(all(value.startswith("avc1.") for value in status["codecs"].values()))
         done = self.finish()
