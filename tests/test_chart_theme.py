@@ -52,6 +52,17 @@ class ThemeTests(unittest.TestCase):
         # Pale tints become a see-through wash of their hue, not an opaque olive block.
         self.assertTrue(module.dark("#e6f2c5").startswith("rgba("))
 
+    def test_dark_selectors_keep_lists_inside_brackets_whole(self):
+        # The generator once split ":is(button, select)" at its comma, so the browser dropped
+        # 14 dark rules (focus rings, Annotate and Code buttons, the pitch lines).
+        sheet = (UI / "theme-dark.css").read_text(encoding="utf-8")
+        for selectors in re.findall(r"^([^{}@/][^{}]*)\{", sheet, re.M):
+            for selector in selectors.split(",\n"):  # the generator puts one selector per line
+                for bracket, closing in (("(", ")"), ("[", "]")):
+                    self.assertEqual(selector.count(bracket), selector.count(closing), selector.strip()[:120])
+        self.assertIn('.code-main :is(button, select, input, a, summary):focus-visible {', sheet)
+        self.assertIn('.code-pitch-lines :is(rect, path, circle) {', sheet)
+
     def test_dark_twins_keep_the_light_cascade(self):
         # A twin of a plain rule must not out-rank a more specific light rule that uses a
         # variable: the play button once lost its dark fill and its icon disappeared.

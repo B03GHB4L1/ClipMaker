@@ -998,12 +998,7 @@
 :root[data-theme="dark"] textarea {
   -webkit-tap-highlight-color: transparent;
 }
-:root[data-theme="dark"] :is(button,
-:root[data-theme="dark"] a,
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] summary):focus-visible {
+:root[data-theme="dark"] :is(button, a, input, select, textarea, summary):focus-visible {
   outline: 2px solid #94cf83;
 }
 :root[data-theme="dark"] .field-note,
@@ -1672,8 +1667,7 @@
   background: transparent;
   color: #afb1ab;
 }
-:root[data-theme="dark"] .export-bar .segmented-control label:hover input:not(:checked,
-:root[data-theme="dark"] :disabled) + span {
+:root[data-theme="dark"] .export-bar .segmented-control label:hover input:not(:checked, :disabled) + span {
   background: #272824;
   color: var(--cm-ink);
 }
@@ -1762,14 +1756,11 @@
   border-right: 2px solid #e9ece6;
   border-bottom: 2px solid #e9ece6;
 }
-:root[data-theme="dark"] .export-job:is([data-job-status="failed"],
-:root[data-theme="dark"] [data-job-status="cancelled"]) .export-job-icon {
+:root[data-theme="dark"] .export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon {
   background: rgba(232,173,164,0.2);
 }
-:root[data-theme="dark"] .export-job:is([data-job-status="failed"],
-:root[data-theme="dark"] [data-job-status="cancelled"]) .export-job-icon::before,
-:root[data-theme="dark"] .export-job:is([data-job-status="failed"],
-:root[data-theme="dark"] [data-job-status="cancelled"]) .export-job-icon::after {
+:root[data-theme="dark"] .export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon::before,
+:root[data-theme="dark"] .export-job:is([data-job-status="failed"], [data-job-status="cancelled"]) .export-job-icon::after {
   border: 0;
   background: #ff9888;
 }
@@ -1845,9 +1836,7 @@
   background: #242522;
   color: #c2c5be;
 }
-:root[data-theme="dark"] :is(.export-folder button,
-:root[data-theme="dark"] .export-file a,
-:root[data-theme="dark"] .export-log > summary):focus-visible {
+:root[data-theme="dark"] :is(.export-folder button, .export-file a, .export-log > summary):focus-visible {
   outline: 2px solid #9dba63;
 }
 
@@ -2127,30 +2116,15 @@
   fill: currentColor;
   stroke: none;
 }
-:root[data-theme="dark"] .annotate-main :where(.annotate-command,
-:root[data-theme="dark"] .annotate-shot,
-:root[data-theme="dark"] .annotate-export-button,
-:root[data-theme="dark"] .annotate-export-cancel,
-:root[data-theme="dark"] .annotate-format,
-:root[data-theme="dark"] .annotate-transport button,
-:root[data-theme="dark"] .annotate-pair button,
-:root[data-theme="dark"] .annotate-row-action,
-:root[data-theme="dark"] .annotate-primary,
-:root[data-theme="dark"] .annotate-remove) {
+:root[data-theme="dark"] .annotate-main :where(.annotate-command, .annotate-shot, .annotate-export-button, .annotate-export-cancel, .annotate-format, .annotate-transport button, .annotate-pair button, .annotate-row-action, .annotate-primary, .annotate-remove) {
   border: 1px solid var(--cm-rule);
   background: var(--annotate-panel);
   color: var(--cm-ink);
 }
-:root[data-theme="dark"] .annotate-main :where(button,
-:root[data-theme="dark"] select):where(:hover:not(:disabled)) {
+:root[data-theme="dark"] .annotate-main :where(button, select):where(:hover:not(:disabled)) {
   background-color: var(--annotate-hover);
 }
-:root[data-theme="dark"] .annotate-main :is(button,
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] a,
-:root[data-theme="dark"] summary,
-:root[data-theme="dark"] canvas):focus-visible {
+:root[data-theme="dark"] .annotate-main :is(button, select, input, a, summary, canvas):focus-visible {
   outline: 2px solid #9dba63;
 }
 :root[data-theme="dark"] .annotate-main button:disabled {
@@ -2399,8 +2373,7 @@
 :root[data-theme="dark"] .annotate-lane-edge::after {
   background: var(--annotate-freeze);
 }
-:root[data-theme="dark"] .annotate-lane[data-empty]:not(:has(.annotate-lane-freeze,
-:root[data-theme="dark"] .annotate-lane-drawing))::before {
+:root[data-theme="dark"] .annotate-lane[data-empty]:not(:has(.annotate-lane-freeze, .annotate-lane-drawing))::before {
   color: var(--cm-muted);
 }
 :root[data-theme="dark"] .annotate-lane-drawing {
@@ -2453,9 +2426,7 @@
 :root[data-theme="dark"] .annotate-fields label > * {
   color: var(--cm-ink);
 }
-:root[data-theme="dark"] .annotate-fields :is(select,
-:root[data-theme="dark"] input[type="number"],
-:root[data-theme="dark"] input[type="text"]) {
+:root[data-theme="dark"] .annotate-fields :is(select, input[type="number"], input[type="text"]) {
   border: 1px solid var(--cm-rule);
   background: #2f2f2f;
   color: var(--cm-ink);
@@ -2701,11 +2672,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-:root[data-theme="dark"] .code-main :is(button,
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] a,
-:root[data-theme="dark"] summary):focus-visible {
+:root[data-theme="dark"] .code-main :is(button, select, input, a, summary):focus-visible {
   outline: 2px solid #9dba63;
 }
 :root[data-theme="dark"] .code-main kbd {
@@ -2733,9 +2700,7 @@
 :root[data-theme="dark"] .code-stage {
   background: #ebebeb;
 }
-:root[data-theme="dark"] .code-main :where(.code-transport button,
-:root[data-theme="dark"] .code-teams button,
-:root[data-theme="dark"] .code-remove) {
+:root[data-theme="dark"] .code-main :where(.code-transport button, .code-teams button, .code-remove) {
   border: 1px solid var(--cm-rule);
   background: var(--code-panel);
   color: var(--cm-ink);
@@ -3007,8 +2972,7 @@
   color: #171817;
   background: var(--cm-accent);
 }
-:root[data-theme="dark"] .code-dialog :is(button,
-:root[data-theme="dark"] input):focus-visible {
+:root[data-theme="dark"] .code-dialog :is(button, input):focus-visible {
   outline: 2px solid #9dba63;
 }
 :root[data-theme="dark"] .code-pitch-panel {
@@ -3025,9 +2989,7 @@
 :root[data-theme="dark"] .code-pitch-grass {
   fill: rgba(181,198,148,0.2);
 }
-:root[data-theme="dark"] .code-pitch-lines :is(rect,
-:root[data-theme="dark"] path,
-:root[data-theme="dark"] circle) {
+:root[data-theme="dark"] .code-pitch-lines :is(rect, path, circle) {
   fill: none;
   stroke: #9daa8d;
 }

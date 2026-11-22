@@ -144,10 +144,24 @@ def convert(value):
     return COLOR.sub(lambda m: dark(m.group(0)), value)
 
 
+def split_selectors(prelude):
+    """A selector list split at its top-level commas only: tinycss2 keeps :is(a, b),
+    :not(a, b) and [attr="a,b"] as single tokens, so their commas stay inside."""
+    parts, current = [], []
+    for token in prelude:
+        if token.type == "literal" and token.value == ",":
+            parts.append(current)
+            current = []
+        else:
+            current.append(token)
+    parts.append(current)
+    # One line per selector, even when the source breaks a long :where( ... ) across lines.
+    return [text for text in (re.sub(r"\s*\n\s*", " ", tinycss2.serialize(part)).strip() for part in parts) if text]
+
+
 def rules(nodes, out, wrap=None):
     for node in nodes:
         if node.type == "qualified-rule":
-            selectors = tinycss2.serialize(node.prelude).strip()
             decls = []
             on_accent = False
             for item in tinycss2.parse_declaration_list(node.content, skip_comments=True, skip_whitespace=True):
@@ -175,7 +189,7 @@ def rules(nodes, out, wrap=None):
             if not decls:
                 continue
             scoped = []
-            for sel in (s.strip() for s in selectors.split(",")):
+            for sel in split_selectors(node.prelude):
                 if sel in (":root", "html"):
                     scoped.append(SCOPE)
                 elif sel.startswith("html"):
