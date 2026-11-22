@@ -125,7 +125,7 @@ locations were clicked; the rest show their usual "no data" message.
   and refuses a panel that lacks codes it has used. A tag can set the outcome or one
   of Filter's qualifier columns; each qualifier still applies to its own event types
   (Big chances to shots, Headers to passes). The in-app editor changes names, keys,
-  colours, codes and tags; links between codes are edited in an exported file.
+  colours, codes and tags; links between codes came with C5.
 - **C4** Pitch location clicks; "both" source merging with scraped data. Done 2026-11-22.
   A click on the Code screen's pitch sets x, y in the feeds' scale (the event's team
   attacking right); a drag adds endX, endY. Coded rows carry depth_zone and pitch_zone,
@@ -135,6 +135,13 @@ locations were clicked; the rest show their usual "no data" message.
   changed, deleting every code goes back to it, and a new scrape or import is merged
   again. The Analyst Room, Tactical Lab and the score read the feed alone, so a coded
   Goal is not counted twice.
+- **C5** Code-link editor, before L1, so the panels people record live with carry their
+  own links. Done 2026-11-22. In the panel editor each code's Links row sets which interval
+  codes it starts (for the same or the other team), which it stops, and which of the
+  panel's tags it adds (`ui/code/links.js`; at most 4 starts, 4 stops, 10 tags). Links to
+  a removed code or tag go with it. `app/coding/templates.py` refuses links to codes or
+  tags the panel does not have, starts or stops of instant codes or of the code itself,
+  and entries that are not names.
 
 ### Tests
 
@@ -188,6 +195,7 @@ adapter and checked on all three systems in a spike:
 
 - **L0 spike**: device listing and 30-minute recording on each OS (CI cannot
   test devices, so a manual checklist plus a CI test with a generated stream).
+- C5 (the code-link editor) comes first, so live panels can carry their own links.
 - **L1** Network and localhost-push recording, segmented, play behind the live
   edge, join at the end.
 - **L2** Live coding, live kick-off markers, cutting clips while recording.

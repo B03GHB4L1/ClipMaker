@@ -6,10 +6,10 @@
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=4" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=5" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=4"></script>
+  <script type="module" src="code.js?v=5"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -180,7 +180,7 @@
       <div class="code-dialog-body">
         <h3>Codes</h3>
         <table class="code-edit-table">
-          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Colour</th><th scope="col">Kind</th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
+          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Colour</th><th scope="col">Kind</th><th scope="col"><span class="code-sr">Links</span></th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
           <tbody data-panel-codes></tbody>
         </table>
         <div class="code-template-row"><button type="button" data-add-code="instant">Add code</button><button type="button" data-add-code="interval">Add interval</button></div>
@@ -190,7 +190,7 @@
           <tbody data-panel-tags></tbody>
         </table>
         <div class="code-template-row"><button type="button" data-add-tag>Add tag</button></div>
-        <p class="code-muted">Code keys are single letters (not H or A); tag keys are pressed with Shift. Tags in one group exclude each other. Links between codes (a Goal stopping possession) are kept; edit them in an exported file.</p>
+        <p class="code-muted">Code keys are single letters (not H or A); tag keys are pressed with Shift. Tags in one group exclude each other. Links let one press do more: a Goal can stop Possession, and Ball won can start it.</p>
         <p class="code-error" data-panel-error role="alert" hidden></p>
       </div>
       <div class="code-dialog-foot">
