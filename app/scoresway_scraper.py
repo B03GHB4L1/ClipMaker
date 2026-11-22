@@ -10,8 +10,13 @@ import pandas as pd
 from whoscored_scraper import (
     OPTA_COLUMNS,
     OPTA_QUALIFIER_COLUMNS,
+    OPTA_VALUE_COLUMNS,
     RELATED_EVENT,
+    SKIPPED_EVENT_TYPES,
+    BLOCKED_X, BLOCKED_Y, CAUGHT_OFFSIDE, TEAM_FORMATION, FORMATION_SLOTS,
+    INVOLVED_PLAYERS, FORMATION_SLOT, CAPTAIN,
     opta_flags,
+    opta_values,
     _apply_xt_and_progressive,
     _depth_zone,
     _in_box,
@@ -58,7 +63,7 @@ EXPECTED_COLUMNS = [
     "is_assist_throughball", "is_assist_cross", "is_assist_corner",
     "is_assist_freekick", "is_intentional_assist", "is_yellow_card",
     "is_red_card", "is_second_yellow", "is_nutmeg", "is_success_in_box",
-    *OPTA_COLUMNS, "event_id", "assist_event_id",
+    *OPTA_COLUMNS, *OPTA_VALUE_COLUMNS, "event_id", "assist_event_id",
     "pitch_zone", "depth_zone", "xT", "prog_pass", "prog_carry",
     "matchName", "homeTeam", "awayTeam", "matchDate",
 ]
@@ -67,6 +72,7 @@ BOOLEAN_COLUMNS = [c for c in EXPECTED_COLUMNS if c.startswith("is_")]
 NUMERIC_COLUMNS = {
     "minute", "second", "x", "y", "endX", "endY", "goal_mouth_y",
     "goal_mouth_z", "shirtNumber", "xT", "prog_pass", "prog_carry",
+    "blocked_x", "blocked_y",
 }
 
 TYPE_ID_TO_EVENT = {
@@ -92,6 +98,7 @@ TYPE_ID_TO_EVENT = {
 QUALIFIER_RULES = {
     1: "is_long_ball", 2: "is_cross", 3: "is_header", 4: "is_through_ball",  # 3 is a headed pass, 15 any other header
     5: "is_freekick", 6: "is_corner", 9: "is_penalty", 15: "is_header", 241: "is_freekick",  # 241: indirect
+    14: "is_last_line",  # WhoScored names it LastMan
     20: "is_right_foot", 23: "is_fast_break", 28: "is_own_goal",
     31: "is_yellow_card", 32: "is_second_yellow", 33: "is_red_card",
     72: "is_left_foot", 89: "is_1on1", 94: "is_def_block",
@@ -108,7 +115,11 @@ QUALIFIER_RULES = {
     263: "is_direct_from_corner",
 }
 
-KNOWN_QUALIFIERS = set(QUALIFIER_RULES) | set(OPTA_QUALIFIER_COLUMNS) | {RELATED_EVENT, 82, 102, 103, 132, 140, 141, 146, 147, 210}
+# Every qualifier id the scraper uses; any other id in the feed is not read.
+KNOWN_QUALIFIERS = set(QUALIFIER_RULES) | set(OPTA_QUALIFIER_COLUMNS) | {
+    RELATED_EVENT, 82, 102, 103, 132, 140, 141, 210, BLOCKED_X, BLOCKED_Y, CAUGHT_OFFSIDE,
+    TEAM_FORMATION, FORMATION_SLOTS, INVOLVED_PLAYERS, FORMATION_SLOT, CAPTAIN,
+}
 SHOT_TYPES = {"MissedShot", "ShotOnPost", "SavedShot", "Goal", "BlockedShot"}
 PERIOD_MAP = {
     1: "FirstHalf",
@@ -463,7 +474,7 @@ def apply_qualifier_flags(row, q, event_type, outcome, home_team):
     for qid, column in QUALIFIER_RULES.items():
         if qid in q and column in row:
             row[column] = True
-    row.update(opta_flags(q))
+    row.update(opta_flags(q, event_type))
 
     q210 = to_int(q_value(q, 210), default=None)
     row["is_key_pass"] = q210 in {13, 14, 15, 16}
@@ -809,6 +820,43 @@ def reclassify_shots_and_saves(df, context):
     return df
 
 
+def _in_six_yard_box(x, y):
+    """Inside the attacking six-yard box (0-100 scale), as _in_box is for the penalty box."""
+    try:
+        return float(x) > 94.2 and 36.8 < float(y) < 63.2
+    except (TypeError, ValueError):
+        return False
+
+
+ZONE_COLUMNS = ("is_keeper_save_in_box", "is_keeper_save_six_yard", "is_keeper_save_outside_box")
+
+
+def add_keeper_save_zones(df):
+    """Where each keeper save's shot was taken from. WhoScored marks it on the save (its ids
+    11115-11117, which follow the shot's spot: a six-yard shot is also in the box); Scoresway's
+    feed has no such qualifier, so read it from the shot paired with the save, as
+    reclassify_shots_and_saves pairs them (same period and minute, the save a second later at most)."""
+    df = df.copy()
+    saves = df.index[(df["type"] == "Save") & df["is_gk_save"].astype(bool)
+                     & ~df[list(ZONE_COLUMNS)].astype(bool).any(axis=1)]
+    shots = df[df["type"].isin(SHOT_TYPES)]
+    for index in saves:
+        save = df.loc[index]
+        paired = shots[
+            (shots["period"].astype(str) == str(save["period"]))
+            & (shots["minute"].astype(int) == int(save["minute"]))
+            & (shots["second"].astype(int).isin([int(save["second"]), int(save["second"]) - 1]))
+        ]
+        if save["team"]:
+            paired = paired[paired["team"].astype(str) != str(save["team"])]
+        if paired.empty or pd.isna(paired.iloc[0]["x"]) or pd.isna(paired.iloc[0]["y"]):
+            continue
+        x, y = paired.iloc[0]["x"], paired.iloc[0]["y"]
+        in_box = _in_box(x, y)
+        df.loc[index, list(ZONE_COLUMNS)] = [in_box, in_box and _in_six_yard_box(x, y), not in_box]
+    return df
+
+
 def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, log=lambda msg: None, squad_jsons=None):
     context = build_match_context(match_json)
     enrich_match_context_from_squads(context, squad_jsons, log=log)
@@ -817,20 +865,22 @@ def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, 
         raise ValueError("No PerformFeeds event list found.")
 
     unknown_type_ids = Counter()
-    unknown_qualifier_ids = Counter()
+    skipped_types = Counter()
     unresolved_players = 0
     unresolved_teams = 0
     rows = []
 
     for event in raw_events:
-        q = normalize_qualifiers(get_first(event, "qualifiers", "qualifier", "q", default=None))
-        unknown_qualifier_ids.update(qid for qid in q if qid not in KNOWN_QUALIFIERS)
-
         type_id = to_int(get_first(event, "typeId", "type_id", "eventTypeId"), default=-1)
         event_type = TYPE_ID_TO_EVENT.get(type_id)
         if event_type is None:
-            event_type = f"Unknown_{type_id}"
-            unknown_type_ids[type_id] += 1
+            unknown_type_ids[type_id] += 1  # unmapped event types are skipped, and counted in the log
+            continue
+        if event_type in SKIPPED_EVENT_TYPES:
+            skipped_types[event_type] += 1
+            continue
+        q = {qid: value for qid, value in normalize_qualifiers(
+            get_first(event, "qualifiers", "qualifier", "q", default=None)).items() if qid in KNOWN_QUALIFIERS}
 
         outcome = normalize_outcome(get_first(event, "outcome", "outcomeType", "outcomeId", "outcomeValue"))
         player_id = str(get_first(event, "playerId", "personId", "player_id", default=""))
@@ -879,6 +929,7 @@ def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, 
             row["endY"] = row["y"]
 
         apply_qualifier_flags(row, q, event_type, outcome, context.home_team)
+        row.update(opta_values(q, lambda pid: context.player_id_to_name.get(pid, "")))
         row["pitch_zone"] = "" if np.isnan(row["y"]) else _pitch_zone(row["y"], flip=(context.home_team != ""))
         row["depth_zone"] = "" if np.isnan(row["x"]) else _depth_zone(row["x"])
         rows.append(row)
@@ -896,6 +947,7 @@ def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, 
     df["_period_order"] = df["period"].map(period_order).fillna(99)
     df = df.sort_values(["_period_order", "minute", "second"]).drop(columns=["_period_order"]).reset_index(drop=True)
     df = reclassify_shots_and_saves(df, context)
+    df = add_keeper_save_zones(df)
 
     log(f"Built base Scoresway dataframe with {len(df)} rows.")
     if enrich_xg:
@@ -918,10 +970,9 @@ def normalise_scoresway_events(match_json, event_json, app_dir, enrich_xg=True, 
 
     if unknown_type_ids:
         summary = ", ".join(f"{tid} x{count}" for tid, count in unknown_type_ids.most_common())
-        log(f"Warning: Unknown Scoresway/Opta event typeIds detected: {summary}")
-    if unknown_qualifier_ids:
-        summary = ", ".join(f"{qid} x{count}" for qid, count in unknown_qualifier_ids.most_common(20))
-        log(f"Info: Unmapped Scoresway qualifier IDs detected: {summary}")
+        log(f"Skipped {sum(unknown_type_ids.values())} events with unmapped Scoresway/Opta typeIds: {summary}")
+    for event_type, count in skipped_types.items():
+        log(f"Skipped {count} {event_type} events.")
     if unresolved_players:
         log(f"Warning: Could not resolve player name for {unresolved_players} events.")
     if unresolved_teams:

@@ -116,6 +116,15 @@ INTENT_FLAG_TO_BOOL_COL = {
     "caught_saves_only":             "is_caught",
     "attacking_duels_only":          "is_attacking_duel",
     "defending_duels_only":          "is_defending_duel",
+    # Read from both feeds after a second live check (2026-11-22)
+    "disallowed_goals_only":         "is_goal_disallowed",
+    "six_yard_blocks_only":          "is_six_yard_block",
+    "standing_saves_only":           "is_standing_save",
+    "saves_in_box_only":             "is_keeper_save_in_box",
+    "saves_six_yard_only":           "is_keeper_save_six_yard",
+    "saves_outside_box_only":        "is_keeper_save_outside_box",
+    "high_claims_only":              "is_high_claim",
+    "overruns_only":                 "is_overrun",
 }
 
 
@@ -184,6 +193,14 @@ SCOPED_QUALIFIERS = [
     ("caught_saves_only",              "is_caught",                   "Caught or collected",      {"Save"}),
     ("attacking_duels_only",           "is_attacking_duel",           "Attacking duels",          DUEL_TYPES),
     ("defending_duels_only",           "is_defending_duel",           "Defending duels",          DUEL_TYPES),
+    # Disallowed goals stay unscoped: WhoScored puts the qualifier on the offside pass.
+    ("six_yard_blocks_only",           "is_six_yard_block",           "Blocked in the six-yard box", SHOT_TYPES),
+    ("standing_saves_only",            "is_standing_save",            "Standing saves",           {"Save"}),
+    ("saves_in_box_only",              "is_keeper_save_in_box",       "Saves from shots in the box", {"Save"}),
+    ("saves_six_yard_only",            "is_keeper_save_six_yard",     "Saves from six-yard shots", {"Save"}),
+    ("saves_outside_box_only",         "is_keeper_save_outside_box",  "Saves from outside the box", {"Save"}),
+    ("high_claims_only",               "is_high_claim",               "High claims",              {"Claim"}),
+    ("overruns_only",                  "is_overrun",                  "Overruns",                 {"TakeOn"}),
 ]
 
 
@@ -850,6 +867,7 @@ def apply_filters(df, config, log=None):
             ("blocked_cross_only",           "is_blocked_cross",          "Blocked cross"),
             ("errors_to_shot_only",          "is_error_led_to_shot",      "Error → shot"),
             ("errors_to_goal_only",          "is_error_led_to_goal",      "Error → goal"),
+            ("disallowed_goals_only",        "is_goal_disallowed",        "Disallowed goals"),
         ]:
             if config.get(flag):
                 if flag in scoped_flag_names:

@@ -5,7 +5,9 @@ SHA256 11b6ade0fba4cdeef086bb09a4be9de1918dc93db14f9792a7537bb76facafc0,
 and the historical filtering page's PASS_TYPE_MAP and qualifier-logic help.
 The explicit manifest below is the parity checklist for all 64 non-AI flags,
 plus Headed shots (added 2026-11-22, when headed passes started reaching is_header) and
-14 shot-situation, save and duel qualifiers read from Opta ids the same day.
+14 shot-situation, save and duel qualifiers read from Opta ids the same day, and 8 more
+(disallowed goals, six-yard blocks, standing saves, where saved shots came from, high
+claims, overruns) after a second live check of both feeds.
 It deliberately does not derive expected semantics from the implementation.
 
 Historical behavior combined ANY/ALL within identical action scopes. Intended
@@ -48,6 +50,7 @@ SCOPES = {
     "pass": frozenset({"Pass"}), "shot": SHOTS,
     "goal": frozenset({"Goal"}), "save": frozenset({"Save"}),
     "card": frozenset({"Card"}), "takeon": frozenset({"TakeOn"}),
+    "claim": frozenset({"Claim"}),
     "carry": frozenset({"Carry"}), "global": None,
     "duel": frozenset({"Aerial", "Tackle", "Challenge", "TakeOn", "Dispossessed"}),
 }
@@ -134,6 +137,14 @@ parried_saves_only is_parried save
 caught_saves_only is_caught save
 attacking_duels_only is_attacking_duel duel
 defending_duels_only is_defending_duel duel
+disallowed_goals_only is_goal_disallowed global
+six_yard_blocks_only is_six_yard_block shot
+standing_saves_only is_standing_save save
+saves_in_box_only is_keeper_save_in_box save
+saves_six_yard_only is_keeper_save_six_yard save
+saves_outside_box_only is_keeper_save_outside_box save
+high_claims_only is_high_claim claim
+overruns_only is_overrun takeon
 """.strip().splitlines())
 BOOLEAN_COLUMNS = {column for _, column, _ in CHECKLIST if column.startswith("is_")}
 
@@ -156,10 +167,10 @@ class FilterAcceptance(unittest.TestCase):
         self.assertEqual(removed, len(rows) - len(expected))
         self.assertNotIn("_xt_num", result.columns)
 
-    def test_catalog_matches_all_79_explicit_non_ai_semantics(self):
-        self.assertEqual(len(CHECKLIST), 79)
-        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 79)
-        self.assertEqual(len(FILTER_QUALIFIERS), 79)
+    def test_catalog_matches_all_87_explicit_non_ai_semantics(self):
+        self.assertEqual(len(CHECKLIST), 87)
+        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 87)
+        self.assertEqual(len(FILTER_QUALIFIERS), 87)
         self.assertEqual({flag: column for flag, column, _ in CHECKLIST},
                          {flag: column for flag, column, *_ in FILTER_QUALIFIERS})
 
