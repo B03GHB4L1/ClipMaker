@@ -434,6 +434,7 @@ FILTER_QUALIFIERS = [
     ("deep_completion_only", "is_deep_completion", "Deep completions", "Passing", None),
     ("final_third_entry_pass_only", "is_final_third_entry_pass", "Final-third entry passes", "Passing", None),
     ("big_chances_only", "is_big_chance_shot", "Big chances", "Shots", None),
+    ("headed_shots_only", "is_header", "Headed shots", "Shots", None),
     ("own_goals_only", "is_own_goal", "Own goals", "Shots", None),
     ("penalties_only", "is_penalty", "Penalties", "Shots", None),
     ("volleys_only", "is_volley", "Volleys", "Shots", None),
@@ -1396,8 +1397,13 @@ def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
 
     qualifiers = []
     qualifier_rows: dict[str, list[int]] = {}
+    from clipmaker_core import SCOPED_QUALIFIERS
+
+    scopes = {flag: types for flag, _column, _label, types in SCOPED_QUALIFIERS}
     for flag, column, label, group, expected in FILTER_QUALIFIERS:
         mask = qualifier_mask(frame, column, expected)
+        if flag in scopes and "type" in frame.columns:
+            mask &= frame["type"].astype(str).isin(scopes[flag])  # count what the filter keeps: Headers are passes
         count = int(mask.sum())
         if count:
             qualifier_rows[flag] = [int(index) for index in mask.to_numpy().nonzero()[0]]

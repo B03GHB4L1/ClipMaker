@@ -61,6 +61,7 @@
   "qualifiers": {
     "1": "is_long_ball",
     "2": "is_cross",
+    "3": "is_header",
     "4": "is_through_ball",
     "5": "is_freekick",
     "6": "is_corner",

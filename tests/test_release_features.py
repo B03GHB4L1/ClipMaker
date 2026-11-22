@@ -3,7 +3,8 @@
 Baseline reviewed: older versions/{Windows,Linux,Mac}/clipmaker_core.py, all
 SHA256 11b6ade0fba4cdeef086bb09a4be9de1918dc93db14f9792a7537bb76facafc0,
 and the historical filtering page's PASS_TYPE_MAP and qualifier-logic help.
-The explicit manifest below is the parity checklist for all 64 non-AI flags.
+The explicit manifest below is the parity checklist for all 64 non-AI flags,
+plus Headed shots (added 2026-11-22, when headed passes started reaching is_header).
 It deliberately does not derive expected semantics from the implementation.
 
 Historical behavior combined ANY/ALL within identical action scopes. Intended
@@ -80,6 +81,7 @@ box_entry_pass_only is_box_entry_pass pass
 deep_completion_only is_deep_completion pass
 final_third_entry_pass_only is_final_third_entry_pass pass
 big_chances_only is_big_chance_shot shot
+headed_shots_only is_header shot
 own_goals_only is_own_goal goal
 penalties_only is_penalty shot
 volleys_only is_volley shot
@@ -138,10 +140,10 @@ class FilterAcceptance(unittest.TestCase):
         self.assertEqual(removed, len(rows) - len(expected))
         self.assertNotIn("_xt_num", result.columns)
 
-    def test_catalog_matches_all_64_explicit_non_ai_semantics(self):
-        self.assertEqual(len(CHECKLIST), 64)
-        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 64)
-        self.assertEqual(len(FILTER_QUALIFIERS), 64)
+    def test_catalog_matches_all_65_explicit_non_ai_semantics(self):
+        self.assertEqual(len(CHECKLIST), 65)
+        self.assertEqual(len({flag for flag, _, _ in CHECKLIST}), 65)
+        self.assertEqual(len(FILTER_QUALIFIERS), 65)
         self.assertEqual({flag: column for flag, column, _ in CHECKLIST},
                          {flag: column for flag, column, *_ in FILTER_QUALIFIERS})
 
@@ -153,7 +155,8 @@ class FilterAcceptance(unittest.TestCase):
                      "markers": {"1H": "00:00:00", "2H": "00:00:00"}}
             for flag, column, kind in CHECKLIST:
                 with self.subTest(flag=flag):
-                    row = event("match")
+                    # Counts follow the filter's scopes, so the row is an event the flag applies to.
+                    row = event("match", sorted(SCOPES.get(kind) or {"Pass"})[0])
                     if kind == "outcome_failure":
                         row[column] = "Unsuccessful"
                     elif kind == "progressive":

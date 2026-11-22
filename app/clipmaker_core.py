@@ -81,6 +81,7 @@ INTENT_FLAG_TO_BOOL_COL = {
     "success_in_box_only":          "is_success_in_box",
     # Shot context
     "big_chances_only":             "is_big_chance_shot",
+    "headed_shots_only":            "is_header",
     "big_chances_created_only":     "is_big_chance",
     "fast_break_only":              "is_fast_break",
     "scrambles_only":               "is_scramble",
@@ -101,6 +102,59 @@ INTENT_FLAG_TO_BOOL_COL = {
     "errors_to_shot_only":          "is_error_led_to_shot",
     "errors_to_goal_only":          "is_error_led_to_goal",
 }
+
+
+# Qualifiers that only apply to some event types (Headers to passes, Headed shots
+# to shots): the clip filter narrows those types only, and Filter's counts use the
+# same scopes (packaging/clipmaker_api_server.qualifier_mask).
+SHOT_TYPES = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
+SCOPED_QUALIFIERS = [
+    ("key_passes_only",              "is_key_pass",                "Key passes",              {"Pass"}),
+    ("crosses_only",                 "is_cross",                   "Crosses",                 {"Pass"}),
+    ("long_balls_only",              "is_long_ball",               "Long balls",              {"Pass"}),
+    ("switches_only",                "is_switch_of_play",          "Switches of play",        {"Pass"}),
+    ("diagonals_only",               "is_diagonal_long_ball",      "Diagonals",               {"Pass"}),
+    ("through_balls_only",           "is_through_ball",            "Through balls",           {"Pass"}),
+    ("corners_only",                 "is_corner",                  "Corners",                 {"Pass"}),
+    ("freekicks_only",               "is_freekick",                "Freekicks",               {"Pass"}),
+    ("headers_only",                 "is_header",                  "Headers",                 {"Pass"}),
+    ("big_chances_created_only",     "is_big_chance",              "Big chances created",     {"Pass"}),
+    ("assist_throughball_only",      "is_assist_throughball",      "Assist (through ball)",   {"Pass"}),
+    ("assist_cross_only",            "is_assist_cross",            "Assist (cross)",          {"Pass"}),
+    ("assist_corner_only",           "is_assist_corner",           "Assist (corner)",         {"Pass"}),
+    ("assist_freekick_only",         "is_assist_freekick",         "Assist (free kick)",      {"Pass"}),
+    ("intentional_assists_only",     "is_intentional_assist",      "Intentional assists",     {"Pass"}),
+    ("box_entry_pass_only",          "is_box_entry_pass",          "Box entry (pass)",        {"Pass"}),
+    ("deep_completion_only",         "is_deep_completion",         "Deep completion",         {"Pass"}),
+    ("final_third_entry_pass_only",  "is_final_third_entry_pass",  "Final third entry (pass)", {"Pass"}),
+    ("throw_ins_only",               "is_throw_in",                "Throw ins",               {"Pass"}),
+    ("goal_kicks_only",              "is_goal_kick",               "Goal kicks",              {"Pass"}),
+    ("keeper_throws_only",           "is_keeper_throw",            "Keeper throws",           {"Pass"}),
+    ("gk_hoofs_only",                "is_gk_hoof",                 "GK hoofs",                {"Pass"}),
+    ("pull_backs_only",              "is_pull_back",               "Pull backs",              {"Pass"}),
+    ("lay_offs_only",                "is_lay_off",                 "Lay offs",                {"Pass"}),
+    ("flick_ons_only",               "is_flick_on",                "Flick ons",               {"Pass"}),
+    ("launches_only",                "is_launch",                  "Launches",                {"Pass"}),
+    ("assists_only",                 "is_assist",                  "Assists",                 {"Pass"}),
+    ("attacking_passes_only",        "is_attacking_pass",          "Attacking passes",        {"Pass"}),
+    ("big_chances_only",             "is_big_chance_shot",         "Big chances",             SHOT_TYPES),
+    ("headed_shots_only",            "is_header",                  "Headed shots",            SHOT_TYPES),
+    ("own_goals_only",               "is_own_goal",                "Own goal",                {"Goal"}),
+    ("penalties_only",               "is_penalty",                 "Penalties",               SHOT_TYPES),
+    ("volleys_only",                 "is_volley",                  "Volleys",                 SHOT_TYPES),
+    ("chipped_only",                 "is_chipped",                 "Chipped shots",           SHOT_TYPES),
+    ("direct_from_corner_only",      "is_direct_from_corner",      "Direct from corner",      SHOT_TYPES),
+    ("left_foot_only",               "is_left_foot",               "Left foot",               SHOT_TYPES),
+    ("right_foot_only",              "is_right_foot",              "Right foot",              SHOT_TYPES),
+    ("gk_saves_only",                "is_gk_save",                 "GK save",                 {"Save"}),
+    ("yellow_cards_only",            "is_yellow_card",             "Yellow card",             {"Card"}),
+    ("red_cards_only",               "is_red_card",                "Red card",                {"Card"}),
+    ("second_yellow_only",           "is_second_yellow",           "Second yellow",           {"Card"}),
+    ("nutmegs_only",                 "is_nutmeg",                  "Nutmeg",                  {"TakeOn"}),
+    ("success_in_box_only",          "is_success_in_box",          "Success in box",          {"TakeOn"}),
+    ("box_entry_carry_only",         "is_box_entry_carry",         "Box entry (carry)",       {"Carry"}),
+    ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final third entry (carry)", {"Carry"}),
+]
 
 
 def load_football_glossary():
@@ -650,53 +704,8 @@ def apply_filters(df, config, log=None):
             log(f"  [WARN] Qualifier '{label or col}' matched 0/{before} events — column has no True values in filtered data")
         return result
 
-    shot_types = {"SavedShot", "MissedShot", "MissedShots", "Goal", "ShotOnPost", "BlockedShot", "AttemptSaved", "Attempt"}
-    scoped_qualifiers = [
-        ("key_passes_only",              "is_key_pass",                "Key passes",              {"Pass"}),
-        ("crosses_only",                 "is_cross",                   "Crosses",                 {"Pass"}),
-        ("long_balls_only",              "is_long_ball",               "Long balls",              {"Pass"}),
-        ("switches_only",                "is_switch_of_play",          "Switches of play",        {"Pass"}),
-        ("diagonals_only",               "is_diagonal_long_ball",      "Diagonals",               {"Pass"}),
-        ("through_balls_only",           "is_through_ball",            "Through balls",           {"Pass"}),
-        ("corners_only",                 "is_corner",                  "Corners",                 {"Pass"}),
-        ("freekicks_only",               "is_freekick",                "Freekicks",               {"Pass"}),
-        ("headers_only",                 "is_header",                  "Headers",                 {"Pass"}),
-        ("big_chances_created_only",     "is_big_chance",              "Big chances created",     {"Pass"}),
-        ("assist_throughball_only",      "is_assist_throughball",      "Assist (through ball)",   {"Pass"}),
-        ("assist_cross_only",            "is_assist_cross",            "Assist (cross)",          {"Pass"}),
-        ("assist_corner_only",           "is_assist_corner",           "Assist (corner)",         {"Pass"}),
-        ("assist_freekick_only",         "is_assist_freekick",         "Assist (free kick)",      {"Pass"}),
-        ("intentional_assists_only",     "is_intentional_assist",      "Intentional assists",     {"Pass"}),
-        ("box_entry_pass_only",          "is_box_entry_pass",          "Box entry (pass)",        {"Pass"}),
-        ("deep_completion_only",         "is_deep_completion",         "Deep completion",         {"Pass"}),
-        ("final_third_entry_pass_only",  "is_final_third_entry_pass",  "Final third entry (pass)", {"Pass"}),
-        ("throw_ins_only",               "is_throw_in",                "Throw ins",               {"Pass"}),
-        ("goal_kicks_only",              "is_goal_kick",               "Goal kicks",              {"Pass"}),
-        ("keeper_throws_only",           "is_keeper_throw",            "Keeper throws",           {"Pass"}),
-        ("gk_hoofs_only",                "is_gk_hoof",                 "GK hoofs",                {"Pass"}),
-        ("pull_backs_only",              "is_pull_back",               "Pull backs",              {"Pass"}),
-        ("lay_offs_only",                "is_lay_off",                 "Lay offs",                {"Pass"}),
-        ("flick_ons_only",               "is_flick_on",                "Flick ons",               {"Pass"}),
-        ("launches_only",                "is_launch",                  "Launches",                {"Pass"}),
-        ("assists_only",                 "is_assist",                  "Assists",                 {"Pass"}),
-        ("attacking_passes_only",        "is_attacking_pass",          "Attacking passes",        {"Pass"}),
-        ("big_chances_only",             "is_big_chance_shot",         "Big chances",             shot_types),
-        ("own_goals_only",               "is_own_goal",                "Own goal",                {"Goal"}),
-        ("penalties_only",               "is_penalty",                 "Penalties",               shot_types),
-        ("volleys_only",                 "is_volley",                  "Volleys",                 shot_types),
-        ("chipped_only",                 "is_chipped",                 "Chipped shots",           shot_types),
-        ("direct_from_corner_only",      "is_direct_from_corner",      "Direct from corner",      shot_types),
-        ("left_foot_only",               "is_left_foot",               "Left foot",               shot_types),
-        ("right_foot_only",              "is_right_foot",              "Right foot",              shot_types),
-        ("gk_saves_only",                "is_gk_save",                 "GK save",                 {"Save"}),
-        ("yellow_cards_only",            "is_yellow_card",             "Yellow card",             {"Card"}),
-        ("red_cards_only",               "is_red_card",                "Red card",                {"Card"}),
-        ("second_yellow_only",           "is_second_yellow",           "Second yellow",           {"Card"}),
-        ("nutmegs_only",                 "is_nutmeg",                  "Nutmeg",                  {"TakeOn"}),
-        ("success_in_box_only",          "is_success_in_box",          "Success in box",          {"TakeOn"}),
-        ("box_entry_carry_only",         "is_box_entry_carry",         "Box entry (carry)",       {"Carry"}),
-        ("final_third_entry_carry_only", "is_final_third_entry_carry", "Final third entry (carry)", {"Carry"}),
-    ]
+    shot_types = SHOT_TYPES
+    scoped_qualifiers = SCOPED_QUALIFIERS
     scoped_flag_names = {flag for flag, _col, _label, _scope in scoped_qualifiers}
     active_scoped = [
         (flag, col, label, set(scope_types))
@@ -759,6 +768,7 @@ def apply_filters(df, config, log=None):
             ("freekicks_only",           "is_freekick",             "Freekicks"),
             ("headers_only",             "is_header",               "Headers"),
             ("big_chances_only",         "is_big_chance_shot",      "Big chances"),
+            ("headed_shots_only",        "is_header",               "Headed shots"),
             ("big_chances_created_only", "is_big_chance",           "Big chances created"),
             ("own_goals_only",           "is_own_goal",             "Own goal"),
             ("gk_saves_only",            "is_gk_save",              "GK save"),
@@ -945,7 +955,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             active_filters.append(f"types={config['filter_types']}")
         for flag in ["key_passes_only", "crosses_only", "through_balls_only",
                       "corners_only", "freekicks_only", "headers_only",
-                      "big_chances_only", "long_balls_only", "own_goals_only",
+                      "big_chances_only", "headed_shots_only", "long_balls_only", "own_goals_only",
                       "successful_only", "unsuccessful_only", "progressive_only",
                       "penalties_only", "volleys_only", "chipped_only",
                       "direct_from_corner_only", "left_foot_only", "right_foot_only",
