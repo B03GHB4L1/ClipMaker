@@ -343,8 +343,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn("5 minutes", self.refused(f"/api/projects/{self.project}/live/clip", {"start": 0, "end": 900}))
         self.assertIn("start, end and name", self.refused(f"/api/projects/{self.project}/live/clip", {"start": 0, "end": 1, "path": "x"}))
         push(port, 3)
-        live = self.request(f"/api/projects/{self.project}/live")["live"]
-        self.assertGreaterEqual(live["recorded_seconds"], 5)
+        # The last segment is written as the recorder's FFmpeg ends the part, a moment after the push.
+        def recorded():
+            status = self.request(f"/api/projects/{self.project}/live")["live"]
+            return status if status["recorded_seconds"] >= 5 else None
+        live = wait_for(recorded)
+        self.assertIsNotNone(live, "the second connection was not recorded")
         first = live["new_segments"][0]
         with urlopen(f"{self.url}/api/live/{self.project}/{first['part']}/init.mp4") as response:
             self.assertIn(b"ftyp", response.read(64))
