@@ -2312,6 +2312,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/live/capabilities":
             self.send_json(HTTPStatus.OK, self.live.capabilities())
             return
+        if path == "/api/live/devices":
+            self.send_json(HTTPStatus.OK, self.live.list_devices())
+            return
         if path.startswith("/api/live/"):
             self.send_live_file(path)
             return

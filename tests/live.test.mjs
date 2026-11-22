@@ -37,6 +37,11 @@ test("says what the recording is doing", () => {
   assert.match(liveSummary({ ...base, state: "waiting" }), /send to rtmp:\/\/127\.0\.0\.1:1935\/live \(any stream key\)/);
   assert.match(liveSummary({ ...base, state: "reconnecting" }), /dropped at 12:34/);
   assert.equal(liveSummary({ state: "failed", error: "Could not connect." }), "Could not connect.");
+  // A camera or the screen (L3) is opened, not connected to, and stops rather than drops.
+  assert.equal(liveSummary({ ...base, state: "connecting", kind: "device" }), "Opening the camera...");
+  assert.equal(liveSummary({ ...base, state: "connecting", kind: "screen" }), "Opening the screen...");
+  assert.match(liveSummary({ ...base, state: "reconnecting", kind: "device" }), /^The camera stopped at 12:34; recording resumes/);
+  assert.match(liveSummary({ ...base, state: "connecting", kind: "url", source: "rtmp://club" }), /^Connecting to rtmp:\/\/club/);
 });
 
 test("disk space reads in GB or MB", () => {

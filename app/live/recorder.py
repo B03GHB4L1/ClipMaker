@@ -10,6 +10,7 @@ Sources (each checked against what this copy of FFmpeg can read; a missing proto
 reported, never skipped):
   - a stream address the user supplies: rtmp(s)://, srt://, rtsp(s)://, http(s)://
   - a push on this computer only (127.0.0.1): RTMP or SRT, for OBS or a phone app.
+  - a camera, capture card or the screen (L3; see devices.py for each system).
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+from . import devices
+
 SEGMENT_SECONDS = 2
 URL_SCHEMES = {"rtmp", "rtmps", "srt", "rtsp", "rtsps", "http", "https"}
 LISTEN_PORTS = {"rtmp": 1935, "srt": 9000}
@@ -35,6 +38,7 @@ PART = re.compile(r"^part\d{2}$")
 SEGMENT_FILE = re.compile(r"^(init\.mp4|seg_\d{5}\.m4s)$")
 PROJECT_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 META = "recording.json"
+CAPTURE_KINDS = ("device", "screen")
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
@@ -62,11 +66,17 @@ def _needs(scheme: str) -> str:
     return {"rtsp": "tcp", "rtsps": "tls"}.get(scheme, scheme)
 
 
-def check_source(source: Any, available: set[str]) -> dict[str, Any]:
-    """A source the recorder accepts, or ValueError with what to change."""
+def check_source(source: Any, available: set[str], listing: dict[str, Any] | None = None,
+                 ffmpeg: str = "") -> dict[str, Any]:
+    """A source the recorder accepts, or ValueError with what to change. A camera or
+    screen is checked against ``listing`` (devices.list_devices, read just now)."""
     if not isinstance(source, dict):
         raise ValueError("Choose a stream address, or receive a stream on this computer.")
     kind = source.get("kind")
+    if kind in CAPTURE_KINDS:
+        if listing is None:
+            raise ValueError("Look for devices first.")
+        return devices.check(source, listing, ffmpeg)
     if kind == "url":
         url = str(source.get("url") or "").strip()
         if not url or len(url) > 2048 or any(ch.isspace() or ord(ch) < 32 for ch in url):
@@ -107,12 +117,16 @@ def describe(source: dict[str, Any]) -> str:
     """The source without any stream key or password, for the page and the saved notes."""
     if source["kind"] == "listen":
         return f"{source['protocol'].upper()} on this computer, port {source['port']}"
+    if source["kind"] in CAPTURE_KINDS:
+        return devices.describe(source)
     parts = urlsplit(source["url"])
     return f"{parts.scheme}://{parts.hostname}" + (f":{parts.port}" if parts.port else "")
 
 
 def input_args(source: dict[str, Any]) -> list[str]:
     wait = str(15_000_000)  # microseconds without data before a drop counts as one
+    if source["kind"] in CAPTURE_KINDS:
+        return devices.input_args(source)[0]
     if source["kind"] == "listen":
         if source["protocol"] == "rtmp":
             return ["-listen", "1", "-i", f"rtmp://127.0.0.1:{source['port']}/live/vizorplay"]
@@ -128,12 +142,21 @@ def input_args(source: dict[str, Any]) -> list[str]:
     return ["-i", url]
 
 
-def output_args(transcode: bool) -> list[str]:
+def output_args(transcode: bool, source: dict[str, Any] | None = None) -> list[str]:
     """Segments in the part's own folder (FFmpeg runs there). H.264 is kept as it is;
-    anything else is encoded to H.264 so the page can play it while it records."""
-    video = (["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-              "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT_SECONDS})"] if transcode else ["-c:v", "copy"])
-    return ["-map", "0:v:0", "-map", "0:a:0?", *video, "-c:a", "aac", "-b:a", "128k",
+    anything else is encoded to H.264 so the page can play it while it records. A camera
+    or screen is always encoded, tuned to keep up in real time."""
+    capture = bool(source and source["kind"] in CAPTURE_KINDS)
+    audio = devices.input_args(source)[1] if capture else "0:a:0?"
+    if capture:
+        video = [*devices.video_filter(source), "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+                 "-crf", "23", "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT_SECONDS})"]
+    elif transcode:
+        video = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                 "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT_SECONDS})"]
+    else:
+        video = ["-c:v", "copy"]
+    return ["-map", "0:v:0", "-map", audio, *video, "-c:a", "aac", "-b:a", "128k",
             "-f", "hls", "-hls_time", str(SEGMENT_SECONDS), "-hls_list_size", "0", "-hls_segment_type", "fmp4",
             "-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", "seg_%05d.m4s",
             "-hls_flags", "independent_segments+temp_file", "live.m3u8"]
@@ -232,7 +255,7 @@ class Recording:
         # connecting, waiting, recording, reconnecting, stopped, failed
         self.state = "waiting" if source["kind"] == "listen" else "connecting"
         self.error = ""
-        self.transcode = False
+        self.transcode = source["kind"] in CAPTURE_KINDS  # a camera or screen is always encoded
         self.video_codec = ""
         self.gaps: list[dict[str, float]] = []
         self.started = time.time()
@@ -280,7 +303,7 @@ class Recording:
         return {"state": self.state, "error": self.error, "recorded_seconds": round(recorded, 3),
                 "segments": len(found), "gaps": list(self.gaps), "transcode": self.transcode,
                 "video_codec": self.video_codec, "free_bytes": free, "low_disk": free < LOW_DISK,
-                "source": describe(self.source), "push_address": push_address(self.source)}
+                "source": describe(self.source), "push_address": push_address(self.source), "kind": self.source["kind"]}
 
     # -- the loop -----------------------------------------------------------
     def _save_meta(self) -> None:
@@ -316,7 +339,8 @@ class Recording:
                 recorded = self._recorded()
                 if not recorded and not listening and not self.gaps:
                     self.state = "failed"
-                    self.error = _explain(last_lines)
+                    self.error = (_explain_device(last_lines, self.source) if self.source["kind"] in CAPTURE_KINDS
+                                  else _explain(last_lines))
                     break
                 if not recorded and listening and _bind_failed(last_lines):
                     self.state = "failed"
@@ -339,7 +363,7 @@ class Recording:
 
     def _record_part(self, part: Path) -> tuple[str, list[str]]:
         command = [self.ffmpeg, "-hide_banner", "-nostats", "-loglevel", "info",
-                   *input_args(self.source), *output_args(self.transcode)]
+                   *input_args(self.source), *output_args(self.transcode, self.source)]
         with self._lock:  # stop() takes the same lock, so it either sees this FFmpeg or prevents it
             if self._stop.is_set():
                 return "ended", []
@@ -410,6 +434,23 @@ def _explain(lines: list[str]) -> str:
         return "The stream did not answer in time."
     detail = next((line.strip() for line in reversed(lines) if line.strip()), "")
     return f"Could not record that stream. FFmpeg said: {detail[-200:]}" if detail else "Could not record that stream."
+
+
+def _explain_device(lines: list[str], source: dict[str, Any]) -> str:
+    """Why a camera, microphone or screen would not open."""
+    text = " ".join(lines).lower()
+    what = "the screen" if source["kind"] == "screen" else "the camera"
+    if "not authorized" in text or "permission" in text or "not permitted" in text:
+        return (f"VizorPlay is not allowed to use {what}. Allow it in System Settings, Privacy & Security, "
+                "then try again.")
+    if "busy" in text or "could not run graph" in text or "i/o error" in text or "already in use" in text:
+        return f"Could not open {what}. Close any other app using it, or plug it in again, then try again."
+    if "cannot open display" in text or "can't open display" in text:
+        return "Could not open the X11 display to record the screen."
+    if "framerate" in text and "not supported" in text:
+        return "The camera does not offer 30 frames per second. Try another camera or capture card."
+    detail = next((line.strip() for line in reversed(lines) if line.strip()), "")
+    return f"Could not record from {what}. FFmpeg said: {detail[-200:]}" if detail else f"Could not record from {what}."
 
 
 def _bind_failed(lines: list[str]) -> bool:
@@ -541,7 +582,9 @@ class LiveRecordings:
 
     def _warm(self) -> None:
         try:
-            protocols(self.find_ffmpeg())
+            ffmpeg = self.find_ffmpeg()
+            protocols(ffmpeg)
+            devices.input_formats(ffmpeg)
         except Exception:  # noqa: BLE001 - the page asks again and reports the error
             pass
 
@@ -554,11 +597,16 @@ class LiveRecordings:
         available = protocols(self.find_ffmpeg())
         return {"url": sorted(scheme for scheme in URL_SCHEMES if _needs(scheme) in available),
                 "listen": [name for name in LISTEN_PORTS if name in available], "ports": LISTEN_PORTS,
-                "segment_seconds": SEGMENT_SECONDS}
+                "segment_seconds": SEGMENT_SECONDS, "system": devices.system()}
+
+    def list_devices(self) -> dict[str, Any]:
+        """Cameras, microphones and screens on this computer, read now (names only)."""
+        return devices.public(devices.list_devices(self.find_ffmpeg()))
 
     def start(self, project_id: str, source: Any) -> dict[str, Any]:
         ffmpeg = self.find_ffmpeg()
-        checked = check_source(source, protocols(ffmpeg))
+        capture = isinstance(source, dict) and source.get("kind") in CAPTURE_KINDS
+        checked = check_source(source, protocols(ffmpeg), devices.list_devices(ffmpeg) if capture else None, ffmpeg)
         folder = self.folder(project_id)
         with self._lock:
             busy = next((key for key, item in self.recordings.items() if item.active), None)

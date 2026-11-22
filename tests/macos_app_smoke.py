@@ -75,6 +75,9 @@ def bundle_checks(app: Path) -> dict:
     executable = app / "Contents" / "MacOS" / info["CFBundleExecutable"]
     assert os.access(executable, os.X_OK), f"App executable missing: {executable}"
     assert info.get("CFBundleIdentifier") == "com.b4l1.clipmaker", info.get("CFBundleIdentifier")
+    # Live recording from a camera or microphone (L3): without these macOS refuses the access.
+    for key in ("NSCameraUsageDescription", "NSMicrophoneUsageDescription"):
+        assert info.get(key), f"Info.plist is missing {key} (src-tauri/Info.plist)"
     signature = subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", str(app)],
                                capture_output=True, text=True, timeout=60)
     assert signature.returncode == 0, f"App signature does not verify: {signature.stderr}"

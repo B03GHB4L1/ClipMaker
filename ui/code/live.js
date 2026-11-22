@@ -44,11 +44,14 @@ export const liveSummary = (live) => {
   const free = live.free_bytes ? ` · ${formatBytes(live.free_bytes)} free` : "";
   const gaps = (live.gaps || []).filter((gap) => gap.length != null);
   const breaks = gaps.length ? ` · ${gaps.length} ${gaps.length === 1 ? "break" : "breaks"} in the stream` : "";
+  const device = { device: "camera", screen: "screen recording" }[live.kind];
   switch (live.state) {
-    case "connecting": return `Connecting to ${live.source}...`;
+    case "connecting": return device ? `Opening the ${live.kind === "screen" ? "screen" : "camera"}...` : `Connecting to ${live.source}...`;
     case "waiting": return `Waiting for a stream. In OBS or your phone app, send to ${live.push_address} (any stream key).`;
     case "recording": return `Recording ${recorded}${breaks}${free}`;
-    case "reconnecting": return `The stream dropped at ${recorded}; recording resumes when it comes back${free}`;
+    case "reconnecting": return device
+      ? `The ${device} stopped at ${recorded}; recording resumes when it comes back${free}`
+      : `The stream dropped at ${recorded}; recording resumes when it comes back${free}`;
     case "joining": return `Saving the recording (${recorded})...`;
     default: return live.error || "";
   }

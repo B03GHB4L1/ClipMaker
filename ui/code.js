@@ -1128,20 +1128,71 @@ const showLiveForm = async () => {
   }
 };
 
-liveForm.addEventListener("change", () => {
-  const kind = liveForm.querySelector('input[name="live-kind"]:checked').value;
+// Cameras, capture cards and the screen (L3): listed when chosen, and again on "Look again",
+// since a device can be plugged in after the page opened.
+let liveDevices = null;
+const liveKind = () => liveForm.querySelector('input[name="live-kind"]:checked').value;
+const showDeviceRows = () => {
+  const kind = liveKind();
+  const capture = kind === "device" || kind === "screen";
+  $("[data-live-devices-row]").hidden = !capture || !liveDevices;
+  $("[data-live-camera-row]").hidden = kind !== "device";
+  $("[data-live-screen-row]").hidden = kind !== "screen";
+  const note = $("[data-live-device-note]");
+  const problem = !capture || !liveDevices ? "" : kind === "device" ? liveDevices.device_problem : liveDevices.screen_problem;
+  const empty = capture && liveDevices && !(kind === "device" ? liveDevices.video : liveDevices.screens).length;
+  note.textContent = problem;
+  note.hidden = !problem;
+  liveForm.querySelector("button[type=submit]").disabled = Boolean(empty);
+};
+const fill = (select, names, none) => {
+  const keep = select.value;
+  select.replaceChildren(...(none ? [new Option(none, "")] : []), ...names.map((name) => new Option(name, name)));
+  if ([...select.options].some((option) => option.value === keep)) select.value = keep;
+};
+const loadDevices = async () => {
+  const note = $("[data-live-device-note]");
+  const rescan = $("[data-live-rescan]");
+  note.textContent = "Looking for cameras, microphones and screens...";
+  note.hidden = false;
+  rescan.disabled = true;
+  try {
+    liveDevices = await projectRequest("/api/live/devices");
+    fill($("[data-live-camera]"), liveDevices.video);
+    fill($("[data-live-screen]"), liveDevices.screens);
+    fill($("[data-live-audio]"), liveDevices.audio, "No sound");
+  } catch (error) {
+    liveDevices = null;
+    note.textContent = error.message;
+    return;
+  } finally {
+    rescan.disabled = false;
+  }
+  showDeviceRows();
+};
+$("[data-live-rescan]").onclick = loadDevices;
+
+liveForm.addEventListener("change", (event) => {
+  if (event.target.name !== "live-kind") return;
+  const kind = liveKind();
   $("[data-live-url-row]").hidden = kind !== "url";
   $("[data-live-listen-row]").hidden = kind !== "listen";
+  if ((kind === "device" || kind === "screen") && !liveDevices) loadDevices();
+  else showDeviceRows();
 });
 
 liveForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formError = $("[data-live-form-error]");
   formError.hidden = true;
-  const kind = liveForm.querySelector('input[name="live-kind"]:checked').value;
-  const source = kind === "url"
-    ? { kind, url: $("[data-live-url]").value.trim() }
-    : { kind, protocol: $("[data-live-protocol]").value, port: Number($("[data-live-port]").value) };
+  const kind = liveKind();
+  const sources = {
+    url: () => ({ kind, url: $("[data-live-url]").value.trim() }),
+    listen: () => ({ kind, protocol: $("[data-live-protocol]").value, port: Number($("[data-live-port]").value) }),
+    device: () => ({ kind, video: $("[data-live-camera]").value, audio: $("[data-live-audio]").value }),
+    screen: () => ({ kind, screen: $("[data-live-screen]").value, audio: $("[data-live-audio]").value }),
+  };
+  const source = sources[kind]();
   const button = liveForm.querySelector("button[type=submit]");
   button.disabled = true;
   try {

@@ -233,7 +233,27 @@ adapter and checked on all three systems in a spike:
     stream ends where the break starts. Reels (a whole half) stay on Filter once
     the recording is saved.
   - The video stage stays black in the dark theme (it showed grey before a video loaded).
-- **L3** Capture devices and screen capture per OS.
+- **L3** Capture devices and screen capture per OS. *Done 2026-11-22.*
+  - `app/live/devices.py` is the platform adapter. Windows: DirectShow for cameras,
+    capture cards and microphones, GDI for the whole desktop. macOS: AVFoundation for
+    all three (each screen is listed). Linux: Video4Linux2 cameras, the default
+    PulseAudio or ALSA microphone, X11 for the screen; a Wayland session is told it
+    cannot record the screen. Whatever this FFmpeg lacks is stated on the form.
+  - The page sees device names only. A recording names one, and the name is looked up
+    again in a fresh listing when it starts, so nothing else reaches FFmpeg.
+  - On Windows the camera's largest mode up to 1080p that keeps 25 frames a second is
+    chosen (the test laptop's camera defaults to 640x360 but gives MJPEG 1280x720 at 30;
+    its raw 720p only manages 8). Cameras and screens are always encoded to H.264
+    (veryfast, zerolatency); screens are scaled to 1920 wide at most.
+  - Code screen: "A camera or capture card" and "This computer's screen" on the record
+    form, with Camera or Screen, Sound (or no sound) and "Look again".
+  - macOS: `src-tauri/Info.plist` adds the camera and microphone usage strings, which
+    macOS needs before it shows its permission prompt; the Mac app check asserts them.
+    Screen recording is allowed under Privacy & Security, Screen Recording.
+  - Checked on Windows 11 (the laptop camera with its microphone, and the desktop):
+    record, play behind the live edge, stop and save. CI records the screen on Windows
+    and Linux. Not checked by hand: macOS and Linux devices, a capture card, a
+    30-minute run on each system.
 
 ---
 

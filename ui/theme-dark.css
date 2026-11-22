@@ -2721,6 +2721,11 @@
   background: var(--code-panel);
   color: var(--cm-ink);
 }
+:root[data-theme="dark"] .code-empty .code-live-form .code-live-devices button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}
 :root[data-theme="dark"] .code-live-bar {
   border: 1px solid var(--cm-rule);
   background: var(--code-panel);
