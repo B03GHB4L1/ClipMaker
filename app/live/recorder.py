@@ -229,7 +229,8 @@ class Recording:
         self.ffmpeg = ffmpeg
         self.folder = folder
         self.source = source
-        self.state = "connecting"   # connecting, waiting, recording, reconnecting, stopped, failed
+        # connecting, waiting, recording, reconnecting, stopped, failed
+        self.state = "waiting" if source["kind"] == "listen" else "connecting"
         self.error = ""
         self.transcode = False
         self.video_codec = ""
