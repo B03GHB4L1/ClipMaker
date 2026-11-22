@@ -147,6 +147,9 @@ def clean_client_project(body: dict[str, Any], existing: dict[str, Any] | None) 
         raise ValueError("Event data is set by scraping a match or importing a CSV.")
     if "source" in body and str(body.get("source") or "") != str(existing.get("source") or ""):
         raise ValueError("Event data is set by scraping, importing or coding a match.")
+    for key in ("feed_csv_path", "feed_source"):
+        if key in body and str(body.get(key) or "") != str(existing.get(key) or ""):
+            raise ValueError("Event data is set by scraping, importing or coding a match.")
 
     def video(value: Any, previous: Any) -> str:
         text = str(value or "").strip()
@@ -338,6 +341,10 @@ class MatchStore:
             "video_name": str(match.get("video_name") or "").strip(),
             "video_path": str(match.get("video_path") or "").strip(),
             "csv_path": str(match.get("csv_path") or "").strip(),
+            # Source "both" (C4): csv_path is the feed's table with coded rows merged in;
+            # these keep the feed itself, which the Analyst Room and Tactical Lab read.
+            "feed_csv_path": str(match.get("feed_csv_path") or "").strip(),
+            "feed_source": str(match.get("feed_source") or "").strip(),
             "markers": match.get("markers") if isinstance(match.get("markers"), dict) else {},
             "status": str(match.get("status") or "in_progress"),
             "schema_version": 1,
@@ -1040,21 +1047,61 @@ def coded_rows(project: dict[str, Any], document: dict[str, Any]):
                           str(project.get("home_team") or ""), str(project.get("away_team") or ""))
 
 
-def write_coded_table(store: Any, project: dict[str, Any], document: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Write the event table of a project whose events are coded, and point the project at it.
-
-    A project with scraped or imported events keeps them: merging codes into
-    them is milestone C4, so its codes are saved but its table is left alone."""
-    from coding import store as coding_store, to_events
+def feed_of(project: dict[str, Any]) -> tuple[str, str]:
+    """(table, source) of the project's scraped or imported events, or ("", "") when it has none."""
+    source = str(project.get("source") or "")
+    if source == "both":
+        return str(project.get("feed_csv_path") or ""), str(project.get("feed_source") or "csv")
     current = str(project.get("csv_path") or "")
-    if current and project.get("source") != "coded":
-        return project
+    if current and source != "coded":
+        return current, source
+    return "", ""
+
+
+def write_coded_table(store: Any, project: dict[str, Any], document: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Write the event table of a project with coded events, and point the project at it.
+
+    Without a feed the table is the coded rows alone (source "coded"). With a
+    scraped or imported table the coded rows are merged into a copy of it
+    (source "both", milestone C4); the feed itself is never changed, and a
+    project whose codes are all deleted goes back to it."""
+    from coding import store as coding_store, to_events
     folder = store.project_path(project["id"]).parent
     if document is None:
         document = coding_store.read(folder)
+    feed, feed_source = feed_of(project)
     table, _ = coded_rows(project, document)
-    path = to_events.write_csv(folder / "match-data" / "coded_events.csv", table)
-    return store.upsert({"id": project["id"], "csv_path": str(path), "source": "coded", "event_count": len(table)})
+    if not feed:
+        path = to_events.write_csv(folder / "match-data" / "coded_events.csv", table)
+        return store.upsert({"id": project["id"], "csv_path": str(path), "source": "coded", "event_count": len(table)})
+    if not Path(feed).is_file():
+        return project  # the feed moved: keep what the project points at rather than lose it
+    if not document.get("events"):
+        if project.get("source") != "both":
+            return project
+        import pandas as pd
+        count = len(pd.read_csv(feed, low_memory=False))
+        return store.upsert({"id": project["id"], "csv_path": feed, "source": feed_source, "event_count": count,
+                             "feed_csv_path": "", "feed_source": ""})
+    count = to_events.write_merged(Path(feed), table, folder / "match-data" / "merged_events.csv")
+    return store.upsert({"id": project["id"], "csv_path": str(folder / "match-data" / "merged_events.csv"),
+                         "source": "both", "event_count": count, "feed_csv_path": feed, "feed_source": feed_source})
+
+
+def has_codes(store: Any, project_id: str) -> bool:
+    from coding import store as coding_store
+    try:
+        return bool(coding_store.read(store.project_path(project_id).parent)["events"])
+    except (ValueError, OSError):
+        return False
+
+
+def analysis_view(project: dict[str, Any]) -> dict[str, Any]:
+    """The project as the Analyst Room and Tactical Lab see it: a "both" project's feed only,
+    so a coded Goal on top of the feed's own is not counted twice."""
+    if project.get("source") == "both" and project.get("feed_csv_path"):
+        return {**project, "csv_path": project["feed_csv_path"]}
+    return project
 
 
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
@@ -1282,6 +1329,8 @@ def repair_saved_score(store: Any, project: dict[str, Any], csv_path: str) -> di
     import pandas as pd
 
     frame = pd.read_csv(csv_path, low_memory=False)
+    if project.get("source") == "both" and "source" in frame.columns:
+        frame = frame[frame["source"].astype(str) != "coded"]  # the score is the feed's
     home_score, away_score = infer_score(frame, str(project.get("home_team") or ""), str(project.get("away_team") or ""))
     if (home_score, away_score) != (project.get("home_score"), project.get("away_score")):
         store.upsert({"id": project["id"], "home_score": home_score, "away_score": away_score})
@@ -1370,6 +1419,9 @@ def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
         "events": event_index(frame, action_types, team_players, qualifier_rows),
         "has_xt": "xT" in frame.columns,
         "event_count": len(frame),
+        # Coded events without a clicked pitch location: lane and depth filters leave them out.
+        "unlocated": int(((frame["source"].astype(str) == "coded") & pd.to_numeric(frame["x"], errors="coerce").isna()).sum())
+        if {"source", "x"} <= set(frame.columns) else 0,
     }
 
 
@@ -1630,7 +1682,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         """Tactical Lab tabs run the classic tab code against a recorder."""
         import shutil
         from analysis_core import tactical
-        projects = self.store.list()
+        projects = [analysis_view(item) for item in self.store.list()]
         if is_clip:
             action = str(body.get("action") or "")
             source, name = tactical.clip(tab, controls, project, projects, action)
@@ -1705,6 +1757,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         project = self.store.get(project_id)
         if not project:
             raise ValueError("Project not found")
+        project = analysis_view(project)
         if not project.get("csv_path") or not Path(project["csv_path"]).is_file():
             raise ValueError("Scrape or import a match before opening an analytical workspace.")
         return project
@@ -1764,7 +1817,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 project = self.store.upsert({"id": project_id, "csv_path": str(destination),
                     "home_team": home, "away_team": away, "home_score": home_score,
                     "away_score": away_score, "event_count": len(frame), "source": "csv", "status": "in_progress"})
-                self.send_json(HTTPStatus.OK, {"match": {**project, **load_event_rows(str(destination))}})
+                if has_codes(self.store, project_id):
+                    project = write_coded_table(self.store, project)
+                self.send_json(HTTPStatus.OK, {"match": {**project, **load_event_rows(str(project["csv_path"]))}})
             else:
                 token = uuid.uuid4().hex
                 self.media_files[token] = destination
@@ -2314,8 +2369,8 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if self.store.get(project_id) is None:
                     raise ValueError("Project not found")
                 saved = self.store.upsert({**clean_client_project(body, self.store.get(project_id)), "id": project_id})
-                if saved.get("source") == "coded" and set(body) & {"markers", "video_path", "period_videos",
-                                                                    "home_team", "away_team"}:
+                if saved.get("source") in ("coded", "both") and set(body) & {"markers", "video_path", "period_videos",
+                                                                              "home_team", "away_team"}:
                     # Coded events are kept in video time: re-time their table to the new kick-offs.
                     saved = write_coded_table(self.store, saved)
                 self.send_json(HTTPStatus.OK, {"project": saved})
@@ -2336,8 +2391,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     current = self.store.get(project_id)
                     if current.get("project_name") == "Untitled project":
                         scraped["project_name"] = f"{scraped['home_team']} vs {scraped['away_team']}"
-                    scraped = {**self.store.upsert({**scraped, "id": project_id, "status": "in_progress",
-                                                   "preview_windows": [], "preview_range": {}}), "events": events}
+                    saved = self.store.upsert({**scraped, "id": project_id, "status": "in_progress",
+                                               "preview_windows": [], "preview_range": {}})
+                    if has_codes(self.store, project_id):
+                        saved = write_coded_table(self.store, saved)  # a new feed: merge the codes into it again
+                    scraped = {**saved, "events": events}
                 self.send_json(HTTPStatus.OK, {"match": scraped})
                 return
             if path == "/api/files/video":

@@ -31,8 +31,26 @@ KEY_PERIOD = {key: number for number, key, _, _ in PERIODS}
 
 # The scraped table's core columns first, then what only coded rows carry.
 COLUMNS = ["minute", "second", "type", "outcomeType", "period", "playerName", "team", "x", "y", "endX", "endY",
-           "homeTeam", "awayTeam", "matchName", "source", "code", "coded_id", "video_time", "video_end",
+           "depth_zone", "pitch_zone", "homeTeam", "awayTeam", "matchName", "source", "code", "coded_id", "video_time", "video_end",
            "duration", "end_minute", "end_second", "before", "after", "tags", "shirt", *templates.FLAGS]
+
+
+def depth_zone(x: float) -> str:
+    """Third of the pitch from x, as whoscored_scraper._depth_zone labels scraped events."""
+    return "Defensive Third" if x < 34 else "Middle Third" if x < 67 else "Attacking Third"
+
+
+def pitch_zone(y: float) -> str:
+    """Channel from y, as whoscored_scraper._pitch_zone(y, flip=True) labels scraped events
+    (y 100 is the team's left touchline)."""
+    y = 100 - y
+    if y < 20:
+        return "Left Wing"
+    if y < 37:
+        return "Left Half Space"
+    if y < 63:
+        return "Centre"
+    return "Right Half Space" if y < 80 else "Right Wing"
 
 
 def parse_marker(value: Any) -> float | None:
@@ -130,7 +148,9 @@ def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[
         table.append((period, clock, {
             "minute": minute, "second": second, "type": code["type"], "outcomeType": outcome,
             "period": names[period], "playerName": player, "team": {"home": home, "away": away}.get(event["team"], ""),
-            "x": "", "y": "", "endX": "", "endY": "", "homeTeam": home, "awayTeam": away,
+            "x": event.get("x", ""), "y": event.get("y", ""), "endX": event.get("endX", ""), "endY": event.get("endY", ""),
+            "depth_zone": depth_zone(event["x"]) if "x" in event else "",
+            "pitch_zone": pitch_zone(event["y"]) if "y" in event else "", "homeTeam": home, "awayTeam": away,
             "matchName": f"{home} vs {away}", "source": "coded", "code": code["label"], "coded_id": event["id"],
             "video_time": event["t"], "video_end": "", "duration": "", "end_minute": "", "end_second": "",
             **span, "before": before, "after": after, "tags": "; ".join(tag["label"] for tag in chosen),
@@ -138,6 +158,55 @@ def rows(document: dict[str, Any], markers: dict[str, Any], video_of: Callable[[
         }))
     table.sort(key=lambda item: item[:2])
     return [row for _, _, row in table], unplaced
+
+
+PERIOD_RANK = {name.lower(): number for number, _, name, _ in PERIODS}
+
+
+def _period_rank(value: Any) -> int:
+    text = str(value if value is not None else "").strip()
+    if text.lower() in PERIOD_RANK:
+        return PERIOD_RANK[text.lower()]
+    try:
+        return int(float(text))
+    except ValueError:
+        return 9
+
+
+def write_merged(feed_path: Path, table: list[dict[str, Any]], path: Path) -> int:
+    """The feed's event table with the coded rows added (C4: a project's source is "both").
+
+    Feed rows are kept as they are, marked ``source`` "feed" unless they name a
+    source of their own; coded rows join in match-clock order, after feed rows
+    at the same second. Written atomically; returns the number of rows."""
+    import pandas as pd
+
+    try:  # read as saved: the merged copy must not change the feed's own rows
+        feed = pd.read_csv(feed_path, low_memory=False, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        feed = pd.read_csv(feed_path, low_memory=False, encoding="latin-1")
+    if "source" in feed.columns:
+        feed["source"] = feed["source"].where(feed["source"].notna() & (feed["source"].astype(str) != "coded"), "feed")
+    else:
+        feed["source"] = "feed"
+    coded = pd.DataFrame(table, columns=COLUMNS)
+    merged = pd.concat([feed.assign(_coded=0), coded.assign(_coded=1)], ignore_index=True, sort=False)
+    merged["_period"] = merged["period"].map(_period_rank) if "period" in merged.columns else 0
+    for column in ("minute", "second"):
+        merged[f"_{column}"] = pd.to_numeric(merged.get(column), errors="coerce").fillna(0)
+    merged = merged.sort_values(["_period", "_minute", "_second", "_coded"], kind="mergesort")
+    merged = merged.drop(columns=["_period", "_minute", "_second", "_coded"])
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix="saving-", suffix=".tmp")
+    os.close(fd)
+    try:
+        merged.to_csv(temporary, index=False, encoding="utf-8-sig")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return len(merged)
 
 
 def write_csv(path: Path, table: list[dict[str, Any]]) -> Path:

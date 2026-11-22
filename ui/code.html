@@ -5,11 +5,11 @@
   <script src="theme.js?v=1"></script>
   <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Code</title>
-  <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=3" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=4" />
   <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="code.js?v=3"></script>
+  <script type="module" src="code.js?v=4"></script>
   <script type="module" src="update.js?v=1"></script>
 </head>
 <body class="analysis-page code-page">
@@ -43,6 +43,26 @@
           <label class="code-source" data-source-row hidden>Video <select data-source></select></label>
         </div>
         <p class="code-warning" data-kickoff-note role="note" hidden></p>
+        <details class="code-pitch-panel" open>
+          <summary>Pitch location <span class="code-muted" data-pitch-status></span></summary>
+          <div class="code-pitch-wrap">
+            <p class="code-pitch-direction" data-pitch-direction aria-hidden="true"></p>
+            <svg class="code-pitch" data-pitch viewBox="-2 -2 109 72" role="img" aria-labelledby="pitch-help">
+              <rect class="code-pitch-grass" x="-2" y="-2" width="109" height="72"/>
+              <g class="code-pitch-lines">
+                <rect x="0" y="0" width="105" height="68"/><path d="M52.5 0v68"/><circle cx="52.5" cy="34" r="9.15"/>
+                <rect x="0" y="13.84" width="16.5" height="40.32"/><rect x="88.5" y="13.84" width="16.5" height="40.32"/>
+                <rect x="0" y="24.84" width="5.5" height="18.32"/><rect x="99.5" y="24.84" width="5.5" height="18.32"/>
+                <path d="M16.5 26.7a9.15 9.15 0 0 1 0 14.6M88.5 26.7a9.15 9.15 0 0 0 0 14.6"/>
+              </g>
+              <g data-pitch-marks></g>
+            </svg>
+            <div class="code-pitch-foot">
+              <p class="code-muted" id="pitch-help">Click where the chosen event happened; drag to also mark where it ended (a pass's target).</p>
+              <button type="button" data-pitch-clear hidden>Clear location</button>
+            </div>
+          </div>
+        </details>
       </div>
       <aside class="code-side">
         <section class="code-panel" aria-labelledby="codes-title">

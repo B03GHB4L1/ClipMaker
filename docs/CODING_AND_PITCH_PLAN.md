@@ -126,7 +126,15 @@ locations were clicked; the rest show their usual "no data" message.
   of Filter's qualifier columns; each qualifier still applies to its own event types
   (Big chances to shots, Headers to passes). The in-app editor changes names, keys,
   colours, codes and tags; links between codes are edited in an exported file.
-- **C4** Pitch location clicks; "both" source merging with scraped data.
+- **C4** Pitch location clicks; "both" source merging with scraped data. Done 2026-11-22.
+  A click on the Code screen's pitch sets x, y in the feeds' scale (the event's team
+  attacking right); a drag adds endX, endY. Coded rows carry depth_zone and pitch_zone,
+  so Filter's lane and depth filters work on them, and Filter says how many coded events
+  have no location. With a scraped or imported table, coded rows join a copy of it
+  (`match-data/merged_events.csv`, `source` "feed" or "coded"); the feed file is never
+  changed, deleting every code goes back to it, and a new scrape or import is merged
+  again. The Analyst Room, Tactical Lab and the score read the feed alone, so a coded
+  Goal is not counted twice.
 
 ### Tests
 

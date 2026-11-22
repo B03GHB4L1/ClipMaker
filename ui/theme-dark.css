@@ -2971,3 +2971,40 @@
 :root[data-theme="dark"] input):focus-visible {
   outline: 2px solid #9dba63;
 }
+:root[data-theme="dark"] .code-pitch-panel {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+}
+:root[data-theme="dark"] .code-pitch-direction {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .code-main .code-pitch {
+  fill: initial;
+  stroke: none;
+}
+:root[data-theme="dark"] .code-pitch-grass {
+  fill: rgba(181,198,148,0.2);
+}
+:root[data-theme="dark"] .code-pitch-lines :is(rect,
+:root[data-theme="dark"] path,
+:root[data-theme="dark"] circle) {
+  fill: none;
+  stroke: #9daa8d;
+}
+:root[data-theme="dark"] .code-pitch-start {
+  fill: var(--cm-ink);
+  stroke: #2f2f2f;
+}
+:root[data-theme="dark"] .code-pitch-end {
+  fill: #2f2f2f;
+  stroke: var(--cm-ink);
+}
+:root[data-theme="dark"] .code-pitch-path {
+  stroke: var(--cm-ink);
+  stroke-dasharray: 1.4 0.8;
+}
+:root[data-theme="dark"] .code-main .code-pitch-foot button {
+  border: 1px solid var(--cm-rule);
+  background: var(--code-panel);
+  color: var(--cm-ink);
+}

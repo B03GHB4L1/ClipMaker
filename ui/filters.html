@@ -8,13 +8,13 @@
     <meta name="theme-color" content="#f4f4f0" />
     <title>VizorPlay - Filter and Edit</title>
     <link rel="stylesheet" href="styles.css?v=11" />
-    <link rel="stylesheet" href="filters.css?v=3" />
+    <link rel="stylesheet" href="filters.css?v=4" />
     <link rel="stylesheet" href="compact.css?v=15" />
     <link rel="stylesheet" href="design.css?v=6" />
     <link rel="stylesheet" href="editor.css?v=14" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
     <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-    <script type="module" src="filters.js?v=19"></script>
+    <script type="module" src="filters.js?v=20"></script>
     <script type="module" src="update.js?v=1"></script>
     <script type="module" src="audio-warm.js?v=2"></script>
   </head>
@@ -178,6 +178,7 @@
                 </select></label>
                 <label><span>Minimum xT</span><input type="number" min="0" step="0.001" value="0" data-xt-min /></label>
                 <label><span>Top N by xT</span><input type="number" min="0" step="1" value="0" data-top-n /></label>
+                <p class="field-note filter-unlocated" data-unlocated role="note" hidden></p>
               </div>
             </details>
 
