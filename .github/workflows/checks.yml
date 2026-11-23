@@ -47,6 +47,8 @@ jobs:
       - run: node --test tests/annotate.test.mjs
       - run: node --test tests/board.test.mjs
       - run: node --test tests/flat.test.mjs
+      - run: node --test tests/camera.test.mjs
+      - run: node --test tests/shape_tool.test.mjs
       - run: node --test tests/moving_board.test.mjs
       - run: node --test tests/parts.test.mjs
       - run: node --test tests/fit.test.mjs

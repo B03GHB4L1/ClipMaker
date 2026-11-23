@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { apply, fitHomography, landmark } from "../ui/annotate/pitch.js";
-import { arrowOnPitch, pitchCalibration, pitchKey, projectItems, ringOnPitch } from "../ui/annotate/flat.js";
+import { arrowOnPitch, projectItems, ringOnPitch } from "../ui/annotate/flat.js";
+import { clipPitchTrack, pitchKeys } from "../ui/annotate/camera.js";
 import { newItem } from "../ui/annotate/document.js";
 
 const ASPECT = 16 / 9;
@@ -14,9 +15,12 @@ const frameOf = (metres) => apply(camera, metres);
 const pairs = ["half-far", "circle-right", "box-r-far", "box-r-near", "spot-r", "centre"].map((id) => ({ id, at: frameOf(landmark(id).at) }));
 const value = { version: 1, items: [], freezes: [], pitch: { keys: [{ frame: 12, pairs }] } };
 
+// The calibration on the marked frame (P1); camera.test.mjs covers the other frames (P2).
+const pitchCalibration = (doc, aspect) => clipPitchTrack(doc, aspect)?.at(12)?.calibration || null;
+
 test("the clip's calibration comes from its saved key, and none without one", () => {
-  assert.equal(pitchKey(value).frame, 12);
-  assert.equal(pitchKey({ version: 1, items: [] }), null);
+  assert.equal(pitchKeys(value)[0].frame, 12);
+  assert.deepEqual(pitchKeys({ version: 1, items: [] }), []);
   assert.equal(pitchCalibration({ version: 1, items: [] }, ASPECT), null);
   const fit = pitchCalibration(value, ASPECT);
   assert.ok(fit.worst < 0.01);

@@ -2247,6 +2247,31 @@
 :root[data-theme="dark"] .annotate-tools button[aria-pressed="true"] kbd {
   color: #666962;
 }
+:root[data-theme="dark"] .annotate-shape-more {
+  border-color: transparent transparent var(--cm-muted) transparent;
+}
+:root[data-theme="dark"] .annotate-tools button[aria-pressed="true"] .annotate-shape-more {
+  border-bottom-color: #666962;
+}
+:root[data-theme="dark"] .annotate-shape-menu {
+  border: 1px solid var(--cm-rule);
+  background: var(--annotate-panel);
+}
+:root[data-theme="dark"] .annotate-shape-menu button {
+  border: 0;
+  background: transparent;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-shape-menu button:hover:not([aria-checked="true"]) {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-shape-menu button[aria-checked="true"] {
+  background: var(--cm-ink);
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-shape-menu button:focus-visible {
+  outline: 2px solid var(--cm-accent-ink, var(--cm-ink));
+}
 :root[data-theme="dark"] .annotate-player-tools {
   border: 1px solid var(--cm-rule);
   background: var(--annotate-panel);

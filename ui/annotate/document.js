@@ -25,6 +25,7 @@ export const newItem = (kind, points, { from, to, style, geometry, text } = {}) 
     show: { from: Math.round(from * 1000) / 1000, to: Math.round(to * 1000) / 1000, animate: "none" },
   };
   if (kind === "ring" || kind === "spotlight") item.geometry = { ...geometry };
+  if (kind === "shape") item.geometry = { shape: geometry?.shape || "rect" };
   if (kind === "text") item.text = text;
   return item;
 };

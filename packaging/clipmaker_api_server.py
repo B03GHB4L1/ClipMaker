@@ -2382,6 +2382,31 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                                                         end_box=end_box))
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
+    def start_camera(self, path: str, body: dict[str, Any]) -> None:
+        """Follow the camera from `from_frame` to `to_frame` in the background (P2, telestration/camera.py)."""
+        parts = path.split("/")
+        if len(parts) != 6:
+            raise ValueError("Unknown editor request")
+        try:
+            record, video = self.editor_clips.get(parts[3], parts[4])
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        from telestration import camera
+        start, end = body.get("from_frame"), body.get("to_frame")
+        for value in (start, end):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < record["frames"]:
+                raise ValueError("The camera can only be followed on frames of the clip.")
+        if end < start:
+            raise ValueError("Following the camera cannot end before it starts.")
+        if end - start + 1 > camera.MAX_FRAMES:
+            raise ValueError("Follow the camera for up to 3 minutes at a time.")
+        ffmpeg = _find_ffmpeg()
+        camera.check_available()  # refuse now, not in the background, if OpenCV is missing
+        job = self.tracking_jobs.start(
+            lambda cancel, progress: camera.follow_camera(ffmpeg, video, record, start, end, cancel, progress))
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
     def tracking_job(self, job_id: str, cancel: bool = False) -> None:
         if not re.fullmatch(r"[a-f0-9]{16}", job_id or ""):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown tracking job."})
@@ -3056,6 +3081,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path.startswith("/api/editor/") and path.endswith("/track"):
                 self.start_tracking(path, body)
+                return
+            if path.startswith("/api/editor/") and path.endswith("/camera"):
+                self.start_camera(path, body)
                 return
             if path.startswith("/api/editor/") and path.endswith("/players"):
                 self.find_players(path, body)

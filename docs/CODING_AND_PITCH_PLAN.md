@@ -318,6 +318,36 @@ metres and player speed.
     arrow, saved and reopened, and an export whose frames show them as on screen.
     Not yet tried: marking a real frame by hand on several matches.
 - **P2** Camera following, confidence, re-click correction, saved per clip.
+  *Done 2026-11-23.*
+  - "Follow camera" under the pitch button runs `app/telestration/camera.py` as an
+    editor job (progress, Stop). It measures each frame against a reference frame
+    (corners and optical flow, a RANSAC similarity, a full homography only when the
+    picture clearly needs one), so small errors do not pile up frame after frame. A
+    median filter removes single-frame jolts. A scene cut starts a new stretch. Each
+    frame keeps how sure the step is (share of corners that agree, fewer corners
+    count for less). Up to 4,500 frames per clip.
+  - The clip keeps `pitch: {keys: [...], camera: {from, rows, starts}}`. A key can be
+    added on any frame (up to 50): "Mark the pitch" on another frame adds a key, on a
+    marked frame it replaces it. "Remove marks" removes this frame's key; the last
+    key takes the camera path with it.
+  - Between two keys the pitch blends both, leaning on the nearer one, so it reaches
+    each key without a jump. Frames reached only through a step under 0.15 sureness
+    are "to check": their pitch lines are drawn amber and "Next to check" jumps to
+    them, with a line saying what is wrong (doubtful, or no pitch after a cut). Marking
+    the pitch on such a frame is the re-click correction.
+  - Flat drawings keep the frame they were drawn on (`at`) and are placed through the
+    pitch on every other frame, in the editor, screenshots and exports. Where the
+    camera was followed but a frame has no pitch (after a cut), they are hidden.
+    Without a followed camera they stay as drawn, as in P1.
+  - Checked: generated pan, zoom and cut clips (under 2 px over 60 frames), and one
+    real 29 s broadcast clip (1,450 frames in 24 s, cuts to close-ups found, a flat ring
+    staying on the grass across the pan and hidden after the cut). With marks only on
+    the far half, the near touchline was 20 to 40 px off on other frames.
+    Not yet tried: several matches, long zooms, marks spread over the whole pitch.
+- **Shape tool** (asked 2026-11-23): a Shape button under Draw (key G) opens a row of
+  shapes beside it (below it on a phone): rectangle, ellipse, triangle, diamond,
+  pentagon, hexagon and star. Drag to draw, Shift for equal sides; the shape can be
+  changed later in its settings. Filled and patterned like a zone.
 - **P3** Offside line, minimap, distances and speed.
 
 ### Risks

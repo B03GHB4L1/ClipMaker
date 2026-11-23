@@ -117,8 +117,9 @@ class DocumentTests(unittest.TestCase):
         zone = {"id": "z1", "kind": "zone", "points": [[0.1, 0.5], [0.4, 0.5], [0.4, 0.8]], "style": {"flat": True},
                 "show": {"from": 0, "to": 2}}
         for bad, message in (
-                ({"keys": []}, "1 calibrated frame"),
-                ({"keys": [{"frame": 40, "pairs": marks}, {"frame": 41, "pairs": marks}]}, "1 calibrated frame"),
+                ({"keys": []}, "1 to 50 calibrated frames"),
+                ({"keys": [{"frame": 40, "pairs": marks}, {"frame": 40, "pairs": marks}]}, "calibrated twice"),
+                ({"keys": [{"frame": f, "pairs": marks} for f in range(51)]}, "1 to 50 calibrated frames"),
                 ({"keys": [{"frame": 50, "pairs": marks}]}, "not in the clip"),  # frame 51 of 50
                 ({"keys": [{"frame": True, "pairs": marks}]}, "not in the clip"),
                 ({"keys": [{"frame": 1, "pairs": marks[:3]}]}, "4 to 40"),
@@ -133,6 +134,62 @@ class DocumentTests(unittest.TestCase):
             annotations.clean_document(document(zone), duration=2, frames=50)
         with self.assertRaisesRegex(ValueError, "true or false"):
             annotations.clean_document(document(ring(style={"flat": "yes"})), duration=2, frames=50)
+
+    def test_several_marked_frames_and_the_cameras_path_are_kept(self):
+        # P2: a key per camera move, and the engine's path of the camera between them.
+        marks = [{"id": "half-far", "at": [0.3, 0.22]}, {"id": "circle-right", "at": [0.1756, 0.5733]},
+                 {"id": "box-r-far", "at": [0.8774, 0.3636]}, {"id": "box-r-near", "at": [0.6291, 0.9506]}]
+        identity = [1, 0, 0, 0, 1, 0, 0, 0]
+        camera = {"from": 5, "rows": [identity + [1], [1.001, 0, -0.012, 0, 1.001, 0.001, 0, 0, 0.82], identity + [1]],
+                  "starts": [5, 7]}
+        pitch = {"keys": [{"frame": 40, "pairs": marks}, {"frame": 6, "pairs": marks}], "camera": camera}
+        clean = annotations.clean_document({**document(ring()), "pitch": pitch}, duration=2, frames=50)
+        self.assertEqual([key["frame"] for key in clean["pitch"]["keys"]], [6, 40], "kept in frame order")
+        self.assertEqual(clean["pitch"]["camera"], camera)
+        key = {"frame": 6, "pairs": marks}
+        for bad, message in (
+                ({**camera, "from": 50}, "start on a frame"),
+                ({**camera, "from": 48}, "covers 1 to"),  # 3 rows from frame 48 run past frame 50
+                ({**camera, "rows": []}, "covers 1 to"),
+                ({**camera, "rows": [identity]}, "8 numbers and how sure"),
+                ({**camera, "rows": [identity + [1.5]]}, "between 0 and 1"),
+                ({**camera, "rows": [[float("nan")] + identity[1:] + [1]]}, "must be a number"),
+                ({**camera, "starts": []}, "where each stretch starts"),
+                ({**camera, "starts": [6]}, "where each stretch starts"),
+                ({**camera, "starts": [5, 9]}, "later frame it covers"),
+                ({**camera, "starts": [5, 7, 7]}, "later frame it covers"),
+                ({**camera, "extra": 1}, "its first frame, its rows"),
+                ({"from": 0, "rows": [identity + [1]] * 4501, "starts": [0]}, "covers 1 to 4500")):
+            with self.subTest(bad=str(bad)[:60]), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document({**document(ring()), "pitch": {"keys": [key], "camera": bad}},
+                                           duration=2, frames=5000 if len(bad.get("rows", [])) > 50 else 50)
+        with self.assertRaisesRegex(ValueError, "list its calibrated frames"):
+            annotations.clean_document({**document(ring()), "pitch": {"keys": [key], "other": 1}}, duration=2, frames=50)
+
+    def test_a_flat_drawing_keeps_the_frame_it_was_drawn_on(self):
+        flat = {**ring(style={"flat": True}), "at": 12}
+        clean = annotations.clean_document(document(flat), duration=2, frames=50)
+        self.assertEqual(clean["items"][0]["at"], 12)
+        for bad, message in (({**ring(), "at": 12}, "Only a drawing flat on the pitch"),
+                             ({**flat, "at": 50}, "not in the clip"),
+                             ({**flat, "at": True}, "not in the clip"),
+                             ({**flat, "at": -1}, "not in the clip")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document(document(bad), duration=2, frames=50)
+
+    def test_shapes_keep_which_shape_they_are(self):
+        shape = {"id": "s1", "kind": "shape", "points": [[0.1, 0.2], [0.4, 0.5]], "geometry": {"shape": "star"},
+                 "style": {"stroke": "#ffffff", "fill": "#2f80ed", "fillOpacity": 0.2, "pattern": "cross", "dashed": True},
+                 "show": {"from": 0, "to": 1, "animate": "draw", "pulse": True}}
+        clean = annotations.clean_document(document(shape), duration=2, frames=50)
+        self.assertEqual(clean["items"][0]["geometry"], {"shape": "star"})
+        for bad, message in (({**shape, "geometry": {"shape": "circle"}}, "must be one of"),
+                             ({**shape, "geometry": None}, "must be one of"),
+                             ({**shape, "geometry": {"shape": "rect", "rx": 1}}, "must be one of"),
+                             ({**shape, "points": [[0.1, 0.2]]}, "2 to 2 points"),
+                             ({**shape, "style": {"flat": True}}, "cannot lie flat")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document(document(bad), duration=2, frames=50)
 
     def test_no_animation_stores_no_animation_settings(self):
         clean = annotations.clean_document(document(ring(show={"from": 0, "to": 1, "animSeconds": 2, "ease": "linear"})),
