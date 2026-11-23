@@ -111,7 +111,7 @@ const confirmDelete = (project) => new Promise((resolve) => {
   const heading = document.createElement("h2");
   heading.textContent = `Delete “${projectTitle(project)}”?`;
   const text = document.createElement("p");
-  text.textContent = "The project leaves your library and moves to the project-trash folder, where it can be recovered. Your video files are not touched.";
+  text.textContent = "This deletes the project for good; it cannot be undone. Its matches stay saved with their events, kick-off times and video locations, so other projects can still use them. Your video files are not touched.";
   const actions = document.createElement("div");
   actions.className = "confirm-actions";
   const cancel = document.createElement("button");

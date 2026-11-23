@@ -67,27 +67,31 @@ class ProjectStoreTests(unittest.TestCase):
                 self.assertEqual(changed_project["preview_range"], {})
                 self.assertEqual(changed_project["filter_settings"], {"filter_types": ["Goal"]})
 
-    def test_delete_moves_only_that_project_to_the_trash(self):
+    def test_delete_removes_only_that_project_for_good_and_keeps_its_match(self):
         keep, gone = self.store.create("Keep"), self.store.create("Gone")
         video = self.root / "match.mp4"
         video.write_bytes(b"video")
-        self.store.upsert({"id": gone["id"], "video_path": str(video)})
-        trash = self.store.delete(gone["id"])
+        saved = self.store.upsert({"id": gone["id"], "video_path": str(video), "markers": {"1H": "00:01:00"}})
+        self.store.delete(gone["id"])
         self.assertEqual([item["id"] for item in MatchStore(self.root).list()], [keep["id"]])
-        self.assertEqual(json.loads((trash / "project.json").read_text())["id"], gone["id"])  # recoverable
-        self.assertTrue(trash.is_relative_to(self.root / "project-trash"))
+        self.assertFalse((self.root / "projects" / gone["id"]).exists())  # gone for good
+        self.assertFalse((self.root / "project-trash").exists())
+        match = self.store.get_match(saved["match_id"])  # the match stays in the library
+        self.assertEqual((match["video_path"], match["markers"]), (str(video), {"1H": "00:01:00"}))
         self.assertEqual(video.read_bytes(), b"video")  # the footage is never touched
         with self.assertRaisesRegex(ValueError, "not found"):
             self.store.delete(gone["id"])
         with self.assertRaisesRegex(ValueError, "Invalid project id"):
             self.store.delete("../matches")
 
-    def test_delete_removes_a_legacy_history_entry_without_losing_it(self):
+    def test_legacy_history_entries_become_projects_with_saved_matches(self):
         self.store.path.write_text(json.dumps([{"id": "old-one", "home_team": "A", "away_team": "B"},
                                                {"id": "old-two", "home_team": "C", "away_team": "D"}]))
-        trash = self.store.delete("old-one")
+        self.store.delete("old-one")
         self.assertEqual([item["id"] for item in self.store.list()], ["old-two"])
-        self.assertEqual(json.loads((trash / "legacy-history.json").read_text())[0]["id"], "old-one")
+        self.assertEqual(sorted(match["home_team"] for match in self.store.matches()), ["A", "C"])
+        self.assertFalse(self.store.path.exists())
+        self.assertTrue((self.root / "matches.json.before-library").exists())  # the old file is kept
 
     def test_snapshots_survive_ports_restarts_and_delete_is_recoverable(self):
         self.store.update_snapshot("Goals", {"filter_types": ["Goal"]})
@@ -103,7 +107,8 @@ class ProjectStoreTests(unittest.TestCase):
         original = [{"id": "old-match", "home_team": "Home", "markers": {"1H": "00:01:00"}}]
         self.store.path.write_text(json.dumps(original), encoding="utf-8")
         self.store.upsert({"id": "old-match", "project_name": "Reopened"})
-        self.assertEqual(json.loads(self.store.path.read_text()), original)
+        kept = self.root / "matches.json.before-library"  # moved aside once, never rewritten
+        self.assertEqual(json.loads(kept.read_text()), original)
         self.assertEqual(self.store.get("old-match")["markers"], original[0]["markers"])
         self.assertEqual(len(self.store.list()), 1)
 
@@ -294,7 +299,7 @@ class ProjectApiTests(unittest.TestCase):
         self.assertEqual(imported["event_count"], 2)
         self.assertEqual(imported["home_score"], 1)
         self.assertEqual(imported["id"], project["id"])
-        self.assertTrue(Path(imported["csv_path"]).is_relative_to(self.root / "projects" / project["id"]))
+        self.assertTrue(Path(imported["csv_path"]).is_relative_to(self.root / "matches" / imported["match_id"]))
 
     def test_cross_origin_request_is_rejected(self):
         with self.assertRaises(HTTPError) as error:

@@ -223,7 +223,7 @@ document.addEventListener("vizorplay:project-deleted", async ({ detail }) => {
     }
     renderHistory(projects);
     if (detail.wasActive) await openProject(projects[0]);
-    showToast("Project moved to the project trash");
+    showToast("Project deleted. Its matches stay saved.");
   } catch (error) { showToast(error.message); }
 });
 
