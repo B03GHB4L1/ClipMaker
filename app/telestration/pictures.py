@@ -163,7 +163,12 @@ def used_by(project: Path, picture_id: str) -> bool:
             continue
         if picture_id in picture_ids(document):
             return True
-    return False
+    try:
+        sessions = json.loads((project / "sessions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return any(isinstance(card, dict) and card.get("picture_id") == picture_id
+               for session in sessions if isinstance(session, dict) for card in session.get("cards") or [])
 
 
 def remove(project: Path, picture_id: str) -> None:
@@ -173,6 +178,6 @@ def remove(project: Path, picture_id: str) -> None:
     if not meta.is_file():
         raise LookupError("That picture is not in the project any more.")
     if used_by(project, picture_id):
-        raise ValueError("An insert in one of the project's clips shows this picture. Remove the insert first.")
+        raise ValueError("An insert or a card in one of the project's sessions shows this picture. Remove it first.")
     meta.unlink(missing_ok=True)
     image.unlink(missing_ok=True)

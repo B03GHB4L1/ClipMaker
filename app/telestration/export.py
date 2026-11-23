@@ -95,6 +95,28 @@ class ExportSessions:
         return {"id": session_id, "frames": count, "fps": record["fps"], "width": record["width"],
                 "height": record["height"]}
 
+    def add_still(self, png: bytes) -> str:
+        """Keep the picture of a text card the page drew (re-encoded here, so it is always a clean PNG) until the
+        sequence renders; returns its id."""
+        from . import pictures
+        self.prune()
+        clean, _, _ = pictures.clean_png(png)
+        still_id = uuid.uuid4().hex[:16]
+        folder = self.root / still_id
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "card.png").write_bytes(clean)
+        return still_id
+
+    def still(self, still_id: str) -> Path | None:
+        if not re.fullmatch(r"[a-f0-9]{16}", still_id or ""):
+            return None
+        path = self.root / still_id / "card.png"
+        return path if path.is_file() else None
+
+    def discard_still(self, still_id: str) -> None:
+        if re.fullmatch(r"[a-f0-9]{16}", still_id or ""):
+            shutil.rmtree(self.root / still_id, ignore_errors=True)
+
     def get(self, session_id: str) -> dict[str, Any] | None:
         if not re.fullmatch(r"[a-f0-9]{16}", session_id or ""):
             return None
@@ -521,13 +543,53 @@ def join(ffmpeg: str, pieces: list[dict[str, Any]], target: str, encoder: str, s
 JOIN_SHARE = 0.1  # of a sequence's progress bar: the join, after every clip is rendered
 
 
-def run_sequence(ffmpeg: str, sessions: list[dict[str, Any]], folder: Path, name: str, save: Callable[..., Path],
+def render_still(ffmpeg: str, image: Path, seconds: float, record: dict[str, Any], target: str, encoder: str,
+                 cancel: threading.Event | None = None) -> None:
+    """A card: `image` held for `seconds` at the clip's size and frame rate, without sound."""
+    import video_encoder as encoders
+
+    width, height, fps = _even(record["width"]), _even(record["height"]), float(record["fps"])
+    _, video_args = encoders.video_args(encoder, ffmpeg, 18, "veryfast")
+    command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-loop", "1", "-framerate", f"{fps:g}",
+               "-i", str(image), "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p",
+               "-frames:v", str(max(1, round(seconds * fps))), "-r", f"{fps:g}", *video_args, "-pix_fmt", "yuv420p",
+               "-movflags", "+faststart", "-f", "mp4", target]
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                               creationflags=_flags())
+    while True:
+        try:
+            _, errors = process.communicate(timeout=0.2)
+            break
+        except subprocess.TimeoutExpired:
+            if cancel is not None and cancel.is_set():
+                process.kill()
+                process.wait()
+                raise Cancelled() from None
+    if process.returncode != 0:
+        message = (errors or b"").decode("utf-8", "replace")[-500:]
+        if encoder != encoders.SOFTWARE:
+            raise encoders.HardwareEncodeError(message)
+        raise ValueError(f"Could not make the card: {message}")
+
+
+def run_sequence(ffmpeg: str, items: list[dict[str, Any]], folder: Path, name: str, save: Callable[..., Path],
                  register: Callable[[Path], str], cancel: threading.Event, progress: Callable[[int, int], None],
                  encoder_setting: str = "auto") -> dict[str, Any]:
-    """Render each export session (a clip of the sequence, in order) and join them into one video in the
-    user's folder. Removes the sessions' overlays and every piece afterwards, also when cancelled."""
+    """Render each item of the sequence, in order, and join them into one video in the user's folder. An item is an
+    export session (a clip with its overlays) or a card {"still": image path, "seconds": n}; a bare export session
+    counts as a clip. Removes the sessions' overlays and every piece afterwards, also when cancelled."""
     import video_encoder as encoders
-    total = sum(session["frames"] for session in sessions)
+    items = [item if "still" in item or "session" in item else {"session": item} for item in items]
+    sessions = [item["session"] for item in items if "session" in item]
+    if not sessions:
+        raise ValueError("A sequence needs at least one clip.")
+    reference = sessions[0]["record"]
+
+    def frames_of(item: dict[str, Any]) -> int:
+        return item["session"]["frames"] if "session" in item else max(1, round(item["seconds"] * reference["fps"]))
+
+    total = sum(frames_of(item) for item in items)
     if total > MAX_OUTPUT_FRAMES:
         raise ValueError("Exports can be up to 20 minutes long.")
     scale = 1000
@@ -536,9 +598,22 @@ def run_sequence(ffmpeg: str, sessions: list[dict[str, Any]], folder: Path, name
             scratch = Path(scratch_name)
             encoder = encoders.resolve(encoder_setting, ffmpeg)
             pieces, done = [], 0
-            for index, session in enumerate(sessions):
-                schedule = overlay_schedule(session["folder"])
+            for index, item in enumerate(items):
                 target = str(scratch / f"piece-{index:03d}.mp4")
+                if "still" in item:
+                    try:
+                        render_still(ffmpeg, item["still"], item["seconds"], reference, target, encoder, cancel)
+                    except encoders.HardwareEncodeError:
+                        encoder = encoders.SOFTWARE
+                        render_still(ffmpeg, item["still"], item["seconds"], reference, target, encoder, cancel)
+                    count = frames_of(item)
+                    pieces.append({"path": target, "width": reference["width"], "height": reference["height"],
+                                   "fps": reference["fps"], "seconds": count / reference["fps"], "sound": False})
+                    done += count
+                    progress(int(done / total * (1 - JOIN_SHARE) * scale), scale)
+                    continue
+                session = item["session"]
+                schedule = overlay_schedule(session["folder"])
                 record = session["record"]
 
                 def report(n: int, count: int, base: int = done) -> None:
@@ -568,7 +643,7 @@ def run_sequence(ffmpeg: str, sessions: list[dict[str, Any]], folder: Path, name
 
             saved = save(folder, name, ".mp4", write, fallback="VizorPlay annotated sequence")
         return {"saved": {"name": saved.name, "folder": str(saved.parent), "id": register(saved)},
-                "frames": total, "clips": len(sessions), "encoder": encoders.label(encoder)}
+                "frames": total, "clips": len(sessions), "items": len(items), "encoder": encoders.label(encoder)}
     finally:
         for session in sessions:
             shutil.rmtree(session["folder"], ignore_errors=True)

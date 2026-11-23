@@ -52,7 +52,7 @@ else:
     from process_owner import watch_process_owner
     import update_check
     import user_folders
-from telestration.clips import CLIP_ID, SESSION_ID, EditorClips
+from telestration.clips import CARD_ID, CLIP_ID, SESSION_ID, EditorClips
 from live.recorder import PART as LIVE_PART, SEGMENT_FILE as LIVE_FILE, LiveRecordings
 
 
@@ -2580,9 +2580,21 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if not SESSION_ID.match(session_id):
                     raise ValueError("Invalid annotate session.")
                 order = body.get("clips")
-                if not isinstance(order, list) or not all(isinstance(c, str) and CLIP_ID.match(c) for c in order):
+                if not isinstance(order, list) or not all(isinstance(c, str) and (CLIP_ID.match(c) or CARD_ID.match(c)) for c in order):
                     raise ValueError("Invalid clip id.")
                 clips.reorder_session(project_id, session_id, order)
+            elif action in ("add-card", "update-card", "remove-card"):
+                if not SESSION_ID.match(session_id):
+                    raise ValueError("Invalid annotate session.")
+                card_id = str(body.get("card_id") or "")
+                if action == "add-card":
+                    clips.add_card(project_id, session_id, body.get("card") if isinstance(body.get("card"), dict) else {}, body.get("index"))
+                elif not CARD_ID.match(card_id):
+                    raise ValueError("Invalid card.")
+                elif action == "update-card":
+                    clips.update_card(project_id, session_id, card_id, body.get("card") if isinstance(body.get("card"), dict) else {})
+                else:
+                    clips.remove_card(project_id, session_id, card_id)
             elif action == "move-clip":
                 # Bring a clip from another session into this one (the sequence's Add clip).
                 if not SESSION_ID.match(session_id) or not clips.has_session(project_id, session_id):
@@ -2830,24 +2842,69 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         job = self.tracking_jobs.start(work)
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
 
+    def receive_card(self) -> None:
+        """POST /api/editor-sequences/cards: the PNG of a text card the page drew; answers its id for the render."""
+        from telestration import pictures
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > pictures.MAX_BYTES:
+            raise ValueError("A card's picture must be under 20 MB.")
+        data = self.rfile.read(length)
+        self._body_read = getattr(self, "_body_read", 0) + len(data)
+        if len(data) != length:
+            raise ValueError("The card did not arrive in full.")
+        self.send_json(HTTPStatus.CREATED, {"card": self.editor_exports.add_still(data)})
+
     def render_sequence(self, body: dict[str, Any]) -> None:
-        """POST /api/editor-sequences/render {exports: [ids], name}: the clips' exports, each with its overlays
-        already sent, rendered in order and joined into one video (T2)."""
+        """POST /api/editor-sequences/render {items: [...], name}, in play order. An item is {export: id} (a clip whose
+        overlays were sent), {picture: id, seconds} (a picture of the project) or {card: id, seconds} (a text card
+        the page drew). Each is rendered and the pieces joined into one video (T2)."""
         from telestration import export
-        ids = body.get("exports")
-        if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
-                or not all(isinstance(i, str) and re.fullmatch(r"[a-f0-9]{16}", i) for i in ids) or len(set(ids)) != len(ids)):
-            raise ValueError("A sequence lists between 1 and 100 clip exports, each once.")
+        from telestration.clips import CARD_SECONDS
+        items = body.get("items")
+        if items is None and isinstance(body.get("exports"), list):
+            items = [{"export": each} for each in body["exports"]]
+        hex16 = re.compile(r"[a-f0-9]{16}")
+        if not isinstance(items, list) or not 1 <= len(items) <= 150 or not all(isinstance(each, dict) for each in items):
+            raise ValueError("A sequence lists between 1 and 150 items.")
         exports = self.editor_exports
-        found = [exports.get(i) for i in ids]
-        if any(session is None for session in found):
+        export_ids = [each.get("export") for each in items if "export" in each]
+        if (not export_ids or not all(isinstance(i, str) and hex16.fullmatch(i) for i in export_ids)
+                or len(set(export_ids)) != len(export_ids)):
+            raise ValueError("A sequence has between 1 and 100 clips, each once.")
+        found = {i: exports.get(i) for i in export_ids}
+        if any(session is None for session in found.values()):
             self.send_post_error(HTTPStatus.NOT_FOUND, "This export is no longer open. Start it again.")
             return
-        if len({session["project"] for session in found}) != 1:  # type: ignore[index]
+        projects = {session["project"] for session in found.values()}  # type: ignore[index]
+        if len(projects) != 1:
             raise ValueError("A sequence's clips come from one project.")
-        if sum(session["frames"] for session in found) > export.MAX_OUTPUT_FRAMES:  # type: ignore[index]
+        project_id = projects.pop()
+        picture_folder = self.editor_clips.pictures_dir(project_id)
+        from telestration import pictures
+        plan: list[dict[str, Any]] = []
+        for each in items:
+            if "export" in each:
+                plan.append({"export": each["export"]})
+                continue
+            seconds = each.get("seconds")
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not CARD_SECONDS[0] <= seconds <= CARD_SECONDS[1]:
+                raise ValueError("A card is shown for 0.5 to 30 seconds.")
+            if "picture" in each:
+                image = pictures.file_of(picture_folder, str(each["picture"]))
+                if image is None:
+                    raise ValueError("A picture in this sequence is not in the project any more.")
+                plan.append({"still": image, "seconds": float(seconds)})
+            elif "card" in each:
+                image = exports.still(str(each["card"]))
+                if image is None:
+                    self.send_post_error(HTTPStatus.NOT_FOUND, "A card's picture is no longer open. Start the export again.")
+                    return
+                plan.append({"still": image, "seconds": float(seconds), "card": str(each["card"])})
+            else:
+                raise ValueError("Each item is a clip, a picture or a card.")
+        if sum(session["frames"] for session in found.values()) > export.MAX_OUTPUT_FRAMES:  # type: ignore[index]
             raise ValueError("Exports can be up to 20 minutes long.")
-        sessions = [exports.take(i) for i in ids]
+        work_items = [{"session": exports.take(each["export"])} if "export" in each else each for each in plan]
         ffmpeg = _find_ffmpeg()
         folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
         name = str(body.get("name") or "")[:160]
@@ -2860,10 +2917,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
 
         def work(cancel: threading.Event, progress: Callable[[int, int], None]) -> dict[str, Any]:
             try:
-                return export.run_sequence(ffmpeg, sessions, folder, name, save_to_user_folder, register, cancel, progress)
+                return export.run_sequence(ffmpeg, work_items, folder, name, save_to_user_folder, register, cancel, progress)
             finally:
-                for i in ids:
+                for i in export_ids:
                     exports.discard(i)
+                for each in plan:
+                    if "card" in each:
+                        exports.discard_still(each["card"])
 
         job = self.tracking_jobs.start(work)
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
@@ -3116,6 +3176,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path.startswith("/api/editor-exports/") and path.endswith("/overlays"):
                 self.receive_overlays(path.split("/")[-2])
+                return
+            if path == "/api/editor-sequences/cards":
+                self.receive_card()
                 return
             body = self.read_json()
             if path == "/api/open-site":

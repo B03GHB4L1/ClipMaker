@@ -213,5 +213,107 @@ class SequenceApiTests(unittest.TestCase):
         self.assertEqual(render({"exports": [one, one]}), 400)
 
 
+def png_bytes(colour=(0, 200, 0), size=(64, 48)) -> bytes:
+    import cv2
+    import numpy as np
+    image = np.zeros((size[1], size[0], 3), np.uint8)
+    image[:] = colour  # BGR
+    return cv2.imencode(".png", image)[1].tobytes()
+
+
+class CardTests(SequenceApiTests):
+    """Cards: a picture or a line of text held between clips."""
+
+    def upload_picture(self):
+        request = Request(self.base + f"/api/projects/{self.project}/pictures", data=png_bytes(), method="POST",
+                          headers={"Content-Type": "application/octet-stream", "X-File-Name": "Badge.png"})
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read())["picture"]["id"]
+
+    def card_path(self, action):
+        return f"/api/editor-sessions/{self.project}/{action}"
+
+    def items(self):
+        return self.sessions()[0]["items"]
+
+    def test_cards_are_added_ordered_edited_and_removed(self):
+        picture = self.upload_picture()
+        add = lambda card, index=None: self.call(self.card_path("add-card"), {"session_id": self.session_id, "card": card, "index": index})
+        self.assertEqual(add({"kind": "text", "text": "  Half time  ", "seconds": 3})[0], 200)
+        self.assertEqual(add({"kind": "picture", "picture_id": picture, "seconds": 2}, 0)[0], 200)
+        items = self.items()
+        self.assertEqual([item["kind"] for item in items], ["card", "clip", "clip", "clip", "card"])
+        self.assertEqual(items[4]["text"], "Half time")
+        self.assertEqual(items[0]["picture_id"], picture)
+        # Reordering takes clips and cards together; the clips' own order follows it.
+        order = [items[4]["id"], items[1]["id"], items[0]["id"], items[2]["id"], items[3]["id"]]
+        self.assertEqual(self.call(self.card_path("reorder"), {"session_id": self.session_id, "clips": order})[0], 200)
+        self.assertEqual([item["id"] for item in self.items()], order)
+        card = self.items()[0]
+        status, _ = self.call(self.card_path("update-card"), {"session_id": self.session_id, "card_id": card["id"], "card": {"text": "Full time", "seconds": 99}})
+        self.assertEqual(status, 200)
+        self.assertEqual((self.items()[0]["text"], self.items()[0]["seconds"]), ("Full time", 30.0))  # clamped
+        self.call(self.card_path("remove-card"), {"session_id": self.session_id, "card_id": card["id"]})
+        self.assertEqual([item["kind"] for item in self.items()].count("card"), 1)
+
+    def test_cards_are_checked(self):
+        add = lambda card: self.call(self.card_path("add-card"), {"session_id": self.session_id, "card": card})[0]
+        self.assertEqual(add({"kind": "text", "text": "", "seconds": 3}), 400)
+        self.assertEqual(add({"kind": "text", "text": "x", "seconds": "3"}), 400)
+        self.assertEqual(add({"kind": "video", "seconds": 3}), 400)
+        self.assertEqual(add({"kind": "picture", "picture_id": "0" * 32, "seconds": 3}), 400)  # not in the project
+        self.assertEqual(add({"kind": "picture", "picture_id": "../x", "seconds": 3}), 400)
+        self.assertEqual(self.call(self.card_path("remove-card"), {"session_id": self.session_id, "card_id": "k" + "0" * 16})[0], 404)
+        self.assertEqual(self.call(self.card_path("reorder"), {"session_id": self.session_id, "clips": self.clips + ["k" + "0" * 16]})[0], 400)
+
+    def test_a_picture_a_card_shows_cannot_be_deleted(self):
+        picture = self.upload_picture()
+        self.call(self.card_path("add-card"), {"session_id": self.session_id, "card": {"kind": "picture", "picture_id": picture, "seconds": 2}})
+        status, body = self.call(f"/api/projects/{self.project}/pictures/delete", {"id": picture})
+        self.assertEqual(status, 400, body)
+
+    def test_cards_are_rendered_between_the_clips(self):
+        picture = self.upload_picture()
+        ids = []
+        for clip in self.clips[:2]:
+            ids.append(self.call(f"/api/editor/{self.project}/{clip}/export", {})[1]["export"]["id"])
+        request = Request(self.base + "/api/editor-sequences/cards", data=png_bytes((200, 0, 0)), method="POST",
+                          headers={"Content-Type": "application/octet-stream"})
+        with urlopen(request, timeout=30) as response:
+            card = json.loads(response.read())["card"]
+        items = [{"export": ids[0]}, {"card": card, "seconds": 1.5}, {"picture": picture, "seconds": 1}, {"export": ids[1]}]
+        status, body = self.call("/api/editor-sequences/render", {"items": items, "name": "With cards"})
+        self.assertEqual(status, 202, body)
+        job = body["job"]
+        for _ in range(600):
+            job = self.call(f"/api/editor-jobs/{job['id']}")[1]["job"]
+            if job["status"] != "running":
+                break
+            time.sleep(0.05)
+        self.assertEqual(job["status"], "done", job)
+        output = self.data / "Videos" / job["result"]["saved"]["name"]
+        frames = list(read_frames(_find_ffmpeg(), output, 10, 0, 60, (160, 120)))
+        self.assertEqual(len(frames), 10 + 15 + 10 + 10)
+        self.assertGreater(int(frames[5][60, 80][2]), 200)    # red clip
+        self.assertGreater(int(frames[15][60, 80][0]), 150)   # blue card (BGR)
+        self.assertGreater(int(frames[30][60, 80][1]), 150)   # green picture
+        self.assertGreater(int(frames[40][60, 80][0]), 200)   # blue clip
+        self.assertTrue(export.has_audio(_find_ffmpeg(), output))
+        self.assertFalse(any((self.data / "editor-exports").iterdir()))  # overlays and card pictures removed
+
+    def test_card_requests_are_checked(self):
+        one = self.call(f"/api/editor/{self.project}/{self.clips[0]}/export", {})[1]["export"]["id"]
+        render = lambda items: self.call("/api/editor-sequences/render", {"items": items})[0]
+        self.assertEqual(render([{"export": one}, {"picture": "0" * 32, "seconds": 2}]), 400)
+        self.assertEqual(render([{"export": one}, {"card": "0" * 16, "seconds": 2}]), 404)
+        self.assertEqual(render([{"export": one}, {"picture": "0" * 32, "seconds": 99}]), 400)
+        self.assertEqual(render([{"picture": "0" * 32, "seconds": 2}]), 400)  # a sequence needs a clip
+        request = Request(self.base + "/api/editor-sequences/cards", data=b"not a picture", method="POST",
+                          headers={"Content-Type": "application/octet-stream"})
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=30)
+        self.assertEqual(caught.exception.code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

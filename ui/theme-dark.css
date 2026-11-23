@@ -2833,6 +2833,34 @@
 :root[data-theme="dark"] .annotate-sequence-tools button:hover:not(:disabled) {
   background: var(--annotate-hover);
 }
+:root[data-theme="dark"] .annotate-sequence-block.is-card {
+  background: #dabd8d;
+  border: 0;
+}
+:root[data-theme="dark"] .annotate-sequence-tools button[aria-pressed="true"] {
+  background: var(--annotate-hover);
+  border-color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-card-form {
+  border-top: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .annotate-card-form input,
+:root[data-theme="dark"] .annotate-card-form select,
+:root[data-theme="dark"] .annotate-card-form button {
+  border: 1px solid var(--cm-rule);
+  background: transparent;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-card-form button:hover {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-card-error {
+  color: #ff9888;
+}
+:root[data-theme="dark"] .annotate-card-show {
+  background: #dfe8e5;
+  color: #242622;
+}
 :root[data-theme="dark"] .annotate-sequence-tools svg {
   fill: none;
   stroke: currentColor;

@@ -6,10 +6,10 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=33" />
-    <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=35" />
+    <link rel="stylesheet" href="theme-dark.css?v=2" /><link rel="stylesheet" href="theme.css?v=2" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=31"></script>
+  <script type="module" src="annotate.js?v=32"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -145,11 +145,23 @@
           </div>
           <div class="annotate-sequence" data-sequence role="group" aria-labelledby="sequence-title" hidden>
             <span class="annotate-sequence-head"><span id="sequence-title" class="annotate-row-name">Sequence</span><span class="annotate-sequence-name" data-sequence-name></span></span>
-            <ol class="annotate-sequence-lane" data-sequence-lane aria-label="Clips in this session, in play order"></ol>
+            <ol class="annotate-sequence-lane" data-sequence-lane aria-label="Clips and cards in this session, in play order"></ol>
             <span class="annotate-sequence-tools">
+              <button type="button" data-sequence-play aria-pressed="false" title="Play every clip and card in this order, from this clip"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg><span data-play-label>Play</span></button>
               <select data-sequence-add aria-label="Add a clip from another session"></select>
+              <button type="button" data-sequence-card title="Add a picture or text card between the clips"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5"/><path d="M5.5 7h5M5.5 9.5h3"/></svg>Card</button>
               <button type="button" data-sequence-export><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M4.8 6.8L8 10l3.2-3.2"/><path d="M2.5 11v2.5h11V11"/></svg>Export<span class="annotate-wide-only"> sequence</span></button>
             </span>
+            <form class="annotate-card-form" data-card-form aria-label="Card in the sequence" hidden>
+              <label>Kind<select data-card-kind><option value="text">Text</option><option value="picture">Picture</option></select></label>
+              <label>Words<input type="text" data-card-text maxlength="200" placeholder="Half time" autocomplete="off"></label>
+              <label hidden>Picture<select data-card-picture></select></label>
+              <label>Seconds<input type="number" data-card-seconds min="0.5" max="30" step="0.5" value="3"></label>
+              <button type="submit" data-card-save>Add card</button>
+              <button type="button" data-card-remove>Delete</button>
+              <button type="button" data-card-cancel>Close</button>
+              <span class="annotate-card-error" data-card-error role="alert"></span>
+            </form>
           </div>
           <div class="annotate-tl-scroll" data-tl-scroll>
             <div class="annotate-tl-body" data-tl-body>

@@ -4,7 +4,7 @@ import { test } from "node:test";
 // sequence.js loads the page's request helpers, which listen on the document: give them one.
 globalThis.document ??= { addEventListener() {} };
 globalThis.window ??= { addEventListener() {} };
-const { clipSeconds, clock, dropIndex, moveInOrder, sequenceLayout } = await import("../ui/annotate/sequence.js");
+const { clipSeconds, clock, dropIndex, itemAfter, moveInOrder, sequenceLayout, wrapLines } = await import("../ui/annotate/sequence.js");
 
 test("blocks are sized by how long each clip plays once exported", () => {
   const layout = sequenceLayout([{ id: "a", seconds: 10, duration: 8 }, { id: "b", duration: 30 }]);
@@ -39,3 +39,25 @@ test("lengths read as minutes and seconds", () => {
   assert.equal(clock(65.4), "1:05");
   assert.equal(clock(-3), "0:00");
 });
+
+test("a card's block is as long as it is shown", () => {
+  const layout = sequenceLayout([{ id: "a", kind: "clip", seconds: 6 }, { id: "k1", kind: "card", seconds: 2 }]);
+  assert.equal(layout[1].width, 0.25);
+  assert.equal(layout[1].start, 0.75);
+});
+
+test("the entry after the current one is the next to play", () => {
+  const items = [{ id: "a" }, { id: "k1", kind: "card" }, { id: "b" }];
+  assert.equal(itemAfter(items, "a").id, "k1");
+  assert.equal(itemAfter(items, "k1").id, "b");
+  assert.equal(itemAfter(items, "b"), null);
+  assert.equal(itemAfter(items, "missing"), null);
+});
+
+test("card text wraps on words and keeps explicit lines", () => {
+  const measure = (text) => text.length * 10;
+  assert.deepEqual(wrapLines(measure, "one two three four", 90), ["one two", "three", "four"]);
+  assert.deepEqual(wrapLines(measure, "Half\ntime", 500), ["Half", "time"]);
+  assert.deepEqual(wrapLines(measure, "extraordinarilylongword", 50), ["extraordinarilylongword"]);
+});
+

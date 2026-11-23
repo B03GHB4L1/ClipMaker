@@ -499,7 +499,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 @media (max-width: 900px) { .annotate-timeline { --head-width: 92px; } .annotate-row-head .annotate-row-action { padding: 0 4px; font-size: 10px; } }
 
 /* Sequence (T2): the session's clips in play order; the open clip is the one the tracks below show */
-.annotate-sequence { display: grid; grid-template-columns: var(--head-width) minmax(0, 1fr) auto; align-items: center; gap: 0;
+.annotate-sequence { display: grid; grid-template-columns: var(--head-width) minmax(0, 1fr); align-items: center; gap: 0;
   margin: 0 0 6px; border-top: 1px solid var(--cm-rule); border-bottom: 1px solid var(--cm-rule); }
 .annotate-sequence[hidden] { display: none; }
 .annotate-sequence-head { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; height: 100%; box-sizing: border-box;
@@ -515,14 +515,29 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-sequence-block.is-dragging { z-index: 3; cursor: grabbing; opacity: 0.9; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
 .annotate-sequence-block .annotate-block-label { position: static; inset: auto; flex: 1; min-width: 0; display: block; overflow: hidden; color: #fff; font-size: 10.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .annotate-sequence-index { flex: none; display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 4px; background: rgba(0, 0, 0, 0.25); font-size: 10px; font-variant-numeric: tabular-nums; }
-.annotate-sequence-tools { display: flex; align-items: center; gap: 6px; padding: 0 10px; }
+.annotate-sequence-tools { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; padding: 6px 10px; }
 .annotate-sequence-tools select, .annotate-sequence-tools button { height: 26px; max-width: 160px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px;
   background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; }
 .annotate-sequence-tools button { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .annotate-sequence-tools button:hover:not(:disabled) { background: var(--annotate-hover); }
 .annotate-sequence-tools :disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-sequence-block.is-card { background: #7a5a1e; border: 0; font: inherit; text-align: left; cursor: pointer; }
+.annotate-sequence-block.is-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-sequence-tools button[aria-pressed="true"] { background: var(--annotate-hover); border-color: var(--cm-ink); }
+.annotate-card-form { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; padding: 8px 10px; border-top: 1px solid var(--cm-rule); }
+.annotate-card-form[hidden] { display: none; }
+.annotate-card-form label { display: grid; gap: 2px; font-size: 10.5px; }
+.annotate-card-form label[hidden] { display: none; }
+.annotate-card-form input, .annotate-card-form select, .annotate-card-form button { height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 12px; }
+.annotate-card-form input[type="text"] { width: 220px; max-width: 100%; }
+.annotate-card-form input[type="number"] { width: 64px; }
+.annotate-card-form button { cursor: pointer; }
+.annotate-card-form button:hover { background: var(--annotate-hover); }
+.annotate-card-error { flex-basis: 100%; min-height: 0; color: #b3261e; font-size: 11px; }
+.annotate-card-error:empty { display: none; }
+.annotate-stage.is-card > video, .annotate-stage.is-card > canvas { visibility: hidden; }
+.annotate-card-show { position: absolute; inset: 0; display: grid; place-items: center; padding: 6%; background: #10201b; color: #f4f7f2; text-align: center; }
+.annotate-card-show p { margin: 0; font-size: clamp(18px, 4vw, 40px); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.annotate-card-show img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .annotate-sequence-tools svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-@media (max-width: 640px) {
-  .annotate-sequence { grid-template-columns: var(--head-width) minmax(0, 1fr); }
-  .annotate-sequence-tools { grid-column: 1 / -1; justify-content: flex-end; padding: 6px 10px; }
-}
+
