@@ -8,23 +8,21 @@ from the project's own pictures folder. Writes are atomic.
 """
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
+import struct
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageOps
 
 PICTURE_ID = re.compile(r"^[a-f0-9]{32}$")
 MAX_BYTES = 20_000_000
 MAX_SIDE = 4096
 MAX_PICTURES = 200
-FORMATS = {"PNG", "JPEG", "WEBP"}
 
 
 def _atomic(path: Path, data: bytes) -> None:
@@ -41,28 +39,61 @@ def _atomic(path: Path, data: bytes) -> None:
             os.unlink(temporary)
 
 
+def _size(data: bytes) -> tuple[str, int, int]:
+    """The format, width and height, read from the file's header before anything is decoded."""
+    if data[:8] == bytes.fromhex("89504e470d0a1a0a") and len(data) >= 24:
+        return "PNG", struct.unpack(">II", data[16:24])[0], struct.unpack(">II", data[16:24])[1]
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        kind = data[12:16]
+        if kind == b"VP8X":
+            return "WEBP", 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little")
+        if kind == b"VP8L":
+            bits = int.from_bytes(data[21:25], "little")
+            return "WEBP", 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)
+        if kind == b"VP8 ":
+            return "WEBP", struct.unpack("<H", data[26:28])[0] & 0x3FFF, struct.unpack("<H", data[28:30])[0] & 0x3FFF
+    if data[:2] == bytes.fromhex("ffd8"):
+        position = 2
+        while position + 9 < len(data):
+            if data[position] != 0xFF:
+                position += 1
+                continue
+            marker = data[position + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7 or marker == 0xFF:
+                position += 2 if marker != 0xFF else 1
+                continue
+            length = struct.unpack(">H", data[position + 2:position + 4])[0]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height, width = struct.unpack(">HH", data[position + 5:position + 9])
+                return "JPEG", width, height
+            position += 2 + length
+    raise ValueError("Only PNG, JPEG and WebP pictures can be added.")
+
+
 def clean_png(data: bytes) -> tuple[bytes, int, int]:
     """The picture re-encoded as a PNG, with its width and height. Anything that is not a PNG, JPEG or WebP is refused."""
     if not 0 < len(data) <= MAX_BYTES:
         raise ValueError("A picture must be under 20 MB.")
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            if image.format not in FORMATS:
-                raise ValueError("Only PNG, JPEG and WebP pictures can be added.")
-            width, height = image.size  # read from the header, before anything is decoded
-            if not (1 <= width <= MAX_SIDE and 1 <= height <= MAX_SIDE):
-                raise ValueError(f"A picture can be at most {MAX_SIDE} pixels on a side.")
-            image.load()
-            image = ImageOps.exif_transpose(image)
-            alpha = "A" in image.getbands() or (image.mode == "P" and "transparency" in image.info)
-            image = image.convert("RGBA" if alpha else "RGB")
-            output = io.BytesIO()
-            image.save(output, "PNG")
-            return output.getvalue(), image.width, image.height
-    except Image.DecompressionBombError:
-        raise ValueError(f"A picture can be at most {MAX_SIDE} pixels on a side.") from None
-    except (OSError, SyntaxError):
-        raise ValueError("That file could not be read as a PNG, JPEG or WebP picture.") from None
+    kind, width, height = _size(data)
+    if not (1 <= width <= MAX_SIDE and 1 <= height <= MAX_SIDE):
+        raise ValueError(f"A picture can be at most {MAX_SIDE} pixels on a side.")
+    import cv2  # bundled for the tracker; Pillow is not shipped
+    import numpy as np
+    # A JPEG is read with its camera orientation applied; PNG and WebP keep their transparency.
+    flag = cv2.IMREAD_COLOR if kind == "JPEG" else cv2.IMREAD_UNCHANGED
+    image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), flag)
+    if image is None or image.ndim not in (2, 3):
+        raise ValueError("That file could not be read as a PNG, JPEG or WebP picture.")
+    if image.dtype != np.uint8:
+        image = cv2.convertScaleAbs(image, alpha=255.0 / (65535.0 if image.dtype == np.uint16 else 1.0))
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    elif image.shape[2] == 2:
+        image = cv2.cvtColor(image[:, :, 0], cv2.COLOR_GRAY2BGR)
+    ok, encoded = cv2.imencode(".png", image)
+    if not ok:
+        raise ValueError("That file could not be read as a PNG, JPEG or WebP picture.")
+    return encoded.tobytes(), int(image.shape[1]), int(image.shape[0])
 
 
 def _name(value: Any) -> str:

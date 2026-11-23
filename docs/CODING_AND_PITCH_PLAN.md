@@ -33,7 +33,8 @@ The rules that bind every step:
 | I | Picture inserts | No | Board inserts (M7) |
 
 **Decided 2026-11-23, to ship soon:** C, L and P (P1 to P3) are done. Next are I, then B. T (tracking every player, with
-teams), A and O are left for a future update.
+teams), A and O are left for a future update,
+along with one more (asked 2026-11-23): exporting the positions of followed players to the event table for coded matches.
 Asked 2026-11-23, after I and B (a small P3c): a speed-over-time chart for a followed player and its export; and a Measure that can end on followed players, so its distance updates as they move.
 
 I is small and independent; it can slot in at any point. C and P are independent and can run side by side. L follows C because live
