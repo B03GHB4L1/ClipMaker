@@ -802,7 +802,7 @@ def exercise_kickoff_player(page, base, root):
     expect(page.locator('[data-timeline-start]')).to_have_text("00:01:00")
     expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
     expect(second).to_be_visible()
-    page.get_by_role("button", name="Full").click()
+    page.get_by_role("button", name="Full", exact=True).click()
     expect(page.locator('[data-timeline-start]')).to_have_text("00:00:00")
     expect(page.locator('[data-timeline-end]')).to_have_text("00:03:00")
 
