@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import annotations
+from . import annotations, pictures
 
 PROJECT_ID = re.compile(r"^[a-zA-Z0-9_-]{1,160}$")
 CLIP_ID = re.compile(r"^[a-f0-9]{32}$")
@@ -139,8 +139,17 @@ class EditorClips:
         record, _ = self.get(project_id, clip_id)
         clean = annotations.clean_document(document, record["duration"], record["frames"])
         _, _, path = self._clip_paths(project_id, clip_id)
+        folder = self.pictures_dir(project_id)
+        if any(pictures.file_of(folder, picture_id) is None for picture_id in pictures.picture_ids(clean)):
+            raise ValueError("A picture in this clip is not in the project any more. Remove its insert or add the picture again.")
         _atomic_json(path, clean)
         return clean
+
+    def project_dir(self, project_id: str) -> Path:
+        return self._project_dir(project_id)
+
+    def pictures_dir(self, project_id: str) -> Path:
+        return self._project_dir(project_id) / "pictures"
 
     # -----------------------------------------------------------------------
     # Sessions: named groups of clips annotated together (the Annotate tab)

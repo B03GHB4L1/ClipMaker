@@ -34,6 +34,7 @@ The rules that bind every step:
 
 **Decided 2026-11-23, to ship soon:** C, L and P (P1 to P3) are done. Next are I, then B. T (tracking every player, with
 teams), A and O are left for a future update.
+Asked 2026-11-23, after I and B (a small P3c): a speed-over-time chart for a followed player and its export; and a Measure that can end on followed players, so its distance updates as they move.
 
 I is small and independent; it can slot in at any point. C and P are independent and can run side by side. L follows C because live
 coding is the same panel on a growing recording. B can start any time after C.
@@ -519,9 +520,12 @@ clip, with the same drawing tools on top.
 
 ### Milestones and tests
 
-- **I1** Upload route, picture library, insert with contain/fill, export.
-- **I2** "Send to clip" from the export of any chart, not only the Tactical Lab's: every page that exports a chart
-  image (Tactical Lab, Analyst Room, Filter's charts) offers it, in both themes.
+- **I1** (done 2026-11-23) Upload route, picture library, insert with contain/fill, export. Pictures are re-encoded to clean PNGs
+  (at most 4096 px a side, 20 MB, 200 per project) in `projects/<id>/pictures/`; an insert is a freeze whose background is a
+  picture; deleting a picture an insert shows is refused.
+- **I2** (done 2026-11-23) "Send to clip" from the export of any chart: a button beside PNG in the shared chart component
+  (Analyst Room event charts) and in the Plotly toolbar (Comparison, Tactical Lab). It sends the same branded picture to the
+  active project's pictures. The Filter page has no chart export of its own.
 - Tests: oversize and non-image uploads refused; a project with a picture
   insert saves, reopens and exports with the picture's pixels in the right
   frames; deleting a picture in use is refused.

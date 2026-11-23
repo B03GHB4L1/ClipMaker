@@ -259,6 +259,17 @@ class SharedUiTests(unittest.TestCase):
             self.assertNotIn("{ ...item.config, responsive: true })", source.replace("plotlyConfig({ ...item.config, responsive: true }", ""), name)
             self.assertNotIn("{ ...element.config, responsive: true })", source.replace("plotlyConfig({ ...element.config, responsive: true }", ""), name)
 
+    def test_any_chart_picture_can_be_sent_to_the_clip_editor(self):
+        component = (UI.parent / "app" / "smp_component" / "frontend" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-export="send"', component)
+        self.assertIn('type: "vizorplay:send-to-clip"', component)
+        host = (UI / "analysis" / "component-host.js").read_text(encoding="utf-8")
+        self.assertIn('message.type === "vizorplay:send-to-clip"', host)
+        helper = (UI / "save-clip.js").read_text(encoding="utf-8")
+        self.assertIn("export const sendToClip", helper)
+        self.assertIn('/pictures`', helper)
+        self.assertIn('name: "sendToClip"', helper)  # the Plotly charts (comparison, tactical) get the same button
+
     def test_video_lab_reel_is_picked_moment_by_moment(self):
         source = (UI / "analysis" / "tabs" / "tactical.js").read_text(encoding="utf-8")
         self.assertIn('"vl_selected_moment_", "vl_reel_moments_"', source)  # picks saved per playlist
@@ -360,7 +371,8 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("data-freeze ", side)
         self.assertIn("data-board ", side)
         self.assertIn("data-pitch ", side)
-        self.assertEqual(side.count("<small>"), 6)  # every player and insert button says what it does (P1 adds Mark the pitch)
+        self.assertIn("data-picture ", side)
+        self.assertEqual(side.count("<small>"), 7)  # every player and insert button says what it does (P1 adds Mark the pitch, I1 Insert picture)
         transport = html[html.index('<div class="annotate-transport"'):html.index("</div>", html.index('<div class="annotate-transport"'))]
         self.assertNotIn("data-freeze", transport)  # it overflowed the transport row
         # Vague tracking labels are gone; the buttons name their action.

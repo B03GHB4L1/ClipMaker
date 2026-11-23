@@ -316,8 +316,24 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-freezes li > button:first-child { flex: 1; }
 .annotate-freezes input { width: 56px; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
 .annotate-freezes li.is-board { flex-wrap: wrap; padding-bottom: 4px; }
-.annotate-board-settings { display: flex; flex: 1 0 100%; gap: 4px; padding-left: 8px; }
+.annotate-board-settings { display: flex; flex: 1 0 100%; box-sizing: border-box; flex-wrap: wrap; gap: 4px; padding-left: 8px; }
 .annotate-board-settings select { flex: 1; min-width: 0; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-picture-name { flex: 1 0 100%; padding-left: 8px; overflow: hidden; color: var(--cm-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-picture-panel { display: grid; gap: 6px; margin-top: 6px; padding: 8px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-picture-panel[hidden] { display: none; }
+.annotate-picture-head { display: flex; align-items: center; gap: 6px; }
+.annotate-picture-head strong { flex: 1; font-size: 12px; }
+.annotate-picture-add { position: relative; display: inline-flex; align-items: center; min-height: 30px; padding: 0 10px; border: 1px solid var(--cm-ink); border-radius: 6px; background: var(--cm-ink); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; }
+.annotate-picture-add input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.annotate-picture-add:focus-within { outline: 2px solid var(--annotate-freeze); outline-offset: 2px; }
+.annotate-picture-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+.annotate-picture-list li { position: relative; min-width: 0; }
+.annotate-picture-list li > button:first-child { display: grid; gap: 3px; width: 100%; padding: 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.annotate-picture-list li > button:first-child:hover { background: var(--annotate-hover); }
+.annotate-picture-list img { width: 100%; aspect-ratio: 16 / 10; border-radius: 3px; background: #d9dbd4; object-fit: contain; }
+.annotate-picture-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-picture-list .annotate-remove { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.85); cursor: pointer; }
+.annotate-picture-panel .is-error { color: var(--annotate-lost); }
 .annotate-main .annotate-remove { width: 26px; height: 26px; padding: 0; color: var(--cm-muted); }
 .annotate-main .annotate-remove svg { width: 12px; height: 12px; }
 .annotate-main .annotate-remove:hover:not(:disabled) { color: #9b2a28; }

@@ -7,7 +7,7 @@ import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, minim
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
-import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
+import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, PICTURE_COLOURS, PICTURE_FITS, pictureInsert, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { isFlat, PITCH_KINDS, placeFlat, projectItems } from "./annotate/flat.js";
@@ -39,6 +39,8 @@ let tool = "select";
 let selectedId = null;
 let selectedIds = []; // several drawings chosen at once (a drag round them, or Shift+click); empty otherwise
 let selectedFreeze = null; // a freeze or board chosen on the Freezes lane (its frame)
+let pictureList = []; // the project's picture library (annotate/board.js: picture inserts)
+const pictureImages = new Map(); // picture id -> {image, ready}
 let gesture = null; // the drag or drawing in progress
 let zoneDraft = null; // corners of a zone being drawn
 let pointer = null; // last pointer position in fractions, for the zone preview
@@ -306,7 +308,7 @@ const render = () => {
   ctx.clearRect(0, 0, w, h);
   const time = currentTime();
   const board = boardNow();
-  if (board) drawBoard(ctx, w, h, board.background);
+  if (board) drawBoard(ctx, w, h, board.background, pictureOf);
   const items = shown().map((item) => (gesture?.previews?.[item.id] || (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item)));
   const here = board ? null : pitchHere();
   const pitch = here?.calibration || null;
@@ -607,7 +609,7 @@ const renderInspector = () => {
   const many = selectedIds.length > 1;
   const freeze = selectedFreeze !== null ? doc.freezes.find((f) => f.atFrame === selectedFreeze) : null;
   $("[data-inspector-title]").textContent = many ? `${selectedIds.length} drawings selected`
-    : freeze ? `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}`
+    : freeze ? `${insertName(freeze)} at frame ${freeze.atFrame + 1}`
       : item ? `${KIND_NAMES[item.kind]} settings` : kind ? `New ${KIND_NAMES[kind].toLowerCase()}` : empty ? "How to start" : "Nothing selected";
   if (many) {
     fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
@@ -617,11 +619,13 @@ const renderInspector = () => {
     fields.append(remove);
   } else if (freeze) {
     fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
-      textContent: freeze.background
-        ? "A tactical board, with its own tokens and drawings. Press Delete to remove it with everything on it; Undo brings it back."
-        : "The picture holds still here. Drag its right edge on the timeline to change the length, or press Delete to remove it." }));
+      textContent: freeze.background?.kind === "picture"
+        ? "An inserted picture, with its own drawings on top. Change how it fits in the Freezes list. Press Delete to remove it with everything on it; Undo brings it back."
+        : freeze.background
+          ? "A tactical board, with its own tokens and drawings. Press Delete to remove it with everything on it; Undo brings it back."
+          : "The picture holds still here. Drag its right edge on the timeline to change the length, or press Delete to remove it." }));
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-danger",
-      textContent: freeze.background ? "Delete board" : "Delete freeze" });
+      textContent: `Delete ${insertName(freeze).toLowerCase()}` });
     remove.onclick = () => removeFreeze(freeze.atFrame);
     fields.append(remove);
   } else if (!kind && empty) {
@@ -1373,13 +1377,15 @@ function renderPlayers() {
 // Freezes
 // ---------------------------------------------------------------------------
 const changeFreeze = (frame, seconds) => doc.commitDocument((value) => (seconds > 0 ? setFreeze(value, timing, frame, seconds) : removeInsert(value, timing, frame)));
-// Remove a freeze, or a board with its tokens and drawings, in one undoable step.
+// "Freeze", "Board" or "Picture": what the insert at a freeze is.
+const insertName = (freeze) => (freeze.background?.kind === "picture" ? "Picture" : freeze.background ? "Board" : "Freeze");
+// Remove a freeze, or a board or picture with its tokens and drawings, in one undoable step.
 const removeFreeze = (frame) => {
   const freeze = doc.freezes.find((f) => f.atFrame === frame);
   if (!freeze) return;
   if (selectedFreeze === frame) selectedFreeze = null;
   changeFreeze(frame, 0);
-  trackStatus(`${freeze.background ? "Board" : "Freeze"} at frame ${frame + 1} deleted. Undo brings it back.`);
+  trackStatus(`${insertName(freeze)} at frame ${frame + 1} deleted. Undo brings it back.`);
 };
 const selectFreeze = (frame) => {
   selectedFreeze = frame;
@@ -1411,7 +1417,7 @@ const renderFreezes = () => {
     const board = freeze.background;
     const start = freezeStart(freeze.atFrame, timing, freezes);
     const go = Object.assign(document.createElement("button"), { type: "button",
-      textContent: `${board ? "Board" : "Frame"} ${freeze.atFrame + 1} · ${formatTime(start)}` });
+      textContent: `${insertName(freeze) === "Freeze" ? "Frame" : insertName(freeze)} ${freeze.atFrame + 1} · ${formatTime(start)}` });
     go.onclick = () => seekOutput(start);
     const seconds = Object.assign(document.createElement("input"), { type: "number", min: "0.04", max: "60", step: "0.1", value: String(freeze.seconds) });
     seconds.dataset.freezeSeconds = String(freeze.atFrame);
@@ -1423,8 +1429,8 @@ const renderFreezes = () => {
     };
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", title: "Remove this freeze",
       innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' });
-    remove.setAttribute("aria-label", `Remove the ${board ? "board" : "freeze"} at frame ${freeze.atFrame + 1}`);
-    if (board) remove.title = "Remove this board with its tokens and drawings";
+    remove.setAttribute("aria-label", `Remove the ${insertName(freeze).toLowerCase()} at frame ${freeze.atFrame + 1}`);
+    if (board) remove.title = `Remove this ${insertName(freeze).toLowerCase()} with its drawings`;
     remove.onclick = () => removeFreeze(freeze.atFrame);
     entry.append(go, seconds, Object.assign(document.createElement("span"), { textContent: "s" }), remove);
     if (board) {
@@ -1432,15 +1438,24 @@ const renderFreezes = () => {
       const settings = Object.assign(document.createElement("span"), { className: "annotate-board-settings" });
       const choice = (label, options, value, change) => {
         const select = document.createElement("select");
-        select.setAttribute("aria-label", `${label} of the board at frame ${freeze.atFrame + 1}`);
+        select.setAttribute("aria-label", `${label} of the ${insertName(freeze).toLowerCase()} at frame ${freeze.atFrame + 1}`);
         select.append(...Object.entries(options).map(([key, text]) => new Option(typeof text === "string" ? text : text.name, key, false, key === value)));
         select.onchange = () => change(select.value);
         return select;
       };
-      settings.append(
-        choice("View", VIEWS, board.view, (view) => doc.commitDocument((value) => changeBoardView(value, freeze.atFrame, view, aspect()))),
-        choice("Look", THEMES, board.theme, (theme) => doc.commitDocument((value) => changeBoard(value, freeze.atFrame, { theme }))),
-      );
+      if (board.kind === "picture") {
+        const name = pictureList.find((picture) => picture.id === board.id)?.name || "Missing picture";
+        settings.append(
+          Object.assign(document.createElement("span"), { className: "annotate-picture-name", textContent: name, title: name }),
+          choice("Fit", PICTURE_FITS, board.fit, (fit) => doc.commitDocument((value) => changeBoard(value, freeze.atFrame, { fit }))),
+          choice("Background", PICTURE_COLOURS, board.colour, (colour) => doc.commitDocument((value) => changeBoard(value, freeze.atFrame, { colour }))),
+        );
+      } else {
+        settings.append(
+          choice("View", VIEWS, board.view, (view) => doc.commitDocument((value) => changeBoardView(value, freeze.atFrame, view, aspect()))),
+          choice("Look", THEMES, board.theme, (theme) => doc.commitDocument((value) => changeBoard(value, freeze.atFrame, { theme }))),
+        );
+      }
       entry.append(settings);
     }
     return entry;
@@ -1452,11 +1467,11 @@ const renderFreezes = () => {
     const block = document.createElement("span");
     block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}${freeze.atFrame === selectedFreeze ? " is-selected" : ""}`;
     block.dataset.laneFreeze = String(freeze.atFrame);
-    block.title = `${freeze.background ? "Board" : "Freeze"} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag its right edge to change the length.`;
+    block.title = `${insertName(freeze)} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag its right edge to change the length.`;
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-lane-remove",
       innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>' });
     remove.dataset.freezeRemove = String(freeze.atFrame);
-    remove.title = freeze.background ? "Delete this board with its tokens and drawings" : "Delete this freeze";
+    remove.title = freeze.background ? `Delete this ${insertName(freeze).toLowerCase()} with its drawings` : "Delete this freeze";
     remove.setAttribute("aria-label", remove.title);
     block.append(remove);
     block.style.left = `${(freezeStart(freeze.atFrame, timing, freezes) / length) * 100}%`;
@@ -1817,7 +1832,7 @@ function openCalibration(mode = "board") {
   $("[data-calib-save]").hidden = board;
   $("[data-calib-forget]").hidden = board || !saved;
   // Boards before this frame with tokens: their players can glide to where they are here (M8).
-  const earlier = sortedFreezes().filter((f) => f.background && f.atFrame < calib.cut
+  const earlier = sortedFreezes().filter((f) => f.background?.kind === "board" && f.atFrame < calib.cut
     && doc.items.some((item) => item.on === f.atFrame && item.kind === "token"));
   const target = $("[data-calib-target]");
   target.replaceChildren(new Option("A new board", ""), ...earlier.reverse().map((f) => new Option(`Players of board ${f.atFrame + 1} move here`, String(f.atFrame))));
@@ -2294,6 +2309,112 @@ function makeBoard(result) {
 }
 
 // ---------------------------------------------------------------------------
+// Picture inserts (section I): a picture from the project's library shown for a few seconds
+// ---------------------------------------------------------------------------
+const pictureOf = { get: (id) => pictureImages.get(id)?.image };
+const pictureLoad = (picture) => {
+  if (!pictureImages.has(picture.id)) {
+    const image = new Image();
+    const entry = { image, ready: null };
+    entry.ready = new Promise((resolve) => {
+      image.onload = () => { resolve(true); scheduleRender(); };
+      image.onerror = () => resolve(false);
+    });
+    image.src = picture.url;
+    pictureImages.set(picture.id, entry);
+  }
+  return pictureImages.get(picture.id).ready;
+};
+// Wait for the pictures an export or screenshot draws; one that cannot be loaded stops it with a plain message.
+const picturesReady = async (ids) => {
+  const loaded = await Promise.all([...new Set(ids)].map((id) => {
+    const picture = pictureList.find((item) => item.id === id);
+    return picture ? pictureLoad(picture) : false;
+  }));
+  if (loaded.includes(false)) throw new Error("A picture in this clip could not be loaded. Remove its insert or add the picture again.");
+};
+const setPictures = (list) => {
+  pictureList = list;
+  list.forEach(pictureLoad);
+  renderPictureLibrary();
+  if (doc) { renderFreezes(); scheduleRender(); }
+};
+const picturePath = (tail = "") => `/api/projects/${encodeURIComponent(projectId)}/pictures${tail}`;
+const pictureStatus = (text, bad = false) => {
+  const line = $("[data-picture-status]");
+  line.textContent = text;
+  line.classList.toggle("is-error", bad);
+};
+
+function renderPictureLibrary() {
+  const grid = $("[data-picture-list]");
+  grid.replaceChildren(...pictureList.map((picture) => {
+    const card = document.createElement("li");
+    const insert = Object.assign(document.createElement("button"), { type: "button", title: `Insert ${picture.name} at the playhead` });
+    const thumb = Object.assign(document.createElement("img"), { src: picture.url, alt: "", loading: "lazy" });
+    insert.append(thumb, Object.assign(document.createElement("span"), { textContent: picture.name }));
+    insert.onclick = () => insertPicture(picture);
+    const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-remove", title: `Delete ${picture.name} from the project`,
+      innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>' });
+    remove.setAttribute("aria-label", `Delete ${picture.name} from the project`);
+    remove.onclick = () => deletePicture(picture);
+    card.append(insert, remove);
+    return card;
+  }));
+  $("[data-picture-empty]").hidden = pictureList.length > 0;
+}
+
+async function uploadPicture(file) {
+  if (!file) return;
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { pictureStatus("Choose a PNG, JPEG or WebP picture.", true); return; }
+  if (file.size > 20_000_000) { pictureStatus("A picture must be under 20 MB.", true); return; }
+  pictureStatus("Adding the picture...");
+  try {
+    const response = await fetch(picturePath(), { method: "POST", body: file,
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) } });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+    setPictures(payload.pictures);
+    await pictureLoad(payload.picture);
+    pictureStatus(`${payload.picture.name} added. Click it to insert it at the playhead.`);
+  } catch (error) {
+    pictureStatus(error.message, true);
+  }
+}
+
+async function deletePicture(picture) {
+  try {
+    const { pictures } = await projectRequest(picturePath("/delete"), { id: picture.id });
+    pictureImages.delete(picture.id);
+    setPictures(pictures);
+    pictureStatus(`${picture.name} deleted from the project.`);
+  } catch (error) {
+    pictureStatus(error.message, true); // refused while an insert shows it
+  }
+}
+
+function insertPicture(picture) {
+  if (!doc || !clip) return;
+  const frame = boardFrame(doc.value, timing, cutFrameNow());
+  if (frame === null) { pictureStatus("There is no free frame after this one for an insert.", true); return; }
+  doc.commitDocument((value) => addBoard(value, timing, frame, BOARD_SECONDS, pictureInsert(picture.id)));
+  setTool("select");
+  seekOutput(freezeStart(frame, timing, doc.freezes));
+  closePicturePanel();
+  trackStatus(`${picture.name} inserted for ${BOARD_SECONDS} s. Draw on it; change how it fits in the Freezes list.`);
+}
+
+function openPicturePanel() {
+  $("[data-picture-panel]").hidden = false;
+  $("[data-picture]").setAttribute("aria-expanded", "true");
+  pictureStatus("");
+}
+function closePicturePanel() {
+  $("[data-picture-panel]").hidden = true;
+  $("[data-picture]").setAttribute("aria-expanded", "false");
+}
+
+// ---------------------------------------------------------------------------
 // Text
 // ---------------------------------------------------------------------------
 const openText = (point, item = null) => {
@@ -2753,7 +2874,8 @@ const screenshot = async (button) => {
   shot.height = video.videoHeight || clip.height;
   const context = shot.getContext("2d");
   const board = boardNow();
-  if (board) drawBoard(context, shot.width, shot.height, board.background);
+  if (board?.background.kind === "picture") await picturesReady([board.background.id]);
+  if (board) drawBoard(context, shot.width, shot.height, board.background, pictureOf);
   else context.drawImage(video, 0, 0, shot.width, shot.height);
   drawItems(context, projectItems(shown(), board ? null : pitchHere()?.calibration), shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
@@ -2842,6 +2964,7 @@ const exportVideo = async () => {
     const value = doc.value; // the saved document; edits made during the export are not in it
     ({ export: run.session } = await projectRequest(`${editorPath()}/export`, {}));
     const { id, frames, width, height } = run.session;
+    await picturesReady((value.freezes || []).flatMap((freeze) => (freeze.background?.kind === "picture" ? [freeze.background.id] : [])));
     const exportPitch = clipPitchTrack(value, aspect()); // flat drawings, as on screen
     const sheet = document.createElement("canvas");
     sheet.width = width;
@@ -2868,7 +2991,7 @@ const exportVideo = async () => {
         let entry = { frame: n, crop: null };
         if (shown.length || board) {
           context.clearRect(0, 0, width, height);
-          if (board) drawBoard(context, width, height, board.background); // covers the frozen frame
+          if (board) drawBoard(context, width, height, board.background, pictureOf); // covers the frozen frame
           for (let index = 0; index < shown.length; index += 2) drawItem(context, projectItems([shown[index]], board ? null : exportPitch?.at(frame)?.calibration)[0], width, height, shown[index + 1]);
           const pixels = context.getImageData(0, 0, width, height).data;
           // Moving tokens change a few places: send those tiles over the overlay already held (M8).
@@ -2945,6 +3068,9 @@ const wire = () => {
   $("[data-freeze]").onclick = freezeHere;
   $("[data-split]").onclick = splitHere;
   $("[data-board]").onclick = () => openCalibration("board");
+  $("[data-picture]").onclick = () => ($("[data-picture-panel]").hidden ? openPicturePanel() : closePicturePanel());
+  $("[data-picture-close]").onclick = closePicturePanel;
+  $("[data-picture-file]").onchange = (event) => { uploadPicture(event.target.files[0]); event.target.value = ""; };
   $("[data-pitch]").onclick = () => openCalibration("pitch");
   $("[data-calib-save]").onclick = savePitch;
   $("[data-calib-forget]").onclick = forgetPitch;
@@ -3034,6 +3160,7 @@ const start = async () => {
     const opened = await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`);
     clip = opened.clip;
     doc = createDocument(opened.annotations);
+    projectRequest(picturePath()).then(({ pictures }) => setPictures(pictures)).catch(() => pictureStatus("The picture library could not be read.", true));
     refreshTiming();
     renderPitchSaved();
     document.title = `VizorPlay - Annotate ${clip.name}`;

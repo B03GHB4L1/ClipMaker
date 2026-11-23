@@ -2475,6 +2475,45 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
     def editor_clips(self) -> EditorClips:
         return self.server.editor_clips  # type: ignore[attr-defined]
 
+    def picture_rows(self, project_id: str) -> list[dict[str, Any]]:
+        """The project's pictures (telestration/pictures.py), each with a link the editor draws it from."""
+        from telestration import pictures
+        folder = self.editor_clips.pictures_dir(project_id)
+        rows = []
+        for record in pictures.listing(folder):
+            file = folder / f"{record['id']}.png"
+            token = uuid.uuid5(uuid.NAMESPACE_URL, str(file.resolve())).hex
+            self.media_files[token] = file
+            rows.append({**record, "url": f"/api/media/{token}"})
+        return rows
+
+    def add_picture(self, project_id: str) -> None:
+        """POST /api/projects/<id>/pictures: the picture's bytes as the body, its name in X-File-Name."""
+        from telestration import pictures
+        folder = self.editor_clips.pictures_dir(project_id)
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > pictures.MAX_BYTES:
+            raise ValueError("A picture must be under 20 MB.")
+        data = self.rfile.read(length)
+        self._body_read = getattr(self, "_body_read", 0) + len(data)
+        if len(data) != length:
+            raise ValueError("The picture did not arrive in full; nothing was added.")
+        record = pictures.add(folder, data, unquote(self.headers.get("X-File-Name", "")))
+        rows = self.picture_rows(project_id)
+        self.send_json(HTTPStatus.CREATED, {"picture": next(row for row in rows if row["id"] == record["id"]), "pictures": rows})
+
+    def delete_picture(self, project_id: str, body: dict[str, Any]) -> None:
+        """POST /api/projects/<id>/pictures/delete {id}: refused while an insert shows the picture."""
+        from telestration import pictures
+        if set(body) - {"id"}:
+            raise ValueError("Send the picture's id.")
+        try:
+            pictures.remove(self.editor_clips.project_dir(project_id), str(body.get("id") or ""))
+        except LookupError as error:
+            self.send_post_error(HTTPStatus.NOT_FOUND, str(error))
+            return
+        self.send_json(HTTPStatus.OK, {"pictures": self.picture_rows(project_id)})
+
     def scratch_clip(self, token: str) -> Path | None:
         """A clip the engine cut for watching (never a path named by the request)."""
         source = self.media_files.get(token)
@@ -2941,6 +2980,15 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/live/"):
             self.send_live_file(path)
             return
+        if path.startswith("/api/projects/") and path.endswith("/pictures"):
+            parts = path.split("/")
+            try:
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                self.send_json(HTTPStatus.OK, {"pictures": self.picture_rows(parts[3])})
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         if path.startswith("/api/projects/") and path.endswith("/live"):
             parts = path.split("/")
             if len(parts) != 5 or self.store.get(parts[3]) is None:
@@ -3011,6 +3059,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path == "/api/images/save":
                 self.save_image()
                 return
+            if path.startswith("/api/projects/") and path.endswith("/pictures") and path.count("/") == 4:
+                self.add_picture(path.split("/")[3])
+                return
             if path.startswith("/api/editor-exports/") and path.endswith("/overlays"):
                 self.receive_overlays(path.split("/")[-2])
                 return
@@ -3067,6 +3118,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if len(parts) != 5:
                     raise ValueError("Unknown project action")
                 self.project_codes(parts[3], body)
+                return
+            if path.startswith("/api/projects/") and path.endswith("/pictures/delete"):
+                parts = path.split("/")
+                if len(parts) != 6:
+                    raise ValueError("Unknown project action")
+                self.delete_picture(parts[3], body)
                 return
             if path.startswith("/api/projects/") and path.rsplit("/", 2)[-2:] in (["live", "start"], ["live", "stop"], ["live", "clip"]):
                 parts = path.split("/")

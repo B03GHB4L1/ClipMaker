@@ -577,6 +577,9 @@ def exercise_native_workspace(page, base, project_id, evidence, errors):
     # windows ignore browser downloads); a pop-up says where they went.
     component.locator('[data-export="png"]').click()
     downloads = [validate_chart_download(saved_picture(page), evidence / "native-shot-map.png", "PNG")]
+    # "Send to clip" adds the same branded picture to the project, for Insert picture in the editor.
+    component.locator('[data-export="send"]').click()
+    expect(page.locator(".saved-popup.is-visible")).to_contain_text("Sent to the clip editor", timeout=30000)
     # The GIF animations: Pulse, Still and Build are gone; Shot Flight leads on a shot map.
     expect(component.locator('[data-export-animation] option')).to_have_text(["Shot Flight", "Match Clock"])
     # Preview plays the animation on the chart; Stop puts the chart back. No file is made.
@@ -909,7 +912,7 @@ def exercise_update_notice(page, base):
     page.get_by_role("button", name="Update and restart").click()
     # Outside the desktop shell the engine answers 204, so the page stays put.
     expect(notice).to_contain_text("Downloading VizorPlay 1.0.1")
-    assert page.url.endswith("/filters.html"), page.url
+    assert page.url.split("?")[0].endswith("/filters.html"), page.url
     page.evaluate("window.vizorplayUpdateStatus('error', 'the signature did not match')")
     expect(notice).to_contain_text("The update did not install: the signature did not match")
     expect(page.get_by_role("button", name="Try again")).to_be_enabled()

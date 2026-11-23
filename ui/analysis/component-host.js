@@ -3,7 +3,7 @@
 // componentReady, setFrameHeight and setComponentValue; the host answers with
 // "streamlit:render" carrying the same args the Python wrappers sent.
 
-import { showSaved, showSaveError } from "../save-clip.js";
+import { sendToClip, showSaved, showSaveError } from "../save-clip.js";
 
 const COMPONENT_URL = "/analysis-component/index.html";
 
@@ -31,6 +31,7 @@ export class ComponentHost {
     if (!message || typeof message !== "object") return;
     // Chart pictures (PNG/GIF) are saved by the engine; say where they went.
     if (message.type === "vizorplay:saved" && message.saved) return void showSaved(message.saved, "Picture");
+    if (message.type === "vizorplay:send-to-clip" && message.blob instanceof Blob) return void sendToClip(message.blob, String(message.name || ""));
     if (message.type === "vizorplay:save-failed") return void showSaveError(String(message.error || ""), "Picture");
     if (!message.isStreamlitMessage) return;
     if (message.type === "streamlit:componentReady") {
