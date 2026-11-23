@@ -16,7 +16,7 @@ import { minimapPlayers, motionOf, pitchPositions, speedAt } from "./annotate/mo
 import { drawSpeedChart, SPEED_PAPER } from "./annotate/speedchart.js";
 import { fitBox } from "./annotate/fit.js";
 import { showLibrary } from "./annotate/library.js";
-import { showSequence } from "./annotate/sequence.js";
+import { drawTextCard, showSequence } from "./annotate/sequence.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -193,6 +193,7 @@ function tick(now) {
       if (!following) {
         outTime = total();
         pause();
+        sequence?.endOfClip(); // a play-through carries on to the next clip or card
       } else {
         run.part += 1;
         if (following.from !== here.to) video.currentTime = (following.from + 0.1) / fps();
@@ -3063,7 +3064,7 @@ const screenshot = async (button) => {
 // and encodes the clip into the user's VizorPlay folder.
 // ---------------------------------------------------------------------------
 let exporting = null; // {session | sessions, job, cancelled}
-let sequence = null; // the session this clip is in (annotate/sequence.js)
+let sequence = null; // the sequence strip's controller (annotate/sequence.js)
 const exportPanel = $("[data-export-panel]");
 const exportStatus = (text, share) => {
   exportPanel.hidden = false;
@@ -3073,7 +3074,7 @@ const exportStatus = (text, share) => {
 const endExport = (text) => {
   exporting = null;
   $("[data-export]").disabled = false;
-  if (sequence) $("[data-sequence-export]").disabled = sequence.clips.length < 2;
+  if (sequence?.session()) $("[data-sequence-export]").disabled = sequence.session().items.length < 2;
   $("[data-export-cancel]").disabled = false;
   if (text) {
     exportStatus(text, 0);
@@ -3245,20 +3246,39 @@ const exportSequence = async (session) => {
   $("[data-sequence-export]").disabled = true;
   exportStatus("Starting sequence export...", 0);
   const count = session.clips.length;
+  const items = []; // what the engine joins, in play order
+  let done = 0;
   try {
-    for (let index = 0; index < count; index += 1) {
-      const entry = session.clips[index];
+    for (const entry of session.items) {
+      if (entry.kind === "card") {
+        if (entry.type === "picture") {
+          items.push({ picture: entry.picture_id, seconds: entry.seconds });
+        } else {
+          // A text card is drawn here, at the first clip's size, and sent as a picture.
+          const first = session.clips[0];
+          const png = await drawTextCard(entry.text, first.width || clip.width, first.height || clip.height);
+          const response = await fetch("/api/editor-sequences/cards", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: png });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+          items.push({ card: payload.card, seconds: entry.seconds });
+        }
+        if (run.cancelled) return;
+        continue;
+      }
+      const index = done;
+      done += 1;
       const path = `/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(entry.id)}`;
       const opened = entry.id === clipId ? { clip, annotations: doc.value } : await projectRequest(path);
       if (run.cancelled) return;
       const { export: exportSession } = await projectRequest(`${path}/export`, {});
       run.sessions.push(exportSession);
+      items.push({ export: exportSession.id });
       const label = `Clip ${index + 1} of ${count}: drawing overlays`;
       const drawn = await drawOverlays(opened.clip, opened.annotations, exportSession, run,
-        (done) => exportStatus(`${label}, frame ${done} of ${exportSession.frames}`, ((index + done / exportSession.frames) / count) * DRAWING_SHARE));
+        (frame) => exportStatus(`${label}, frame ${frame} of ${exportSession.frames}`, ((index + frame / exportSession.frames) / count) * DRAWING_SHARE));
       if (!drawn) return;
     }
-    ({ job: run.job } = await projectRequest("/api/editor-sequences/render", { exports: run.sessions.map((each) => each.id), name: session.name }));
+    ({ job: run.job } = await projectRequest("/api/editor-sequences/render", { items, name: session.name }));
     await followExport(run);
   } catch (error) {
     if (!run.cancelled) {
@@ -3413,7 +3433,13 @@ const start = async () => {
       onExport: exportSequence,
       beforeLeave: async () => { finishText(); await save(); },
       onError: (message) => showSaveError(message, "Sequence"),
-    }).then((found) => { sequence = found; });
+      stage: $("[data-stage]"),
+      onPlay: () => { if (!playing && doc) play(); },
+    }).then((found) => {
+      sequence = found;
+      // Opened by a play-through: start from the top. (The browser may refuse to start a video by itself; then it waits.)
+      if (found?.resumed) { seekOutput(0); play(); }
+    });
     status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
     setSaveStatus("Saved locally");
   } catch (error) {

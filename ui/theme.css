@@ -53,3 +53,5 @@
 /* Lime buttons keep dark text; clips keep a black surround (Annotate sessions). */
 :root[data-theme="dark"] .annotate-main .annotate-session-open { color: #171817; }
 :root[data-theme="dark"] .code-stage { background: #000; }
+/* A card in a sequence is drawn the same dark green with light words in the export, so the preview keeps it. */
+:root[data-theme="dark"] .annotate-card-show { background: #10201b; color: #f4f7f2; }

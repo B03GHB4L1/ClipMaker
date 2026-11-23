@@ -117,7 +117,7 @@ class LibraryTests(unittest.TestCase):
         notes.mkdir()
         (notes / ("c" * 32 + ".json")).write_text(json.dumps({"version": 1, "items": [],
                                                                 "freezes": [picture_freeze(record["id"])]}))
-        with self.assertRaisesRegex(ValueError, "Remove the insert first"):
+        with self.assertRaisesRegex(ValueError, "Remove it first"):
             pictures.remove(self.project, record["id"])
         self.assertIsNotNone(pictures.file_of(self.folder, record["id"]))
         (notes / ("c" * 32 + ".json")).write_text(json.dumps({"version": 1, "items": [], "freezes": []}))
@@ -204,7 +204,7 @@ class PictureApiTests(unittest.TestCase):
         # Deleting a picture an insert shows is refused, and it is still there afterwards.
         status, refused = self.call(f"/api/projects/{self.project['id']}/pictures/delete", {"id": picture["id"]})
         self.assertEqual(status, 400)
-        self.assertIn("Remove the insert first", refused["error"])
+        self.assertIn("Remove it first", refused["error"])
         self.assertEqual(len(self.call(f"/api/projects/{self.project['id']}/pictures")[1]["pictures"]), 1)
         # Saving an insert of a picture the project does not have is refused.
         gone = {"version": 1, "items": [], "freezes": [picture_freeze("d" * 32)]}

@@ -456,7 +456,7 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         self.assertIn('aria-current="page" data-annotate-nav>Annotate</a>', html)
         self.assertIn("data-library-list", html)
-        self.assertIn('data-sequence-lane aria-label="Clips in this session, in play order"', html)
+        self.assertIn('data-sequence-lane aria-label="Clips and cards in this session, in play order"', html)
         script = (UI / "annotate.js").read_text(encoding="utf-8")
         # No clip in the link: list the sessions instead of failing; a clip shows its session as a sequence.
         self.assertIn("if (!clipId) return await startLibrary();", script)
@@ -550,7 +550,14 @@ class SharedUiTests(unittest.TestCase):
         # Each clip's overlays are drawn and sent like a single export, then the engine joins them.
         flow = script[script.index("const exportSequence"):]
         self.assertIn("drawOverlays(opened.clip, opened.annotations, exportSession", flow)
-        self.assertIn('"/api/editor-sequences/render", { exports: run.sessions.map', flow)
+        self.assertIn('"/api/editor-sequences/render", { items, name: session.name }', flow)
+        self.assertIn("/api/editor-sequences/cards", flow)  # a text card is drawn here and sent as a picture
+        self.assertIn("picture: entry.picture_id", flow)
+        for hook in ("data-sequence-card", "data-card-form", "data-sequence-play"):
+            self.assertIn(hook, html)
+        for call in ('request("add-card"', 'request("update-card"', 'request("remove-card"'):
+            self.assertIn(call, sequence)
+        self.assertIn("sequence?.endOfClip()", script)  # a play-through goes on at the end of a clip
         self.assertIn("run.sessions || []", script[script.index("const cancelExport"):])
 
     def test_annotate_exports_video_with_progress_and_cancel(self):

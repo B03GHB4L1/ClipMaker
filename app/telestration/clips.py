@@ -6,7 +6,8 @@ first copies the clip into the project:
     projects/<project>/clips/<clip>.mp4        the video
     projects/<project>/clips/<clip>.json       its facts (fps, size, frames...)
     projects/<project>/annotations/<clip>.json the drawings
-    projects/<project>/sessions.json           annotate sessions: named groups of clips
+    projects/<project>/sessions.json           annotate sessions: named groups of clips, their order, and cards
+                                               (a picture or a line of text shown for a few seconds between clips)
 
 A clip saved before sessions existed gets a session of its own when the
 project's sessions are listed. Every write is atomic. Ids are checked against strict patterns, so no request
@@ -171,7 +172,10 @@ class EditorClips:
         for entry in value if isinstance(value, list) else []:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and SESSION_ID.match(entry["id"]):
                 clips = [c for c in entry.get("clips", []) if isinstance(c, str) and CLIP_ID.match(c)]
-                sessions.append({"id": entry["id"], "name": str(entry.get("name") or "Session")[:120], "clips": clips,
+                cards = [card for card in (clean_card(each) for each in entry.get("cards") or []) if card][:MAX_CARDS]
+                order = _in_order(entry.get("order"), clips, cards)
+                sessions.append({"id": entry["id"], "name": str(entry.get("name") or "Session")[:120],
+                                 "clips": [token for token in order if CLIP_ID.match(token)], "cards": cards, "order": order,
                                  "created_at": str(entry.get("created_at") or ""), "updated_at": str(entry.get("updated_at") or "")})
         return sessions
 
@@ -191,6 +195,7 @@ class EditorClips:
             kept = [clip for clip in session["clips"] if clip in present]
             changed |= kept != session["clips"]
             session["clips"] = kept
+            session["order"] = _in_order(session["order"], kept, session["cards"])
         for clip_id in sorted(present - grouped):
             record, _ = self.get(project_id, clip_id)
             sessions.append(_new_session(record.get("name") or "Clip", [clip_id], record.get("created_at") or ""))
@@ -219,7 +224,10 @@ class EditorClips:
                               "seconds": seconds, "width": record.get("width"), "height": record.get("height"),
                               "drawings": drawings, "edited_at": edited})
             updated = max([session.get("updated_at") or "", *(clip["edited_at"] for clip in clips)])
-            result.append({**session, "clips": clips, "updated_at": updated})
+            by_id = {clip["id"]: {"kind": "clip", **clip} for clip in clips}
+            by_id.update({card["id"]: {**card, "type": card["kind"], "kind": "card"} for card in session["cards"]})
+            items = [by_id[token] for token in session["order"] if token in by_id]
+            result.append({**session, "clips": clips, "items": items, "updated_at": updated})
         return sorted(result, key=lambda session: session["updated_at"], reverse=True)
 
     def has_session(self, project_id: str, session_id: str) -> bool:
@@ -240,23 +248,68 @@ class EditorClips:
             sessions.append(target)
         if clip_id not in target["clips"]:
             target["clips"].append(clip_id)
+            target["order"] = [*target["order"], clip_id]
         target["updated_at"] = _now()
         self._write_sessions(project_id, [session for session in sessions if session["clips"]])
         return target
 
-    def reorder_session(self, project_id: str, session_id: str, order: Any) -> dict[str, Any]:
-        """Put a session's clips in `order` (the same clip ids, each once): the order a sequence plays and exports."""
+    def _session(self, project_id: str, session_id: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         sessions = self._read_sessions(project_id)
         target = next((session for session in sessions if session["id"] == session_id), None)
         if target is None:
             raise LookupError("That annotate session is not in the project any more.")
-        if (not isinstance(order, list) or len(order) != len(target["clips"])
-                or sorted(str(clip) for clip in order) != sorted(target["clips"])):
-            raise ValueError("The new order must list the session's clips, each once.")
-        target["clips"] = [str(clip) for clip in order]
+        return sessions, target
+
+    def reorder_session(self, project_id: str, session_id: str, order: Any) -> dict[str, Any]:
+        """Put a session's clips and cards in `order` (the same ids, each once): the order a sequence plays and exports."""
+        sessions, target = self._session(project_id, session_id)
+        known = [*target["clips"], *(card["id"] for card in target["cards"])]
+        if not isinstance(order, list) or len(order) != len(known) or sorted(str(item) for item in order) != sorted(known):
+            raise ValueError("The new order must list the session's clips and cards, each once.")
+        target["order"] = [str(item) for item in order]
+        target["clips"] = [token for token in target["order"] if CLIP_ID.match(token)]
         target["updated_at"] = _now()
         self._write_sessions(project_id, sessions)
         return target
+
+    def add_card(self, project_id: str, session_id: str, fields: dict[str, Any], index: Any = None) -> dict[str, Any]:
+        """Put a card (a picture or a line of text, shown for a few seconds) in a session, at `index` or the end."""
+        sessions, target = self._session(project_id, session_id)
+        if len(target["cards"]) >= MAX_CARDS:
+            raise ValueError(f"A session can have up to {MAX_CARDS} cards.")
+        card = clean_card({**fields, "id": f"k{uuid.uuid4().hex[:16]}"}, strict=True)
+        if card["kind"] == "picture" and pictures.file_of(self.pictures_dir(project_id), card["picture_id"]) is None:
+            raise ValueError("That picture is not in the project any more.")
+        target["cards"].append(card)
+        order = list(target["order"])
+        at = index if isinstance(index, int) and not isinstance(index, bool) and 0 <= index <= len(order) else len(order)
+        order.insert(at, card["id"])
+        target["order"] = order
+        target["updated_at"] = _now()
+        self._write_sessions(project_id, sessions)
+        return card
+
+    def update_card(self, project_id: str, session_id: str, card_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        sessions, target = self._session(project_id, session_id)
+        old = next((card for card in target["cards"] if card["id"] == card_id), None)
+        if old is None:
+            raise LookupError("That card is not in the session any more.")
+        card = clean_card({**old, **{key: value for key, value in fields.items() if key in ("text", "seconds", "picture_id", "kind")}}, strict=True)
+        if card["kind"] == "picture" and pictures.file_of(self.pictures_dir(project_id), card["picture_id"]) is None:
+            raise ValueError("That picture is not in the project any more.")
+        target["cards"] = [card if each["id"] == card_id else each for each in target["cards"]]
+        target["updated_at"] = _now()
+        self._write_sessions(project_id, sessions)
+        return card
+
+    def remove_card(self, project_id: str, session_id: str, card_id: str) -> None:
+        sessions, target = self._session(project_id, session_id)
+        if not any(card["id"] == card_id for card in target["cards"]):
+            raise LookupError("That card is not in the session any more.")
+        target["cards"] = [card for card in target["cards"] if card["id"] != card_id]
+        target["order"] = [token for token in target["order"] if token != card_id]
+        target["updated_at"] = _now()
+        self._write_sessions(project_id, sessions)
 
     def rename_session(self, project_id: str, session_id: str, name: str) -> dict[str, Any]:
         clean = re.sub(r"\s+", " ", str(name or "")).strip()[:120]
@@ -302,6 +355,49 @@ class EditorClips:
 
 
 SESSION_ID = re.compile(r"^s[a-f0-9]{16}$")
+CARD_ID = re.compile(r"^k[a-f0-9]{16}$")
+MAX_CARDS = 50
+CARD_SECONDS = (0.5, 30.0)
+CARD_TEXT = 200
+
+
+def clean_card(value: Any, strict: bool = False) -> dict[str, Any] | None:
+    """A card as stored: {id, kind: "picture" | "text", seconds, picture_id | text}. Damaged saved cards are dropped
+    (None); a card a request sends raises ValueError (`strict`) so the analyst is told what is wrong."""
+    def fail(message: str) -> None:
+        if strict:
+            raise ValueError(message)
+    if not isinstance(value, dict) or not isinstance(value.get("id"), str) or not CARD_ID.match(value["id"]):
+        fail("Invalid card.")
+        return None
+    seconds = value.get("seconds")
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not seconds == seconds:
+        fail("A card needs a length in seconds.")
+        return None
+    seconds = round(min(CARD_SECONDS[1], max(CARD_SECONDS[0], float(seconds))), 2)
+    if value.get("kind") == "picture":
+        if not isinstance(value.get("picture_id"), str) or not pictures.PICTURE_ID.match(value["picture_id"]):
+            fail("Choose a picture for the card.")
+            return None
+        return {"id": value["id"], "kind": "picture", "seconds": seconds, "picture_id": value["picture_id"]}
+    if value.get("kind") == "text":
+        text = re.sub(r"[ \t]+", " ", str(value.get("text") or "")).strip()[:CARD_TEXT]
+        if not text:
+            fail("Type the card's text.")
+            return None
+        return {"id": value["id"], "kind": "text", "seconds": seconds, "text": text}
+    fail("A card is a picture or a line of text.")
+    return None
+
+
+def _in_order(saved: Any, clips: list[str], cards: list[dict[str, Any]]) -> list[str]:
+    """`saved` order kept for the clips and cards that exist, with any not in it added at the end."""
+    known = [*clips, *(card["id"] for card in cards)]
+    order = []
+    for token in saved if isinstance(saved, list) else []:
+        if token in known and token not in order:
+            order.append(token)
+    return [*order, *(token for token in known if token not in order)]
 
 
 def output_seconds(record: dict[str, Any], saved: dict[str, Any]) -> float:
@@ -319,4 +415,4 @@ def _now() -> str:
 def _new_session(name: str, clips: list[str], created: str = "") -> dict[str, Any]:
     stamp = created or _now()
     return {"id": f"s{uuid.uuid4().hex[:16]}", "name": str(name)[:120] or "Session", "clips": list(clips),
-            "created_at": stamp, "updated_at": stamp}
+            "cards": [], "order": list(clips), "created_at": stamp, "updated_at": stamp}
