@@ -2496,6 +2496,10 @@
 :root[data-theme="dark"] .annotate-steps span {
   color: var(--cm-muted);
 }
+:root[data-theme="dark"] .annotate-speed-chart {
+  border: 1px solid var(--cm-rule);
+  background: var(--annotate-panel);
+}
 :root[data-theme="dark"] .annotate-main .annotate-follow-group > button {
   border: 1px solid var(--cm-rule);
   background: #2f2f2f;
@@ -2721,6 +2725,99 @@
 :root[data-theme="dark"] .annotate-strip-clip[aria-current="page"] .annotate-strip-index {
   background: var(--cm-ink);
   color: var(--annotate-panel);
+}
+:root[data-theme="dark"] .annotate-timeline {
+  --tl-head: #fe7c79;
+}
+:root[data-theme="dark"] .annotate-tl-bar button {
+  border: 1px solid var(--cm-rule);
+  background: transparent;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-tl-bar button:hover:not(:disabled) {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-tl-bar svg,
+:root[data-theme="dark"] .annotate-row-head svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+:root[data-theme="dark"] .annotate-row-head {
+  border-right: 1px solid var(--cm-rule);
+  background: var(--annotate-panel);
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane {
+  background: var(--tl-lane);
+}
+:root[data-theme="dark"] .annotate-ruler-lane {
+  border-bottom: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .annotate-tick {
+  background: var(--cm-rule);
+}
+:root[data-theme="dark"] .annotate-tick.is-major {
+  border-left: 1px solid var(--cm-muted);
+  background: none;
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .annotate-playhead {
+  background: var(--tl-head);
+}
+:root[data-theme="dark"] .annotate-playhead::before {
+  background: var(--tl-head);
+}
+:root[data-theme="dark"] .annotate-snap {
+  border-left: 1px dashed var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-block-label {
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-parts .annotate-lane {
+  background: var(--tl-lane);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-part {
+  background: #8bc8b5;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-part.is-selected {
+  background: #8bc8b5;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-part-label {
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-part-edge::after {
+  background: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze {
+  background: var(--annotate-freeze);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze.is-current {
+  background: color-mix(in srgb, var(--annotate-freeze) 82%, #2f2f2f);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze.is-board,
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze.is-board.is-current {
+  background: var(--annotate-board);
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze.is-selected {
+  outline: 0;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-edge::after,
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-freeze.is-board .annotate-lane-edge::after {
+  background: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-drawing {
+  background: #b8afed;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-drawing.is-selected {
+  background: #b8afed;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-lane-drawing .annotate-lane-grip::after {
+  background: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-timeline .annotate-cover {
+  background: color-mix(in srgb, var(--cm-ink) 30%, transparent);
 }
 
 /* code.css */

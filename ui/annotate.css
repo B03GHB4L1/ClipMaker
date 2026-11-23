@@ -446,3 +446,62 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-strip-index { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 4px; background: var(--annotate-hover); color: var(--cm-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .annotate-strip-clip[aria-current="page"] .annotate-strip-index { background: var(--cm-ink); color: var(--annotate-panel); }
 .annotate-strip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Timeline, editor style: a ruler, track headers that stay put, blocks that carry their names, zoom, and one
+   playhead through every track (docs/CODING_AND_PITCH_PLAN.md, section T2). */
+.annotate-timeline { --head-width: 120px; --tl-lane: color-mix(in srgb, var(--cm-ink) 7%, transparent); --tl-head: #e5484d;
+  gap: 0; padding: 8px 0 6px; overflow: hidden; }
+.annotate-tl-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px; }
+.annotate-tl-zoom { display: inline-flex; gap: 4px; margin-left: auto; }
+.annotate-tl-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 28px; padding: 0 9px;
+  border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-tl-bar button:hover:not(:disabled) { background: var(--annotate-hover); }
+.annotate-tl-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-tl-bar svg, .annotate-row-head svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.annotate-tl-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.annotate-tl-body { --lane-width: 600px; position: relative; width: calc(var(--head-width) + var(--lane-width)); }
+.annotate-timeline .annotate-row { grid-template-columns: var(--head-width) var(--lane-width); gap: 0; min-height: 0; margin-top: 4px; align-items: stretch; }
+.annotate-row-head { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; gap: 6px; min-width: 0; box-sizing: border-box; padding: 0 8px 0 10px;
+  border-right: 1px solid var(--cm-rule); background: var(--annotate-panel); color: var(--cm-muted); }
+.annotate-row-head .annotate-row-name { min-width: 0; flex: 1; }
+.annotate-row-head .annotate-row-action { flex: none; height: 22px; padding: 0 6px; }
+.annotate-timeline .annotate-lane { height: 32px; border-radius: 0; background: var(--tl-lane); }
+.annotate-timeline .annotate-player .annotate-lane { height: 26px; }
+.annotate-timeline .annotate-lane[data-empty]:not(:has(.annotate-lane-freeze, .annotate-lane-drawing))::before { line-height: 32px; }
+.annotate-timeline .annotate-drawings .annotate-lane { min-height: 28px; }
+
+/* Ruler */
+.annotate-ruler { margin-top: 0; }
+.annotate-ruler-lane { position: relative; height: 24px; border-bottom: 1px solid var(--cm-rule); cursor: ew-resize; touch-action: none; user-select: none; }
+.annotate-tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--cm-rule); pointer-events: none; }
+.annotate-tick.is-major { top: 0; height: auto; width: auto; padding-left: 4px; border-left: 1px solid var(--cm-muted); background: none;
+  color: var(--cm-muted); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 12px; white-space: nowrap; }
+
+/* Playhead: one line through the ruler and every track */
+.annotate-playhead { position: absolute; top: 0; bottom: 0; z-index: 2; left: calc(var(--head-width) + var(--head, 0) * var(--lane-width)); width: 2px; margin-left: -1px;
+  background: var(--tl-head); pointer-events: none; }
+.annotate-playhead::before { content: ""; position: absolute; top: 0; left: -5px; width: 12px; height: 10px; background: var(--tl-head); clip-path: polygon(0 0, 100% 0, 100% 45%, 50% 100%, 0 45%); }
+
+.annotate-snap { position: absolute; top: 0; bottom: 0; z-index: 2; left: calc(var(--head-width) + var(--snap, 0) * var(--lane-width)); width: 0; border-left: 1px dashed var(--cm-ink); pointer-events: none; }
+.annotate-snap[hidden] { display: none; }
+/* Blocks carry their names */
+.annotate-timeline .annotate-block-label { position: absolute; inset: 0 8px; display: flex; align-items: center; overflow: hidden; color: #fff; font-size: 10.5px; font-weight: 500;
+  text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.annotate-timeline .annotate-parts .annotate-lane { height: 46px; overflow: hidden; background: var(--tl-lane); }
+.annotate-timeline .annotate-part { top: 3px; bottom: 3px; border-radius: 5px; background: #2d7d68; box-shadow: none; }
+.annotate-timeline .annotate-part:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.annotate-timeline .annotate-part.is-selected { background: #2d7d68; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-part-label { inset: 0 10px; color: #fff; font-size: 11px; font-weight: 500; }
+.annotate-timeline .annotate-part-edge::after { background: #fff; }
+.annotate-timeline .annotate-lane-freeze { top: 3px; bottom: 3px; border-radius: 5px; background: var(--annotate-freeze); box-shadow: none; }
+.annotate-timeline .annotate-lane-freeze.is-current { background: color-mix(in srgb, var(--annotate-freeze) 82%, #fff); }
+.annotate-timeline .annotate-lane-freeze.is-board, .annotate-timeline .annotate-lane-freeze.is-board.is-current { background: var(--annotate-board); box-shadow: none; }
+.annotate-timeline .annotate-lane-freeze.is-selected { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); outline: 0; }
+.annotate-timeline .annotate-lane-edge::after, .annotate-timeline .annotate-lane-freeze.is-board .annotate-lane-edge::after { background: #fff; }
+.annotate-timeline .annotate-lane-drawing { height: 16px; min-width: 6px; border-radius: 4px; background: #6f62a8; }
+.annotate-timeline .annotate-lane-drawing.is-selected { height: 16px; background: #6f62a8; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-lane-drawing .annotate-block-label { inset: 0 6px; font-size: 10px; }
+.annotate-timeline .annotate-lane-drawing .annotate-lane-grip::after { background: #fff; box-shadow: 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-cover { top: 5px; bottom: 5px; border-radius: 3px; background: color-mix(in srgb, var(--cm-ink) 30%, transparent); }
+.annotate-timeline .annotate-track-status { margin: 4px 10px 0; }
+@media (max-width: 900px) { .annotate-timeline { --head-width: 92px; } .annotate-row-head .annotate-row-action { padding: 0 4px; font-size: 10px; } }

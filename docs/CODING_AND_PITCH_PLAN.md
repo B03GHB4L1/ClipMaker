@@ -533,6 +533,26 @@ clip, with the same drawing tools on top.
 
 ---
 
+## T2. Editor-style timeline (replaces the presentation builder, B)
+
+B is dropped: a presentation builder is a clunky video-editor timeline, so the
+Annotate timeline itself becomes the editor.
+
+**Stage 1 (done): one clip.** Ruler with labels and ticks spaced on their own
+(frame-level when zoomed far in), zoom 1-60x (buttons, Ctrl+wheel, around the
+playhead), one red playhead through every track, sticky track headers, named
+blocks (video part, inserts, boards, drawings), click or drag the ruler to seek,
+and snapping (10 px to the playhead, clip ends and other blocks' edges; Alt
+places freely) with a dashed snap line. Ideas for the ruler and snapping come
+from OpenCut (MIT); nothing is copied, only reimplemented.
+
+**Stage 2 (later): several clips on one sequence.** Annotated clips, pictures
+and freezes from different clips in one ordered timeline, exported in one go.
+Needs a sequence document saved with the project, drag-to-reorder, and an
+export that renders each clip's overlays in turn. To be scoped with the user.
+
+---
+
 ## Still open (for the user)
 
 1. **C first or C and P together?** They are independent; P is mostly engine
