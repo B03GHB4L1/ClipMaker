@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+INSTALLED_LICENCES = ("LICENSE.txt", "LICENSE-MIT-EARLIER.txt", "licences/three.js.txt",
+                      "licences/Geist-Mono.txt", "licences/ViT-tracker.txt")
 sys.path.insert(0, str(ROOT / "packaging"))
 from smoke_test import fixture_csv, request
 from process_owner import wait_for_process_exit
@@ -312,6 +314,14 @@ def main():
                             left = [str(path) for path in old_engines if path.exists()]
                             assert not left, f"Upgrade left the old engine behind: {left}"
                             app = candidate_app
+                        stage(evidence, "verify the licence files were installed")
+                        if sys.platform == "win32":
+                            resources = app.parent
+                        else:
+                            resources = next(path.parent for path in Path("/usr/lib").glob("*/backend/vizorplay-engine"))
+                        missing = [name for name in INSTALLED_LICENCES if not (resources / name).is_file()]
+                        assert not missing, f"Installed app is missing licence files: {missing}"
+                        assert "PolyForm Strict License 1.0.0" in (resources / "LICENSE.txt").read_text(encoding="utf-8")
                 if args.package:
                     stage(evidence, "uninstall package and verify saved project data remains")
                     preserved = project_path.read_bytes()

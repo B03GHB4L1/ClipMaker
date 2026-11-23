@@ -24,6 +24,8 @@ from macos_min_os import format_version, scan  # noqa: E402
 
 # The oldest macOS the install guide promises for each chip; nothing inside the app may need a
 # newer one, and the app's own declared minimum must say the same so an older Mac is told so.
+INSTALLED_LICENCES = ("LICENSE.txt", "LICENSE-MIT-EARLIER.txt", "licences/three.js.txt",
+                      "licences/Geist-Mono.txt", "licences/ViT-tracker.txt")
 PROMISED_MINIMUM = {"arm64": (14, 0), "x86_64": (12, 0)}
 
 
@@ -93,6 +95,10 @@ def main() -> int:
                 archs = check(["lipo", "-archs", str(binary)], f"Reading the chip of {binary.name}").split()
                 assert archs == [args.expect_arch], f"{binary.name} is built for {archs}, expected {args.expect_arch}"
             result["architectures"] = args.expect_arch
+            resources = app / "Contents" / "Resources"
+            missing = [name for name in INSTALLED_LICENCES if not (resources / name).is_file()]
+            assert not missing, f"The app is missing licence files: {missing}"
+            assert "PolyForm Strict License 1.0.0" in (resources / "LICENSE.txt").read_text(encoding="utf-8")
             check(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)], "App signature")
             stage(evidence, f"app {version} is {args.expect_arch}, minimum macOS {minimum}, signature verifies")
 

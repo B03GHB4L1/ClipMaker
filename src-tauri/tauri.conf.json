@@ -29,7 +29,12 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "resources/backend/": "backend/"
+      "resources/backend/": "backend/",
+      "../LICENSE": "LICENSE.txt",
+      "../LICENSE-MIT-EARLIER.md": "LICENSE-MIT-EARLIER.txt",
+      "../ui/vendor/THREE-LICENSE.txt": "licences/three.js.txt",
+      "../ui/assets/fonts/OFL-GeistMono.txt": "licences/Geist-Mono.txt",
+      "../app/telestration/models/NOTICE.txt": "licences/ViT-tracker.txt"
     },
     "linux": {
       "deb": {
