@@ -2,7 +2,7 @@
 // (docs/TELESTRATION_PLAN.md, M1). Drawings are fixed in place for now;
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
-import { saveImage, showSaved, showSaveError } from "./save-clip.js";
+import { saveImage, sendToClip, showSaved, showSaveError } from "./save-clip.js";
 import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, minimapBox, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS, SHAPES } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
@@ -13,6 +13,7 @@ import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./
 import { isFlat, PITCH_KINDS, placeFlat, projectItems } from "./annotate/flat.js";
 import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } from "./annotate/camera.js";
 import { minimapPlayers, motionOf, pitchPositions, speedAt } from "./annotate/motion.js";
+import { drawSpeedChart, SPEED_PAPER } from "./annotate/speedchart.js";
 import { fitBox } from "./annotate/fit.js";
 import { showClipStrip, showLibrary } from "./annotate/library.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
@@ -891,10 +892,40 @@ const trackMotion = (track) => {
   motionCache.set(track, { pitch, motion });
   return motion;
 };
+// The chart in the panel uses the page's colours; the saved picture is always on paper.
+const drawSpeedPanel = (motion) => {
+  const canvas = $("[data-speed-chart]");
+  const style = getComputedStyle(canvas);
+  const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+  drawSpeedChart(canvas.getContext("2d"), canvas.width, canvas.height, motion, clip.fps, {
+    frame: frameNow(),
+    colours: { background: null, ink: read("--cm-ink", "#2b2b2a"), muted: read("--cm-muted", "#6b6a66"), rule: read("--cm-rule", "#d9d6cc"), line: "#4a8cf0", marker: "#e8a317" },
+  });
+};
+const speedPicture = async (send, button) => {
+  const motion = speedTrack && trackMotion(speedTrack);
+  if (!motion) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1600;
+  canvas.height = 700;
+  const name = playerName(speedTrack);
+  drawSpeedChart(canvas.getContext("2d"), canvas.width, canvas.height, motion, clip.fps, { title: `${name}: speed on the pitch, ${clip.name}`, scale: 2 });
+  button.disabled = true;
+  try {
+    const { brandPicture } = await import("./analysis/brand-export.js");
+    const picture = await brandPicture(canvas);
+    await (send ? sendToClip : saveImage)(picture, `${clip.name} ${name} speed.png`);
+  } finally { button.disabled = false; }
+};
 const showSpeed = () => {
   const text = $("[data-follow-speed]");
+  const chart = $("[data-speed-chart]");
+  const buttons = document.querySelectorAll("[data-speed-save], [data-speed-send]");
+  const motion = speedTrack ? trackMotion(speedTrack) : null;
+  chart.hidden = !motion;
+  buttons.forEach((button) => { button.hidden = !motion; });
+  if (motion) drawSpeedPanel(motion);
   if (!speedTrack) { text.textContent = ""; return; }
-  const motion = trackMotion(speedTrack);
   if (!motion) { text.textContent = 'Mark the pitch (under "Add at this frame") to read speed and distance.'; return; }
   const now = speedAt(motion, frameNow());
   const parts = [now === null ? "No speed on this frame: the player or the pitch is not known here, or it is too early in their run."
@@ -3071,6 +3102,8 @@ const wire = () => {
   $("[data-board]").onclick = () => openCalibration("board");
   $("[data-picture]").onclick = () => ($("[data-picture-panel]").hidden ? openPicturePanel() : closePicturePanel());
   $("[data-picture-close]").onclick = closePicturePanel;
+  $("[data-speed-save]").onclick = (event) => speedPicture(false, event.currentTarget);
+  $("[data-speed-send]").onclick = (event) => speedPicture(true, event.currentTarget);
   $("[data-picture-file]").onchange = (event) => { uploadPicture(event.target.files[0]); event.target.value = ""; };
   $("[data-pitch]").onclick = () => openCalibration("pitch");
   $("[data-calib-save]").onclick = savePitch;

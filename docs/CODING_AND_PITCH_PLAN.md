@@ -35,7 +35,7 @@ The rules that bind every step:
 **Decided 2026-11-23, to ship soon:** C, L and P (P1 to P3) are done. Next are I, then B. T (tracking every player, with
 teams), A and O are left for a future update,
 along with one more (asked 2026-11-23): exporting the positions of followed players to the event table for coded matches.
-Asked 2026-11-23, after I and B (a small P3c): a speed-over-time chart for a followed player and its export; and a Measure that can end on followed players, so its distance updates as they move (done 2026-11-23: an end dropped on a followed player's feet follows them).
+Asked 2026-11-23, after I and B (a small P3c): a speed-over-time chart for a followed player and its export (done 2026-11-23: in the Follow panel, with Save chart and Send to clip); and a Measure that can end on followed players, so its distance updates as they move (done 2026-11-23: an end dropped on a followed player's feet follows them).
 
 I is small and independent; it can slot in at any point. C and P are independent and can run side by side. L follows C because live
 coding is the same panel on a growing recording. B can start any time after C.
