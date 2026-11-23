@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { apply, calibrate, fitHomography, landmark } from "../ui/annotate/pitch.js";
 import { isFlat, measureOnPitch, offsideOnPitch, placeFlat, projectItems } from "../ui/annotate/flat.js";
-import { hitTest } from "../ui/annotate/shapes.js";
+import { hitTest, minimapBox } from "../ui/annotate/shapes.js";
 import { newItem } from "../ui/annotate/document.js";
 
 const ASPECT = 16 / 9;
@@ -93,4 +93,18 @@ test("an offside line is hit on its line and on its spot, and a measure along it
   const measure = newItem("measure", [[0.2, 0.5], [0.6, 0.5]], { from: 0, to: 2 });
   assert.ok(hitTest(measure, 0.4 * w, 0.5 * h, w, h, 4));
   assert.ok(!hitTest(measure, 0.4 * w, 0.7 * h, w, h, 4));
+});
+
+test("a minimap is a box from its top-left corner, hit anywhere inside it", () => {
+  const [w, h] = [1600, 900];
+  const map = newItem("minimap", [[0.7, 0.05]], { from: 0, to: 2 });
+  const box = minimapBox(map, w, h);
+  near(box.x, 0.7 * w, 1e-6, "left edge");
+  near(box.y, 0.05 * h, 1e-6, "top edge");
+  near(box.width, 60 * 4 * (h / 1080), 1e-6, "width follows the frame height");
+  near(box.height / box.width, (68 + 8) / (105 + 8), 1e-6, "in the pitch's own proportions, with grass round it");
+  assert.ok(hitTest(map, box.x + box.width / 2, box.y + box.height / 2, w, h, 4));
+  assert.ok(!hitTest(map, box.x - 40, box.y + 5, w, h, 4));
+  assert.ok(!isFlat(map), "it is placed on the picture, not on the grass");
+  assert.equal(projectItems([map], calibration())[0], map, "and is not read through the calibration");
 });

@@ -17,7 +17,7 @@ from typing import Any
 from . import parts as cuts
 
 VERSION = 1
-KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape", "offside", "measure"}
+KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape", "offside", "measure", "minimap"}
 SHAPES = {"rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "star"}  # the Shape tool's shapes
 ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
 EXIT_ANIMATIONS = {"none", "fade"}
@@ -30,9 +30,9 @@ OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its 
 FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
 MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1, "shape": 2,
-              "offside": 1, "measure": 2}
+              "offside": 1, "measure": 2, "minimap": 1}
 MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1, "shape": 2,
-              "offside": 1, "measure": 2}
+              "offside": 1, "measure": 2, "minimap": 1}
 # Tactical boards (M7): a freeze can show a pitch instead of the held frame.
 BOARD_VIEWS = {"full", "left", "right", "blank"}
 BOARD_THEMES = {"grass", "light"}
@@ -322,6 +322,11 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int], frames: 
             raise ValueError(f"{name} goes on the video, not on a board.")
         if any(isinstance(point, dict) for point in clean["points"]):
             raise ValueError(f"{name} is placed on the grass; it does not follow a player.")
+    if kind == "minimap":  # P3b: a small pitch in a corner of the picture, with the followed players on it
+        if "on" in value:
+            raise ValueError("A minimap goes on the video, not on a board.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError("A minimap stays where it is put; it does not follow a player.")
     if "at" in value:
         # The recorded frame a flat drawing's points are for (P2): it keeps that place on the pitch.
         at = value["at"]

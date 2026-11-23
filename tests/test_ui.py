@@ -343,7 +343,7 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         section = lambda start, end: html[html.index(start):html.index(end, html.index(start))]
         rail = section('<div class="annotate-tools"', '<div class="annotate-centre">')
-        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "offside", "measure", "text"])
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "offside", "measure", "minimap", "text"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow", "token"])
 

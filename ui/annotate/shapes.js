@@ -4,6 +4,7 @@
 // frame; widths and text sizes are pixels on a 1080-pixel-high frame.
 
 import { animation } from "./timeline.js";
+import { LENGTH, LINES, WIDTH } from "./pitch.js";
 
 export const TEXT_FONT = '"Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif';
 
@@ -20,6 +21,16 @@ export const DEFAULT_STYLE = {
   // P3: always on the pitch (flat), so they are read through the clip's calibration.
   offside: { stroke: "#ffd400", width: 4, dashed: false, flat: true },
   measure: { stroke: "#ffffff", width: 4, dashed: false, flat: true },
+  // P3b: a small pitch in a corner of the picture with the followed players on it; `size` is its width in tens of pixels.
+  minimap: { stroke: "#ffffff", width: 2, fill: "#1f6f3a", fillOpacity: 0.85, color: "#ffd400", size: 60 },
+};
+
+const MINIMAP_MARGIN = 4; // metres of grass drawn round the pitch's lines
+/** A minimap's box in pixels on a w×h canvas: {x, y, width, height}; the point is its top-left corner. */
+export const minimapBox = (item, w, h) => {
+  const width = styleOf(item).size * 4 * scaleFor(h);
+  const [x, y] = px(item.points[0], w, h);
+  return { x, y, width, height: (width * (WIDTH + 2 * MINIMAP_MARGIN)) / (LENGTH + 2 * MINIMAP_MARGIN) };
 };
 
 /** Geometric shapes (the Shape tool): drawn in the box between two dragged corners. */
@@ -227,6 +238,32 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
       tracePath(ctx, partialPath(points, state.draw));
       ctx.stroke();
       break;
+    case "minimap": {
+      // The pitch as seen from above, far side up as in the picture, with a dot for each followed player.
+      const box = minimapBox(item, w, h);
+      const k = box.width / (LENGTH + 2 * MINIMAP_MARGIN);
+      const onMap = ([x, y]) => [box.x + (x + LENGTH / 2 + MINIMAP_MARGIN) * k, box.y + (y + WIDTH / 2 + MINIMAP_MARGIN) * k];
+      ctx.setLineDash([]);
+      ctx.fillStyle = rgba(style.fill, style.fillOpacity);
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(box.x, box.y, box.width, box.height, box.width * 0.03);
+      else ctx.rect(box.x, box.y, box.width, box.height);
+      ctx.fill();
+      ctx.strokeStyle = rgba(style.stroke, 0.85);
+      ctx.lineWidth = Math.max(1, width * 0.5);
+      LINES.forEach((line) => { tracePath(ctx, line.map(onMap)); ctx.stroke(); });
+      (item.projected?.players || []).forEach((player) => {
+        const [x, y] = onMap(player.at);
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2.5, box.width * 0.022), 0, Math.PI * 2);
+        ctx.fillStyle = style.color;
+        ctx.fill();
+        ctx.lineWidth = Math.max(1, box.width * 0.006);
+        ctx.strokeStyle = "rgba(23, 24, 23, 0.85)";
+        ctx.stroke();
+      });
+      break;
+    }
     case "offside": {
       // A line across the pitch at the clicked spot's depth, and a dot where the spot is.
       const segments = item.projected?.segments;
@@ -461,6 +498,10 @@ export const hitTest = (item, x, y, w, h, tolerance = 6, measure) => {
         return y >= top && y <= cy && Math.abs(x - cx) <= item.geometry.rx * w;
       }
       return false;
+    }
+    case "minimap": {
+      const box = minimapBox(item, w, h);
+      return x >= box.x - tolerance && x <= box.x + box.width + tolerance && y >= box.y - tolerance && y <= box.y + box.height + tolerance;
     }
     case "offside": {
       const lines = (item.projected?.segments || []).map((segment) => segment.map((point) => px(point, w, h)));

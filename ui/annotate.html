@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=26" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=22"></script>
+  <script type="module" src="annotate.js?v=23"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -75,6 +75,7 @@
           <h2 class="annotate-group-title" id="tools-pitch">Pitch</h2>
           <button type="button" data-tool="offside" title="Offside line (O): a line across the pitch through a spot you click. Needs the pitch marked"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3l-3 14"/><path d="M11 3l-3 14" stroke-dasharray="1 2.4"/><circle cx="12.5" cy="12" r="1.8"/></svg><span>Offside</span><kbd>O</kbd></button>
           <button type="button" data-tool="measure" title="Measure (M): the distance in metres between two spots on the grass. Needs the pitch marked"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 12.5l13-5"/><path d="M4.6 9.5l1.6 4.2M8.9 8l1.6 4.2M13.2 6.4l1.6 4.2" /></svg><span>Measure</span><kbd>M</kbd></button>
+          <button type="button" data-tool="minimap" title="Minimap (N): a small pitch in the corner with the players you follow. Needs the pitch marked"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="5.5" width="14" height="9" rx="1"/><path d="M10 5.5v9"/><circle cx="7" cy="9" r="1.1"/><circle cx="13.5" cy="11.5" r="1.1"/></svg><span>Minimap</span><kbd>N</kbd></button>
         </div>
         <div class="annotate-tool-group" role="group" aria-labelledby="tools-write">
           <h2 class="annotate-group-title" id="tools-write">Write</h2>
@@ -193,6 +194,10 @@
             <p class="annotate-muted" data-follow-state></p>
             <button type="button" class="annotate-primary" data-follow-start>Follow player</button>
             <label data-follow-linked>Name <input type="text" data-follow-label maxlength="40" placeholder="Player" /></label>
+            <div class="annotate-follow-group" data-follow-linked>
+              <h3>Speed on the pitch</h3>
+              <p class="annotate-muted" data-follow-speed role="status"></p>
+            </div>
             <div class="annotate-follow-group" data-follow-linked>
               <h3>Check the tracking</h3>
               <p class="annotate-muted">Amber marks on the timeline are frames the tracker was unsure of.</p>

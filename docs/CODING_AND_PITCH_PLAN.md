@@ -32,6 +32,9 @@ The rules that bind every step:
 | B | Presentation builder | No | Annotated clips, boards, reels |
 | I | Picture inserts | No | Board inserts (M7) |
 
+**Decided 2026-11-23, to ship soon:** C, L and P (P1 to P3) are done. Next are I, then B. T (tracking every player, with
+teams), A and O are left for a future update.
+
 I is small and independent; it can slot in at any point. C and P are independent and can run side by side. L follows C because live
 coding is the same panel on a growing recording. B can start any time after C.
 
@@ -366,8 +369,26 @@ metres and player speed.
       panning, hit-testing) and engine validation; in the browser on the real clip
       (placing both, saving, following the pan, hidden after the cut, phone width, dark).
       Not yet tried: marking and measuring on other matches.
-  - **P3b** Minimap and speed: not started. The minimap shows followed players' feet on a
-    small pitch; speed turns a followed player's track into km/h through the pitch.
+  - **P3b** Minimap and speed. *Done 2026-11-23.*
+    - Speed: select a followed player's drawing and the Follow panel's "Speed on the pitch"
+      says their speed on this frame in km/h, their top speed and the frame it was on, and
+      the metres covered. It is read from their feet through each frame's own pitch
+      (`ui/annotate/motion.js`), so a panning camera is not counted as running. Positions are
+      smoothed with a straight-line fit over 0.3 s and speeds taken over 0.5 s, leaning
+      forward or back at the ends of a track; anything over 45 km/h is a tracking slip and
+      is left out. It needs the pitch marked and the camera followed.
+    - Minimap (key N, Pitch group): click where its top-left corner goes. A small pitch,
+      far side up as in the picture, with a dot for each followed player on the frame. Its
+      colours and size are settings. It stays where it is put on the picture (no player
+      link, video only, not a board), and is in screenshots and exports.
+    - Checked: node tests (steady running, jitter, a panning camera, gaps, a tracking slip,
+      the map's box and hit-testing) and the engine's rules; in the browser on the real
+      clip, with one followed player (a walking pace of about 6 km/h, 6 m in 3.6 s) and an
+      export whose frames show the map's dot on the near side where the player is, as the
+      pitch numbers say (15 m right of centre, 30 to 32 m from the far touchline).
+      Not yet tried: several followed players on the map, other matches, a long run.
+      The map shows nothing for frames with no pitch (after a cut). Team colours on the dots
+      come with T (tracking every player, with teams).
 
 ### Risks
 
@@ -390,6 +411,8 @@ shows it is needed), fast pans, low-angle cameras with few lines.
 ---
 
 ## T. Tracking every player, with teams
+
+*Deferred to a future update (2026-11-23); nothing below is started beyond T0.*
 
 ### Goal
 
@@ -497,7 +520,8 @@ clip, with the same drawing tools on top.
 ### Milestones and tests
 
 - **I1** Upload route, picture library, insert with contain/fill, export.
-- **I2** "Send to clip" from chart exports, in both themes.
+- **I2** "Send to clip" from the export of any chart, not only the Tactical Lab's: every page that exports a chart
+  image (Tactical Lab, Analyst Room, Filter's charts) offers it, in both themes.
 - Tests: oversize and non-image uploads refused; a project with a picture
   insert saves, reopens and exports with the picture's pixels in the right
   frames; deleting a picture in use is refused.

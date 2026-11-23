@@ -50,6 +50,7 @@ jobs:
       - run: node --test tests/camera.test.mjs
       - run: node --test tests/shape_tool.test.mjs
       - run: node --test tests/pitch_tools.test.mjs
+      - run: node --test tests/motion.test.mjs
       - run: node --test tests/moving_board.test.mjs
       - run: node --test tests/parts.test.mjs
       - run: node --test tests/fit.test.mjs

@@ -3,7 +3,7 @@
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage, showSaved, showSaveError } from "./save-clip.js";
-import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS, SHAPES } from "./annotate/shapes.js";
+import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, minimapBox, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS, SHAPES } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
@@ -12,6 +12,7 @@ import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, 
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { isFlat, PITCH_KINDS, placeFlat, projectItems } from "./annotate/flat.js";
 import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } from "./annotate/camera.js";
+import { minimapPlayers, motionOf, pitchPositions, speedAt } from "./annotate/motion.js";
 import { fitBox } from "./annotate/fit.js";
 import { showClipStrip, showLibrary } from "./annotate/library.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
@@ -206,6 +207,7 @@ const showTime = () => {
   const at = source();
   const frozen = at.freeze !== null ? ` · <span class="is-frozen">${boardNow() ? "board" : "frozen"}</span>` : "";
   $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${timing.frames}${doc.value.parts?.length > 1 ? ` · part ${partAt(doc.value, clip, at.frame).index + 1}/${doc.value.parts.length}` : ""}${frozen}`;
+  if (speedTrack) showSpeed();
   const scrub = $("[data-scrub]");
   scrub.max = String(total());
   if (document.activeElement !== scrub) scrub.value = String(outTime);
@@ -241,7 +243,10 @@ const boardNow = () => (clip ? boardAt(doc.value, timing, outTime) : null);
 // Flat drawings keep their place on the pitch as the camera moves (P2, annotate/camera.js).
 const placeNow = (item) => withPitch(placeFlat(resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()), clipTrack(), frameNow()));
 // An offside line's or measure's place on the grass on this frame, so it can be hit-tested and outlined as drawn.
-const withPitch = (item) => (PITCH_KINDS.has(item.kind) && !item.offPitch ? projectItems([item], pitchHere()?.calibration || null)[0] : item);
+const withPitch = (item) => (PITCH_KINDS.has(item.kind) && !item.offPitch ? projectItems([item], pitchHere()?.calibration || null)[0]
+  : item.kind === "minimap" ? withMinimap(item, tracks(), pitchHere()?.calibration || null, frameNow()) : item);
+// A minimap's players on this frame: the followed players' feet through the pitch (annotate/motion.js).
+const withMinimap = (item, trackList, calibration, frame) => ({ ...item, projected: { players: minimapPlayers(trackList, calibration, frame) } });
 const shown = () => itemsAt(doc.value, timing, outTime).map(placeNow).filter((item) => !item.offPitch);
 const shownItem = (id) => { const item = doc.find(id); const placed = item && placeNow(item); return placed && !placed.offPitch ? placed : null; };
 // Seconds into the board that drawing `item` is on, at the playhead.
@@ -364,6 +369,10 @@ function itemBounds(item) {
   const { w, h } = size();
   if (item.kind === "text") {
     const box = textBox(item, w, h, measure);
+    return [box.x, box.y, box.x + box.width, box.y + box.height];
+  }
+  if (item.kind === "minimap") {
+    const box = minimapBox(item, w, h);
     return [box.x, box.y, box.x + box.width, box.y + box.height];
   }
   const points = item.kind === "offside" && item.projected ? [...item.projected.segments.flat(), item.points[0]].map(toPixels) : item.points.map(toPixels);
@@ -493,6 +502,7 @@ const HINTS = {
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line). Click on a followed player to make the text follow them.",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
   shape: "Drag to draw the shape. Hold Shift for equal sides, as a square or a circle.",
+  minimap: "Click where the minimap's top-left corner goes. It shows the players you follow on a small pitch, and needs the pitch marked.",
   offside: "Click the spot to draw the offside line through, such as a defender's boot. The line lies across the pitch and follows the camera.",
   measure: "Drag from one spot on the grass to another to read the distance between them in metres.",
   follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
@@ -525,13 +535,16 @@ const select = (id) => {
   scheduleRender();
 };
 
-const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token", shape: "Shape", offside: "Offside line", measure: "Measure" };
+const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token", shape: "Shape", offside: "Offside line", measure: "Measure", minimap: "Minimap" };
 const itemName = (item) => (item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}`
   : item.kind === "shape" ? SHAPES[item.geometry?.shape] || "Shape"
   : item.kind === "token" ? ["Token", item.label, item.name].filter(Boolean).join(" ") : KIND_NAMES[item.kind]);
 // Some settings read differently on a token.
-const KIND_LABELS = { token: { fill: "Colour", color: "Number colour", stroke: "Outline", size: "Size", width: "Outline width" } };
-const KIND_RANGES = { token: { size: { min: 16, max: 80 }, width: { min: 0, max: 8 } } };
+const KIND_LABELS = {
+  token: { fill: "Colour", color: "Number colour", stroke: "Outline", size: "Size", width: "Outline width" },
+  minimap: { fill: "Pitch colour", color: "Player colour", stroke: "Line colour", size: "Size", width: "Line thickness" },
+};
+const KIND_RANGES = { token: { size: { min: 16, max: 80 }, width: { min: 0, max: 8 } }, minimap: { size: { min: 30, max: 100 }, width: { min: 1, max: 6 } } };
 
 const FIELDS = {
   stroke: { label: "Line colour", type: "color" },
@@ -573,6 +586,16 @@ const pitchToolNote = (item, kind) => {
   if (!reading) return note("This frame has no pitch to read it from. Mark the pitch here, or move to a frame that has it.");
   return note(kind === "measure" ? `${reading.metres.toFixed(1)} m on the pitch.`
     : `${reading.fromLeft.toFixed(1)} m from the left goal line, ${reading.fromRight.toFixed(1)} m from the right.`);
+};
+
+const minimapNote = (item) => {
+  const note = (text) => Object.assign(document.createElement("p"), { className: "annotate-muted", textContent: text });
+  if (!pitchKeys(doc.value).length) return note('Mark the pitch first (under "Add at this frame"): the players are placed through it.');
+  if (!tracks().length) return note("Follow players (Follow tool) to put them on the map.");
+  if (!item) return note("Click where the map's top-left corner goes.");
+  const players = shownItem(item.id)?.projected?.players;
+  return note(players ? `${players.length} of ${tracks().length} followed player${tracks().length === 1 ? "" : "s"} on the pitch on this frame.`
+    : "This frame has no pitch to place the players on.");
 };
 
 const renderInspector = () => {
@@ -692,6 +715,7 @@ const renderInspector = () => {
     });
     if (flatNote) fields.append(flatNote);
     if (PITCH_KINDS.has(kind)) fields.append(pitchToolNote(item, kind));
+    if (kind === "minimap") fields.append(minimapNote(item));
   }
   renderFollowPanel(many ? null : item);
   const timing = $("[data-timing]");
@@ -850,12 +874,40 @@ function teamColours(frame = boardNow()?.atFrame) {
   return { ...DEFAULT_TEAM_COLOURS, ...(board?.home ? { home: board.home } : {}), ...(board?.away ? { away: board.away } : {}) };
 }
 
+// Speed on the pitch (P3b): a followed player's feet through each frame's own calibration (annotate/motion.js).
+const motionCache = new WeakMap();
+let speedTrack = null; // the followed player whose speed the panel shows
+const trackMotion = (track) => {
+  const pitch = clipTrack();
+  if (!pitch?.keys.length) return null;
+  const cached = motionCache.get(track);
+  if (cached?.pitch === pitch) return cached.motion;
+  const first = Math.min(track.from, ...Object.keys(track.keyframes).map(Number));
+  const motion = motionOf(pitchPositions(track, pitch, first, lastFrame(track)), clip.fps, first);
+  motionCache.set(track, { pitch, motion });
+  return motion;
+};
+const showSpeed = () => {
+  const text = $("[data-follow-speed]");
+  if (!speedTrack) { text.textContent = ""; return; }
+  const motion = trackMotion(speedTrack);
+  if (!motion) { text.textContent = 'Mark the pitch (under "Add at this frame") to read speed and distance.'; return; }
+  const now = speedAt(motion, frameNow());
+  const parts = [now === null ? "No speed on this frame: the player or the pitch is not known here, or it is too early in their run."
+    : `${now.toFixed(1)} km/h on this frame.`];
+  if (motion.topFrame !== null) parts.push(`Top ${motion.top.toFixed(1)} km/h at frame ${motion.topFrame + 1}.`);
+  if (motion.seconds > 0) parts.push(`${motion.distance.toFixed(0)} m covered over ${motion.seconds.toFixed(1)} s on the pitch.`);
+  text.textContent = parts.join(" ");
+};
+
 function renderFollowPanel(item) {
   const panel = $("[data-follow-panel]");
   const linked = item ? [...linkedTracks(item)] : [];
   panel.hidden = !item || (!linked.length && !FOLLOWABLE.includes(item.kind));
   if (panel.hidden) return;
   const track = linked.length === 1 ? trackById(linked[0]) : null;
+  speedTrack = track;
+  showSpeed();
   $("[data-follow-start]").hidden = linked.length > 0;
   document.querySelectorAll("[data-follow-linked]").forEach((row) => { row.hidden = !track; });
   const state = $("[data-follow-state]");
@@ -2410,6 +2462,16 @@ canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     openText(clampPoint(at));
     return;
+  } else if (tool === "minimap") {
+    if (boardNow()) { trackStatus("The minimap goes on the video, not on a board.", true); return; }
+    // The click is the map's top-left corner, kept far enough in that the whole map is in the picture.
+    const base = newItem("minimap", [clampPoint(at)], { from, to: total(), style: toolStyle.minimap });
+    const box = minimapBox(base, w, h);
+    const corner = clampPoint([Math.min(at[0], 1 - box.width / w), Math.min(at[1], 1 - box.height / h)]);
+    const item = placeNew(newItem("minimap", [corner], { from, to: total(), style: toolStyle.minimap }));
+    doc.add(item);
+    select(item.id);
+    return;
   } else if (tool === "offside" || tool === "measure") {
     if (pitchToolBlocked()) return;
     if (tool === "offside") {
@@ -2635,7 +2697,7 @@ canvas.addEventListener("dblclick", (event) => {
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
-const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token", g: "shape", o: "offside", m: "measure" };
+const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token", g: "shape", o: "offside", m: "measure", n: "minimap" };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMenu(false);
   if (!clip) return;
@@ -2736,10 +2798,11 @@ const overlayKey = (value, n, pitch = null) => {
   const shown = [];
   itemsAt(value, cut, t).forEach((item) => {
     const state = animation(item, t);
-    const placed = state && placeFlat(resolveItem(placedAt(value, cut, item, t), value.tracks || [], frame), pitch, frame);
+    let placed = state && placeFlat(resolveItem(placedAt(value, cut, item, t), value.tracks || [], frame), pitch, frame);
+    if (placed?.kind === "minimap") placed = withMinimap(placed, value.tracks || [], pitch?.at(frame)?.calibration || null, frame);
     if (placed && !placed.offPitch) shown.push(placed, state);
   });
-  const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))]);
+  const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points, entry.projected?.players] : entry))]);
   return { t, board, shown, key, frame };
 };
 
