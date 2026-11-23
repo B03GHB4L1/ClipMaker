@@ -88,8 +88,8 @@ class LibraryTests(unittest.TestCase):
 
     def test_files_that_are_not_pictures_or_are_too_big_are_refused(self):
         wide = encoded(size=(pictures.MAX_SIDE + 1, 2))
-        for data, message in ((b"", "under 20 MB"), (b"MZ\x90\x00" + b"0" * 200, "could not be read"),
-                              (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "could not be read"),
+        for data, message in ((b"", "under 20 MB"), (b"MZ\x90\x00" + b"0" * 200, "Only PNG, JPEG and WebP"),
+                              (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "Only PNG, JPEG and WebP"),
                               (encoded(format="GIF"), "Only PNG, JPEG and WebP"),
                               (wide, "pixels on a side"), (b"0" * (pictures.MAX_BYTES + 1), "under 20 MB")):
             with self.subTest(message=message, size=len(data)), self.assertRaisesRegex(ValueError, message):
