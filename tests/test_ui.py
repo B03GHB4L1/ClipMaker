@@ -90,14 +90,14 @@ class SharedUiTests(unittest.TestCase):
         # Explorer opens on the engine's behalf; the app lets it take the foreground first.
         shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertIn("AllowSetForegroundWindow(ASFW_ANY)", shell)
-        self.assertIn("generate_handler![allow_foreground, raise_folder_window]", shell)
+        self.assertIn("generate_handler![allow_foreground, raise_folder_window, window_fullscreen]", shell)
         # Explorer can still open behind; the app (in front) raises the window for that folder.
         self.assertIn('"CabinetWClass"', shell)
         self.assertIn("SetForegroundWindow(search.found)", shell)
         # Without an app manifest and a grant, Tauri refused the pages' calls
         # ("Command allow_foreground not allowed by ACL"), so nothing came to the front.
         build = (UI.parent / "src-tauri/build.rs").read_text(encoding="utf-8")
-        self.assertIn('commands(&["allow_foreground", "raise_folder_window"])', build)
+        self.assertIn('commands(&["allow_foreground", "raise_folder_window", "window_fullscreen"])', build)
         config = json.loads((UI.parent / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
         self.assertTrue(config["app"]["withGlobalTauri"])
         capability = json.loads((UI.parent / "src-tauri/capabilities/engine-pages.json").read_text(encoding="utf-8"))
@@ -105,7 +105,8 @@ class SharedUiTests(unittest.TestCase):
         self.assertEqual(capability["remote"]["urls"], ["http://127.0.0.1:*/*"])  # the local engine only
         self.assertNotIn("core:default", capability["permissions"])  # no window or webview APIs
         self.assertEqual(capability["permissions"],
-                         ["core:app:allow-version", "allow-allow-foreground", "allow-raise-folder-window"])
+                         ["core:app:allow-version", "allow-allow-foreground", "allow-raise-folder-window",
+                          "allow-window-fullscreen"])
         helper = (UI / "save-clip.js").read_text(encoding="utf-8")
         self.assertIn('invoke("allow_foreground")', helper)
         self.assertRegex(helper, r"await allowForeground\(\);\s*const \{ folder \} = await post\(apiPath\);")
@@ -120,6 +121,28 @@ class SharedUiTests(unittest.TestCase):
             if "Open folder" in source and path.name != "save-clip.js":
                 self.assertTrue("data-reveal-export" in source or "revealFolder(`/api/" in source, path.name)
         self.assertIn('invoke("allow_foreground")', (UI / "update.js").read_text(encoding="utf-8"))
+
+    def test_the_window_can_go_full_screen_on_every_screen(self):
+        # The desktop window had no way to fill the screen: a footer button and F11 now do it.
+        shell = (UI.parent / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+        self.assertIn("fn window_fullscreen(window: tauri::Window, full: Option<bool>)", shell)
+        self.assertIn("window.set_fullscreen(full)", shell)
+        theme = (UI / "theme.js").read_text(encoding="utf-8")
+        self.assertIn('invoke()("window_fullscreen"', theme)
+        self.assertIn('event.key !== "F11"', theme)
+        self.assertIn("requestFullscreen", theme)  # a browser fills the screen with the page instead
+        self.assertIn("data-fullscreen-switch", theme.replace("dataset.fullscreenSwitch", "data-fullscreen-switch"))
+        for page in ("index.html", "filters.html", "analysis.html", "code.html", "annotate.html"):
+            self.assertIn("theme.js", (UI / page).read_text(encoding="utf-8"), page)
+
+    def test_charts_open_full_screen_from_their_toolbar(self):
+        helper = (UI / "save-clip.js").read_text(encoding="utf-8")
+        self.assertIn('name: "fullscreen"', helper)
+        self.assertIn("openChartFullscreen(chart", helper)
+        viewer = (UI / "chart-fullscreen.js").read_text(encoding="utf-8")
+        self.assertIn("dialog.showModal()", viewer)  # Esc closes it
+        self.assertIn("width: undefined, height: undefined, autosize: true", viewer)  # fills the window
+        self.assertIn("Plotly.purge(plot)", viewer)
 
     def test_projects_can_be_deleted_from_intake_and_the_projects_dialog(self):
         projects = (UI / "projects.js").read_text(encoding="utf-8")
