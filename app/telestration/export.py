@@ -431,6 +431,149 @@ def render(ffmpeg: str, video: Path, record: dict[str, Any], freezes: list[dict[
             raise ValueError(f"Could not encode the video: {message}")
 
 
+# ---------------------------------------------------------------------------
+# Sequences: a session's clips, each rendered as above, joined into one video (T2)
+# ---------------------------------------------------------------------------
+def _even(value: int) -> int:
+    return max(2, int(value) // 2 * 2)
+
+
+def join_plan(pieces: list[dict[str, Any]]) -> dict[str, Any]:
+    """How to join rendered pieces [{width, height, fps, seconds, sound}]: the first clip sets the size and
+    frame rate; when every piece already matches (and all or none have sound) they are copied, not re-encoded."""
+    if not pieces:
+        raise ValueError("A sequence needs at least one clip.")
+    first = pieces[0]
+    width, height, fps = _even(first["width"]), _even(first["height"]), float(first["fps"])
+    sound = any(piece["sound"] for piece in pieces)
+    same = all(piece["width"] == width and piece["height"] == height and abs(float(piece["fps"]) - fps) < 1e-3
+               for piece in pieces)
+    copy = same and len({bool(piece["sound"]) for piece in pieces}) == 1
+    return {"width": width, "height": height, "fps": fps, "sound": sound, "copy": copy,
+            "seconds": sum(float(piece["seconds"]) for piece in pieces)}
+
+
+def join_filter(pieces: list[dict[str, Any]], plan: dict[str, Any]) -> str:
+    """The ffmpeg filter graph that scales, pads and joins the pieces, with silence for a piece without sound.
+    The frame rate is set on the output (-r): an fps filter on each piece drops its last frame."""
+    width, height = plan["width"], plan["height"]
+    chains, labels = [], []
+    for index, piece in enumerate(pieces):
+        chains.append(f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                      f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,setpts=PTS-STARTPTS[v{index}]")
+        labels.append(f"[v{index}]")
+        if plan["sound"]:
+            if piece["sound"]:
+                chains.append(f"[{index}:a]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[a{index}]")
+            else:
+                chains.append(f"anullsrc=r={AUDIO_RATE}:cl=stereo,atrim=duration={float(piece['seconds']):.6f},"
+                              f"aformat=sample_fmts=fltp:channel_layouts=stereo[a{index}]")
+            labels.append(f"[a{index}]")
+    audio = 1 if plan["sound"] else 0
+    chains.append(f"{''.join(labels)}concat=n={len(pieces)}:v=1:a={audio}[v]" + ("[a]" if audio else ""))
+    return ";".join(chains)
+
+
+def join(ffmpeg: str, pieces: list[dict[str, Any]], target: str, encoder: str, scratch: Path,
+         cancel: threading.Event | None = None, progress: Callable[[float], None] | None = None) -> None:
+    """Join the rendered pieces (each {path, width, height, fps, seconds, sound}) into `target` (.mp4)."""
+    import video_encoder as encoders
+
+    plan = join_plan(pieces)
+    if plan["copy"]:
+        listing = scratch / "pieces.txt"
+        listing.write_text("".join(f"file '{Path(piece['path']).as_posix()}'\n" for piece in pieces), encoding="utf-8")
+        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "concat", "-safe", "0",
+                   "-i", str(listing), "-c", "copy", "-movflags", "+faststart", "-f", "mp4", target]
+    else:
+        _, video_args = encoders.video_args(encoder, ffmpeg, 18, "veryfast")
+        command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin"]
+        for piece in pieces:
+            command += ["-i", str(piece["path"])]
+        command += ["-filter_complex", join_filter(pieces, plan), "-map", "[v]"]
+        if plan["sound"]:
+            command += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        command += ["-r", f"{plan['fps']:g}", *video_args, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", target]
+    command[1:1] = ["-progress", "pipe:1", "-nostats"]
+    errors = scratch / "join.log"
+    with errors.open("wb") as log:
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log,
+                                   creationflags=_flags())
+        try:
+            for line in process.stdout:  # type: ignore[union-attr]
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled()
+                key, _, value = line.decode("ascii", "replace").strip().partition("=")
+                if key == "out_time_us" and value.isdigit() and progress is not None and plan["seconds"] > 0:
+                    progress(min(1.0, int(value) / 1e6 / plan["seconds"]))
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        code = process.wait()
+    if code != 0:
+        message = errors.read_text(errors="replace")[-500:]
+        if encoder != encoders.SOFTWARE and not plan["copy"]:
+            raise encoders.HardwareEncodeError(message)
+        raise ValueError(f"Could not join the clips: {message}")
+
+
+JOIN_SHARE = 0.1  # of a sequence's progress bar: the join, after every clip is rendered
+
+
+def run_sequence(ffmpeg: str, sessions: list[dict[str, Any]], folder: Path, name: str, save: Callable[..., Path],
+                 register: Callable[[Path], str], cancel: threading.Event, progress: Callable[[int, int], None],
+                 encoder_setting: str = "auto") -> dict[str, Any]:
+    """Render each export session (a clip of the sequence, in order) and join them into one video in the
+    user's folder. Removes the sessions' overlays and every piece afterwards, also when cancelled."""
+    import video_encoder as encoders
+    total = sum(session["frames"] for session in sessions)
+    if total > MAX_OUTPUT_FRAMES:
+        raise ValueError("Exports can be up to 20 minutes long.")
+    scale = 1000
+    try:
+        with tempfile.TemporaryDirectory(prefix="vizorplay-sequence-") as scratch_name:
+            scratch = Path(scratch_name)
+            encoder = encoders.resolve(encoder_setting, ffmpeg)
+            pieces, done = [], 0
+            for index, session in enumerate(sessions):
+                schedule = overlay_schedule(session["folder"])
+                target = str(scratch / f"piece-{index:03d}.mp4")
+                record = session["record"]
+
+                def report(n: int, count: int, base: int = done) -> None:
+                    progress(int((base + n) / total * (1 - JOIN_SHARE) * scale), scale)
+
+                try:
+                    render(ffmpeg, session["video"], record, session["freezes"], session["frames"],
+                           schedule, target, encoder, cancel, report, session.get("parts"))
+                except encoders.HardwareEncodeError:
+                    encoder = encoders.SOFTWARE
+                    render(ffmpeg, session["video"], record, session["freezes"], session["frames"],
+                           schedule, target, encoder, cancel, report, session.get("parts"))
+                shutil.rmtree(session["folder"], ignore_errors=True)
+                pieces.append({"path": target, "width": record["width"], "height": record["height"],
+                               "fps": record["fps"], "seconds": session["frames"] / record["fps"],
+                               "sound": has_audio(ffmpeg, Path(target))})
+                done += session["frames"]
+
+            def joined(share: float) -> None:
+                progress(int(((1 - JOIN_SHARE) + share * JOIN_SHARE) * scale), scale)
+
+            def write(temporary: str) -> None:
+                try:
+                    join(ffmpeg, pieces, temporary, encoder, scratch, cancel, joined)
+                except encoders.HardwareEncodeError:
+                    join(ffmpeg, pieces, temporary, encoders.SOFTWARE, scratch, cancel, joined)
+
+            saved = save(folder, name, ".mp4", write, fallback="VizorPlay annotated sequence")
+        return {"saved": {"name": saved.name, "folder": str(saved.parent), "id": register(saved)},
+                "frames": total, "clips": len(sessions), "encoder": encoders.label(encoder)}
+    finally:
+        for session in sessions:
+            shutil.rmtree(session["folder"], ignore_errors=True)
+
+
 def run_export(ffmpeg: str, session: dict[str, Any], folder: Path, name: str, save: Callable[..., Path],
                register: Callable[[Path], str], cancel: threading.Event, progress: Callable[[int, int], None],
                encoder_setting: str = "auto") -> dict[str, Any]:

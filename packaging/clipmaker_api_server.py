@@ -2576,6 +2576,20 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if not CLIP_ID.match(clip_id):
                     raise ValueError("Invalid clip id.")
                 clips.remove_clip(project_id, clip_id)
+            elif action == "reorder":
+                if not SESSION_ID.match(session_id):
+                    raise ValueError("Invalid annotate session.")
+                order = body.get("clips")
+                if not isinstance(order, list) or not all(isinstance(c, str) and CLIP_ID.match(c) for c in order):
+                    raise ValueError("Invalid clip id.")
+                clips.reorder_session(project_id, session_id, order)
+            elif action == "move-clip":
+                # Bring a clip from another session into this one (the sequence's Add clip).
+                if not SESSION_ID.match(session_id) or not clips.has_session(project_id, session_id):
+                    raise LookupError("That annotate session is not in the project any more.")
+                if not CLIP_ID.match(clip_id):
+                    raise ValueError("Invalid clip id.")
+                clips.add_to_session(project_id, clip_id, session_id)
             else:
                 raise ValueError("Unknown annotate session request")
         except LookupError as error:
@@ -2812,6 +2826,44 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return export.run_export(ffmpeg, session, folder, name, save_to_user_folder, register, cancel, progress)
             finally:
                 exports.discard(session_id)
+
+        job = self.tracking_jobs.start(work)
+        self.send_json(HTTPStatus.ACCEPTED, {"job": job})
+
+    def render_sequence(self, body: dict[str, Any]) -> None:
+        """POST /api/editor-sequences/render {exports: [ids], name}: the clips' exports, each with its overlays
+        already sent, rendered in order and joined into one video (T2)."""
+        from telestration import export
+        ids = body.get("exports")
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 100
+                or not all(isinstance(i, str) and re.fullmatch(r"[a-f0-9]{16}", i) for i in ids) or len(set(ids)) != len(ids)):
+            raise ValueError("A sequence lists between 1 and 100 clip exports, each once.")
+        exports = self.editor_exports
+        found = [exports.get(i) for i in ids]
+        if any(session is None for session in found):
+            self.send_post_error(HTTPStatus.NOT_FOUND, "This export is no longer open. Start it again.")
+            return
+        if len({session["project"] for session in found}) != 1:  # type: ignore[index]
+            raise ValueError("A sequence's clips come from one project.")
+        if sum(session["frames"] for session in found) > export.MAX_OUTPUT_FRAMES:  # type: ignore[index]
+            raise ValueError("Exports can be up to 20 minutes long.")
+        sessions = [exports.take(i) for i in ids]
+        ffmpeg = _find_ffmpeg()
+        folder = Path(self.server.default_export_dir or self.store.data_dir / "exports")  # type: ignore[attr-defined]
+        name = str(body.get("name") or "")[:160]
+        saved_clips = self.server.saved_clips  # type: ignore[attr-defined]
+
+        def register(saved: Path) -> str:
+            token = uuid.uuid4().hex
+            saved_clips[token] = saved
+            return token
+
+        def work(cancel: threading.Event, progress: Callable[[int, int], None]) -> dict[str, Any]:
+            try:
+                return export.run_sequence(ffmpeg, sessions, folder, name, save_to_user_folder, register, cancel, progress)
+            finally:
+                for i in ids:
+                    exports.discard(i)
 
         job = self.tracking_jobs.start(work)
         self.send_json(HTTPStatus.ACCEPTED, {"job": job})
@@ -3458,6 +3510,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 return
             if path.startswith("/api/editor/") and path.endswith("/export"):
                 self.start_export(path)
+                return
+            if path == "/api/editor-sequences/render":
+                self.render_sequence(body)
                 return
             if path.startswith("/api/editor-exports/") and path.endswith("/render"):
                 self.render_export(path.split("/")[-2], body)

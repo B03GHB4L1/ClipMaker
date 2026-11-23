@@ -61,6 +61,7 @@ jobs:
       - run: node --test tests/chart_export.test.mjs
       - run: node --test tests/picture_insert.test.mjs
       - run: node --test tests/speed_chart.test.mjs
+      - run: node --test tests/sequence.test.mjs
       - run: python packaging/clipmaker_api_server.py --help
       - uses: ./.github/actions/ubuntu-mirror
       - run: python -m playwright install --with-deps chromium

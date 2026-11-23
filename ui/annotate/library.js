@@ -1,5 +1,5 @@
 // The Annotate tab: the project's annotate sessions (groups of clips drawn on
-// together), and the strip of a session's clips shown above the editor.
+// together). The open clip's session shows as a sequence on its timeline (sequence.js).
 // Sessions live in the project (app/telestration/clips.py, sessions.json).
 import { projectRequest } from "../projects.js";
 
@@ -144,28 +144,4 @@ export async function showLibrary(root, projectId, onStatus = () => {}) {
     onStatus("Sessions need attention");
     fail(problem.message);
   }
-}
-
-/** Show the other clips of the session holding `clipId` above the editor, as links (saving waits on leaving). */
-export async function showClipStrip(strip, projectId, clipId) {
-  let sessions;
-  try {
-    sessions = await loadSessions(projectId);
-  } catch {
-    return null; // the strip is a convenience; the editor works without it
-  }
-  const session = sessions.find((entry) => entry.clips.some((clip) => clip.id === clipId));
-  if (!session || session.clips.length < 2) return session || null;
-  const label = el("span", "annotate-strip-name", session.name);
-  const links = session.clips.map((clip, index) => {
-    const link = el("a", "annotate-strip-clip");
-    link.href = editorUrl(projectId, clip.id);
-    link.title = clip.name;
-    link.append(el("span", "annotate-strip-index", String(index + 1)), el("span", "annotate-strip-label", clip.name));
-    if (clip.id === clipId) link.setAttribute("aria-current", "page");
-    return link;
-  });
-  strip.replaceChildren(label, ...links);
-  strip.hidden = false;
-  return session;
 }
