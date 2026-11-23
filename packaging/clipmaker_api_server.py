@@ -2279,7 +2279,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         """Tactical Lab tabs run the classic tab code against a recorder."""
         import shutil
         from analysis_core import tactical
-        projects = [analysis_view(item) for item in self.store.list()]
+        # One entry per saved match (a project can use several), named by the match's id.
+        seen: dict[str, dict[str, Any]] = {}
+        for owner in self.store.list():
+            for view in self.store.match_views(owner["id"]):
+                if view["match_id"] and view["match_id"] not in seen and view.get("csv_path"):
+                    seen[view["match_id"]] = analysis_view({**view, "id": view["match_id"]})
+        projects = list(seen.values())
+        project = {**project, "id": project.get("match_id") or project["id"]}
         if is_clip:
             action = str(body.get("action") or "")
             source, name = tactical.clip(tab, controls, project, projects, action)
@@ -2348,12 +2355,18 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         else:
             raise ValueError("Unknown code panel action")
 
-    def analysis_project(self, project_id: str) -> dict[str, Any]:
+    def analysis_project(self, project_id: str, match_id: str = "") -> dict[str, Any]:
+        """The project as the analytical workspace reads it: one match of it (the one chosen in the
+        Analyst Room's match picker, else the project's current one)."""
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", project_id or ""):
             raise ValueError("Open a project before using the analytical workspace.")
         project = self.store.get(project_id)
         if not project:
             raise ValueError("Project not found")
+        if match_id and match_id != project.get("match_id"):
+            project = next((view for view in self.store.match_views(project_id) if view["match_id"] == match_id), None)
+            if project is None:
+                raise ValueError("That match is no longer in this project.")
         project = analysis_view(project)
         if not project.get("csv_path") or not Path(project["csv_path"]).is_file():
             raise ValueError("Scrape or import a match before opening an analytical workspace.")
@@ -2884,7 +2897,8 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                                                      for view, label in VIEWS.items()}})
             return
         if path == "/api/analysis/summary":
-            project = self.analysis_project(parse_qs(urlparse(self.path).query).get("project", [""])[0])
+            query = parse_qs(urlparse(self.path).query)
+            project = self.analysis_project(query.get("project", [""])[0], query.get("match", [""])[0])
             frames = self.server.analysis_frames.get(project["csv_path"])  # type: ignore[attr-defined]
             self.send_json(HTTPStatus.OK, {"summary": frames.summary(),
                                            "analysis_state": project.get("analysis_state", {})})
@@ -3026,7 +3040,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if len(parts) not in {5, 6} or (len(parts) == 6 and parts[5] != "clip"):
                     raise ValueError("Unknown analytical tab")
                 validate_tab(parts[3], parts[4])
-                project = self.analysis_project(str(body.get("project_id") or ""))
+                project = self.analysis_project(str(body.get("project_id") or ""), str(body.get("match_id") or ""))
                 handler = NATIVE_TABS.get((parts[3], parts[4]))
                 if handler is None:
                     raise ValueError("Unknown analytical tab")

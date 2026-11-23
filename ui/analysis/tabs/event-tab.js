@@ -142,7 +142,7 @@ export function eventTab(slug, title) {
       renderDetail();
       try {
         const { file } = await projectRequest(`/api/analysis/${context.view}/${slug}/clip`, {
-          project_id: context.projectId, controls, before: clip.before, after: clip.after,
+          project_id: context.projectId, match_id: context.matchId, controls, before: clip.before, after: clip.after,
         });
         if (clip.key === key) clip.file = file;
       } catch (error) {
@@ -196,7 +196,7 @@ export function eventTab(slug, title) {
       const ticket = ++request;
       panel.setAttribute("aria-busy", "true");
       try {
-        const result = await projectRequest(`/api/analysis/${context.view}/${slug}`, { project_id: context.projectId, controls });
+        const result = await projectRequest(`/api/analysis/${context.view}/${slug}`, { project_id: context.projectId, match_id: context.matchId, controls });
         if (ticket !== request) return; // A newer request superseded this one.
         view = result.view;
         if (clip.before === null) Object.assign(clip, { before: view.clip_defaults.before, after: view.clip_defaults.after });

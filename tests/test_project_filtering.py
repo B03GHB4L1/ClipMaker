@@ -217,6 +217,48 @@ class ProjectFilteringTests(unittest.TestCase):
         job = self.finish(result["job"])
         self.assertEqual(job["status"], "complete")  # the bad id is dropped; the clip uses the project's own match
 
+    # The Analyst Room analyses one match of a project at a time, chosen in its picker.
+    def summary(self, match_id=""):
+        suffix = f"&match={match_id}" if match_id else ""
+        return self.get(f"/api/analysis/summary?project={self.project_id}{suffix}")["summary"]
+
+    def test_the_summary_is_of_the_chosen_match_else_the_projects_current_one(self):
+        self.assertEqual(self.summary(self.match_a)["home_team"], "Home A")
+        self.assertEqual(self.summary(self.match_b)["home_team"], "Home B")
+        self.assertEqual(self.summary()["home_team"], "Home B")  # the match Intake is on
+        self.store.set_active_match(self.project_id, self.match_a)
+        self.assertEqual(self.summary()["home_team"], "Home A")
+
+    def test_a_match_outside_the_project_is_refused(self):
+        with self.assertRaises(HTTPError) as context:
+            self.get(f"/api/analysis/summary?project={self.project_id}&match=gone")
+        self.assertIn("no longer in this project", json.loads(context.exception.read())["error"])
+        context.exception.close()
+
+    def test_an_analysis_tab_reads_the_chosen_match(self):
+        teams = {}
+        for name, match_id in (("a", self.match_a), ("b", self.match_b)):
+            view = self.post("/api/analysis/analyst/shot-map",
+                             {"project_id": self.project_id, "match_id": match_id, "controls": {}})["view"]
+            teams[name] = next(item for item in view["filters"] if item["key"] == "team")["options"]
+        self.assertEqual([item["value"] for item in teams["a"]], ["Home A", "Away A"])
+        self.assertEqual([item["value"] for item in teams["b"]], ["Home B", "Away B"])
+
+    def test_tactical_lab_offers_every_saved_match_whichever_project_uses_it(self):
+        other = self.store.create("Another project")
+        third = self.store.upsert({"id": other["id"], "home_team": "Home C", "away_team": "Away C",
+                                   "csv_path": str(self.root / "a.csv")})
+        view = self.post("/api/analysis/tactical/style-profile",
+                         {"project_id": self.project_id, "match_id": self.match_b,
+                          "controls": {"multi": True, "matches": [self.match_a, self.match_b, third["match_id"]]}})["view"]
+        scope = view["scope"]
+        self.assertEqual({option["value"] for option in scope["match_options"]},
+                         {self.match_a, self.match_b, third["match_id"]})
+        self.assertEqual(scope["matches"], [self.match_a, self.match_b, third["match_id"]])
+        solo = self.post("/api/analysis/tactical/style-profile",
+                         {"project_id": self.project_id, "match_id": self.match_b, "controls": {}})["view"]
+        self.assertEqual(solo["scope"]["matches"], [self.match_b])  # one match: named by its own id
+
 
 if __name__ == "__main__":
     unittest.main()

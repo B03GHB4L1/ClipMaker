@@ -454,3 +454,5 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
 .prepare-start { border: 1px solid #9a6b00; background: #9a6b00; color: #fff; }
 .prepare-stop { border: 1px solid #b9ad8c; background: transparent; color: #4d4532; }
 .prepare-actions button:disabled { opacity: .6; cursor: default; }
+.analysis-match { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 12px; font-size: 11px; color: #62655d; }
+.analysis-match select { min-height: 28px; max-width: 260px; padding: 2px 8px; border: 1px solid #d7d8d2; border-radius: 4px; background: #fff; color: #151916; font: inherit; }
