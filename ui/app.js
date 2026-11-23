@@ -329,7 +329,6 @@ document
     } finally { finish?.(); }
   });
 
-const videoInput = document.querySelector("[data-video-input]");
 document.querySelector("[data-batch-fetch]").addEventListener("click", async (event) => {
   const urls = document.querySelector("[data-batch-urls]").value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
   if (!urls.length || urls.length > 20) { showToast("Enter between 1 and 20 match URLs."); return; }
@@ -386,30 +385,39 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
     activeMatch.video_path = path || "";
   }
   if (save) persistIntake();
-  showToast("Footage loaded locally. It never leaves this device.");
+  showToast("Footage is used where it is. It is not copied and never leaves this device.");
+};
+
+// The system's own file dialog (engine): VizorPlay keeps the video's path and never copies it.
+const pickVideo = (period = "1H") => apiRequest("/api/files/video", { method: "POST", body: JSON.stringify({ period }) });
+
+// A saved video that is not where it was (moved, renamed, drive unplugged): say so next to its name.
+const showMissingVideo = (name, message) => {
+  const row = document.querySelector("[data-file-row]");
+  row.hidden = false;
+  row.classList.add("is-missing");
+  row.querySelector(".file-info strong").textContent = name || "Saved video";
+  row.querySelector(".file-info strong").title = message;
+  row.querySelector(".file-info small").textContent = "Not found · choose match footage to find it again";
+  row.querySelector(".file-ready").textContent = "Missing";
+  showToast(message);
 };
 
 document
   .querySelector("[data-dropzone]")
   .addEventListener("click", async () => {
     if (!apiAvailable) {
-      videoInput.click();
+      showToast("Design preview: connect the local engine to choose footage");
       return;
     }
     let finish;
     try {
       await flushProject();
       finish = beginProjectOperation();
-      if (navigator.platform.toLowerCase().includes("mac")) { videoInput.click(); return; }
-      const result = await apiRequest("/api/files/video", {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      if (result.browser_picker) videoInput.click();
-      else if (!result.cancelled) showSelectedVideo(result.file);
+      const result = await pickVideo("1H");
+      if (!result.cancelled) showSelectedVideo(result.file);
     } catch (error) {
-      showToast("Native picker unavailable. Choose the file in the browser.");
-      videoInput.click();
+      showToast(error.message);
     } finally { finish?.(); }
   });
 
@@ -422,15 +430,6 @@ const importFile = async (file) => {
   if (!response.ok) throw new Error(result.error || "Could not import file.");
   return result;
 };
-videoInput.addEventListener("change", async () => {
-  const file = videoInput.files[0];
-  if (!file) return;
-  const finish = beginProjectOperation();
-  try { showToast("Copying footage into this local project..."); showSelectedVideo((await importFile(file)).file); }
-  catch (error) { showToast(error.message); }
-  finally { finish(); }
-  videoInput.value = "";
-});
 
 document.querySelector("[data-csv-input]").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -441,24 +440,32 @@ document.querySelector("[data-csv-input]").addEventListener("change", async (eve
   finally { finish?.(); }
   event.target.value = "";
 });
-document.querySelectorAll("[data-period-video]").forEach((input) => input.addEventListener("change", async () => {
-  const file = input.files[0];
-  if (!file) return;
-  const finish = beginProjectOperation();
+const showPeriodFile = (period, path, missing = "") => {
+  const span = document.querySelector(`[data-period-file="${period}"]`);
+  span.textContent = (path || "").split(/[\\/]/).pop() + (path && missing ? " · not found" : "");
+  span.title = missing || path || "";
+  span.classList.toggle("is-missing", Boolean(path && missing));
+};
+document.querySelectorAll("[data-period-video]").forEach((button) => button.addEventListener("click", async () => {
+  if (!apiAvailable || !activeMatch.id) { showToast("The local engine must be connected before choosing a video."); return; }
+  const period = button.dataset.periodVideo;
+  let finish;
   try {
-    const result = await importFile(file);
-    activeMatch.period_videos = { ...(activeMatch.period_videos || {}), [input.dataset.periodVideo]: result.file.path };
-    document.querySelector(`[data-period-file="${input.dataset.periodVideo}"]`).textContent = file.name;
+    await flushProject();
+    finish = beginProjectOperation();
+    const result = await pickVideo(period);
+    if (result.cancelled) return;
+    activeMatch.period_videos = { ...(activeMatch.period_videos || {}), [period]: result.file.path };
+    showPeriodFile(period, result.file.path);
     await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos });
     renderTimelineMarkers();
   } catch (error) { showToast(error.message); }
-  finally { finish(); }
-  input.value = "";
+  finally { finish?.(); }
 }));
 document.querySelectorAll("[data-remove-period]").forEach((button) => button.addEventListener("click", async () => {
   const period = button.dataset.removePeriod;
   delete (activeMatch.period_videos || {})[period];
-  document.querySelector(`[data-period-file="${period}"]`).textContent = "";
+  showPeriodFile(period, "");
   renderTimelineMarkers();
   try { await saveProject(activeMatch.id, { period_videos: activeMatch.period_videos || {} }); }
   catch (error) { showToast(error.message); }
@@ -473,6 +480,8 @@ matchVideo.addEventListener("loadedmetadata", () => {
 });
 const clearFootage = () => {
   document.querySelector("[data-file-row]").hidden = true;
+  document.querySelector("[data-file-row]").classList.remove("is-missing");
+  document.querySelector(".file-ready").textContent = "Ready";
   matchVideo.pause();
   matchVideo.removeAttribute("src");
   matchFrame.classList.remove("has-video");
@@ -487,7 +496,6 @@ const clearFootage = () => {
   previewDuration.textContent = "--:--:--";
   previewSeconds = 0;
   renderTimeline();
-  videoInput.value = "";
 };
 document.querySelector(".remove-button").addEventListener("click", () => {
   clearFootage();
@@ -552,9 +560,7 @@ const openProject = async (project) => {
   document.querySelector(".ticket-meta span:last-child").textContent = "";
   document.querySelector(".ticket-foot span:last-child").textContent = project.csv_path ? "Data saved locally" : "No match loaded";
   renderMatch(project);
-  document.querySelectorAll("[data-period-file]").forEach((span) => {
-    span.textContent = (project.period_videos?.[span.dataset.periodFile] || "").split(/[\\/]/).pop();
-  });
+  document.querySelectorAll("[data-period-file]").forEach((span) => showPeriodFile(span.dataset.periodFile, project.period_videos?.[span.dataset.periodFile]));
   const url = new URL(location.href);
   url.searchParams.set("project", project.id);
   history.replaceState({}, "", url);
@@ -576,8 +582,13 @@ const openProject = async (project) => {
     try {
       const result = await apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: project.id }) });
       showSelectedVideo(result.file, false);
-    } catch (error) { showToast(error.message); }
+    } catch (error) { showMissingVideo(project.video_name || project.video_path.split(/[\\/]/).pop(), error.message); }
   }
+  // Separate period videos: flag any that are no longer where they were.
+  Object.entries(project.period_videos || {}).filter(([, path]) => path).forEach(([period, path]) => {
+    apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: project.id, period }) })
+      .catch((error) => { if (activeMatch.id === project.id) showPeriodFile(period, path, error.message); });
+  });
 };
 
 document.querySelector("[data-project-name]").addEventListener("change", persistIntake);

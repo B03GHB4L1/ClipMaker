@@ -666,6 +666,8 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         # The engine defaults exports to the user's Videos/VizorPlay; keep test exports out of it.
         os.environ["VIZORPLAY_EXPORT_DIR"] = str(Path(directory) / "Videos" / "VizorPlay")
+        # The engine's file dialog returns the path written here (no real dialog in a test).
+        os.environ["VIZORPLAY_TEST_VIDEO_PICK"] = str(Path(directory) / "video-pick.txt")
         stage("starting isolated backend")
         with backend(command, Path(directory) / "data", evidence, startup_timeout=600 if args.launcher else 90) as base:
             stage("backend ready; launching Chromium")
@@ -709,6 +711,16 @@ def main():
     stage("finished")
 
 
+def choose_footage(page, video):
+    """Choose match footage the way a user does: the engine's file dialog, which keeps the path."""
+    Path(os.environ["VIZORPLAY_TEST_VIDEO_PICK"]).write_text(str(video), encoding="utf-8")
+    page.get_by_role("button", name="Choose match footage").click()
+    expect(page.locator("[data-file-row] .file-info strong")).to_have_text(video.name)
+    data = Path(os.environ["VIZORPLAY_TEST_VIDEO_PICK"]).parent / "data"
+    copies = [path for path in data.glob("projects/*/imports/*") if path.suffix != ".csv"]
+    assert not copies, ("footage was copied into the project", copies)
+
+
 def exercise_kickoff_player(page, base, root):
     """Step, zoom, period markers and set-kick-off in the intake player, in its own project."""
     stage("kick-off player: own project with a 3-minute 25 fps video")
@@ -719,7 +731,7 @@ def exercise_kickoff_player(page, base, root):
                     "testsrc2=size=160x90:rate=25", "-t", "180", "-c:v", "libx264",
                     "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(video)],
                    check=True, capture_output=True)
-    page.locator('[data-video-input]').set_input_files(str(video))
+    choose_footage(page, video)
     expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
     page.wait_for_function("document.querySelector('[data-match-video]').duration > 179")
     current = lambda: page.locator('[data-match-video]').evaluate("(video) => video.currentTime")
@@ -957,7 +969,7 @@ def exercise(page, base, root, evidence, errors):
     assert divider.evaluate("e => e.nextElementSibling.classList.contains('csv-import')")
     page.locator('[data-csv-input]').set_input_files(str(csv))
     page.get_by_text("2 events found", exact=True).wait_for()
-    page.locator('[data-video-input]').set_input_files(str(video))
+    choose_footage(page, video)
     expect(page.get_by_role("group", name="Playback controls").get_by_role("button", name="Play", exact=True)).to_be_enabled()
     for period in ("2H", "1H"):
         page.get_by_role("tab", name=period, exact=True).click()

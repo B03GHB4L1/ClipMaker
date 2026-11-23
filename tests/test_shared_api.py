@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import threading
 import time
@@ -15,6 +16,7 @@ from packaging.clipmaker_api_server import (
     infer_score,
     normalize_period,
     compute_clip_windows,
+    remove_unused_imports,
     render_preview_clip,
 )
 
@@ -406,13 +408,112 @@ class SharedApiTests(unittest.TestCase):
             self.assertEqual(response.headers["Content-Range"], "bytes 2-5/10")
             self.assertEqual(response.read(), b"2345")
 
-    def test_macos_video_picker_requests_browser_upload(self):
+    def test_macos_video_picker_uses_the_system_dialog_and_keeps_the_path(self):
+        # macOS used to fall back to a browser upload, which copied the whole video.
+        video_path = Path(self.temporary.name) / "mac match.mov"
+        video_path.write_bytes(b"0123456789")
+        finished = type("Done", (), {"returncode": 0, "stdout": f"{video_path}\n", "stderr": ""})()
         with patch("packaging.clipmaker_api_server.sys.platform", "darwin"), \
-             patch("packaging.clipmaker_api_server.choose_video_file") as native_picker:
-            status, result = self.request("/api/files/video", method="POST", payload={})
+             patch.dict("os.environ", {}, clear=False) as env, \
+             patch("subprocess.run", return_value=finished) as run:
+            env.pop("VIZORPLAY_TEST_VIDEO_PICK", None)
+            status, result = self.request("/api/files/video", method="POST", payload={"period": "2H"})
         self.assertEqual(status, 200)
-        self.assertEqual(result, {"browser_picker": True})
-        native_picker.assert_not_called()
+        self.assertTrue(Path(result["file"]["path"]).samefile(video_path))
+        script = run.call_args.args[0]
+        self.assertEqual(script[0], "osascript")
+        self.assertIn("second-half", script[2])
+
+    def test_macos_picker_cancel_is_not_an_error(self):
+        cancelled = type("Done", (), {"returncode": 1, "stdout": "", "stderr": "User canceled. (-128)"})()
+        with patch("packaging.clipmaker_api_server.sys.platform", "darwin"), \
+             patch.dict("os.environ", {}, clear=False) as env, \
+             patch("subprocess.run", return_value=cancelled):
+            env.pop("VIZORPLAY_TEST_VIDEO_PICK", None)
+            status, result = self.request("/api/files/video", method="POST", payload={})
+        self.assertEqual((status, result), (200, {"cancelled": True}))
+
+    def test_video_picker_refuses_files_that_are_not_videos(self):
+        document = Path(self.temporary.name) / "notes.txt"
+        document.write_text("not a video", encoding="utf-8")
+        with patch("packaging.clipmaker_api_server.choose_video_file", return_value=document):
+            with self.assertRaises(HTTPError) as context:
+                self.request("/api/files/video", method="POST", payload={})
+        self.assertEqual(context.exception.code, 400)
+        self.assertIn("Choose a video file", json.loads(context.exception.read())["error"])
+        context.exception.close()
+
+    def test_video_picker_rejects_unknown_periods(self):
+        with patch("packaging.clipmaker_api_server.choose_video_file") as picker:
+            with self.assertRaises(HTTPError) as context:
+                self.request("/api/files/video", method="POST", payload={"period": "../../x"})
+        self.assertEqual(context.exception.code, 400)
+        context.exception.close()
+        picker.assert_not_called()
+
+    def test_test_harness_pick_file_names_the_chosen_video(self):
+        video_path = Path(self.temporary.name) / "picked.mp4"
+        video_path.write_bytes(b"abc")
+        pick = Path(self.temporary.name) / "pick.txt"
+        pick.write_text(str(video_path), encoding="utf-8")
+        with patch.dict("os.environ", {"VIZORPLAY_TEST_VIDEO_PICK": str(pick)}):
+            status, result = self.request("/api/files/video", method="POST", payload={"period": "PEN"})
+        self.assertEqual(status, 200)
+        self.assertTrue(Path(result["file"]["path"]).samefile(video_path))
+
+    def test_video_uploads_are_refused_so_nothing_is_copied(self):
+        project = self.server.match_store.create()
+        request = Request(f"{self.base_url}/api/files/upload?project={project['id']}", data=b"0" * 64,
+                          method="POST", headers={"Content-Type": "application/octet-stream",
+                                                  "X-File-Name": "match.mp4"})
+        with self.assertRaises(HTTPError) as context:
+            urlopen(request, timeout=3)
+        self.assertEqual(context.exception.code, 400)
+        self.assertIn("not copied", json.loads(context.exception.read())["error"])
+        context.exception.close()
+        imports = Path(self.temporary.name) / "projects" / project["id"] / "imports"
+        self.assertEqual([path for path in imports.glob("*")] if imports.exists() else [], [])
+
+    def test_missing_saved_video_says_how_to_find_it_again(self):
+        project = self.server.match_store.upsert({"id": "gone", "video_name": "away.mp4",
+                                                  "video_path": str(Path(self.temporary.name) / "away.mp4")})
+        with self.assertRaises(HTTPError) as context:
+            self.request("/api/files/reopen", method="POST", payload={"match_id": project["id"]})
+        message = json.loads(context.exception.read())["error"]
+        context.exception.close()
+        self.assertIn("away.mp4", message)
+        self.assertIn("Find it again on Intake", message)
+
+    def test_unused_video_copies_from_older_versions_are_removed(self):
+        store = self.server.match_store
+        kept = store.upsert({"id": "kept"})
+        imports = store.project_path(kept["id"]).parent / "imports"
+        imports.mkdir(parents=True)
+        in_use, period_in_use, unused, csv = (imports / "a.mp4", imports / "b.mkv", imports / "c.mp4", imports / "d.csv")
+        old_part, new_part = imports / "e.part", imports / "f.part"
+        for path in (in_use, period_in_use, unused, csv, old_part, new_part):
+            path.write_bytes(b"x")
+        old = time.time() - 7200
+        os.utime(old_part, (old, old))
+        store.upsert({"id": "kept", "video_path": str(in_use), "period_videos": {"2H": str(period_in_use)}})
+        self.assertEqual(remove_unused_imports(store), 2)
+        self.assertEqual(sorted(path.name for path in imports.iterdir()), ["a.mp4", "b.mkv", "d.csv", "f.part"])
+
+    def test_replacing_a_video_removes_the_copy_it_replaced(self):
+        store = self.server.match_store
+        project = store.create()
+        imports = store.project_path(project["id"]).parent / "imports"
+        imports.mkdir(parents=True)
+        copy = imports / "old-copy.mp4"
+        copy.write_bytes(b"x")
+        store.upsert({"id": project["id"], "video_path": str(copy)})
+        original = Path(self.temporary.name) / "original.mp4"
+        original.write_bytes(b"y")
+        status, _ = self.request(f"/api/projects/{project['id']}", method="POST",
+                                 payload={"video_path": str(original), "video_name": original.name})
+        self.assertEqual(status, 200)
+        self.assertFalse(copy.exists())
+        self.assertTrue(original.exists())
 
     def test_saved_video_can_be_reopened(self):
         video_path = Path(self.temporary.name) / "saved-match.mp4"
