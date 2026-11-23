@@ -321,8 +321,9 @@ def main():
                         else:  # read the package's own file list rather than guess its folder
                             listing = subprocess.run(["dpkg-deb", "--contents", str(args.package)], check=True,
                                                      capture_output=True, text=True, timeout=30).stdout.splitlines()
-                            licence = [line.split()[-1].lstrip(".") for line in listing if line.endswith("/LICENSE.txt")]
-                            resources = Path(licence[0]).parent if licence else Path("/usr/lib/VizorPlay")
+                            # Entries read "usr/lib/..." or "./usr/lib/..."; the installed file is under /.
+                            licence = [line.split()[-1].lstrip("./") for line in listing if line.endswith("/LICENSE.txt")]
+                            resources = (Path("/") / licence[0]).parent if licence else Path("/usr/lib/VizorPlay")
                         missing = [name for name in INSTALLED_LICENCES if not (resources / name).is_file()]
                         shown = [line for line in listing if "_internal" not in line]
                         assert not missing, f"Installed app is missing licence files: {missing} in {resources}; package has {shown}"
