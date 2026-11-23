@@ -1137,6 +1137,14 @@
   background: transparent;
   color: #c6c3bc;
 }
+:root[data-theme="dark"] .analysis-match {
+  color: #abaea7;
+}
+:root[data-theme="dark"] .analysis-match select {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #e5ebe7;
+}
 
 /* design.css */
 :root[data-theme="dark"] {

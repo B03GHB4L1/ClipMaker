@@ -99,7 +99,7 @@ export async function renderComparison(panel, context) {
     renderMoments();
     try {
       const { file } = await projectRequest(`/api/analysis/${context.view}/comparison/clip`, {
-        project_id: context.projectId, controls: { ...controls, reel: side },
+        project_id: context.projectId, match_id: context.matchId, controls: { ...controls, reel: side },
         before: view.clip_defaults.before, after: view.clip_defaults.after,
       });
       reel.file = file;
@@ -144,7 +144,7 @@ export async function renderComparison(panel, context) {
     const ticket = ++request;
     panel.setAttribute("aria-busy", "true");
     try {
-      const result = await projectRequest(`/api/analysis/${context.view}/comparison`, { project_id: context.projectId, controls });
+      const result = await projectRequest(`/api/analysis/${context.view}/comparison`, { project_id: context.projectId, match_id: context.matchId, controls });
       if (ticket !== request) return;
       view = result.view;
       Object.assign(controls, view.controls);

@@ -21,7 +21,9 @@
   </header>
   <nav id="analysis-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
   <main class="analysis-main">
-    <div class="project-bar"><strong data-analysis-project></strong><span data-project-status role="status">Saved locally</span></div>
+    <div class="project-bar"><strong data-analysis-project></strong>
+      <label class="analysis-match" data-analysis-match-field hidden><span>Match</span> <select data-analysis-match aria-label="Match to analyse"></select></label>
+      <span data-project-status role="status">Saved locally</span></div>
     <p data-analysis-error role="alert" hidden></p>
     <div class="native-workspace" data-native-workspace hidden></div>
   </main>

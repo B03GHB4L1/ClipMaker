@@ -14,7 +14,7 @@ const element = (tag, attributes = {}, ...children) => {
   return node;
 };
 
-export async function startNativeWorkspace({ projectId, view, config, status, root }) {
+export async function startNativeWorkspace({ projectId, matchId = "", view, config, status, root }) {
   const tabs = config.views[view].tabs;
   const params = new URLSearchParams(location.search);
   let state = {};
@@ -31,7 +31,7 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
     showMessage("loading", "Loading match data", "Preparing the analytical workspace...");
     setStatus("Loading match data...");
     try {
-      const result = await projectRequest(`/api/analysis/summary?project=${encodeURIComponent(projectId)}`);
+      const result = await projectRequest(`/api/analysis/summary?project=${encodeURIComponent(projectId)}${matchId ? `&match=${encodeURIComponent(matchId)}` : ""}`);
       state = result.analysis_state || {};
       render(result.summary);
       setStatus("Workspace ready");
@@ -112,7 +112,7 @@ export async function startNativeWorkspace({ projectId, view, config, status, ro
         // Tactical controls are shared across its tabs, like the classic session.
         const stateKey = view === "tactical" ? "shared" : slug;
         const result = await renderer(panel, {
-          projectId, view, slug, summary, state: state[view]?.controls?.[stateKey] || {},
+          projectId, matchId, view, slug, summary, state: state[view]?.controls?.[stateKey] || {},
           save: (controls) => persistControls(stateKey, controls),
         });
         if (active === slug) cleanup = typeof result === "function" ? result : null;

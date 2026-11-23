@@ -187,7 +187,7 @@ export async function renderTactical(panel, context) {
     renderMedia();
     try {
       const { file } = await projectRequest(`/api/analysis/${context.view}/${context.slug}/clip`, {
-        project_id: context.projectId, controls, action,
+        project_id: context.projectId, match_id: context.matchId, controls, action,
       });
       slot.file = file;
     } catch (error) {
@@ -436,7 +436,7 @@ export async function renderTactical(panel, context) {
     const ticket = ++request;
     panel.setAttribute("aria-busy", "true");
     try {
-      const result = await projectRequest(`/api/analysis/${context.view}/${context.slug}`, { project_id: context.projectId, controls });
+      const result = await projectRequest(`/api/analysis/${context.view}/${context.slug}`, { project_id: context.projectId, match_id: context.matchId, controls });
       if (ticket !== request) return;
       view = result.view;
       Object.assign(controls, { team: view.team, multi: view.scope.multi, matches: view.scope.matches });

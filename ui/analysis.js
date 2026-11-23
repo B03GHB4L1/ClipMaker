@@ -2,6 +2,7 @@ import { projectRequest, newProject, rememberProject } from "./projects.js";
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get("project") || sessionStorage.getItem("clipmaker.active-match");
+const requestedMatch = params.get("match") || "";
 const view = params.get("view") === "tactical" ? "tactical" : "analyst";
 const menu = document.querySelector("#analysis-menu");
 const menuButton = document.querySelector("[data-analysis-menu]");
@@ -21,7 +22,7 @@ document.querySelector("[data-new-project]").onclick = async () => {
 document.querySelectorAll("[data-view]").forEach((link) => {
   link.classList.toggle("is-active", link.dataset.view === view);
   if (link.dataset.view === view) link.setAttribute("aria-current", "page");
-  link.href = `/analysis.html?view=${link.dataset.view}&project=${encodeURIComponent(projectId || "")}`;
+  link.href = `/analysis.html?view=${link.dataset.view}&project=${encodeURIComponent(projectId || "")}${requestedMatch ? `&match=${encodeURIComponent(requestedMatch)}` : ""}`;
 });
 const connect = async () => {
   try {
@@ -29,11 +30,25 @@ const connect = async () => {
     const { project } = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
     rememberProject(project);
     document.querySelector("[data-analysis-project]").textContent = project.project_name || `${project.home_team} vs ${project.away_team}`;
+    // A project that uses several matches: pick the one to analyse (Tactical Lab compares matches itself).
+    const matches = (project.matches || []).filter((match) => match.has_events);
+    const matchId = matches.some((match) => match.id === requestedMatch) ? requestedMatch : (matches.length > 1 ? project.match_id : "");
+    if (matches.length > 1 && view === "analyst") {
+      const select = document.querySelector("[data-analysis-match]");
+      select.replaceChildren(...matches.map((match) => new Option(match.title, match.id)));
+      select.value = matchId;
+      select.addEventListener("change", () => {
+        const next = new URL(location.href);
+        next.searchParams.set("match", select.value);
+        location.href = next.toString();
+      });
+      document.querySelector("[data-analysis-match-field]").hidden = false;
+    }
     const config = await projectRequest("/api/analysis/config");
     const root = document.querySelector("[data-native-workspace]");
     root.hidden = false;
     const { startNativeWorkspace } = await import("./analysis/native.js");
-    await startNativeWorkspace({ projectId, view, config, root, status: document.querySelector("[data-analysis-status]") });
+    await startNativeWorkspace({ projectId, matchId: view === "analyst" ? matchId : "", view, config, root, status: document.querySelector("[data-analysis-status]") });
   } catch (error) {
     document.querySelector("[data-analysis-status]").textContent = "Setup needs attention";
     const output = document.querySelector("[data-analysis-error]");
