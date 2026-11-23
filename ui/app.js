@@ -366,7 +366,7 @@ let videoUrl;
 // Where to put the playhead once a reloaded period video is ready.
 let pendingSeek = null;
 
-const showSelectedVideo = ({ name, size, url, path }, save = true) => {
+const showSelectedVideo = ({ name, size, url, path, needs_preparing: slow }, save = true) => {
   if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
   videoUrl = url;
   matchVideo.src = videoUrl;
@@ -380,6 +380,7 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   previewName.textContent = name;
   previewName.title = name;
   setPlayerEnabled(true);
+  showPrepareNote(Boolean(slow));
   if (save) {
     activeMatch.video_name = name;
     activeMatch.video_path = path || "";
@@ -387,6 +388,76 @@ const showSelectedVideo = ({ name, size, url, path }, save = true) => {
   if (save) persistIntake();
   showToast("Footage is used where it is. It is not copied and never leaves this device.");
 };
+
+// A video saved from a web stream in thousands of pieces takes the player many seconds to
+// open. The engine can rearrange it losslessly and swap it in under the same name.
+const prepareNote = document.querySelector("[data-prepare-note]");
+const prepareText = prepareNote.querySelector("[data-prepare-text]");
+const prepareBar = prepareNote.querySelector("[data-prepare-progress]");
+const prepareStart = prepareNote.querySelector("[data-prepare-start]");
+const prepareStop = prepareNote.querySelector("[data-prepare-stop]");
+const prepareIntro = prepareText.textContent;
+let preparing = null; // { job, match }
+
+function showPrepareNote(show) {
+  if (preparing) return; // the running job owns the note until it ends
+  prepareNote.hidden = !show;
+  prepareText.textContent = prepareIntro;
+  prepareBar.hidden = true;
+  prepareStart.hidden = false;
+  prepareStart.disabled = false;
+  prepareStop.hidden = true;
+}
+
+const reopenMainVideo = async (matchId, seconds) => {
+  const result = await apiRequest("/api/files/reopen", { method: "POST", body: JSON.stringify({ match_id: matchId }) });
+  if (activeMatch.id !== matchId) return;
+  pendingSeek = seconds;
+  showSelectedVideo(result.file, false);
+};
+
+prepareStart.addEventListener("click", async () => {
+  const matchId = activeMatch.id;
+  if (!matchId || preparing) return;
+  const seconds = matchVideo.currentTime || 0;
+  prepareStart.disabled = true;
+  try {
+    await flushProject();
+    // Let go of the file: the engine replaces it when done.
+    matchVideo.pause();
+    matchVideo.removeAttribute("src");
+    matchVideo.load();
+    const { job } = await apiRequest("/api/files/prepare", { method: "POST", body: JSON.stringify({ match_id: matchId }) });
+    preparing = { job, match: matchId };
+    prepareStart.hidden = true;
+    prepareStop.hidden = false;
+    prepareStop.disabled = false;
+    prepareBar.hidden = false;
+    let current = job;
+    while (current.status === "running") {
+      const shown = Math.round((current.progress || 0) * 100);
+      prepareBar.value = shown;
+      prepareText.textContent = `Preparing ${current.name} for fast loading: ${shown}%. You can keep working; the player comes back when it is done.`;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      current = (await apiRequest(`/api/files/prepare/${current.id}`)).job;
+    }
+    preparing = null;
+    if (current.status === "done") showToast("Video prepared: it now opens straight away.");
+    else showToast(current.error || "Preparing stopped. The video is unchanged.");
+    if (activeMatch.id === matchId) await reopenMainVideo(matchId, seconds);
+  } catch (error) {
+    preparing = null;
+    showToast(error.message);
+    if (activeMatch.id === matchId) await reopenMainVideo(matchId, seconds).catch(() => {});
+  }
+});
+
+prepareStop.addEventListener("click", async () => {
+  if (!preparing) return;
+  prepareStop.disabled = true;
+  try { await apiRequest(`/api/files/prepare/${preparing.job.id}/cancel`, { method: "POST", body: "{}" }); }
+  catch (error) { showToast(error.message); }
+});
 
 // The system's own file dialog (engine): VizorPlay keeps the video's path and never copies it.
 const pickVideo = (period = "1H") => apiRequest("/api/files/video", { method: "POST", body: JSON.stringify({ period }) });
@@ -479,6 +550,7 @@ matchVideo.addEventListener("loadedmetadata", () => {
   syncPlaybackUi();
 });
 const clearFootage = () => {
+  showPrepareNote(false);
   document.querySelector("[data-file-row]").hidden = true;
   document.querySelector("[data-file-row]").classList.remove("is-missing");
   document.querySelector(".file-ready").textContent = "Ready";

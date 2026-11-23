@@ -228,6 +228,14 @@
               ×
             </button>
           </div>
+          <div class="prepare-note" data-prepare-note hidden>
+            <p data-prepare-text>This video takes a while to open because it was saved from a web stream in thousands of small pieces. VizorPlay can rearrange it in about a minute. Picture and sound stay exactly the same.</p>
+            <progress data-prepare-progress max="100" value="0" hidden aria-label="Preparing video"></progress>
+            <div class="prepare-actions">
+              <button type="button" class="prepare-start" data-prepare-start>Prepare for fast loading</button>
+              <button type="button" class="prepare-stop" data-prepare-stop hidden>Stop</button>
+            </div>
+          </div>
           <details class="period-files">
             <summary>Separate period videos</summary>
             <div class="period-row" role="group" aria-label="Second half video"><span class="period-name">Second half</span><button type="button" class="period-choose" data-period-video="2H" aria-label="Choose second-half video">Choose</button><span class="period-file" data-period-file="2H"></span><button type="button" class="period-remove" data-remove-period="2H" aria-label="Remove second-half video">&times;</button></div>

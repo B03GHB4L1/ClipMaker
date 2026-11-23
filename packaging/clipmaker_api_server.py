@@ -869,6 +869,13 @@ def remove_unused_imports(store: "MatchStore") -> int:
     return removed
 
 
+def video_needs_preparing(path: Path) -> bool:
+    """A match video in thousands of small pieces (saved from a web stream) takes the
+    player many seconds to open; Intake offers to rearrange it (app/video_layout.py)."""
+    import video_layout
+    return video_layout.needs_preparing(path)
+
+
 def choose_output_folder(initial_dir: str = "") -> Path | None:
     if sys.platform == "darwin":
         import subprocess
@@ -2589,6 +2596,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if media_path is None or not media_path.is_file():
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Video is no longer available"})
             return
+        if self.server.preparations.busy(media_path):  # type: ignore[attr-defined]
+            # Reading it now would hold the file open and stop the prepared copy replacing it (Windows).
+            self.send_json(HTTPStatus.CONFLICT, {"error": "This video is being prepared for fast loading."})
+            return
         size = media_path.stat().st_size
         start = 0
         end = size - 1
@@ -2740,6 +2751,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             return
         if path.startswith("/api/editor-jobs/"):
             self.tracking_job(path.split("/")[-1])
+            return
+        if path.startswith("/api/files/prepare/"):
+            job = self.server.preparations.get(path.rsplit("/", 1)[-1])  # type: ignore[attr-defined]
+            self.send_json(HTTPStatus.OK if job else HTTPStatus.NOT_FOUND,
+                           {"job": job} if job else {"error": "Unknown preparation"})
             return
         if path == "/api/editor-models":
             self.editor_models()
@@ -2945,9 +2961,29 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                             "path": str(selected),
                             "size": selected.stat().st_size,
                             "url": f"/api/media/{token}",
+                            "needs_preparing": video_needs_preparing(selected),
                         }
                     },
                 )
+                return
+            if path == "/api/files/prepare":
+                # Only a saved match's own video: the browser never names a file path here.
+                match = self.store.get(str(body.get("match_id") or "").strip())
+                if match is None:
+                    raise ValueError("That saved match is no longer available.")
+                period = {"1H": 1, "2H": 2, "ET1": 3, "ET2": 4, "PEN": 5}.get(str(body.get("period") or "1H"), 1)
+                saved_path = str(video_for_period(match, period) or "").strip()
+                if not saved_path or not Path(saved_path).is_file():
+                    raise ValueError("No video is chosen for this match yet. Choose it on Intake.")
+                if not video_needs_preparing(Path(saved_path)):
+                    raise ValueError("This video already loads quickly.")
+                job = self.server.preparations.start(Path(saved_path).resolve())  # type: ignore[attr-defined]
+                self.send_json(HTTPStatus.OK, {"job": job})
+                return
+            if path.startswith("/api/files/prepare/") and path.endswith("/cancel"):
+                job = self.server.preparations.cancel(path.split("/")[-2])  # type: ignore[attr-defined]
+                self.send_json(HTTPStatus.OK if job else HTTPStatus.NOT_FOUND,
+                               {"job": job} if job else {"error": "Unknown preparation"})
                 return
             if path == "/api/files/reopen":
                 match = self.store.get(str(body.get("match_id") or "").strip())
@@ -2971,6 +3007,7 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                             "path": str(selected),
                             "size": selected.stat().st_size,
                             "url": f"/api/media/{token}",
+                            "needs_preparing": video_needs_preparing(selected),
                         }
                     },
                 )
@@ -3194,6 +3231,8 @@ def create_server(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     server.analysis_frames = LazyFrameCache()  # type: ignore[attr-defined]
     server.default_export_dir = None  # type: ignore[attr-defined]  # main() sets the user's videos folder
     server.editor_clips = EditorClips(data_dir, _find_ffmpeg)  # type: ignore[attr-defined]
+    import video_layout
+    server.preparations = video_layout.Preparations(_find_ffmpeg)  # type: ignore[attr-defined]
     server.tracking_jobs = None  # type: ignore[attr-defined]  # see Handler.tracking_jobs
     server.tracking_lock = threading.Lock()  # type: ignore[attr-defined]
     server.editor_exports = None  # type: ignore[attr-defined]  # see Handler.editor_exports
