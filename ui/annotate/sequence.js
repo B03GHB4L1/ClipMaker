@@ -1,7 +1,7 @@
-// The sequence track (docs/CODING_AND_PITCH_PLAN.md, T2): the session's clips and cards in play order on one strip,
-// each block as long as it plays once exported. Click a clip to open it, a card to edit it, drag a block (or
-// Alt+arrow) to reorder, add a clip from another session or a picture / text card, play the whole run, and export it
-// as one video. Sessions live in the project (app/telestration/clips.py, sessions.json).
+// The Clips track of the Annotate timeline (docs/CODING_AND_PITCH_PLAN.md, T2): every clip and card of the session
+// in play order, on the same time scale as the tracks below it. Click a block to move the playhead there, drag it
+// (or Alt+arrow) to reorder, add a clip from another session or a picture / text card. The editor (annotate.js)
+// owns the playhead, playback and export; this module keeps the session's order (sessions.json, through the engine).
 import { projectRequest } from "../projects.js";
 import { editorUrl, loadSessions } from "./library.js";
 
@@ -10,8 +10,6 @@ const sessionsPath = (projectId) => `/api/editor-sessions/${enc(projectId)}`;
 const picturesPath = (projectId) => `/api/projects/${enc(projectId)}/pictures`;
 export const CARD_SECONDS = [0.5, 30];
 export const CARD_TEXT = 200;
-const PLAY_KEY = "vizorplay.sequence-play";
-const PLAY_FRESH_MS = 20000; // a hand-over to the next clip must arrive within this
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -29,7 +27,7 @@ export const clock = (value) => {
 /** How long an entry plays: a clip's exported length (its video's when that is not known) or a card's seconds. */
 export const clipSeconds = (clip) => Math.max(0.1, Number(clip.seconds ?? clip.duration) || 0.1);
 
-/** Each block as fractions of the strip: [{id, start, width}], end to end in order. */
+/** Each block as fractions of the track: [{id, start, width}], end to end in order. */
 export const sequenceLayout = (clips) => {
   const total = clips.reduce((sum, clip) => sum + clipSeconds(clip), 0) || 1;
   let at = 0;
@@ -49,17 +47,14 @@ export const moveInOrder = (order, from, to) => {
   return next;
 };
 
-/** Where a block dropped at fraction `x` of the strip lands: the index whose block's middle it passed. */
+/** Where a block dropped at fraction `x` of the track lands: the index whose block's middle it passed. */
 export const dropIndex = (layout, from, x) => {
   const others = layout.filter((_, index) => index !== from);
   return others.filter((block) => block.start + block.width / 2 < x).length;
 };
 
-/** What follows `id` in the session's items, or null at the end: [{kind: "clip"|"card", ...}]. */
-export const itemAfter = (items, id) => {
-  const at = items.findIndex((item) => item.id === id);
-  return at >= 0 ? items[at + 1] || null : null;
-};
+/** The entry of `layout` ([{start, length}], seconds) under time `t`: the last one at the very end. */
+export const entryAt = (layout, t) => layout.find((entry) => t < entry.start + entry.length - 1e-6) || layout[layout.length - 1] || null;
 
 /** The text of a card as lines that fit `width` pixels (words kept whole; one long word is cut by the canvas edge). */
 export const wrapLines = (measure, text, width) => {
@@ -75,7 +70,7 @@ export const wrapLines = (measure, text, width) => {
   return lines;
 };
 
-/** The picture of a text card, drawn at the sequence's frame size: light text centred on dark green. Resolves a PNG blob. */
+/** The picture of a text card at the sequence's frame size: light words centred on dark green. Resolves a PNG blob. */
 export const drawTextCard = (text, width, height) => {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -94,90 +89,82 @@ export const drawTextCard = (text, width, height) => {
   return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("The card could not be drawn."))), "image/png"));
 };
 
-/** Hand the play-through on to the clip `clipId`: it starts by itself when it opens (within a few seconds). */
-export const handOver = (projectId, sessionId, clipId) => {
-  try { sessionStorage.setItem(PLAY_KEY, JSON.stringify({ projectId, sessionId, clipId, at: Date.now() })); } catch { /* no storage: no hand-over */ }
-};
-const handedOver = (projectId, clipId) => {
-  try {
-    const value = JSON.parse(sessionStorage.getItem(PLAY_KEY) || "null");
-    if (value && value.projectId === projectId && value.clipId === clipId && Date.now() - value.at < PLAY_FRESH_MS) return value;
-  } catch { /* nothing handed over */ }
-  return null;
-};
-const stopHandOver = () => { try { sessionStorage.removeItem(PLAY_KEY); } catch { /* nothing to remove */ } };
+/** A card's short name: its words, or its picture's name. */
+export const cardName = (card, pictures = []) => (card.type === "picture"
+  ? pictures.find((picture) => picture.id === card.picture_id)?.name || "Picture"
+  : `“${card.text}”`);
 
 /**
- * Show the sequence of the session holding `clipId` in `root` ([data-sequence]).
- * `onExport(session)` exports it; `beforeLeave()` saves the open clip before another opens;
- * `stage` is the element a card is shown over while a play-through is on a card.
- * Returns {session(), resumed, endOfClip(), stop()}: the session (null when none), whether this page was opened by a
- * play-through, and the hook the editor calls when its clip has played to the end.
+ * Show the Clips track of the session holding `clipId`. `root` is the timeline; it holds [data-sequence] (the track
+ * row), [data-sequence-tools] and [data-card-form].
+ * `onItems(items, session)`: the order changed (or first loaded). `onSeek(id)`: the analyst chose a block.
+ * Returns {session(), setLayout(layout), setCurrent(id), pictures()} or null when the sessions cannot be read.
  */
-export async function showSequence(root, projectId, clipId, { onExport, beforeLeave, onError, stage, onPlay }) {
+export async function showSequence(root, projectId, startClipId, { onItems, onSeek, onError }) {
+  const row = root.querySelector("[data-sequence]");
   const lane = root.querySelector("[data-sequence-lane]");
+  const tools = root.querySelector("[data-sequence-tools]");
   const add = root.querySelector("[data-sequence-add]");
-  const exportButton = root.querySelector("[data-sequence-export]");
-  const playButton = root.querySelector("[data-sequence-play]");
   const name = root.querySelector("[data-sequence-name]");
   const cardButton = root.querySelector("[data-sequence-card]");
   const form = root.querySelector("[data-card-form]");
+  let clipId = startClipId;
   let sessions;
   let session;
   let pictures = [];
   let editing = null; // the card being edited, or "new"
-  let playing = false;
-  let timer = null;
-  let shown = null;
+  let layout = null; // the editor's layout: [{id, start, length}] in seconds, with the open clip's live length
 
   const request = async (action, body) => {
     try {
       sessions = (await projectRequest(`${sessionsPath(projectId)}/${action}`, body)).sessions;
-      render();
+      render(true);
       return true;
     } catch (problem) {
       onError(problem.message);
-      render();
+      render(true);
       return false;
     }
   };
 
-  const open = async (event, clip) => {
-    event.preventDefault();
-    if (clip.id === clipId) return;
-    stopHandOver();
-    await beforeLeave();
-    location.href = editorUrl(projectId, clip.id);
+  // Block positions as fractions of the track: the editor's live layout, or the saved lengths until it gives one.
+  const positions = () => {
+    const items = session.items;
+    const all = layout?.reduce((sum, entry) => sum + entry.length, 0);
+    if (!layout || !all || layout.length !== items.length || layout.some((entry, index) => entry.id !== items[index].id)) return sequenceLayout(items);
+    return layout.map((entry) => ({ id: entry.id, start: entry.start / all, width: entry.length / all }));
   };
 
-  const pictureName = (id) => pictures.find((picture) => picture.id === id)?.name || "Picture";
-  const cardLabel = (card) => (card.type === "picture" ? pictureName(card.picture_id) : `“${card.text}”`);
-  const cardTitle = (card) => `${card.type === "picture" ? "Picture" : "Text"} card · ${cardLabel(card)} · ${clock(card.seconds)}`;
-
-  const render = () => {
+  const render = (changed = false) => {
     session = sessions.find((entry) => entry.clips.some((clip) => clip.id === clipId)) || null;
-    root.hidden = !session;
+    row.hidden = !session;
+    tools.hidden = !session;
     if (!session) return;
+    if (changed) onItems(session.items, session);
     name.textContent = session.name;
     const items = session.items;
-    const layout = sequenceLayout(items);
-    const blocks = items.map((item, index) => {
+    const places = positions();
+    lane.replaceChildren(...items.map((item, index) => {
       const holder = el("li", "annotate-sequence-item");
-      holder.style.left = `${layout[index].start * 100}%`;
-      holder.style.width = `${layout[index].width * 100}%`;
+      holder.style.left = `${places[index].start * 100}%`;
+      holder.style.width = `${places[index].width * 100}%`;
       const card = item.kind === "card";
+      const seconds = layout?.find((entry) => entry.id === item.id)?.length ?? clipSeconds(item);
+      const label = card ? cardName(item, pictures) : item.name;
       const block = el(card ? "button" : "a", `annotate-sequence-block${card ? " is-card" : ""}`);
       if (card) block.type = "button"; else block.href = editorUrl(projectId, item.id);
-      block.title = `${card ? cardTitle(item) : `${item.name} · ${clock(clipSeconds(item))}`}. ${card ? "Click to edit it. " : ""}Drag, or Alt and an arrow key, to move it.`;
+      block.title = `${card ? `${item.type === "picture" ? "Picture" : "Text"} card` : "Clip"} ${index + 1}: ${label} · ${clock(seconds)}. `
+        + `Click to go to it${card ? " and edit it" : ""}; drag, or Alt and an arrow key, to move it.`;
       block.dataset.index = String(index);
       block.draggable = false; // a pointer drag reorders; the browser's link drag would not
-      if (item.id === clipId) block.setAttribute("aria-current", "page");
+      if (item.id === clipId) block.setAttribute("aria-current", "true");
       if (card && editing === item.id) block.setAttribute("aria-pressed", "true");
-      block.append(el("span", "annotate-sequence-index", String(index + 1)),
-        el("span", "annotate-block-label", card ? `${cardLabel(item)} · ${clock(item.seconds)}` : `${item.name} · ${clock(clipSeconds(item))}`));
+      block.append(el("span", "annotate-sequence-index", String(index + 1)), el("span", "annotate-block-label", label));
       block.onclick = (event) => {
-        if (block.dataset.dragged) { event.preventDefault(); delete block.dataset.dragged; return; }
-        if (card) editCard(item); else open(event, item);
+        event.preventDefault();
+        if (block.dataset.dragged) { delete block.dataset.dragged; return; }
+        onSeek(item.id);
+        if (card) editCard(item);
       };
       block.onkeydown = (event) => {
         if (!event.altKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -186,14 +173,10 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
         if (to < 0 || to >= items.length) return;
         reorder(index, to, item.id);
       };
-      wireDrag(block, index, layout);
+      wireDrag(block, index, places);
       holder.append(block);
       return holder;
-    });
-    lane.replaceChildren(...blocks);
-    exportButton.disabled = items.length < 2;
-    exportButton.title = items.length < 2 ? "Add another clip or a card to export a sequence" : `Export all ${items.length} entries, in this order, as one video`;
-    playButton.disabled = items.length < 2 && !playing;
+    }));
     const others = sessions.filter((entry) => entry.id !== session.id).flatMap((entry) => entry.clips.map((clip) => ({ clip, from: entry })));
     const choices = others.map(({ clip, from }) => {
       const option = el("option", "", from.clips.length > 1 ? `${clip.name} (from ${from.name})` : clip.name);
@@ -217,6 +200,7 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
     form.hidden = editing === null;
     form.querySelector("[data-card-remove]").hidden = editing === "new" || editing === null;
     form.querySelector("[data-card-save]").textContent = editing === "new" ? "Add card" : "Save card";
+    cardButton.setAttribute("aria-expanded", String(editing === "new"));
   };
   const loadPictures = async () => {
     try { pictures = (await projectRequest(picturesPath(projectId))).pictures || []; } catch { pictures = []; }
@@ -241,7 +225,7 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
   const closeForm = () => { editing = null; showForm(); render(); };
   const fail = (text) => { field("error").textContent = text; };
 
-  form.querySelector("[data-card-kind]").onchange = syncKind;
+  field("kind").onchange = syncKind;
   form.onsubmit = async (event) => {
     event.preventDefault();
     const kind = field("kind").value;
@@ -251,8 +235,10 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
     if (kind === "text" && !text) return fail("Type the words the card shows.");
     if (kind === "picture" && !field("picture").value) return fail("Add a picture to the project first, in the picture panel.");
     const card = kind === "picture" ? { kind, picture_id: field("picture").value, seconds } : { kind, text, seconds };
+    // A new card goes straight after the open clip.
+    const after = session.items.findIndex((item) => item.id === clipId);
     const ok = editing === "new"
-      ? await request("add-card", { session_id: session.id, card, index: session.items.length })
+      ? await request("add-card", { session_id: session.id, card, index: after < 0 ? session.items.length : after + 1 })
       : await request("update-card", { session_id: session.id, card_id: editing, card });
     if (ok) closeForm();
   };
@@ -267,13 +253,14 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
     // Show the new order at once; the engine's answer replaces it.
     session.items = order.map((id) => session.items.find((item) => item.id === id));
     session.clips = session.items.filter((item) => item.kind === "clip");
+    onItems(session.items, session);
     render();
     const focus = () => lane.querySelector(`[data-index="${order.indexOf(focusId)}"]`)?.focus();
     focus();
     request("reorder", { session_id: session.id, clips: order }).then(focus);
   };
 
-  const wireDrag = (block, index, layout) => {
+  const wireDrag = (block, index, places) => {
     let drag = null;
     block.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -292,9 +279,9 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
       block.classList.remove("is-dragging");
       block.style.transform = "";
       if (!moved) return;
-      block.dataset.dragged = "1"; // the click that follows a drag does not open the clip
+      block.dataset.dragged = "1"; // the click that follows a drag does not move the playhead
       const rect = lane.getBoundingClientRect();
-      const to = dropIndex(layout, index, (event.clientX - rect.left) / Math.max(1, rect.width));
+      const to = dropIndex(places, index, (event.clientX - rect.left) / Math.max(1, rect.width));
       if (to !== index) reorder(index, to, session.items[index].id);
     };
     block.addEventListener("pointerup", finish);
@@ -305,73 +292,20 @@ export async function showSequence(root, projectId, clipId, { onExport, beforeLe
     const chosen = add.value;
     if (chosen) request("move-clip", { session_id: session.id, clip_id: chosen });
   };
-  exportButton.onclick = () => { if (session) onExport(session); };
-
-  // ----- play across the sequence (T2 step 4) -------------------------------
-  const clearShown = () => {
-    clearTimeout(timer);
-    timer = null;
-    shown?.remove();
-    shown = null;
-    stage?.classList.remove("is-card");
-  };
-  const setPlaying = (value) => {
-    playing = value;
-    playButton.setAttribute("aria-pressed", String(value));
-    playButton.querySelector("[data-play-label]").textContent = value ? "Stop" : "Play";
-    playButton.title = value ? "Stop playing the sequence" : "Play every clip and card in this order, from this clip";
-    render();
-  };
-  const stop = () => {
-    stopHandOver();
-    clearShown();
-    if (playing) setPlaying(false);
-  };
-  const showCard = (card, then) => {
-    clearShown();
-    shown = el("div", "annotate-card-show");
-    if (card.type === "picture") {
-      const picture = pictures.find((item) => item.id === card.picture_id);
-      if (picture) shown.append(Object.assign(el("img"), { src: picture.url, alt: "" }));
-    } else {
-      shown.append(el("p", "", card.text));
-    }
-    stage?.append(shown);
-    stage?.classList.add("is-card");
-    timer = setTimeout(then, card.seconds * 1000);
-  };
-  // Play on from the entry after `id`: a card is shown for its seconds; a clip is opened (and starts by itself).
-  const goOn = async (id) => {
-    const next = itemAfter(session.items, id);
-    if (!next) { stop(); return; }
-    if (next.kind === "card") { showCard(next, () => goOn(next.id)); return; }
-    handOver(projectId, session.id, next.id);
-    await beforeLeave();
-    location.href = editorUrl(projectId, next.id);
-  };
-  playButton.onclick = async () => {
-    if (!session) return;
-    if (playing) { stop(); return; }
-    await loadPictures();
-    setPlaying(true);
-    onPlay();
-  };
 
   try {
     sessions = await loadSessions(projectId);
   } catch {
-    return null; // the sequence is a convenience; the editor works without it
+    return null; // the editor works on this clip alone without it
   }
-  render();
-  loadPictures().then(render);
-  const resumed = Boolean(session && handedOver(projectId, clipId));
-  if (resumed) { stopHandOver(); setPlaying(true); }
+  render(true);
+  loadPictures().then(() => render());
   return {
     session: () => session,
-    resumed,
-    playing: () => playing,
-    /** The editor's clip has played to its end: go on to the next entry when a play-through is on. */
-    endOfClip: () => { if (playing && session) goOn(clipId); },
-    stop,
+    pictures: () => pictures,
+    /** The editor's live layout ([{id, start, length}], seconds): blocks follow the open clip's edits. */
+    setLayout: (value) => { layout = value; if (session) render(); },
+    /** Another clip of the session is open now. */
+    setCurrent: (id) => { clipId = id; if (sessions) render(); },
   };
 }

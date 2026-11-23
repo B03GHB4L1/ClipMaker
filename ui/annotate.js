@@ -15,17 +15,19 @@ import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } fro
 import { minimapPlayers, motionOf, pitchPositions, speedAt } from "./annotate/motion.js";
 import { drawSpeedChart, SPEED_PAPER } from "./annotate/speedchart.js";
 import { fitBox } from "./annotate/fit.js";
-import { showLibrary } from "./annotate/library.js";
-import { drawTextCard, showSequence } from "./annotate/sequence.js";
+import { editorUrl, showLibrary } from "./annotate/library.js";
+import { cardName, clipSeconds, drawTextCard, entryAt, showSequence } from "./annotate/sequence.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
 const $ = (selector) => document.querySelector(selector);
 const params = new URLSearchParams(location.search);
 const projectId = params.get("project") || sessionStorage.getItem("clipmaker.active-match") || "";
-const clipId = params.get("clip") || "";
+let clipId = params.get("clip") || ""; // changes when another clip of the session opens in place
 
-const video = $("[data-video]");
+// Two video elements: the one on show, and a standby that loads the next clip of a sequence so the cut is instant.
+let video = $("[data-video]");
+let standby = $("[data-video-standby]");
 const canvas = $("[data-canvas]");
 const stage = $("[data-stage]");
 const ctx = canvas.getContext("2d");
@@ -117,18 +119,25 @@ const pause = () => {
   run = null;
   video.pause();
   scheduleRender();
+  cardRun = null; // a card being played holds where it is
 };
 const seekOutput = (t) => {
+  if (card) hideCard();
   pause();
   outTime = clampTime(t);
   showFrame();
   scheduleRender();
 };
-// One stop = the start of a frame, or the start or end of a freeze.
+// One stop = the start of a frame, or the start or end of a freeze. Past either end of the clip, the step goes
+// on into the next or previous clip or card of the sequence.
 const step = (direction, big = false) => {
-  if (big) return seekOutput(outTime + direction);
+  if (big || card) return seekSequence(seqTime() + direction * (big ? 1 : 1 / fps()));
   const list = stops(timing, doc.freezes);
   const target = direction > 0 ? list.find((t) => t > outTime + 1e-6) : [...list].reverse().find((t) => t < outTime - 1e-6);
+  if (target === undefined) {
+    const entry = clipEntry();
+    if (entry) return seekSequence(direction > 0 ? entry.start + entry.length : entry.start - 1e-3);
+  }
   seekOutput(target ?? (direction > 0 ? list[list.length - 1] : 0));
 };
 
@@ -140,6 +149,7 @@ const playParts = () => {
 };
 const cutSeconds = (videoSeconds, part) => (part.cutStart + videoSeconds * fps() - part.from) / fps(); // cut-clip seconds for a video time inside `part`
 const play = () => {
+  if (card) hideCard();
   if (outTime >= total() - 1e-3) outTime = 0;
   const at = source();
   const freezes = sortedFreezes();
@@ -155,13 +165,15 @@ const play = () => {
     const index = freezes.findIndex((f) => f.atFrame > at.frame);
     const next = index < 0 ? freezes.length : index;
     run = { held: freezes.slice(0, next).reduce((sum, f) => sum + f.seconds, 0), next, part, parts, freeze: null };
-    video.currentTime = sourceSeconds(at);
+    const target = sourceSeconds(at);
+    if (Math.abs(video.currentTime - target) > 1 / fps()) video.currentTime = target; // a preloaded clip is already there: no seek at the cut
     video.play().catch(() => pause());
   }
   playing = true;
   requestAnimationFrame(tick);
+  preloadNext();
 };
-const togglePlay = () => (playing ? pause() : play());
+const togglePlay = () => (playing ? pause() : playSequence());
 // A hidden window gets no animation frames, so the clock could not hold a
 // freeze while the video ran on; stop instead.
 document.addEventListener("visibilitychange", () => { if (document.hidden && playing) pause(); });
@@ -192,8 +204,8 @@ function tick(now) {
       const following = run.parts[run.part + 1];
       if (!following) {
         outTime = total();
-        pause();
-        sequence?.endOfClip(); // a play-through carries on to the next clip or card
+        run = null;
+        advanceFrom(clipEntry()); // on to the next clip or card of the sequence, or stop at its end
       } else {
         run.part += 1;
         if (following.from !== here.to) video.currentTime = (following.from + 0.1) / fps();
@@ -211,11 +223,14 @@ function tick(now) {
 const showTime = () => {
   const at = source();
   const frozen = at.freeze !== null ? ` · <span class="is-frozen">${boardNow() ? "board" : "frozen"}</span>` : "";
-  $("[data-time]").innerHTML = `${formatTime(outTime)} / ${formatTime(total())} · frame ${at.frame + 1}/${timing.frames}${doc.value.parts?.length > 1 ? ` · part ${partAt(doc.value, clip, at.frame).index + 1}/${doc.value.parts.length}` : ""}${frozen}`;
+  // Times are the sequence's: this clip alone when it is not in one.
+  const where = card ? ' · <span class="is-frozen">card</span>'
+    : ` · frame ${at.frame + 1}/${timing.frames}${doc.value.parts?.length > 1 ? ` · part ${partAt(doc.value, clip, at.frame).index + 1}/${doc.value.parts.length}` : ""}${frozen}`;
+  $("[data-time]").innerHTML = `${formatTime(seqTime())} / ${formatTime(seqTotal())}${where}`;
   if (speedTrack) showSpeed();
   const scrub = $("[data-scrub]");
-  scrub.max = String(total());
-  if (document.activeElement !== scrub) scrub.value = String(outTime);
+  scrub.max = String(seqTotal());
+  if (document.activeElement !== scrub) scrub.value = String(seqTime());
   $("[data-play]").classList.toggle("is-playing", playing);
   $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
   movePlayhead();
@@ -461,8 +476,9 @@ const save = () => {
   if (!dirty) return saving;
   dirty = false;
   const body = { annotations: doc.value };
+  const path = `/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`; // this clip, even if another opens before the save runs
   setSaveStatus("Saving...");
-  saving = saving.then(() => projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`, body))
+  saving = saving.then(() => projectRequest(path, body))
     .then(() => { if (!dirty) setSaveStatus("Saved locally"); })
     .catch((error) => { dirty = true; setSaveStatus(`Save failed: ${error.message}`, true); });
   return saving;
@@ -485,7 +501,7 @@ window.addEventListener("beforeunload", (event) => {
 // Leaving through a link waits for the save first.
 document.addEventListener("click", async (event) => {
   const link = event.target.closest("a[href]");
-  if (!link || !dirty) return;
+  if (!link || !dirty || link.closest("[data-sequence-lane]")) return; // a clip of the sequence opens in place, after a save
   event.preventDefault();
   event.stopImmediatePropagation();
   await save();
@@ -784,7 +800,7 @@ const rulerLabel = (seconds, fps, withFrames) => {
 };
 const renderRuler = () => {
   if (!clip) return;
-  const length = total();
+  const length = seqTotal();
   const width = laneWidth();
   const key = `${length.toFixed(3)}|${Math.round(width)}`;
   if (key === rulerKey) return;
@@ -831,7 +847,8 @@ const setZoom = (zoom, anchor = 0.5) => {
 function movePlayhead() {
   const body = $("[data-tl-body]");
   if (!clip || !body) return;
-  const fraction = outTime / total();
+  layoutSequence();
+  const fraction = seqTime() / seqTotal();
   body.style.setProperty("--head", String(fraction));
   renderRuler();
   const scroller = $("[data-tl-scroll]");
@@ -845,7 +862,7 @@ function movePlayhead() {
     button.onclick = () => {
       // Zoom around the playhead, wherever it sits in the view.
       const room = Math.max(1, $("[data-tl-scroll]").clientWidth - headWidth());
-      const anchor = Math.min(1, Math.max(0, (outTime / total() * laneWidth() - $("[data-tl-scroll]").scrollLeft) / room));
+      const anchor = Math.min(1, Math.max(0, (seqTime() / seqTotal() * laneWidth() - $("[data-tl-scroll]").scrollLeft) / room));
       setZoom(button.dataset.tlZoom === "fit" ? 1 : timelineZoom * (button.dataset.tlZoom === "in" ? 1.6 : 1 / 1.6), anchor);
     };
   });
@@ -863,7 +880,7 @@ function movePlayhead() {
   const ruler = $("[data-ruler]");
   const seekFromRuler = (event) => {
     const rect = ruler.getBoundingClientRect();
-    seekOutput(Math.min(total(), Math.max(0, ((event.clientX - rect.left) / rect.width) * total())));
+    seekSequence(((event.clientX - rect.left) / rect.width) * seqTotal());
   };
   ruler.addEventListener("pointerdown", (event) => { ruler.setPointerCapture(event.pointerId); seekFromRuler(event); });
   ruler.addEventListener("pointermove", (event) => { if (ruler.hasPointerCapture(event.pointerId)) seekFromRuler(event); });
@@ -881,12 +898,12 @@ const snapTimes = (exceptId = null) => {
 const showSnap = (time) => {
   const mark = $("[data-snap]");
   mark.hidden = time === null;
-  if (time !== null) mark.style.setProperty("--snap", String(time / total()));
+  if (time !== null) mark.style.setProperty("--snap", String(((clipEntry()?.start || 0) + time) / seqTotal()));
 };
 /** `time` moved to the nearest snap point within the threshold (and shown), or left as it is. */
 const snapTime = (time, exceptId, event) => {
   if (event?.altKey) { showSnap(null); return time; }
-  const reach = (SNAP_PX / laneWidth()) * total();
+  const reach = (SNAP_PX / laneWidth()) * seqTotal(); // the clip's lane is its share of the sequence
   let best = null;
   snapTimes(exceptId).forEach((candidate) => { if (Math.abs(candidate - time) <= reach && (best === null || Math.abs(candidate - time) < Math.abs(best - time))) best = candidate; });
   showSnap(best);
@@ -1574,7 +1591,6 @@ const renderFreezes = () => {
   const freezes = sortedFreezes();
   if (freezes.length > freezesShown) $("[data-freeze-panel]").open = true;
   freezesShown = freezes.length;
-  $("[data-scrub]").max = String(total());
   $("[data-freeze-count]").textContent = `(${freezes.length})`;
   $("[data-freeze-empty]").hidden = freezes.length > 0;
   $("[data-freeze-list]").replaceChildren(...freezes.map((freeze) => {
@@ -3074,7 +3090,6 @@ const exportStatus = (text, share) => {
 const endExport = (text) => {
   exporting = null;
   $("[data-export]").disabled = false;
-  if (sequence?.session()) $("[data-sequence-export]").disabled = sequence.session().items.length < 2;
   $("[data-export-cancel]").disabled = false;
   if (text) {
     exportStatus(text, 0);
@@ -3123,6 +3138,8 @@ const sendBatch = async (sessionId, entries) => {
 
 const exportVideo = async () => {
   if (exporting) return;
+  const session = sequence?.session();
+  if (session && session.items.length > 1) return exportSequence(session); // the timeline is the whole sequence
   if (playing) pause();
   finishText();
   await save();
@@ -3243,7 +3260,6 @@ const exportSequence = async (session) => {
   const run = { sessions: [], job: null, cancelled: false };
   exporting = run;
   $("[data-export]").disabled = true;
-  $("[data-sequence-export]").disabled = true;
   exportStatus("Starting sequence export...", 0);
   const count = session.clips.length;
   const items = []; // what the engine joins, in play order
@@ -3352,7 +3368,7 @@ const wire = () => {
   $("[data-pulse]").onchange = (event) => setAnimation({ pulse: event.target.checked });
   $("[data-play]").onclick = togglePlay;
   const scrub = $("[data-scrub]");
-  scrub.oninput = () => seekOutput(Number(scrub.value));
+  scrub.oninput = () => seekSequence(Number(scrub.value));
   $("[data-undo]").onclick = () => doc.undo();
   $("[data-redo]").onclick = () => doc.redo();
   $("[data-screenshot]").onclick = (event) => screenshot(event.currentTarget);
@@ -3376,10 +3392,14 @@ const wire = () => {
     const label = event.target.value.trim().slice(0, 40);
     updateTrack(ids[0], (track) => { const next = { ...track }; if (label) next.label = label; else delete next.label; return next; });
   };
-  for (const name of ["seeked", "loadeddata"]) video.addEventListener(name, scheduleRender);
+  for (const element of [video, standby]) for (const name of ["seeked", "loadeddata"]) element.addEventListener(name, () => { if (element === video) scheduleRender(); });
   new ResizeObserver(fitCanvas).observe(stage);
   window.addEventListener("resize", fitCanvas);
-  doc.onChange(() => {
+  doc.onChange(docChanged);
+};
+
+function docChanged() {
+  {
     refreshTiming();
     renderPitchSaved();
     if (selectedId && !doc.find(selectedId)) selectedId = null;
@@ -3396,8 +3416,324 @@ const wire = () => {
     renderInspector();
     scheduleRender();
     queueSave();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The sequence (T2): every clip and card of the session on one timeline, one playhead through them all. The open
+// clip is the one under the playhead: its tracks sit in its slot and the other clips' blocks show beside them.
+// Times here are seconds from the start of the sequence. Each clip's drawings still save with that clip.
+// ---------------------------------------------------------------------------
+let seqItems = null; // the session's items in play order ({kind: "clip" | "card", id, ...}); null: this clip alone
+const clipCache = new Map(); // clip id -> the engine's answer for it ({clip, annotations, url, seconds})
+let card = null; // the card under the playhead: {id, elapsed}
+let cardRun = null; // while a card plays: {wall, from}
+let layoutKey = "";
+const lengthOf = (item) => {
+  if (item.kind !== "clip") return clipSeconds(item);
+  if (item.id === clipId) return total();
+  return clipCache.get(item.id)?.seconds ?? clipSeconds(item);
+};
+/** [{...item, start, length}] in play order; the open clip's length is live. */
+const seqLayout = () => {
+  let at = 0;
+  return (seqItems || [{ kind: "clip", id: clipId }]).map((item) => {
+    const entry = { ...item, start: at, length: lengthOf(item) };
+    at += entry.length;
+    return entry;
   });
 };
+const seqTotal = () => seqLayout().reduce((sum, entry) => sum + entry.length, 0) || total();
+const clipEntry = () => seqLayout().find((entry) => entry.kind === "clip" && entry.id === clipId);
+const cardEntry = () => (card ? seqLayout().find((entry) => entry.id === card.id) : null);
+const seqTime = () => {
+  const shown = cardEntry();
+  return shown ? shown.start + card.elapsed : (clipEntry()?.start || 0) + outTime;
+};
+
+// Put the open clip's tracks in its slot and the other clips' blocks around them; the Clips track follows.
+function layoutSequence() {
+  const layout = seqLayout();
+  const all = layout.reduce((sum, entry) => sum + entry.length, 0) || 1;
+  const here = layout.find((entry) => entry.kind === "clip" && entry.id === clipId);
+  const body = $("[data-tl-body]");
+  body.style.setProperty("--clip-start", String((here?.start || 0) / all));
+  body.style.setProperty("--clip-span", String((here?.length ?? all) / all));
+  const key = `${clipId}|${layout.map((entry) => `${entry.id}:${entry.length.toFixed(3)}`).join(",")}|${[...clipCache.keys()].join(",")}|${pictureList.length}`;
+  if (key === layoutKey) return;
+  layoutKey = key;
+  renderGhosts(layout, all);
+  sequence?.setLayout(layout);
+}
+
+function renderGhosts(layout, all) {
+  const rows = { parts: [], inserts: [], drawings: [] };
+  const block = (className, start, length, label = "") => {
+    const mark = document.createElement("span");
+    mark.className = className;
+    mark.style.left = `${(start / all) * 100}%`;
+    mark.style.width = `${(Math.max(0, length) / all) * 100}%`;
+    if (label) {
+      mark.title = label;
+      mark.append(Object.assign(document.createElement("span"), { className: "annotate-block-label", textContent: label }));
+    }
+    return mark;
+  };
+  for (const entry of layout) {
+    if (entry.kind === "card") {
+      rows.parts.push(block("annotate-ghost is-card", entry.start, entry.length, cardName(entry, pictureList)));
+      continue;
+    }
+    if (entry.id === clipId) continue;
+    const opened = clipCache.get(entry.id);
+    if (!opened) {
+      rows.parts.push(block("annotate-ghost", entry.start, entry.length, entry.name));
+      continue;
+    }
+    const value = opened.annotations;
+    partSpans(value, opened.clip).forEach((span, index) => rows.parts.push(block("annotate-ghost", entry.start + span.outStart, span.outEnd - span.outStart, index ? "" : opened.clip.name)));
+    const cut = cutClip(opened.clip, value.parts);
+    (value.freezes || []).forEach((freeze) => rows.inserts.push(block(`annotate-ghost is-insert${freeze.background ? " is-board" : ""}`,
+      entry.start + freezeStart(freeze.atFrame, cut, value.freezes), freeze.seconds, insertName(freeze))));
+    (value.items || []).forEach((item) => {
+      const to = Number.isFinite(item.show?.to) ? Math.min(item.show.to, entry.length) : entry.length;
+      const from = Number.isFinite(item.show?.from) ? item.show.from : 0;
+      rows.drawings.push(block("annotate-ghost is-drawing", entry.start + from, Math.max(0.05, to - from)));
+    });
+  }
+  document.querySelectorAll("[data-ghosts]").forEach((box) => box.replaceChildren(...rows[box.dataset.ghosts]));
+}
+
+// Move the playhead to sequence time `t`: into a card, a place in the open clip, or another clip (opened in place).
+async function seekSequence(t, andPlay = false) {
+  const layout = seqLayout();
+  const end = layout.reduce((sum, entry) => sum + entry.length, 0);
+  const entry = entryAt(layout, Math.min(end, Math.max(0, t)));
+  if (!entry) return;
+  const at = Math.min(entry.length, Math.max(0, t - entry.start));
+  if (entry.kind === "card") { enterCard(entry, at, andPlay); return; }
+  if (entry.id === clipId) {
+    seekOutput(at);
+    if (andPlay) play();
+    return;
+  }
+  await openClip(entry.id, { at, play: andPlay });
+}
+
+// Play from the playhead to the end of the sequence; from the start again when it is at the end.
+const playSequence = () => {
+  if (seqTime() >= seqTotal() - 1e-3) { seekSequence(0, true); return; }
+  if (card) { startCard(); return; }
+  if (outTime >= total() - 1e-3) { advanceFrom(clipEntry()); return; }
+  play();
+};
+// `entry` has played to its end: the next one plays, or playback stops at the end of the sequence.
+function advanceFrom(entry) {
+  const layout = seqLayout();
+  const index = entry ? layout.findIndex((each) => each.id === entry.id) : -1;
+  const next = index >= 0 ? layout[index + 1] : null;
+  if (!next) { pause(); showTime(); return; }
+  seekSequence(next.start, true);
+}
+// Load the next clip after the playhead into the standby video, so the cut to it is instant.
+const preloadNext = () => {
+  const now = seqTime();
+  const next = seqLayout().find((entry) => entry.kind === "clip" && entry.id !== clipId && entry.start >= now - 1e-6);
+  if (next) preloadClip(next.id);
+};
+
+// A card under the playhead fills the stage, as it will in the export.
+const showCardOn = (entry) => {
+  stage.classList.add("is-card");
+  const key = `${entry.id}|${entry.type}|${entry.text || ""}|${entry.picture_id || ""}`;
+  let shown = stage.querySelector(".annotate-card-show");
+  if (shown?.dataset.card === key) return;
+  shown?.remove();
+  shown = Object.assign(document.createElement("div"), { className: "annotate-card-show" });
+  shown.dataset.card = key;
+  if (entry.type === "picture") {
+    const picture = pictureList.find((each) => each.id === entry.picture_id);
+    shown.append(picture ? Object.assign(document.createElement("img"), { src: picture.url, alt: "" })
+      : Object.assign(document.createElement("p"), { textContent: "This card's picture is not in the project any more." }));
+  } else {
+    shown.append(Object.assign(document.createElement("p"), { textContent: entry.text }));
+  }
+  stage.append(shown);
+};
+function hideCard() {
+  card = null;
+  cardRun = null;
+  stage.classList.remove("is-card");
+  stage.querySelector(".annotate-card-show")?.remove();
+}
+function enterCard(entry, elapsed, andPlay = false) {
+  if (playing) pause();
+  finishText();
+  selectedId = null;
+  selectedIds = [];
+  renderInspector();
+  card = { id: entry.id, elapsed: Math.min(entry.length, Math.max(0, elapsed)) };
+  showCardOn(entry);
+  if (andPlay) startCard();
+  scheduleRender();
+}
+function startCard() {
+  const entry = cardEntry();
+  if (!entry) return;
+  if (card.elapsed >= entry.length - 1e-3) { advanceFrom(entry); return; }
+  playing = true;
+  cardRun = { wall: performance.now(), from: card.elapsed };
+  preloadNext();
+  showTime();
+  requestAnimationFrame(cardTick);
+}
+function cardTick(now) {
+  if (!cardRun || !card) return;
+  const entry = cardEntry();
+  if (!entry) { pause(); hideCard(); scheduleRender(); return; }
+  card.elapsed = Math.min(entry.length, cardRun.from + (now - cardRun.wall) / 1000);
+  showTime();
+  if (card.elapsed >= entry.length) { cardRun = null; advanceFrom(entry); return; }
+  requestAnimationFrame(cardTick);
+}
+
+// ---------------------------------------------------------------------------
+// Another clip of the session, opened in place (T2): no page load, so a sequence plays from clip to clip
+// without a gap. The next clip of a play-through is loaded into the standby video while this one plays.
+// ---------------------------------------------------------------------------
+let preloaded = null; // {id, element, promise -> opened clip, its first picture ready in the standby video}
+let switching = false;
+const cacheClip = (id, opened) => {
+  // How long the clip plays: its parts and freezes, the same sum the timeline uses for the open clip.
+  const seconds = totalSeconds(cutClip(opened.clip, opened.annotations.parts), opened.annotations.freezes || []);
+  clipCache.set(id, { ...opened, seconds });
+  return clipCache.get(id);
+};
+const fetchClip = async (id) => clipCache.get(id) || cacheClip(id, await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(id)}`));
+const loadInto = (element, url) => new Promise((resolve, reject) => {
+  if (element.src === new URL(url, location.href).href && element.readyState >= 2) { resolve(); return; }
+  const done = () => { element.removeEventListener("error", failed); resolve(); };
+  const failed = () => { element.removeEventListener("loadeddata", done); reject(new Error("The next clip's video could not be played.")); };
+  element.addEventListener("loadeddata", done, { once: true });
+  element.addEventListener("error", failed, { once: true });
+  element.src = url;
+});
+const seekInto = (element, seconds) => new Promise((resolve) => {
+  if (Math.abs(element.currentTime - seconds) < 1e-3) { resolve(); return; }
+  element.addEventListener("seeked", resolve, { once: true });
+  element.currentTime = seconds;
+});
+// The first picture a clip shows: the middle of the first frame of its first part.
+const firstSeconds = (opened) => ((spansOf(opened.annotations.parts, opened.clip.frames)[0]?.[0] ?? 0) + 0.5) / opened.clip.fps;
+const preloadClip = (id) => {
+  if (!id || id === clipId || preloaded?.id === id) return;
+  const element = standby;
+  const promise = fetchClip(id).then(async (opened) => {
+    await loadInto(element, opened.url);
+    await seekInto(element, firstSeconds(opened));
+    return opened;
+  });
+  preloaded = { id, element, promise };
+  promise.catch(() => { if (preloaded?.promise === promise) preloaded = null; });
+};
+// Why this clip cannot be left in place right now, or "".
+const busyReason = () => {
+  if (exporting) return "Wait for the export to finish, or cancel it, before opening another clip.";
+  if (jobs.size || cameraJob) return "A player or the camera is still being followed in this clip. Wait for it to finish or stop it first.";
+  return "";
+};
+
+async function openClip(id, { at = 0, play: andPlay = false } = {}) {
+  if (!id || id === clipId || switching) return;
+  const busy = busyReason();
+  if (busy) { showSaveError(busy, "Sequence"); if (playing) pause(); return; }
+  switching = true;
+  try {
+    finishText();
+    closeCalibration();
+    await save();
+    if (dirty) throw new Error("This clip's drawings could not be saved, so it stays open.");
+    const ready = preloaded?.id === id && preloaded.element === standby ? preloaded : null;
+    preloaded = null;
+    let opened;
+    if (ready) opened = await ready.promise;
+    else {
+      opened = await fetchClip(id);
+      await loadInto(standby, opened.url);
+      await seekInto(standby, firstSeconds(opened));
+    }
+    const keep = playing && andPlay; // playing on: no pause between the clips
+    playing = false;
+    run = null;
+    cardRun = null;
+    cacheClip(clipId, { ...clipCache.get(clipId), clip, annotations: doc.value }); // its blocks show the latest edits
+    showClip(id, opened);
+    if (at > 0) { outTime = clampTime(at); showFrame(); }
+    if (andPlay || keep) play();
+    else scheduleRender();
+  } catch (error) {
+    showSaveError(error.message, "Sequence");
+    if (playing) pause();
+  } finally {
+    switching = false;
+  }
+}
+
+// Put `opened` (the engine's answer for clip `id`, its video ready in the standby element) on the page.
+function showClip(id, opened) {
+  hideCard();
+  const old = video;
+  video = standby;
+  standby = old;
+  video.muted = old.muted;
+  video.volume = old.volume;
+  old.pause();
+  old.removeAttribute("data-video");
+  old.setAttribute("data-video-standby", "");
+  old.classList.add("is-standby");
+  video.removeAttribute("data-video-standby");
+  video.setAttribute("data-video", "");
+  video.classList.remove("is-standby");
+  clipId = id;
+  clip = opened.clip;
+  doc = createDocument(opened.annotations);
+  doc.onChange(docChanged);
+  selectedId = null;
+  selectedIds = [];
+  selectedFreeze = null;
+  selectedPart = null;
+  gesture = null;
+  zoneDraft = null;
+  pointer = null;
+  textEdit = null;
+  followTarget = null;
+  speedTrack = null;
+  dirty = false;
+  outTime = 0;
+  run = null;
+  refreshTiming();
+  freezesShown = doc.freezes.length;
+  partsShown = spansOf(doc.value.parts, clip.frames).length;
+  renderPitchSaved();
+  history.replaceState(null, "", editorUrl(projectId, id));
+  document.title = `VizorPlay - Annotate ${clip.name}`;
+  $("[data-annotate-title]").textContent = clip.name;
+  $("[data-annotate-changed]").hidden = !opened.changed;
+  $("[data-annotate-workspace]").style.setProperty("--clip-ratio", String(clip.width / clip.height));
+  status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
+  fitCanvas();
+  renderParts();
+  renderFreezes();
+  renderPlayers();
+  renderInspector();
+  layoutTimeline(); // the zoom stays; the open clip's tracks move to its slot
+  $("[data-undo]").disabled = true;
+  $("[data-redo]").disabled = true;
+  showFrame();
+  sequence?.setCurrent(id);
+  setSaveStatus("Saved locally");
+  scheduleRender();
+}
 
 const start = async () => {
   try {
@@ -3409,6 +3745,7 @@ const start = async () => {
     const opened = await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`);
     clip = opened.clip;
     doc = createDocument(opened.annotations);
+    cacheClip(clipId, opened);
     projectRequest(picturePath()).then(({ pictures }) => setPictures(pictures)).catch(() => pictureStatus("The picture library could not be read.", true));
     refreshTiming();
     renderPitchSaved();
@@ -3429,17 +3766,26 @@ const start = async () => {
     renderFreezes();
     renderPlayers();
     seekOutput(0);
-    showSequence($("[data-sequence]"), projectId, clipId, {
-      onExport: exportSequence,
-      beforeLeave: async () => { finishText(); await save(); },
+    document.querySelectorAll("[data-ghosts]").forEach((box) => box.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const rect = box.getBoundingClientRect();
+      seekSequence(((event.clientX - rect.left) / Math.max(1, rect.width)) * seqTotal());
+    }));
+    showSequence($(".annotate-timeline"), projectId, clipId, {
+      onItems: (items) => {
+        seqItems = items;
+        // The other clips' parts, inserts and drawings, for their blocks and a quick open.
+        items.filter((item) => item.kind === "clip" && !clipCache.has(item.id))
+          .forEach((item) => fetchClip(item.id).then(() => { layoutKey = ""; movePlayhead(); }).catch(() => {}));
+        layoutKey = "";
+        movePlayhead();
+      },
+      onSeek: (id) => {
+        const entry = seqLayout().find((each) => each.id === id);
+        if (entry) seekSequence(entry.start);
+      },
       onError: (message) => showSaveError(message, "Sequence"),
-      stage: $("[data-stage]"),
-      onPlay: () => { if (!playing && doc) play(); },
-    }).then((found) => {
-      sequence = found;
-      // Opened by a play-through: start from the top. (The browser may refuse to start a video by itself; then it waits.)
-      if (found?.resumed) { seekOutput(0); play(); }
-    });
+    }).then((found) => { sequence = found; layoutKey = ""; movePlayhead(); });
     status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
     setSaveStatus("Saved locally");
   } catch (error) {

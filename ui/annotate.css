@@ -152,6 +152,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 /* The stage takes the clip's own shape, so drawing coordinates are the video's. */
 .annotate-stage { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #0d0e0c; aspect-ratio: var(--clip-ratio, 16 / 9); }
 .annotate-stage video, .annotate-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.annotate-stage video.is-standby { visibility: hidden; }
 .annotate-stage canvas { cursor: crosshair; touch-action: none; }
 .annotate-stage canvas:focus-visible { outline-offset: -2px; }
 .annotate-stage canvas[data-tool="select"] { cursor: default; }
@@ -443,7 +444,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
    playhead through every track (docs/CODING_AND_PITCH_PLAN.md, section T2). */
 .annotate-timeline { --head-width: 120px; --tl-lane: color-mix(in srgb, var(--cm-ink) 7%, transparent); --tl-head: #e5484d;
   gap: 0; padding: 8px 0 6px; overflow: hidden; }
-.annotate-tl-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px; }
+.annotate-tl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 10px 8px; }
 .annotate-tl-zoom { display: inline-flex; gap: 4px; margin-left: auto; }
 .annotate-tl-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 28px; padding: 0 9px;
   border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
@@ -498,33 +499,40 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-timeline .annotate-track-status { margin: 4px 10px 0; }
 @media (max-width: 900px) { .annotate-timeline { --head-width: 92px; } .annotate-row-head .annotate-row-action { padding: 0 4px; font-size: 10px; } }
 
-/* Sequence (T2): the session's clips in play order; the open clip is the one the tracks below show */
-.annotate-sequence { display: grid; grid-template-columns: var(--head-width) minmax(0, 1fr); align-items: center; gap: 0;
-  margin: 0 0 6px; border-top: 1px solid var(--cm-rule); border-bottom: 1px solid var(--cm-rule); }
-.annotate-sequence[hidden] { display: none; }
-.annotate-sequence-head { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; height: 100%; box-sizing: border-box;
-  padding: 0 8px 0 10px; border-right: 1px solid var(--cm-rule); color: var(--cm-muted); font-size: 11px; }
+/* The sequence (T2): one timeline for the session. The open clip's tracks sit in its slot (--clip-start, --clip-span);
+   the other clips and cards show as blocks around them, and a Clips track names every entry. */
+.annotate-timeline .annotate-row > .annotate-lane { grid-column: 2; grid-row: 1; box-sizing: border-box;
+  margin-left: calc(var(--clip-start, 0) * var(--lane-width)); width: calc(var(--clip-span, 1) * var(--lane-width)); }
+.annotate-ghosts { grid-column: 2; grid-row: 1; position: relative; min-height: 100%; background: var(--tl-lane); cursor: pointer; }
+.annotate-ghost { position: absolute; top: 3px; bottom: 3px; box-sizing: border-box; border-radius: 5px; border-left: 1px solid var(--annotate-panel);
+  background: color-mix(in srgb, #2d7d68 45%, transparent); overflow: hidden; }
+.annotate-ghost.is-card { background: color-mix(in srgb, #7a5a1e 70%, transparent); }
+.annotate-ghost.is-insert { background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent); }
+.annotate-ghost.is-board { background: color-mix(in srgb, var(--annotate-board) 50%, transparent); }
+.annotate-ghost.is-drawing { top: 6px; bottom: auto; height: 12px; min-width: 4px; border-left: 0; border-radius: 4px; background: color-mix(in srgb, #6f62a8 50%, transparent); }
+.annotate-ghosts .annotate-block-label { opacity: 0.85; }
+.annotate-clips .annotate-row-name { display: grid; overflow: hidden; }
 .annotate-sequence-name { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
-.annotate-sequence-lane { position: relative; height: 40px; margin: 0; padding: 0; list-style: none; background: var(--tl-lane); }
-.annotate-sequence-item { position: absolute; top: 4px; bottom: 4px; padding: 0 1px; box-sizing: border-box; }
-.annotate-sequence-block { position: relative; display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; padding: 0 6px 0 4px; box-sizing: border-box;
-  border-radius: 5px; background: color-mix(in srgb, #2d7d68 55%, var(--annotate-panel)); color: #fff; text-decoration: none; cursor: grab; touch-action: none; user-select: none; overflow: hidden; }
+.annotate-sequence-lane { position: relative; height: 28px; margin: 0; padding: 0; list-style: none; background: var(--tl-lane); }
+.annotate-sequence-item { position: absolute; top: 3px; bottom: 3px; padding: 0 1px; box-sizing: border-box; }
+.annotate-sequence-block { position: relative; display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; padding: 0 6px 0 3px; box-sizing: border-box;
+  border: 0; border-radius: 5px; background: color-mix(in srgb, #2d7d68 55%, var(--annotate-panel)); color: #fff; font: inherit; text-align: left; text-decoration: none;
+  cursor: grab; touch-action: none; user-select: none; overflow: hidden; }
 .annotate-sequence-block:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
-.annotate-sequence-block[aria-current="page"] { background: #2d7d68; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-sequence-block[aria-current] { background: #2d7d68; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
 .annotate-sequence-block:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 1px; }
 .annotate-sequence-block.is-dragging { z-index: 3; cursor: grabbing; opacity: 0.9; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
 .annotate-sequence-block .annotate-block-label { position: static; inset: auto; flex: 1; min-width: 0; display: block; overflow: hidden; color: #fff; font-size: 10.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.annotate-sequence-index { flex: none; display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 4px; background: rgba(0, 0, 0, 0.25); font-size: 10px; font-variant-numeric: tabular-nums; }
-.annotate-sequence-tools { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; padding: 6px 10px; }
-.annotate-sequence-tools select, .annotate-sequence-tools button { height: 26px; max-width: 160px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px;
-  background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; }
-.annotate-sequence-tools button { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-.annotate-sequence-tools button:hover:not(:disabled) { background: var(--annotate-hover); }
-.annotate-sequence-tools :disabled { opacity: 0.4; cursor: not-allowed; }
-.annotate-sequence-block.is-card { background: #7a5a1e; border: 0; font: inherit; text-align: left; cursor: pointer; }
+.annotate-sequence-index { flex: none; display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 4px; background: rgba(0, 0, 0, 0.25); font-size: 10px; font-variant-numeric: tabular-nums; }
+.annotate-sequence-block.is-card { background: #7a5a1e; cursor: pointer; }
 .annotate-sequence-block.is-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
-.annotate-sequence-tools button[aria-pressed="true"] { background: var(--annotate-hover); border-color: var(--cm-ink); }
-.annotate-card-form { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; padding: 8px 10px; border-top: 1px solid var(--cm-rule); }
+.annotate-tl-seq { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.annotate-tl-seq[hidden] { display: none; }
+.annotate-tl-seq select { height: 26px; max-width: 170px; min-width: 0; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px;
+  background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; }
+.annotate-tl-seq :disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-tl-seq button[aria-expanded="true"] { background: var(--annotate-hover); border-color: var(--cm-ink); }
+.annotate-card-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 10px 8px; padding: 8px 10px; border: 1px solid var(--cm-rule); border-radius: 6px; }
 .annotate-card-form[hidden] { display: none; }
 .annotate-card-form label { display: grid; gap: 2px; font-size: 10.5px; }
 .annotate-card-form label[hidden] { display: none; }
@@ -539,5 +547,4 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-card-show { position: absolute; inset: 0; display: grid; place-items: center; padding: 6%; background: #10201b; color: #f4f7f2; text-align: center; }
 .annotate-card-show p { margin: 0; font-size: clamp(18px, 4vw, 40px); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .annotate-card-show img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.annotate-sequence-tools svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 

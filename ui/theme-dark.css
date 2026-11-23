@@ -2796,23 +2796,36 @@
 :root[data-theme="dark"] .annotate-timeline .annotate-cover {
   background: color-mix(in srgb, var(--cm-ink) 30%, transparent);
 }
-:root[data-theme="dark"] .annotate-sequence {
-  border-top: 1px solid var(--cm-rule);
-  border-bottom: 1px solid var(--cm-rule);
+:root[data-theme="dark"] .annotate-ghosts {
+  background: var(--tl-lane);
 }
-:root[data-theme="dark"] .annotate-sequence-head {
-  border-right: 1px solid var(--cm-rule);
-  color: var(--cm-muted);
+:root[data-theme="dark"] .annotate-ghost {
+  border-left: 1px solid var(--annotate-panel);
+  background: color-mix(in srgb, #8bc8b5 45%, transparent);
+}
+:root[data-theme="dark"] .annotate-ghost.is-card {
+  background: color-mix(in srgb, #dabd8d 70%, transparent);
+}
+:root[data-theme="dark"] .annotate-ghost.is-insert {
+  background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent);
+}
+:root[data-theme="dark"] .annotate-ghost.is-board {
+  background: color-mix(in srgb, var(--annotate-board) 50%, transparent);
+}
+:root[data-theme="dark"] .annotate-ghost.is-drawing {
+  border-left: 0;
+  background: color-mix(in srgb, #b8afed 50%, transparent);
 }
 :root[data-theme="dark"] .annotate-sequence-lane {
   background: var(--tl-lane);
 }
 :root[data-theme="dark"] .annotate-sequence-block {
+  border: 0;
   background: color-mix(in srgb, #8bc8b5 55%, var(--annotate-panel));
   color: #2f2f2f;
   text-decoration: none;
 }
-:root[data-theme="dark"] .annotate-sequence-block[aria-current="page"] {
+:root[data-theme="dark"] .annotate-sequence-block[aria-current] {
   background: #8bc8b5;
 }
 :root[data-theme="dark"] .annotate-sequence-block:focus-visible {
@@ -2824,25 +2837,20 @@
 :root[data-theme="dark"] .annotate-sequence-index {
   background: rgba(0,0,0,0.45);
 }
-:root[data-theme="dark"] .annotate-sequence-tools select,
-:root[data-theme="dark"] .annotate-sequence-tools button {
+:root[data-theme="dark"] .annotate-sequence-block.is-card {
+  background: #dabd8d;
+}
+:root[data-theme="dark"] .annotate-tl-seq select {
   border: 1px solid var(--cm-rule);
   background: transparent;
   color: var(--cm-ink);
 }
-:root[data-theme="dark"] .annotate-sequence-tools button:hover:not(:disabled) {
-  background: var(--annotate-hover);
-}
-:root[data-theme="dark"] .annotate-sequence-block.is-card {
-  background: #dabd8d;
-  border: 0;
-}
-:root[data-theme="dark"] .annotate-sequence-tools button[aria-pressed="true"] {
+:root[data-theme="dark"] .annotate-tl-seq button[aria-expanded="true"] {
   background: var(--annotate-hover);
   border-color: var(--cm-ink);
 }
 :root[data-theme="dark"] .annotate-card-form {
-  border-top: 1px solid var(--cm-rule);
+  border: 1px solid var(--cm-rule);
 }
 :root[data-theme="dark"] .annotate-card-form input,
 :root[data-theme="dark"] .annotate-card-form select,
@@ -2860,12 +2868,6 @@
 :root[data-theme="dark"] .annotate-card-show {
   background: #dfe8e5;
   color: #242622;
-}
-:root[data-theme="dark"] .annotate-sequence-tools svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 /* code.css */
