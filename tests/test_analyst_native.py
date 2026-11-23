@@ -280,6 +280,30 @@ class AnalystNativeParityTests(unittest.TestCase):
         self.assertGreaterEqual(len(records), 15)
         self.assertGreater(keeper_vs_keeper, 0, "no keeper-vs-keeper scenario recorded")
 
+    def test_first_player_colour_stays_visible_on_the_light_theme(self):
+        # The bright lime vanished on light charts and their PNG exports (about 1.1:1 contrast).
+        from analysis_core import comparison
+        record = self.golden["⇄ Comparison"][0]
+        keys = {"comp_team1": "team1", "comp_player1": "player1", "comp_team2": "team2", "comp_player2": "player2"}
+        controls = {target: record["controls"][key] for key, target in keys.items() if key in record["controls"]}
+
+        def luminance(colour):
+            channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+        for light, expected in ((True, comparison.PLAYER1_COLOR_LIGHT), (False, comparison.PLAYER1_COLOR)):
+            with self.subTest(light=light):
+                view = comparison.build_view(self.frames, controls, light_mode=light)
+                radar = next(f["figure"] for f in view["figures"] if f["section"] == "Performance Radar")
+                self.assertEqual(radar["data"][0]["line"]["color"], expected)
+                xg = next((f["figure"] for f in view["figures"] if f["section"] == "Shooting & xG"), None)
+                if xg is not None:
+                    self.assertEqual(xg["data"][0]["marker"]["color"], expected)
+        background = "#ede8df"  # the light plot background (brand_plotly_export)
+        contrast = (luminance(background) + 0.05) / (luminance(comparison.PLAYER1_COLOR_LIGHT) + 0.05)
+        self.assertGreaterEqual(contrast, 3.0)
+
     def test_entry_maps_mark_each_entry_successful_or_not(self):
         import pandas as pd
         for outcome_type, expected in (("Successful", "Successful"), ("Unsuccessful", "Unsuccessful"), ("", "Successful")):

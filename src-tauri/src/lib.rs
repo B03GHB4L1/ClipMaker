@@ -50,6 +50,17 @@ fn raise_folder_window(folder: String) {
     let _ = folder;
 }
 
+/// Full screen for the app window (F11 or the footer button on every page).
+/// `full` sets it; without it the window's current state is only read. The window
+/// keeps its state while the pages change, so each page asks when it loads.
+#[tauri::command]
+fn window_fullscreen(window: tauri::Window, full: Option<bool>) -> Result<bool, String> {
+    if let Some(full) = full {
+        window.set_fullscreen(full).map_err(|error| error.to_string())?;
+    }
+    window.is_fullscreen().map_err(|error| error.to_string())
+}
+
 #[cfg(windows)]
 mod folder_window {
     use std::ffi::c_void;
@@ -258,7 +269,7 @@ const ENGINE_LAUNCHER: Option<&str> = option_env!("VIZORPLAY_ENGINE_LAUNCHER");
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![allow_foreground, raise_folder_window])
+        .invoke_handler(tauri::generate_handler![allow_foreground, raise_folder_window, window_fullscreen])
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             let port = available_port().map_err(std::io::Error::other)?;

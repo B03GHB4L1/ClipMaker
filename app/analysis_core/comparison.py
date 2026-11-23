@@ -5,6 +5,16 @@ import json
 
 from . import comparison_helpers as helpers
 from .common import AWAY_COLOR, HOME_COLOR, match_export_context
+
+# The first player's colour. The bright lime reads well on the dark theme but nearly
+# vanishes on the light one (about 1.1:1 contrast), so light charts and their exports
+# use a dark lime (about 4:1 on the light plot background).
+PLAYER1_COLOR = "#E8FF4D"
+PLAYER1_COLOR_LIGHT = "#5f7a00"
+
+
+def player1_color(light: bool) -> str:
+    return PLAYER1_COLOR_LIGHT if light else PLAYER1_COLOR
 from .views import segmented, select, team_options, view
 
 ROLES = ["Attacker", "Midfielder", "Defender"]
@@ -94,7 +104,7 @@ def _xg_figure(profile1, profile2, player1, player2, match_context, light):
     text1 = [shown(m, profile1[m]) for m in metrics]
     text2 = [shown(m, profile2[m]) for m in metrics]
     ink = "#1f241b" if light else "#e8e8e8"
-    colors = ("#9bb81f" if light else "#E8FF4D", AWAY_COLOR)
+    colors = (player1_color(light), AWAY_COLOR)
     fig = go.Figure([
         go.Bar(y=metrics, x=values, orientation="h", name=name, marker=dict(color=color),
                customdata=texts, hovertemplate="%{y}: %{customdata}<extra>" + name + "</extra>")
@@ -180,7 +190,7 @@ def build_view(frames, controls, light_mode=True):
     context = match_export_context(df_all)
     radar = helpers.brand_plotly_export(helpers._build_radar_figure(
         axes=axes, p1_pct=p1_pct, p2_pct=p2_pct, p1_raw=p1_raw, p2_raw=p2_raw, player1=player1, player2=player2,
-        color1="#E8FF4D", color2=AWAY_COLOR, light=light_mode, match_context=context), light=light_mode)
+        color1=player1_color(light_mode), color2=AWAY_COLOR, light=light_mode, match_context=context), light=light_mode)
     result["figures"] = [
         {"section": "Performance Radar", "figure": _figure_json(radar),
          "config": helpers.plotly_export_config("performance_radar", player1, "vs", player2, context)},

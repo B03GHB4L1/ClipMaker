@@ -3,6 +3,8 @@
 // works the same in the desktop windows (which ignore <a download>) and in a
 // browser. A small pop-up then says where it went and offers to open the folder.
 
+import { FULLSCREEN_ICON, openChartFullscreen } from "./chart-fullscreen.js";
+
 const post = async (path, body) => {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const payload = await response.json().catch(() => ({}));
@@ -193,14 +195,25 @@ export const exportFigure = (chart) => {
 };
 
 // Plotly's camera button downloads through <a download>, which the desktop
-// windows ignore; swap it for one that saves through the engine.
+// windows ignore; swap it for one that saves through the engine. A "Full screen"
+// button opens the chart over the whole window (chart-fullscreen.js).
 export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
   if (!config.displayModeBar || !Plotly?.toImage) return config;
   const options = config.toImageButtonOptions || {};
+  const fullscreen = {
+    name: "fullscreen",
+    title: "Full screen",
+    icon: FULLSCREEN_ICON,
+    // The copy keeps Plotly's own zoom and hover tools; save pictures from the chart on the page.
+    click: (chart) => openChartFullscreen(chart, {
+      ...config, modeBarButtonsToAdd: [],
+      modeBarButtonsToRemove: [...(config.modeBarButtonsToRemove || []), "toImage"],
+    }, Plotly),
+  };
   return {
     ...config,
     modeBarButtonsToRemove: [...(config.modeBarButtonsToRemove || []), "toImage"],
-    modeBarButtonsToAdd: [...(config.modeBarButtonsToAdd || []), {
+    modeBarButtonsToAdd: [...(config.modeBarButtonsToAdd || []), fullscreen, {
       name: "saveImage",
       title: "Save as PNG",
       icon: Plotly.Icons.camera,
