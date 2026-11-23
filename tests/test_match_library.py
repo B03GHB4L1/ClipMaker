@@ -177,6 +177,89 @@ class LibraryTests(unittest.TestCase):
         self.assertFalse(unused.exists())
 
 
+class SeveralMatchesTests(unittest.TestCase):
+    """A project can use several saved matches; Intake edits the active one."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.store = MatchStore(self.root)
+        self.project = self.store.upsert({"id": self.store.create("Two games")["id"], "home_team": "A",
+                                          "away_team": "B", "csv_path": self.csv("a.csv")})
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def csv(self, name):
+        path = self.root / name
+        path.write_bytes(CSV)
+        return str(path)
+
+    def test_adding_a_match_keeps_the_first_and_makes_the_new_one_active(self):
+        added = self.store.add_match(self.project["id"])
+        self.assertEqual(len(added["match_ids"]), 2)
+        self.assertEqual(added["match_id"], added["match_ids"][1])
+        self.assertEqual(added["csv_path"], "")  # the new match is empty until it is scraped
+        first = added["matches"][0]
+        self.assertEqual((first["title"], first["has_events"], first["kickoffs_set"]), ("A v B", True, False))
+
+    def test_adding_twice_reuses_the_empty_match_waiting(self):
+        once = self.store.add_match(self.project["id"])
+        twice = self.store.add_match(self.project["id"])
+        self.assertEqual(once["match_ids"], twice["match_ids"])
+
+    def test_each_match_keeps_its_own_kickoffs_and_video(self):
+        first = self.project["match_id"]
+        second = self.store.add_match(self.project["id"])
+        self.store.upsert({"id": self.project["id"], "home_team": "C", "away_team": "D",
+                           "csv_path": self.csv("b.csv"), "markers": {"1H": "00:10:00", "2H": "01:00:00"}})
+        self.store.set_active_match(self.project["id"], first)
+        self.store.upsert({"id": self.project["id"], "markers": {"1H": "00:02:00"}})
+        views = {view["match_id"]: view for view in self.store.match_views(self.project["id"])}
+        self.assertEqual(views[first]["markers"], {"1H": "00:02:00"})
+        self.assertEqual(views[second["match_id"]]["markers"], {"1H": "00:10:00", "2H": "01:00:00"})
+        self.assertEqual({view["id"] for view in views.values()}, {self.project["id"]})  # still one project
+
+    def test_summaries_say_what_each_match_still_needs(self):
+        second = self.store.add_match(self.project["id"])
+        self.store.upsert({"id": self.project["id"], "home_team": "C", "away_team": "D", "csv_path": self.csv("b.csv"),
+                           "video_path": "", "markers": {"1H": "00:10:00", "2H": "01:00:00"}})
+        summaries = {item["id"]: item for item in self.store.get(self.project["id"])["matches"]}
+        done = summaries[second["match_id"]]
+        self.assertEqual((done["has_events"], done["kickoffs_set"], done["has_video"]), (True, True, False))
+
+    def test_using_a_saved_match_replaces_only_the_active_one(self):
+        other = self.store.upsert({"id": self.store.create()["id"], "home_team": "X", "away_team": "Y",
+                                   "csv_path": self.csv("x.csv")})
+        self.store.add_match(self.project["id"])  # an empty second match, active
+        used = self.store.use_match(self.project["id"], other["match_id"])
+        self.assertEqual(used["match_ids"], [self.project["match_id"], other["match_id"]])
+        self.assertEqual(len(self.store.matches()), 2)  # the empty one is gone, nothing else is
+
+    def test_removing_a_match_keeps_it_in_the_library(self):
+        second = self.store.add_match(self.project["id"])
+        self.store.upsert({"id": self.project["id"], "home_team": "C", "csv_path": self.csv("b.csv")})
+        left = self.store.remove_match(self.project["id"], second["match_id"])
+        self.assertEqual(left["match_ids"], [self.project["match_id"]])
+        self.assertEqual(left["match_id"], self.project["match_id"])
+        self.assertIsNotNone(self.store.get_match(second["match_id"]))
+        with self.assertRaisesRegex(ValueError, "not in this project"):
+            self.store.remove_match(self.project["id"], second["match_id"])
+
+    def test_removing_an_empty_match_deletes_it(self):
+        empty = self.store.add_match(self.project["id"])["match_id"]
+        self.store.remove_match(self.project["id"], empty)
+        self.assertIsNone(self.store.get_match(empty))
+
+    def test_clip_windows_are_cleared_when_the_set_of_matches_changes(self):
+        self.store.upsert({"id": self.project["id"], "preview_windows": [{"start": 1}]})
+        self.assertEqual(self.store.add_match(self.project["id"])["preview_windows"], [])
+
+    def test_activating_a_match_outside_the_project_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "not in this project"):
+            self.store.set_active_match(self.project["id"], "nope")
+
+
 class LibraryApiTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -262,6 +345,34 @@ class LibraryApiTests(unittest.TestCase):
         self.assertNotEqual(result["match_id"], before["match_id"])
         self.assertTrue(Path(result["csv_path"]).is_relative_to(self.root / "matches" / result["match_id"]))
         self.assertIsNotNone(self.store.get_match(before["match_id"]))
+
+    def test_the_matches_route_adds_switches_and_removes(self):
+        project = self.request("/api/projects", {"name": "Two"})["project"]
+        first = self.import_csv(project["id"])
+        added = self.request(f"/api/projects/{project['id']}/matches", {"action": "add"})["project"]
+        self.assertEqual((len(added["matches"]), added["csv_path"]), (2, ""))
+        csv = self.import_csv(project["id"])  # fills the new match; the first stays
+        self.assertEqual(len(csv["matches"]), 2)
+        self.assertNotEqual(csv["match_id"], first["match_id"])
+        back = self.request(f"/api/projects/{project['id']}/matches",
+                            {"action": "activate", "match_id": first["match_id"]})["project"]
+        self.assertEqual((back["match_id"], back["event_count"]), (first["match_id"], 2))
+        left = self.request(f"/api/projects/{project['id']}/matches",
+                            {"action": "remove", "match_id": csv["match_id"]})["project"]
+        self.assertEqual([item["id"] for item in left["matches"]], [first["match_id"]])
+        self.assertEqual(len(self.request("/api/library")["matches"]), 2)
+        with self.assertRaises(HTTPError) as context:
+            self.request(f"/api/projects/{project['id']}/matches", {"action": "explode"})
+        context.exception.close()
+
+    def test_a_saved_match_can_be_added_to_a_project_that_has_another(self):
+        first = self.request("/api/projects", {"name": "First"})["project"]
+        match_id = self.import_csv(first["id"])["match_id"]
+        second = self.request("/api/projects", {"name": "Second"})["project"]
+        self.import_csv(second["id"])
+        added = self.request(f"/api/projects/{second['id']}/matches", {"action": "add", "match_id": match_id})["project"]
+        self.assertEqual(len(added["match_ids"]), 2)
+        self.assertEqual(added["match_id"], match_id)
 
     def test_a_project_can_use_a_saved_match_and_delete_it_from_the_library(self):
         first = self.request("/api/projects", {"name": "First"})["project"]

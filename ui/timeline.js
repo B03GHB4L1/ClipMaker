@@ -27,6 +27,8 @@ export const normaliseClips = (windows = []) => {
         period: Number(clip.period) || 1,
         source_start: Number.isFinite(Number(clip.source_start)) ? Number(clip.source_start) : start,
         source_end: Number.isFinite(Number(clip.source_end)) ? Number(clip.source_end) : end,
+        // A project can use several matches: the clip says which one it is from (and its name, for display).
+        ...(clip.match_id ? { match_id: String(clip.match_id), match_title: String(clip.match_title || "") } : {}),
       };
     });
 };
@@ -63,6 +65,7 @@ export const exportWindows = (clips, scope = "all", selected = new Set()) =>
       label: clip.label,
       period: clip.period,
       number,
+      ...(clip.match_id ? { match_id: clip.match_id } : {}),
     }));
 
 // Older projects saved a first/last range instead of a set of clips.

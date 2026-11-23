@@ -1094,6 +1094,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
         windows = merge_overlapping_windows(raw_windows, config["min_gap"])
         clip_numbers = list(range(1, len(windows) + 1))
         edited_windows = config.get("clip_windows") or []
+        window_videos: list[str] = []  # per window, when a reel takes clips from several matches' videos
         if edited_windows:
             # A chosen set keeps each clip's timeline number for its file name.
             clip_numbers = [int(window.get("number") or index) for index, window in enumerate(edited_windows, 1)]
@@ -1106,6 +1107,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
                 )
                 for window in edited_windows
             ]
+            window_videos = [str(window.get("video") or "").strip() for window in edited_windows]
             log(f"Using {len(windows)} edited preview windows for export.")
         log(f"Found {len(df)} events -> {len(windows)} clips after merging.\n")
 
@@ -1358,7 +1360,14 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             video2_path_str = None
             video2_duration = None
 
-        def get_src_and_duration(period):
+        own_durations: dict[str, float] = {}
+
+        def get_src_and_duration(period, number=None):
+            own = window_videos[number - 1] if number and number <= len(window_videos) else ""
+            if own:
+                if own not in own_durations:
+                    own_durations[own] = get_video_duration(own, ffmpeg_bin)
+                return own, own_durations[own]
             if split_video:
                 if int(period) in period_video_sources:
                     return period_video_sources[int(period)]
@@ -1376,7 +1385,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
             # Build clip spec list first
             clip_specs_indiv = []
             for i, (start, end, label, period) in enumerate(windows, 1):
-                src, src_dur = get_src_and_duration(period)
+                src, src_dur = get_src_and_duration(period, i)
                 s = max(0, start)
                 e = min(src_dur, end)
                 if e <= s:
@@ -1442,7 +1451,7 @@ def run_clip_maker(config, log_queue, progress_queue, cancel_event=None):
         else:
             clip_specs = []
             for i, (start, end, label, period) in enumerate(windows, 1):
-                src, src_dur = get_src_and_duration(period)
+                src, src_dur = get_src_and_duration(period, i)
                 s = max(0, start)
                 e = min(src_dur, end)
                 if e <= s:

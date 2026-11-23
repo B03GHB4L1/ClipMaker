@@ -787,113 +787,64 @@
   border-bottom: 1px solid #494a45;
 }
 }
-:root[data-theme="dark"] .match-context > .context-across {
-  border: 1px solid var(--cm-rule, #545550);
-  background: var(--cm-paper, #2f2f2f);
-  color: var(--cm-ink, #e9ece6);
-}
-:root[data-theme="dark"] .match-context > .context-across:hover {
-  border-color: var(--cm-ink, #e9ece6);
-}
-:root[data-theme="dark"] .player-search {
-  border: 1px solid var(--cm-rule, #4b4c47);
-  background: var(--cm-paper, #242424);
-  color: var(--cm-ink, #e9eae9);
-}
-:root[data-theme="dark"] .player-search::backdrop {
-  background: rgba(0,0,0,0.8);
-}
-:root[data-theme="dark"] .ps-head {
-  border-bottom: 1px solid var(--cm-rule, #3a3b39);
-}
-:root[data-theme="dark"] .ps-close {
-  border: 1px solid var(--cm-rule, #3a3b39);
-  background: transparent;
-  color: inherit;
-}
-:root[data-theme="dark"] .ps-pick {
-  border-right: 1px solid var(--cm-rule, #3a3b39);
-}
-:root[data-theme="dark"] .ps-search-label input {
-  border: 1px solid var(--cm-rule, #545550);
+:root[data-theme="dark"] .matches-menu > summary {
+  border: 1px solid #545550;
   background: #2f2f2f;
-  color: #e9eae9;
+  color: #e9ece6;
 }
-:root[data-theme="dark"] .ps-suggestions {
-  border: 1px solid var(--cm-rule, #3a3b39);
+:root[data-theme="dark"] .matches-menu[open] > summary {
+  border-color: #e9ece6;
 }
-:root[data-theme="dark"] .ps-suggestion {
-  border: 0;
-  border-bottom: 1px solid var(--cm-rule, #2d2d2a);
-  background: transparent;
-  color: inherit;
-}
-:root[data-theme="dark"] .ps-suggestion:hover,
-:root[data-theme="dark"] .ps-suggestion:focus-visible {
-  color: #171817;
-  background: color-mix(in srgb, var(--cm-accent, #c8f135) 30%, transparent);
-  outline: none;
-}
-:root[data-theme="dark"] .ps-suggestion span {
-  color: var(--cm-muted, #a7aaa7);
-}
-:root[data-theme="dark"] .ps-empty {
-  color: var(--cm-muted, #a7aaa7);
-}
-:root[data-theme="dark"] .ps-chip {
-  background: var(--cm-ink, #e9eae9);
-  color: #2f2f2f;
-}
-:root[data-theme="dark"] .ps-chip-remove {
-  border: 0;
-  background: rgba(47,47,47,0.18);
-  color: inherit;
-}
-:root[data-theme="dark"] .ps-scope,
-:root[data-theme="dark"] .ps-status {
-  color: var(--cm-muted, #a7aaa7);
-}
-:root[data-theme="dark"] .ps-status.is-problem {
-  color: #ff9888;
-}
-:root[data-theme="dark"] .ps-actions button,
-:root[data-theme="dark"] .ps-viewer-bar button,
-:root[data-theme="dark"] .ps-play {
-  border: 1px solid var(--cm-rule, #545550);
+:root[data-theme="dark"] .matches-panel {
+  border: 1px solid #4b4c47;
   background: #2f2f2f;
-  color: #e9eae9;
 }
-:root[data-theme="dark"] .ps-actions .ps-primary {
-  border-color: var(--cm-accent, #c8f135);
-  color: #171817;
-  background: var(--cm-accent, #c8f135);
+:root[data-theme="dark"] .pm-head [role=status] {
+  color: #abaea7;
 }
-:root[data-theme="dark"] .ps-viewer video {
-  background: #ebebeb;
+:root[data-theme="dark"] .pm-list small {
+  color: #abaea7;
 }
-:root[data-theme="dark"] .ps-match {
-  border: 1px solid var(--cm-rule, #3a3b39);
+:root[data-theme="dark"] .pm-list small.is-incomplete {
+  color: #e1b67d;
 }
-:root[data-theme="dark"] .ps-match.is-problem .ps-match-head span {
-  color: #ff9888;
+:root[data-theme="dark"] .pm-list button {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #abaea7;
 }
-:root[data-theme="dark"] .ps-match-head {
-  border-bottom: 1px solid var(--cm-rule, #3a3b39);
-}
-:root[data-theme="dark"] .ps-match-head span {
-  color: var(--cm-muted, #a7aaa7);
-}
-:root[data-theme="dark"] .ps-clips li + li {
-  border-top: 1px solid var(--cm-rule, #2d2d2a);
-}
-@media (max-width: 760px) {
-:root[data-theme="dark"] .ps-pick {
-  border-right: 0;
-  border-bottom: 1px solid var(--cm-rule, #3a3b39);
-}
+:root[data-theme="dark"] .pm-add select {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #e5ebe7;
 }
 
 /* compact.css */
+:root[data-theme="dark"] .match-tab {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #e5ebe7;
+}
+:root[data-theme="dark"] .match-tab[aria-pressed=true] {
+  border-color: #e5ebe7;
+}
+:root[data-theme="dark"] .match-tab small {
+  color: #abaea7;
+}
+:root[data-theme="dark"] .match-tab small.is-incomplete {
+  color: #e1b67d;
+}
+:root[data-theme="dark"] .match-remove {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #abaea7;
+}
+:root[data-theme="dark"] .match-add button,
+:root[data-theme="dark"] .match-add select {
+  border: 1px solid #4b4c47;
+  background: #2f2f2f;
+  color: #e5ebe7;
+}
 :root[data-theme="dark"] .batch-import textarea {
   border: 1px solid #4b4c47;
 }

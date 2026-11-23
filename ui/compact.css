@@ -1,5 +1,18 @@
 /* Shared desktop density and identity for Intake and Filtering. */
 body { padding-bottom: 30px; }
+.project-matches { margin: 0 0 12px; display: grid; gap: 8px; font-size: 12px; }
+.match-tabs { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.match-tabs li { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+.match-tab { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; padding: 8px 10px; border: 1px solid #d7d8d2; border-radius: 4px; background: #fff; color: #151916; font: inherit; cursor: pointer; }
+.match-tab[aria-pressed=true] { border-color: #151916; box-shadow: inset 3px 0 0 #151916; }
+.match-tab strong, .match-tab small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-tab small { color: #62655d; font-size: 11px; }
+.match-tab small.is-incomplete { color: #8a5a00; }
+.match-remove { width: 32px; border: 1px solid #d7d8d2; border-radius: 4px; background: #fff; color: #62655d; font-size: 18px; cursor: pointer; }
+.match-add { display: flex; flex-wrap: wrap; gap: 6px; }
+.match-add button, .match-add select { min-height: 32px; padding: 4px 10px; border: 1px solid #d7d8d2; border-radius: 4px; background: #fff; color: #151916; font: inherit; cursor: pointer; }
+.match-add select { flex: 1 1 160px; min-width: 0; }
+.match-add select:disabled { opacity: .55; cursor: default; }
 .batch-import { margin: 8px 0 12px; font-size: 12px; }
 .batch-import summary { cursor: pointer; padding: 6px 0; }
 .batch-import textarea { display: block; width: 100%; resize: vertical; min-height: 65px; padding: 8px; border: 1px solid #d7d8d2; margin: 6px 0; font: 12px Arial,sans-serif; }

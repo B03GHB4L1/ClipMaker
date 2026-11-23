@@ -1,6 +1,5 @@
 import { saveProject, flushProject, newProject, rememberProject } from "./projects.js";
 import { annotateClip, revealFolder, saveClip } from "./save-clip.js";
-import { openPlayerSearch } from "./player-search.js";
 import {
   duration, exportWindows, formatClock, isTrimmed, normaliseClips, parseClock,
   restoreSelection, totalDuration, trimClip,
@@ -31,6 +30,7 @@ let snapshotLibrary = {};
 let activeMatch;
 let filterMetadata;
 let activeJobId;
+let activeJobIds = []; // an export of one reel per match runs one job per match
 let toastTimer;
 let corrections = [];
 let previewRevision = 0;
@@ -246,7 +246,10 @@ const scopeCounts = (index = filterMetadata?.events) => {
   );
   const inScope = new Uint8Array(index.type.length);
   const types = new Map();
+  const scope = matchScope();
+  const matchPositions = scope && index.matches ? new Set(scope.map((id) => index.matches.indexOf(id))) : null;
   for (let row = 0; row < index.type.length; row += 1) {
+    if (matchPositions && !matchPositions.has(index.match?.[row])) continue;
     if (teamPosition !== null && index.team[row] !== teamPosition) continue;
     if (players.size && !players.has(index.player[row])) continue;
     if (period && index.period[row] !== period) continue;
@@ -289,15 +292,20 @@ const refreshScopeCounts = () => {
 };
 
 const renderMatchContext = () => {
-  document.querySelector("[data-match-name]").textContent =
-    `${activeMatch.home_team} vs ${activeMatch.away_team}`;
-  document.querySelector("[data-match-score]").textContent =
-    `${activeMatch.home_score || 0} - ${activeMatch.away_score || 0} ${activeMatch.score_status || "FT"}`;
+  const several = matchCount() > 1;
+  document.querySelector("[data-match-name]").textContent = several
+    ? `${matchCount()} matches`
+    : activeMatch.home_team ? `${activeMatch.home_team} vs ${activeMatch.away_team}` : "No match yet";
+  document.querySelector("[data-match-score]").textContent = several
+    ? (activeMatch.matches || []).map((match) => match.title).join(" · ")
+    : `${activeMatch.home_score || 0} - ${activeMatch.away_score || 0} ${activeMatch.score_status || "FT"}`;
   document.querySelector("[data-match-events]").textContent = Number(
     filterMetadata.event_count || activeMatch.event_count || 0,
   ).toLocaleString();
-  document.querySelector("[data-match-video]").textContent =
-    activeMatch.video_name || "Not selected";
+  const withVideo = (activeMatch.matches || []).filter((match) => match.has_video).length;
+  document.querySelector("[data-match-video]").textContent = several
+    ? `${withVideo} of ${matchCount()} matches`
+    : activeMatch.video_name || "Not selected";
   document.querySelector("[data-xt-min]").disabled = !filterMetadata.has_xt;
   document.querySelector("[data-top-n]").disabled = !filterMetadata.has_xt;
   const unlocated = Number(filterMetadata.unlocated || 0);
@@ -363,6 +371,7 @@ const collectOptions = (dryRun) => {
     top_n: Number(field("top-n").value) || null,
     output_filename: field("output-name").value.trim() || "Highlights.mp4",
     individual_clips: exportAs() === "files",
+    export_mode: exportAs() === "per-match" ? "per_match" : "combined",
     export_scope: exportScope(),
     shots_and_key_passes_only: shotsAndKeyPasses,
     timeline_corrections: structuredClone(corrections),
@@ -373,6 +382,8 @@ const collectOptions = (dryRun) => {
   selectedValues('input[name="qualifier"]').forEach((flag) => {
     options[flag] = true;
   });
+  const scope = matchScope();
+  if (scope) options.match_ids = scope; // the Matches filter, when not every match is ticked
   return options;
 };
 
@@ -404,6 +415,7 @@ const resetFilters = () => {
 
 const applyOptions = (options = {}) => {
   resetFilters();
+  setMatchScope(options.match_ids);
   shotsAndKeyPasses = Boolean(options.shots_and_key_passes_only);
   setCheckedValues("action", options.filter_types || []);
   const team = form.querySelector(
@@ -547,7 +559,7 @@ const renderCorrections = () => {
 // Timeline editor
 // ---------------------------------------------------------------------------
 
-const hasFootage = () => Boolean(activeMatch?.video_path);
+const hasFootage = () => Boolean(activeMatch?.video_path) || (activeMatch?.matches || []).some((match) => match.has_video);
 const clipCount = (count) => `${count} clip${count === 1 ? "" : "s"}`;
 const focused = () => clips[focusIndex];
 
@@ -564,12 +576,15 @@ const resetPreview = () => {
   field("summary-note").textContent = "Find clips to build the timeline.";
 };
 
-const sourceFor = (period) => {
-  const key = PERIOD_KEYS[period] || "1H";
+// Which footage a clip plays: its match's video for its period.
+const sourceKey = (clip) => `${clip.match_id || ""}/${clip.period}`;
+const sourceFor = (clip) => {
+  const key = sourceKey(clip);
   if (!sources.has(key)) {
     const request = apiRequest("/api/files/reopen", {
       method: "POST",
-      body: JSON.stringify({ match_id: activeMatch.id, period: key }),
+      body: JSON.stringify({ match_id: activeMatch.id, period: PERIOD_KEYS[clip.period] || "1H",
+        ...(clip.match_id ? { source_match_id: clip.match_id } : {}) }),
     }).then(({ file }) => {
       if (!sourceUrls.has(file.path)) sourceUrls.set(file.path, file.url);
       return sourceUrls.get(file.path);
@@ -595,7 +610,7 @@ const loadSource = (url) => {
 };
 
 const footageLimit = (clip) =>
-  !fallbackMode && video.dataset.period === String(clip.period) && Number.isFinite(video.duration)
+  !fallbackMode && video.dataset.period === sourceKey(clip) && Number.isFinite(video.duration)
     ? video.duration : Infinity;
 
 const enterFallback = (message) => {
@@ -617,10 +632,10 @@ const showClip = async (index, { play = false, at } = {}) => {
   if (fallbackMode || !hasFootage()) return;
   const generation = previewRevision;
   try {
-    const url = await sourceFor(clip.period);
+    const url = await sourceFor(clip);
     if (generation !== previewRevision || clip !== focused()) return;
     await loadSource(url);
-    video.dataset.period = String(clip.period);
+    video.dataset.period = sourceKey(clip);
     if (clip !== focused()) return;
     if (!draggingEdge) renderTrimPanel(); // the footage length now bounds the trim bar
     video.currentTime = at ?? clip.start;
@@ -676,7 +691,7 @@ const togglePlay = async () => {
     video.pause();
     return;
   }
-  const inside = video.dataset.period === String(clip.period)
+  const inside = video.dataset.period === sourceKey(clip)
     && video.currentTime >= clip.start && video.currentTime < clip.end - 0.1;
   await showClip(focusIndex, { play: true, at: inside ? video.currentTime : clip.start });
 };
@@ -752,7 +767,8 @@ const renderTimeline = () => {
     body.type = "button";
     body.className = "clip-body";
     body.innerHTML = '<span class="clip-number"></span><span class="clip-label"></span><span class="clip-length"></span>';
-    body.querySelector(".clip-label").textContent = clip.label;
+    body.querySelector(".clip-label").textContent = clip.match_title && matchCount() > 1 ? `${clip.match_title} · ${clip.label}` : clip.label;
+    if (clip.match_id) item.dataset.matchIndex = String(Math.max(0, (activeMatch.matches || []).findIndex((match) => match.id === clip.match_id)) % 4);
     body.onclick = () => showClip(clips.indexOf(clip));
     body.ondblclick = () => showClip(clips.indexOf(clip), { play: true });
     const handles = ["start", "end"].map((edge) => {
@@ -813,7 +829,7 @@ const trimEdge = (index, edge, seconds, options) => {
   const clip = clips[index];
   if (!clip) return;
   const next = applyTrim(index, trimClip(clip, edge, seconds, footageLimit(clip)), options);
-  if (options?.seek !== false && index === focusIndex && !fallbackMode && video.dataset.period === String(next.period)) {
+  if (options?.seek !== false && index === focusIndex && !fallbackMode && video.dataset.period === sourceKey(next)) {
     video.pause();
     video.currentTime = edge === "start" ? next.start : Math.max(next.start, next.end - 0.05);
   }
@@ -918,7 +934,8 @@ const renderClip = async () => {
   try {
     const result = await apiRequest("/api/previews/render", {
       method: "POST",
-      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period,
+        ...(clip.match_id ? { source_match_id: clip.match_id } : {}), ...encodingSettings() }),
     });
     if (version !== renderRevision || generation !== previewRevision) return;
     video.dataset.src = result.file.url;
@@ -1039,6 +1056,129 @@ const pollJob = async (jobId) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// The matches a project uses: the Matches filter, adding saved matches, taking one out
+// ---------------------------------------------------------------------------
+
+const matchCount = () => (activeMatch?.matches || []).length;
+const matchBoxes = () => [...document.querySelectorAll("[data-pm-list] input[type=checkbox]")];
+
+// The ticked matches, or null when all are ticked (nothing to narrow).
+const matchScope = () => {
+  const boxes = matchBoxes();
+  if (boxes.length < 2 || boxes.every((box) => box.checked)) return null;
+  return boxes.filter((box) => box.checked).map((box) => box.value);
+};
+
+const setMatchScope = (ids) => {
+  const chosen = Array.isArray(ids) ? new Set(ids) : null;
+  matchBoxes().forEach((box) => { box.checked = !chosen || chosen.has(box.value); });
+};
+
+const changeProjectMatches = async (action, matchId = "") => {
+  if (!activeMatch?.id || activeJobId) return;
+  try {
+    await persistFilters();
+    await flushProject();
+    await apiRequest(`/api/projects/${encodeURIComponent(activeMatch.id)}/matches`, {
+      method: "POST", body: JSON.stringify({ action, match_id: matchId }),
+    });
+    await loadMatch(activeMatch.id);
+    persistFilters();
+  } catch (error) { showToast(error.message); }
+};
+
+const renderMatchesPanel = async () => {
+  const matches = activeMatch.matches || [];
+  const list = document.querySelector("[data-pm-list]");
+  const previous = matchScope();
+  list.replaceChildren(...matches.map((match) => {
+    const item = document.createElement("li");
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = match.id;
+    box.checked = true;
+    box.disabled = !match.has_events;
+    box.addEventListener("change", () => { resetPreview(); updateSummary(); persistSoon(); });
+    const name = document.createElement("span");
+    name.textContent = match.title;
+    const state = document.createElement("small");
+    state.textContent = [match.has_events ? `${match.event_count.toLocaleString()} events` : "no events",
+      match.has_video ? "video" : "no video", match.kickoffs_set ? "kick-offs set" : "kick-offs not set"].join(" · ");
+    state.classList.toggle("is-incomplete", !match.has_events || !match.has_video || !match.kickoffs_set);
+    label.append(box, name, state);
+    item.append(label);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = "Take this match out of the project (it stays saved)";
+    remove.setAttribute("aria-label", `Remove ${match.title} from this project`);
+    remove.addEventListener("click", () => changeProjectMatches("remove", match.id));
+    item.append(remove);
+    return item;
+  }));
+  setMatchScope(previous);
+  document.querySelector("[data-matches-note]").textContent = matches.some((match) => match.has_events)
+    ? (matches.length > 1 ? "Filters search all ticked matches together." : "")
+    : "Add a saved match below, or scrape one in Intake.";
+  const menu = document.querySelector("[data-matches-panel]");
+  document.querySelector("[data-matches-count]").textContent = matches.length > 1 ? `(${matches.length})` : "";
+  if (!matches.some((match) => match.has_events)) menu.open = true; // nothing to filter yet: the way in is right here
+  document.querySelector("[data-export-per-match]").hidden = matches.length < 2;
+  if (matches.length < 2 && exportAs() === "per-match") setRadio("export-as", "reel");
+  const select = document.querySelector("[data-pm-add]");
+  try {
+    const { matches: library = [] } = await apiRequest("/api/library");
+    const used = new Set(matches.map((match) => match.id));
+    const options = library.filter((match) => match.csv_path && !used.has(match.id)).map((match) =>
+      new Option(`${match.home_team || "Home"} v ${match.away_team || "Away"} · ${Number(match.event_count || 0).toLocaleString()} events`, match.id));
+    select.replaceChildren(new Option("Add a saved match…", ""), ...options);
+    select.disabled = !options.length;
+  } catch (error) { select.disabled = true; }
+};
+document.addEventListener("click", (event) => {
+  const menu = document.querySelector("[data-matches-panel]");
+  if (menu?.open && !menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener("keydown", (event) => {
+  const menu = document.querySelector("[data-matches-panel]");
+  if (event.key === "Escape" && menu?.open) { menu.open = false; menu.querySelector("summary").focus(); }
+});
+document.querySelector("[data-pm-add]").addEventListener("change", (event) => {
+  const matchId = event.target.value;
+  event.target.value = "";
+  if (matchId) changeProjectMatches("add", matchId);
+});
+
+// One job per match when exporting a reel per match: show them as one export.
+const finishedStates = ["complete", "failed", "cancelled"];
+const mergeJobs = (jobs) => {
+  if (jobs.length === 1) return jobs[0];
+  const status = jobs.some((job) => job.status === "failed") ? "failed"
+    : jobs.some((job) => job.status === "cancelled") ? "cancelled"
+    : jobs.every((job) => job.status === "complete") ? "complete"
+    : jobs.some((job) => job.status === "running") ? "running" : "queued";
+  const current = jobs.reduce((total, job) => total + (job.status === "complete" ? 1 : Number(job.progress?.total ? job.progress.current / job.progress.total : 0)), 0);
+  return {
+    ...jobs[0], status, logs: jobs.flatMap((job) => job.logs || []), files: jobs.flatMap((job) => job.files || []),
+    progress: { current, total: jobs.length, elapsed: Math.max(...jobs.map((job) => Number(job.progress?.elapsed || 0))) },
+    finished_at: jobs.map((job) => job.finished_at).filter(Boolean).sort().pop(),
+  };
+};
+const pollJobs = async (ids) => {
+  try {
+    const jobs = await Promise.all(ids.map((id) => apiRequest(`/api/jobs/${id}`).then((result) => result.job)));
+    renderJob(mergeJobs(jobs));
+    if (!jobs.every((job) => finishedStates.includes(job.status))) setTimeout(() => pollJobs(ids), 300);
+  } catch (error) {
+    jobState.textContent = "Connection interrupted";
+    field("job-detail").textContent = "Reconnecting to the engine...";
+    jobLogs.textContent = error.message;
+    setTimeout(() => pollJobs(ids), 2000);
+  }
+};
+
 const startExport = async () => {
   if (activeJobId || previewBusy || !clips.length) return;
   if (!hasFootage()) {
@@ -1075,9 +1215,10 @@ const startExport = async () => {
         options: { ...collectOptions(false), clip_windows: windows },
       }),
     });
-    activeJobId = result.job.id;
-    renderJob(result.job);
-    pollJob(activeJobId);
+    activeJobIds = (result.jobs || [result.job]).map((job) => job.id);
+    activeJobId = activeJobIds[0];
+    renderJob(mergeJobs(result.jobs || [result.job]));
+    pollJobs(activeJobIds);
   } catch (error) {
     activeJobId = undefined;
     setExportBusy(false);
@@ -1096,6 +1237,10 @@ const buildPreview = async () => {
   if (activeJobId || previewBusy) return;
   if (!activeMatch?.id) {
     showToast("Choose a match first.");
+    return;
+  }
+  if (!(activeMatch.matches || []).some((match) => match.has_events) && !activeMatch.csv_path) {
+    showToast("Add a saved match above, or scrape one in Intake, before finding clips.");
     return;
   }
   resetPreview();
@@ -1156,6 +1301,7 @@ const loadMatch = async (matchId) => {
   renderTeams();
   renderActions();
   renderQualifiers();
+  await renderMatchesPanel();
   restoringProject = true;
   applyOptions(activeMatch.filter_settings || {});
   if (activeMatch.preview_windows?.length) {
@@ -1182,9 +1328,9 @@ const connect = async () => {
       localStorage.removeItem(snapshotStorageKey);
     } catch (error) { showToast(error.message); }
     const historyResult = await apiRequest("/api/matches");
-    const matches = (historyResult.matches || []).filter((match) => match.csv_path);
+    const matches = historyResult.matches || [];
     if (!matches.length) {
-      throw new Error("Scrape and save a match in Intake before filtering.");
+      throw new Error("Start a project in Intake before filtering.");
     }
     matchSelect.replaceChildren();
     matches.forEach((match) => {
@@ -1546,7 +1692,8 @@ annotateButton.addEventListener("click", async () => {
   try {
     const result = await apiRequest("/api/previews/render", {
       method: "POST",
-      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+      body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period,
+        ...(clip.match_id ? { source_match_id: clip.match_id } : {}), ...encodingSettings() }),
     });
     // annotateClip reports its own errors and leaves the page only once the clip is in the project.
     const opened = await annotateClip(result.file.url, clip.label || `Clip ${focusIndex + 1}`, annotateButton, activeMatch.id);
@@ -1576,7 +1723,8 @@ async function annotateMany(targets) {
       annotateButton.textContent = `Preparing ${index + 1} of ${targets.length}...`;
       const result = await apiRequest("/api/previews/render", {
         method: "POST",
-        body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period, ...encodingSettings() }),
+        body: JSON.stringify({ match_id: activeMatch.id, start: clip.start, end: clip.end, period: clip.period,
+        ...(clip.match_id ? { source_match_id: clip.match_id } : {}), ...encodingSettings() }),
       });
       const added = await apiRequest("/api/editor/clips", {
         method: "POST",
@@ -1602,10 +1750,12 @@ async function annotateMany(targets) {
 cancelJobButton.addEventListener("click", async () => {
   if (!activeJobId) return;
   try {
-    await apiRequest(`/api/jobs/${activeJobId}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+    for (const id of activeJobIds.length ? activeJobIds : [activeJobId]) {
+      await apiRequest(`/api/jobs/${id}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    }
     jobState.textContent = "Cancelling";
   } catch (error) {
     showToast(error.message);
@@ -1681,14 +1831,5 @@ document.querySelector("[data-new-project]").onclick = async (event) => {
   } catch (error) { event.currentTarget.disabled = false; showToast(error.message); }
 };
 document.querySelectorAll('.filter-topbar a, .context-edit').forEach((link) => link.setAttribute("data-project-navigation", ""));
-
-// Players across every saved match (ui/player-search.js): starts with the players ticked here.
-{
-  const across = Object.assign(document.createElement("button"), { type: "button", className: "context-across", textContent: "Players across matches" });
-  across.dataset.playersAcross = "";
-  across.title = "Find one or more players' clips in all your saved matches";
-  across.onclick = () => openPlayerSearch({ pageOptions: () => collectOptions(true), preset: selectedValues('input[name="player"]') });
-  document.querySelector(".context-edit")?.before(across);
-}
 
 connect();

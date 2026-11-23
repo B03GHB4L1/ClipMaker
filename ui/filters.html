@@ -66,9 +66,22 @@
         <div class="context-stat">
           <span>Footage</span><strong data-match-video>--</strong>
         </div>
+        <details class="matches-menu" data-matches-panel>
+          <summary>Matches <span data-matches-count></span></summary>
+          <div class="matches-panel" role="group" aria-label="Matches in this project">
+            <div class="pm-head">
+              <h2>Matches in this project</h2>
+              <span data-matches-note role="status"></span>
+            </div>
+            <ul class="pm-list" data-pm-list></ul>
+            <div class="pm-add">
+              <label class="sr-only" for="pm-add-select">Add a saved match to this project</label>
+              <select id="pm-add-select" data-pm-add><option value="">Add a saved match…</option></select>
+            </div>
+          </div>
+        </details>
         <a class="context-edit" href="/">Edit intake</a>
       </section>
-
       <div class="workbench">
         <form class="filter-rail" data-filter-form aria-labelledby="rail-title">
           <header class="rail-head">
@@ -357,6 +370,7 @@
                 <div class="segmented-control compact">
                   <label><input type="radio" name="export-as" value="reel" checked data-export-as /><span>One reel</span></label>
                   <label><input type="radio" name="export-as" value="files" data-export-as /><span>Separate files</span></label>
+                  <label data-export-per-match hidden><input type="radio" name="export-as" value="per-match" data-export-as /><span>One reel per match</span></label>
                 </div>
               </fieldset>
               <button type="button" class="annotate-button" data-annotate-focused disabled title="Draw on the clip in the player in the analyst editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/></svg>Annotate clip</button>

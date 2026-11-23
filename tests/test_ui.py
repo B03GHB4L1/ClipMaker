@@ -454,14 +454,15 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn("...(session ? { session_id: session.id } : { session_name: sessionName })", script)
         self.assertIn("targets.length > MAX_ANNOTATE", script)
 
-    def test_filter_finds_players_across_saved_matches(self):
+    def test_filter_works_across_a_projects_matches_and_the_players_dialog_is_gone(self):
         script = (UI / "filters.js").read_text(encoding="utf-8")
-        self.assertIn('import { openPlayerSearch } from "./player-search.js";', script)
-        self.assertIn("openPlayerSearch({", script)
-        search = (UI / "player-search.js").read_text(encoding="utf-8")
-        self.assertIn('"/api/previews"', search)
-        self.assertIn('"/api/jobs"', search)
-        self.assertNotIn("/api/fs", search)  # only the engine's own filter and export calls
+        self.assertNotIn("player-search", script)  # the project's own matches replaced it
+        self.assertFalse((UI / "player-search.js").exists())
+        self.assertIn("match_ids", script)  # the Matches filter
+        self.assertIn("/matches", script)  # add or take out a saved match without Intake
+        html = (UI / "filters.html").read_text(encoding="utf-8")
+        self.assertIn("data-pm-add", html)
+        self.assertIn('value="per-match"', html)
 
     def test_annotate_critique_fixes_hold(self):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
