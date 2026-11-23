@@ -216,9 +216,7 @@ const showTime = () => {
   if (document.activeElement !== scrub) scrub.value = String(outTime);
   $("[data-play]").classList.toggle("is-playing", playing);
   $("[data-play]").setAttribute("aria-label", playing ? "Pause" : "Play");
-  $("[data-lane-head]").style.left = `${(outTime / total()) * 100}%`;
-  $("[data-drawing-head]").style.left = `${(outTime / total()) * 100}%`;
-  document.querySelectorAll("[data-players] [data-head]").forEach((head) => { head.style.left = `${(outTime / total()) * 100}%`; });
+  movePlayhead();
   document.querySelectorAll("[data-lane-freeze]").forEach((block) => block.classList.toggle("is-current", Number(block.dataset.laneFreeze) === at.freeze));
 };
 
@@ -761,6 +759,139 @@ function shapeField(item) {
 // ---------------------------------------------------------------------------
 // The Shape tool's menu: opens beside its button (below it on a phone, where the tools are a row)
 // ---------------------------------------------------------------------------
+// Timeline view: a ruler, zoom, and one playhead through every track. Lanes keep their percent positions;
+// zooming only widens them (--lane-width) and the scroller moves sideways.
+// ---------------------------------------------------------------------------
+const headWidth = () => parseFloat(getComputedStyle($("[data-tl-body]")).getPropertyValue("--head-width")) || 120;
+const MAX_ZOOM = 60;
+let timelineZoom = 1;
+let rulerKey = "";
+const laneWidth = () => Math.max(1, $("[data-tl-body]").clientWidth - headWidth());
+// Ideas borrowed from OpenCut's ruler (MIT): labels and ticks are spaced apart on their own, and zoomed far in the
+// ruler counts frames.
+const LABEL_SPACING = 110; // px between labels
+const TICK_SPACING = 14; // px between ticks
+const FRAME_STEPS = [1, 2, 3, 5, 10, 15];
+const SECOND_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800];
+const rulerLabel = (seconds, fps, withFrames) => {
+  const frames = Math.round(seconds * fps);
+  const whole = Math.floor(frames / fps + 1e-9);
+  const minutes = Math.floor(whole / 60);
+  const text = `${minutes}:${String(whole - minutes * 60).padStart(2, "0")}`;
+  return withFrames ? `${text}:${String(frames - whole * fps).padStart(2, "0")}` : text;
+};
+const renderRuler = () => {
+  if (!clip) return;
+  const length = total();
+  const width = laneWidth();
+  const key = `${length.toFixed(3)}|${Math.round(width)}`;
+  if (key === rulerKey) return;
+  rulerKey = key;
+  const fps = clip.fps || 25;
+  const perSecond = width / length;
+  const candidates = [...FRAME_STEPS.filter((frames) => frames < fps).map((frames) => frames / fps), ...SECOND_STEPS];
+  const label = candidates.find((step) => step * perSecond >= LABEL_SPACING) || candidates[candidates.length - 1];
+  const tick = candidates.find((step) => step * perSecond >= TICK_SPACING && Math.abs(label / step - Math.round(label / step)) < 1e-6) || label;
+  const marks = [];
+  for (let n = 0; n * tick <= length + 1e-6; n += 1) {
+    const at = n * tick;
+    const major = Math.abs(at / label - Math.round(at / label)) < 1e-6;
+    const mark = document.createElement("span");
+    mark.className = `annotate-tick${major ? " is-major" : ""}`;
+    mark.style.left = `${(at / length) * 100}%`;
+    if (major) mark.textContent = rulerLabel(at, fps, label < 1);
+    marks.push(mark);
+  }
+  $("[data-ruler]").replaceChildren(...marks);
+};
+const layoutTimeline = () => {
+  if (!clip) return;
+  const scroller = $("[data-tl-scroll]");
+  const body = $("[data-tl-body]");
+  body.style.setProperty("--lane-width", `${Math.max(160, (scroller.clientWidth - headWidth()) * timelineZoom)}px`);
+  rulerKey = "";
+  renderRuler();
+  movePlayhead();
+};
+const setZoom = (zoom, anchor = 0.5) => {
+  const scroller = $("[data-tl-scroll]");
+  const room = scroller.clientWidth - headWidth();
+  const before = (scroller.scrollLeft + anchor * room) / laneWidth();
+  timelineZoom = Math.min(MAX_ZOOM, Math.max(1, zoom));
+  layoutTimeline();
+  scroller.scrollLeft = before * laneWidth() - anchor * room;
+  document.querySelectorAll("[data-tl-zoom]").forEach((button) => {
+    const which = button.dataset.tlZoom;
+    button.disabled = (which === "out" && timelineZoom <= 1) || (which === "in" && timelineZoom >= MAX_ZOOM) || (which === "fit" && timelineZoom === 1);
+  });
+};
+// One playhead line through the ruler and every track; while it plays, the view follows it.
+function movePlayhead() {
+  const body = $("[data-tl-body]");
+  if (!clip || !body) return;
+  const fraction = outTime / total();
+  body.style.setProperty("--head", String(fraction));
+  renderRuler();
+  const scroller = $("[data-tl-scroll]");
+  const x = headWidth() + fraction * laneWidth();
+  if (x < scroller.scrollLeft + headWidth() || x > scroller.scrollLeft + scroller.clientWidth - 16) {
+    scroller.scrollLeft = Math.max(0, x - headWidth() - (scroller.clientWidth - headWidth()) * 0.25);
+  }
+}
+{
+  document.querySelectorAll("[data-tl-zoom]").forEach((button) => {
+    button.onclick = () => {
+      // Zoom around the playhead, wherever it sits in the view.
+      const room = Math.max(1, $("[data-tl-scroll]").clientWidth - headWidth());
+      const anchor = Math.min(1, Math.max(0, (outTime / total() * laneWidth() - $("[data-tl-scroll]").scrollLeft) / room));
+      setZoom(button.dataset.tlZoom === "fit" ? 1 : timelineZoom * (button.dataset.tlZoom === "in" ? 1.6 : 1 / 1.6), anchor);
+    };
+  });
+  const scroller = $("[data-tl-scroll]");
+  scroller.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const rect = scroller.getBoundingClientRect();
+    const anchor = Math.min(1, Math.max(0, (event.clientX - rect.left - headWidth()) / Math.max(1, rect.width - headWidth())));
+    setZoom(timelineZoom * (event.deltaY < 0 ? 1.25 : 0.8), anchor);
+  }, { passive: false });
+  new ResizeObserver(() => layoutTimeline()).observe(scroller);
+  setZoom(1);
+  // Click or drag the ruler to move the playhead.
+  const ruler = $("[data-ruler]");
+  const seekFromRuler = (event) => {
+    const rect = ruler.getBoundingClientRect();
+    seekOutput(Math.min(total(), Math.max(0, ((event.clientX - rect.left) / rect.width) * total())));
+  };
+  ruler.addEventListener("pointerdown", (event) => { ruler.setPointerCapture(event.pointerId); seekFromRuler(event); });
+  ruler.addEventListener("pointermove", (event) => { if (ruler.hasPointerCapture(event.pointerId)) seekFromRuler(event); });
+}
+
+// Dragged edges snap to the playhead, the clip's ends and other blocks' edges within 10 px (hold Alt to place freely).
+const SNAP_PX = 10;
+const snapTimes = (exceptId = null) => {
+  const times = [0, total(), outTime];
+  doc.freezes.forEach((freeze) => { const start = freezeStart(freeze.atFrame, timing, doc.freezes); times.push(start, start + freeze.seconds); });
+  doc.items.forEach((item) => { if (item.id !== exceptId) times.push(item.show.from, item.show.to); });
+  partSpans(doc.value, clip).forEach((span) => times.push(span.outStart, span.outEnd));
+  return times;
+};
+const showSnap = (time) => {
+  const mark = $("[data-snap]");
+  mark.hidden = time === null;
+  if (time !== null) mark.style.setProperty("--snap", String(time / total()));
+};
+/** `time` moved to the nearest snap point within the threshold (and shown), or left as it is. */
+const snapTime = (time, exceptId, event) => {
+  if (event?.altKey) { showSnap(null); return time; }
+  const reach = (SNAP_PX / laneWidth()) * total();
+  let best = null;
+  snapTimes(exceptId).forEach((candidate) => { if (Math.abs(candidate - time) <= reach && (best === null || Math.abs(candidate - time) < Math.abs(best - time))) best = candidate; });
+  showSnap(best);
+  return best === null ? time : best;
+};
+
+// ---------------------------------------------------------------------------
 let shapeKind = "rect";
 const shapeMenu = $("[data-shape-menu]");
 const shapeButton = $("[data-shape-button]");
@@ -984,7 +1115,7 @@ const renderList = () => {
 
 // Drawings lane: one bar per drawing in output time, stacked so overlapping drawings stay apart.
 // Click a bar to select it; drag the selected bar's ends to change when it shows.
-const BAR_ROW = 10;
+const BAR_ROW = 20;
 const renderDrawingLane = () => {
   const lane = $("[data-drawing-lane]");
   lane.querySelectorAll("[data-bar]").forEach((bar) => bar.remove());
@@ -1008,6 +1139,7 @@ const renderDrawingLane = () => {
     bar.style.left = `${(item.show.from / length) * 100}%`;
     bar.style.width = `${(Math.max(0, item.show.to - item.show.from) / length) * 100}%`;
     bar.style.top = `${4 + row * BAR_ROW}px`;
+    bar.append(Object.assign(document.createElement("span"), { className: "annotate-block-label", textContent: itemName(item) }));
     if (item.id === selectedId) {
       for (const grip of ["from", "to"]) {
         const handle = document.createElement("span");
@@ -1018,7 +1150,7 @@ const renderDrawingLane = () => {
     }
     lane.append(bar);
   });
-  lane.style.height = `${Math.max(18, (rowsEnd.length + boardRow) * BAR_ROW + 6)}px`;
+  lane.style.height = `${Math.max(28, (rowsEnd.length + boardRow) * BAR_ROW + 8)}px`;
 };
 
 // A drawing made on a board belongs to it: it shows only there, for the board's time.
@@ -1377,8 +1509,6 @@ function renderPlayers() {
     keys.forEach((frame) => laneSpans(frame, frame).forEach(([left]) => add("annotate-key", `${left}%`)));
     const job = jobs.get(track.id);
     if (job) laneSpans(job.start, job.end).forEach(([left, width]) => add("annotate-progress", `${left}%`, `${job.progress * width}%`));
-    add("annotate-lane-head", `${(outTime / total()) * 100}%`);
-    lane.lastChild.dataset.head = "";
     lane.addEventListener("pointerdown", (event) => {
       const rect = lane.getBoundingClientRect();
       seekOutput(((event.clientX - rect.left) / rect.width) * total());
@@ -1397,7 +1527,9 @@ function renderPlayers() {
         if (item) { setTool("select"); select(item.id); }
       };
     }
-    row.append(name, lane, action);
+    const head = Object.assign(document.createElement("span"), { className: "annotate-row-head" });
+    head.append(name, action);
+    row.append(head, lane);
     return row;
   }));
   const item = doc.find(selectedId);
@@ -1497,6 +1629,7 @@ const renderFreezes = () => {
   freezes.forEach((freeze) => {
     const block = document.createElement("span");
     block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}${freeze.atFrame === selectedFreeze ? " is-selected" : ""}`;
+    block.append(Object.assign(document.createElement("span"), { className: "annotate-block-label", textContent: `${insertName(freeze)} · ${freeze.seconds} s` }));
     block.dataset.laneFreeze = String(freeze.atFrame);
     block.title = `${insertName(freeze)} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag its right edge to change the length.`;
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-lane-remove",
@@ -1610,7 +1743,7 @@ function renderParts() {
     block.style.left = `${(span.outStart / length) * 100}%`;
     block.style.width = `${((span.outEnd - span.outStart) / length) * 100}%`;
     block.title = `${partName(span.index)}, ${formatTime(span.outEnd - span.outStart)}. Click to select, drag to move it, drag an edge to trim it.`;
-    block.append(Object.assign(document.createElement("span"), { className: "annotate-part-label", textContent: spans.length > 1 ? `${span.index + 1} · ${formatTime(span.outEnd - span.outStart)}` : "Whole clip" }));
+    block.append(Object.assign(document.createElement("span"), { className: "annotate-part-label", textContent: spans.length > 1 ? `${span.index + 1} · ${clip.name} · ${formatTime(span.outEnd - span.outStart)}` : clip.name }));
     ["from", "to"].forEach((edge) => {
       const handle = Object.assign(document.createElement("span"), { className: `annotate-part-edge is-${edge}` });
       handle.dataset.partEdge = edge;
@@ -1732,13 +1865,17 @@ function renderParts() {
   lane.addEventListener("pointermove", (event) => {
     if (!drag) return;
     if (drag.seek) return seekOutput(timeAt(event));
-    drag.next = Math.round(Math.min(60, Math.max(0.04, drag.seconds + ((event.clientX - drag.x) / drag.width) * drag.length)) * 10) / 10;
+    const start = freezeStart(drag.frame, timing, doc.freezes);
+    const raw = drag.seconds + ((event.clientX - drag.x) / drag.width) * drag.length;
+    const snapped = snapTime(start + raw, null, event);
+    drag.next = Math.min(60, Math.max(0.04, snapped !== start + raw ? Math.round((snapped - start) * 100) / 100 : Math.round(raw * 10) / 10));
     drag.block.style.width = `${(drag.next / drag.length) * 100}%`;
     drag.block.title = `${drag.next} s`;
   });
   const finish = () => {
     if (drag?.next) changeFreeze(drag.frame, drag.next);
     drag = null;
+    showSnap(null);
   };
   lane.addEventListener("pointerup", finish);
   lane.addEventListener("pointercancel", () => { drag = null; renderFreezes(); });
@@ -1770,7 +1907,7 @@ function renderParts() {
   lane.addEventListener("pointermove", (event) => {
     if (!drag) return;
     if (drag.seek) return seekOutput(timeAt(event));
-    drag.next = timeAt(event);
+    drag.next = snapTime(timeAt(event), drag.item.id, event);
     const from = drag.key === "from" ? Math.min(drag.next, drag.item.show.to) : drag.item.show.from;
     const to = drag.key === "to" ? Math.max(drag.next, drag.item.show.from) : drag.item.show.to;
     drag.bar.style.left = `${(from / total()) * 100}%`;
@@ -1783,6 +1920,7 @@ function renderParts() {
       setTiming(key, key === "from" ? Math.min(next, item.show.to) : Math.max(next, item.show.from));
     }
     drag = null;
+    showSnap(null);
   });
   lane.addEventListener("pointercancel", () => { drag = null; renderDrawingLane(); });
 }

@@ -520,11 +520,22 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
         self.assertIn("data-drawing-lane", html)
-        self.assertIn("data-drawing-head", html)
+        self.assertIn("data-playhead", html)
         lane = script[script.index('const lane = $("[data-drawing-lane]");\n  let drag'):]
         self.assertIn("selectDrawing(item)", lane)
         self.assertIn("setTiming(key,", lane)
         self.assertIn("renderDrawingLane();", script[script.index("const renderList"):])
+
+    def test_annotate_timeline_is_editor_style(self):
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        for hook in ("data-tl-scroll", "data-tl-body", "data-ruler", "data-snap", 'data-tl-zoom="fit"'):
+            self.assertIn(hook, html)
+        for name in ("renderRuler", "setZoom", "movePlayhead", "snapTime", "LABEL_SPACING", "MAX_ZOOM"):
+            self.assertIn(name, script)
+        # Dragging a freeze edge or a drawing grip snaps, and Alt places freely.
+        self.assertIn("snapTime(", script[script.index("drag.next ="):])
+        self.assertIn("event?.altKey", script)
 
     def test_annotate_exports_video_with_progress_and_cancel(self):
         # M4: the page draws overlays with the preview's own code and sends them to the engine.
