@@ -8,6 +8,7 @@ import mimetypes
 import os
 import queue
 import re
+import shutil
 import socketserver
 import sys
 import tempfile
@@ -257,20 +258,150 @@ def analysis_reel(project, frames, events, kickoffs, corrections, before, after,
             part.unlink(missing_ok=True)
 
 
+STORE_ID = re.compile(r"[a-zA-Z0-9_-]{1,160}")
+
+# A saved match (the library): its events, kick-offs and where its videos are.
+MATCH_KEYS = ("home_team", "away_team", "source_url", "source", "event_count", "home_score", "away_score",
+              "score_status", "video_name", "video_path", "csv_path", "feed_csv_path", "feed_source", "markers",
+              "period_videos", "had_extra_time", "had_penalties", "live_gaps")
+# Changing these changes which moments of which video a clip window covers.
+ALIGNMENT_KEYS = ("markers", "csv_path", "video_path", "period_videos")
+# Files of a match that older versions kept inside the project folder.
+MATCH_FILES = ("match-data", "imports", "coded_events.json")
+# Set by the store only, never by a request or a plain upsert.
+LINK_KEYS = ("match_id", "match_ids", "active_match_id")
+
+
+def _same_or_under(path: str, folder: Path) -> str | None:
+    """The part of `path` below `folder` ("" for the folder itself), or None when it is elsewhere."""
+    if not path:
+        return None
+    try:
+        return Path(os.path.normcase(os.path.abspath(path))).relative_to(
+            Path(os.path.normcase(os.path.abspath(folder)))).as_posix()
+    except ValueError:
+        return None
+
+
 class MatchStore:
+    """Saved matches and projects, each in its own folder under the data directory.
+
+    matches/<id>/match.json is a saved match: its event table, kick-off times and the
+    paths of its videos (never copies). It lives on when a project that used it is deleted.
+    projects/<id>/project.json is a project: its name, the matches it uses, and its
+    filter, preview and export settings.
+
+    get() and list() give each project as one flat dict, the project's fields over those
+    of its active match, which is what the rest of the engine reads. upsert() splits such
+    a dict again: match fields go to the active match (making one when the project has
+    none), the rest to the project."""
+
+    SCHEMA = 2
+
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
-        self.path = data_dir / "matches.json"
+        self.path = data_dir / "matches.json"  # history of the oldest versions, read once to migrate
         self._lock = threading.RLock()
+        self._migrated = False
 
-    def create(self, name: str = "Untitled project") -> dict[str, Any]:
-        return self.upsert({"id": uuid.uuid4().hex, "project_name": name,
-                            "status": "draft", "markers": {}})
+    # -- paths ---------------------------------------------------------------------------
 
     def project_path(self, project_id: str) -> Path:
-        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,160}", project_id):
+        if not STORE_ID.fullmatch(project_id or ""):
             raise ValueError("Invalid project id")
         return self.data_dir / "projects" / project_id / "project.json"
+
+    def match_path(self, match_id: str) -> Path:
+        if not STORE_ID.fullmatch(match_id or ""):
+            raise ValueError("Invalid match id")
+        return self.data_dir / "matches" / match_id / "match.json"
+
+    def match_dir(self, project_id: str, create: bool = False) -> Path | None:
+        """The folder of the project's active match (its event tables, imported CSVs and codes).
+        With create, a project without a match is given an empty one."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            match_id = project.get("active_match_id")
+            if not match_id:
+                if not create:
+                    return None
+                match_id = self.start_new_match(project_id)
+            return self.match_path(match_id).parent
+
+    # -- reading -------------------------------------------------------------------------
+
+    @staticmethod
+    def _read(path: Path, what: str) -> dict[str, Any] | None:
+        if not path.is_file():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or value.get("id") != path.parent.name:
+            raise ValueError(f"Invalid saved {what}: {path.parent.name}")
+        return value
+
+    def _project(self, project_id: str) -> dict[str, Any] | None:
+        self._ensure_migrated()
+        return self._read(self.project_path(project_id), "project")
+
+    def get_match(self, match_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._ensure_migrated()
+            return self._read(self.match_path(match_id), "match")
+
+    def matches(self) -> list[dict[str, Any]]:
+        """Every saved match, newest first."""
+        with self._lock:
+            self._ensure_migrated()
+            found = [self._read(path, "match") for path in (self.data_dir / "matches").glob("*/match.json")]
+            return sorted(found, key=lambda item: item.get("updated_at", ""), reverse=True)
+
+    def _projects(self) -> list[dict[str, Any]]:
+        return [self._read(path, "project") for path in (self.data_dir / "projects").glob("*/project.json")]
+
+    def _view(self, project: dict[str, Any]) -> dict[str, Any]:
+        match_id = project.get("active_match_id") or ""
+        match = (self._read(self.match_path(match_id), "match") if match_id else None) or {}
+        view = self._clean_match({})
+        view.update({key: match[key] for key in MATCH_KEYS if key in match})
+        view.update(project)
+        view["match_id"] = match.get("id", "")
+        if not view.get("project_name"):
+            view["project_name"] = (f"{view['home_team']} vs {view['away_team']}" if view["home_team"]
+                                    else "Untitled project")
+        return view
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            self._ensure_migrated()
+            views = [self._view(project) for project in self._projects()]
+            return sorted(views, key=lambda item: item.get("updated_at", ""), reverse=True)
+
+    def get(self, project_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            try:
+                project = self._project(str(project_id or ""))
+            except ValueError as error:
+                if str(error) == "Invalid project id":
+                    return None
+                raise
+            return self._view(project) if project else None
+
+    def projects_using(self, match_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            self._ensure_migrated()
+            return [project for project in self._projects() if match_id in project.get("match_ids", [])]
+
+    def find_match(self, source_url: str) -> dict[str, Any] | None:
+        """The saved match scraped from this address, if it still has its event table."""
+        source_url = source_url.strip()
+        if not source_url:
+            return None
+        return next((match for match in self.matches() if match.get("source_url") == source_url
+                     and match.get("csv_path") and Path(match["csv_path"]).is_file()), None)
+
+    # -- snapshots (unchanged) -----------------------------------------------------------
 
     def snapshots(self) -> dict:
         with self._lock:
@@ -302,37 +433,15 @@ class MatchStore:
             atomic_json(self.data_dir / "filter-snapshots.json", library)
             return library
 
-    def list(self) -> list[dict[str, Any]]:
-        with self._lock:
-            legacy = []
-            if self.path.exists():
-                legacy = json.loads(self.path.read_text(encoding="utf-8"))
-                if not isinstance(legacy, list):
-                    raise ValueError("Saved match history is invalid; it has not been overwritten.")
-            projects = {item["id"]: item for item in legacy if isinstance(item, dict) and item.get("id")}
-            for path in (self.data_dir / "projects").glob("*/project.json"):
-                value = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(value, dict) or value.get("id") != path.parent.name:
-                    raise ValueError(f"Invalid saved project: {path.parent.name}")
-                projects[value["id"]] = value
-            return sorted(projects.values(), key=lambda item: item.get("updated_at", ""), reverse=True)
+    # -- cleaning ------------------------------------------------------------------------
 
-    def upsert(self, match: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
-            return self._upsert(match)
-
-    def _upsert(self, match: dict[str, Any]) -> dict[str, Any]:
-        project_id = str(match.get("id") or "").strip()
-        existing = self.get(project_id) if project_id else None
-        if existing and any(
-            key in match and match[key] != existing.get(key)
-            for key in ("markers", "csv_path", "video_path", "period_videos")
-        ):
-            # Edited clip windows belong to the source and alignment that built them.
-            match = {**match, "preview_windows": [], "preview_range": {}}
-        match = {**(existing or {}), **match}
-        clean = {
-            "id": str(match.get("id") or "").strip(),
+    @staticmethod
+    def _clean_match(match: dict[str, Any]) -> dict[str, Any]:
+        markers = match.get("markers") if isinstance(match.get("markers"), dict) else {}
+        for period, clock in markers.items():
+            if period not in PERIOD_KEYS or not re.fullmatch(r"\d{1,3}:[0-5]\d:[0-5]\d", str(clock)):
+                raise ValueError("Kickoff markers must use HH:MM:SS with minutes and seconds below 60.")
+        return {
             "home_team": str(match.get("home_team") or "").strip(),
             "away_team": str(match.get("away_team") or "").strip(),
             "source_url": str(match.get("source_url") or "").strip(),
@@ -348,67 +457,238 @@ class MatchStore:
             # these keep the feed itself, which the Analyst Room and Tactical Lab read.
             "feed_csv_path": str(match.get("feed_csv_path") or "").strip(),
             "feed_source": str(match.get("feed_source") or "").strip(),
-            "markers": match.get("markers") if isinstance(match.get("markers"), dict) else {},
-            "status": str(match.get("status") or "in_progress"),
-            "schema_version": 1,
-            "project_name": str(match.get("project_name") or "").strip()[:120],
-            "created_at": str(match.get("created_at") or datetime.now(timezone.utc).isoformat()),
-            "filter_settings": match.get("filter_settings") if isinstance(match.get("filter_settings"), dict) else {},
-            "preview_windows": match.get("preview_windows") if isinstance(match.get("preview_windows"), list) else [],
-            "preview_range": match.get("preview_range") if isinstance(match.get("preview_range"), dict) else {},
+            "markers": markers,
             "period_videos": match.get("period_videos") if isinstance(match.get("period_videos"), dict) else {},
-            "had_extra_time": bool(match.get("had_extra_time") or (match.get("markers") or {}).get("ET1") or (match.get("markers") or {}).get("ET2")),
-            "had_penalties": bool(match.get("had_penalties") or (match.get("markers") or {}).get("PEN")),
-            "filter_snapshots": match.get("filter_snapshots") if isinstance(match.get("filter_snapshots"), dict) else {},
-            "export_history": match.get("export_history") if isinstance(match.get("export_history"), list) else [],
-            "analysis_state": clean_analysis_state(match.get("analysis_state")),
+            "had_extra_time": bool(match.get("had_extra_time") or markers.get("ET1") or markers.get("ET2")),
+            "had_penalties": bool(match.get("had_penalties") or markers.get("PEN")),
             # Breaks in a live recording (L1): at = seconds into the joined video, length = seconds lost.
             "live_gaps": [{"at": float(gap["at"]), "length": float(gap["length"])} for gap in (match.get("live_gaps") or [])
                           if isinstance(gap, dict) and isinstance(gap.get("at"), (int, float)) and isinstance(gap.get("length"), (int, float))],
+        }
+
+    @staticmethod
+    def _clean_project(project: dict[str, Any]) -> dict[str, Any]:
+        match_ids = [str(item) for item in (project.get("match_ids") or []) if STORE_ID.fullmatch(str(item))]
+        match_ids = list(dict.fromkeys(match_ids))
+        active = str(project.get("active_match_id") or "")
+        return {
+            "id": str(project.get("id") or "").strip(),
+            "schema_version": MatchStore.SCHEMA,
+            "project_name": str(project.get("project_name") or "").strip()[:120],
+            "status": str(project.get("status") or "in_progress"),
+            "match_ids": match_ids,
+            "active_match_id": active if active in match_ids else (match_ids[0] if match_ids else ""),
+            "created_at": str(project.get("created_at") or datetime.now(timezone.utc).isoformat()),
+            "filter_settings": project.get("filter_settings") if isinstance(project.get("filter_settings"), dict) else {},
+            "preview_windows": project.get("preview_windows") if isinstance(project.get("preview_windows"), list) else [],
+            "preview_range": project.get("preview_range") if isinstance(project.get("preview_range"), dict) else {},
+            "filter_snapshots": project.get("filter_snapshots") if isinstance(project.get("filter_snapshots"), dict) else {},
+            "export_history": project.get("export_history") if isinstance(project.get("export_history"), list) else [],
+            "analysis_state": clean_analysis_state(project.get("analysis_state")),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        if not clean["id"]:
-            parts = [clean["home_team"], clean["away_team"]]
-            clean["id"] = "-vs-".join(part.lower().replace(" ", "-") for part in parts if part)
-        if not clean["id"]:
-            raise ValueError("A match id or team names are required")
 
-        path = self.project_path(clean["id"])
-        if not clean["project_name"]:
-            clean["project_name"] = f"{clean['home_team']} vs {clean['away_team']}" if clean["home_team"] else "Untitled project"
-        for period, clock in clean["markers"].items():
-            if period not in {"1H", "2H", "ET1", "ET2", "PEN"} or not re.fullmatch(r"\d{1,3}:[0-5]\d:[0-5]\d", str(clock)):
-                raise ValueError("Kickoff markers must use HH:MM:SS with minutes and seconds below 60.")
-        atomic_json(path, clean)
+    def _write_match(self, match_id: str, fields: dict[str, Any], created_at: str = "") -> dict[str, Any]:
+        existing = self._read(self.match_path(match_id), "match") or {}
+        clean = {"id": match_id, **self._clean_match({**existing, **fields}),
+                 "created_at": existing.get("created_at") or created_at or datetime.now(timezone.utc).isoformat(),
+                 "updated_at": datetime.now(timezone.utc).isoformat()}
+        atomic_json(self.match_path(match_id), clean)
         return clean
 
-    def get(self, match_id: str) -> dict[str, Any] | None:
-        return next((item for item in self.list() if item.get("id") == match_id), None)
+    def _write_project(self, project: dict[str, Any]) -> dict[str, Any]:
+        clean = self._clean_project(project)
+        if not clean["id"]:
+            raise ValueError("A project id is required")
+        atomic_json(self.project_path(clean["id"]), clean)
+        return clean
 
-    def delete(self, project_id: str) -> Path:
-        """Move a project out of the library into project-trash/, so it can be put back by hand.
-        Video files the project points at are never touched."""
+    def _clear_windows(self, match_id: str, skip: str = "") -> None:
+        """Edited clip windows belong to the source and alignment that built them."""
+        for project in self._projects():
+            if project["id"] != skip and match_id in project.get("match_ids", []) and (
+                    project.get("preview_windows") or project.get("preview_range")):
+                self._write_project({**project, "preview_windows": [], "preview_range": {},
+                                     "updated_at": project.get("updated_at")})
+
+    # -- writing -------------------------------------------------------------------------
+
+    def create(self, name: str = "Untitled project") -> dict[str, Any]:
+        return self.upsert({"id": uuid.uuid4().hex, "project_name": name, "status": "draft"})
+
+    def upsert(self, data: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
+            self._ensure_migrated()
+            data = {key: value for key, value in data.items() if key not in LINK_KEYS}
+            project_id = str(data.get("id") or "").strip()
+            if not project_id:
+                parts = [str(data.get("home_team") or "").strip(), str(data.get("away_team") or "").strip()]
+                project_id = "-vs-".join(part.lower().replace(" ", "-") for part in parts if part)
+            if not project_id:
+                raise ValueError("A match id or team names are required")
+            self.project_path(project_id)  # checks the id
+            project = self._read(self.project_path(project_id), "project") or {"id": project_id}
+            match_fields = {key: data[key] for key in MATCH_KEYS if key in data}
+            project_fields = {key: value for key, value in data.items() if key not in MATCH_KEYS}
+            if match_fields:
+                match_id = project.get("active_match_id") or uuid.uuid4().hex
+                existing = self._read(self.match_path(match_id), "match") or {}
+                if existing and any(key in match_fields and match_fields[key] != existing.get(key)
+                                    for key in ALIGNMENT_KEYS):
+                    project_fields.update(preview_windows=[], preview_range={})
+                    self._clear_windows(match_id, skip=project_id)
+                self._write_match(match_id, match_fields, created_at=str(project.get("created_at") or ""))
+                if match_id not in project.get("match_ids", []):
+                    project["match_ids"] = [*project.get("match_ids", []), match_id]
+                project["active_match_id"] = match_id
+            self._write_project({**project, **project_fields, "id": project_id})
+            return self.get(project_id)
+
+    def start_new_match(self, project_id: str) -> str:
+        """Give the project a new, empty match in place of its current one, which stays in the library."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            match_id = uuid.uuid4().hex
+            self._write_match(match_id, {})
+            self._write_project({**project, "match_ids": [match_id], "active_match_id": match_id,
+                                 "preview_windows": [], "preview_range": {}})
+            return match_id
+
+    def use_match(self, project_id: str, match_id: str) -> dict[str, Any]:
+        """Make a saved match the project's match; the one it had stays in the library."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            if self.get_match(match_id) is None:
+                raise ValueError("That saved match is no longer available.")
+            if project.get("active_match_id") != match_id:
+                self._write_project({**project, "match_ids": [match_id], "active_match_id": match_id,
+                                     "preview_windows": [], "preview_range": {}})
+            return self.get(project_id)
+
+    def delete(self, project_id: str) -> None:
+        """Delete a project for good. The matches it used stay in the library, and video
+        files are never touched (projects only hold their paths)."""
+        with self._lock:
+            self._ensure_migrated()
             folder = self.project_path(project_id).parent
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-            trash = self.data_dir / "project-trash" / f"{project_id}-{stamp}"
-            found = False
-            if folder.is_dir():
-                trash.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(folder, trash)
-                found = True
+            if not folder.is_dir():
+                raise ValueError("Project not found")
+            try:
+                shutil.rmtree(folder)
+            except OSError:
+                raise ValueError("A file of this project is still open (an annotated clip?). "
+                                 "Close it and delete the project again.") from None
+
+    def delete_match(self, match_id: str) -> None:
+        """Delete a saved match for good: its events, kick-offs and codes. Projects that used it
+        keep their other matches; video files are never touched."""
+        with self._lock:
+            self._ensure_migrated()
+            folder = self.match_path(match_id).parent
+            if not folder.is_dir():
+                raise ValueError("That saved match is no longer available.")
+            for project in self._projects():
+                if match_id in project.get("match_ids", []):
+                    self._write_project({**project, "match_ids": [item for item in project["match_ids"] if item != match_id],
+                                         "active_match_id": "" if project.get("active_match_id") == match_id
+                                         else project.get("active_match_id"),
+                                         "preview_windows": [], "preview_range": {}})
+            try:
+                shutil.rmtree(folder)
+            except OSError:
+                raise ValueError("A file of this match is still open. Close it and delete the match again.") from None
+
+    # -- moving older data into the library ----------------------------------------------
+
+    def _ensure_migrated(self) -> None:
+        """Once per start: turn projects of earlier versions (schema 1, each holding one match
+        in its own folder) into a project that uses a saved match. Safe to run again after a
+        crash: files are moved only when they are still in the old place, and paths are
+        rewritten the same way each time."""
+        if self._migrated:
+            return
+        with self._lock:
+            if self._migrated:
+                return
+            for path in sorted((self.data_dir / "projects").glob("*/project.json")):
+                value = self._read(path, "project")
+                if int(value.get("schema_version") or 1) < self.SCHEMA:
+                    self._migrate_one(value, path.parent, keep_project=True)
             if self.path.exists():
                 legacy = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(legacy, list):
-                    kept = [item for item in legacy if not (isinstance(item, dict) and item.get("id") == project_id)]
-                    if len(kept) != len(legacy):
-                        removed = [item for item in legacy if isinstance(item, dict) and item.get("id") == project_id]
-                        atomic_json(trash / "legacy-history.json", removed)
-                        atomic_json(self.path, kept)
-                        found = True
-            if not found:
-                raise ValueError("Project not found")
-            return trash
+                if not isinstance(legacy, list):
+                    raise ValueError("Saved match history is invalid; it has not been overwritten.")
+                for item in legacy:
+                    if (isinstance(item, dict) and STORE_ID.fullmatch(str(item.get("id") or ""))
+                            and not self.project_path(item["id"]).exists()):
+                        self._migrate_one(item, None, keep_project=True)
+                os.replace(self.path, self.data_dir / "matches.json.before-library")
+            # Projects earlier versions moved to the trash: keep their matches, then delete them for good.
+            trash = self.data_dir / "project-trash"
+            if trash.is_dir():
+                for path in sorted(trash.glob("*/project.json")):
+                    try:
+                        value = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if isinstance(value, dict) and STORE_ID.fullmatch(path.parent.name):
+                        # Its paths still name the folder it had before it was trashed.
+                        before = self.data_dir / "projects" / str(value.get("id") or "")
+                        self._migrate_one({**value, "id": path.parent.name}, path.parent, keep_project=False,
+                                          moved_from=before)
+                shutil.rmtree(trash, ignore_errors=True)
+            self._migrated = True
+
+    def _migrate_one(self, value: dict[str, Any], folder: Path | None, keep_project: bool,
+                     moved_from: Path | None = None) -> None:
+        project_id = str(value["id"])
+        match_id = project_id  # the same id each run, so a second run finds what the first moved
+        target = self.match_path(match_id).parent
+        has_files = folder is not None and any((folder / name).exists() for name in MATCH_FILES)
+        has_match = has_files or any(value.get(key) for key in (
+            "csv_path", "video_path", "source_url", "home_team", "away_team", "markers", "period_videos"))
+        if has_match:
+            target.mkdir(parents=True, exist_ok=True)
+            if folder is not None:
+                for name in MATCH_FILES:
+                    if (folder / name).exists() and not (target / name).exists():
+                        os.replace(folder / name, target / name)
+            fields = {key: value.get(key) for key in MATCH_KEYS if key in value}
+            if folder is not None:
+                names = {folder.name, *([moved_from.name] if moved_from is not None else [])}
+
+                def moved(path: Any) -> Any:
+                    for old in (folder, moved_from):
+                        below = _same_or_under(str(path or ""), old) if old is not None else None
+                        if below is not None:
+                            return str(target / below)
+                    # A data folder copied from elsewhere (another computer, a backup): the path still
+                    # names the old place, so find the same file by its projects/<id>/... tail.
+                    from pathlib import PureWindowsPath
+                    text = str(path or "")
+                    parts = (PureWindowsPath(text) if "\\" in text else Path(text)).parts
+                    for index in range(len(parts) - 2):
+                        if parts[index] == "projects" and parts[index + 1] in names and parts[index + 2] in MATCH_FILES:
+                            candidate = target.joinpath(*parts[index + 2:])
+                            if candidate.exists():
+                                return str(candidate)
+                    return path
+                for key in ("csv_path", "feed_csv_path", "video_path"):
+                    fields[key] = moved(fields.get(key))
+                fields["period_videos"] = {period: moved(video) for period, video in
+                                           (fields.get("period_videos") or {}).items()}
+            self._write_match(match_id, fields, created_at=str(value.get("created_at") or ""))
+        if keep_project:
+            project = {key: item for key, item in value.items() if key not in MATCH_KEYS}
+            project.update(match_ids=[match_id] if has_match else [], active_match_id=match_id if has_match else "",
+                           project_name=value.get("project_name") or "")
+            clean = self._clean_project(project)
+            clean["updated_at"] = str(value.get("updated_at") or clean["updated_at"])  # keep the list's order
+            atomic_json(self.project_path(project_id), clean)
 
 
 FILTER_QUALIFIERS = [
@@ -562,17 +842,19 @@ def choose_video_file(title: str = PICKER_TITLES["1H"]) -> Path | None:
 
 
 def remove_unused_imports(store: "MatchStore") -> int:
-    """Delete video copies earlier versions made in projects/<id>/imports/
-    that no saved project uses any more, plus files left by interrupted imports.
+    """Delete video copies earlier versions made in an imports/ folder that no
+    saved match uses any more, plus files left by interrupted imports.
     Imported CSVs are kept. Returns how many files went."""
     used = set()
-    for project in store.list():
-        for value in [project.get("video_path"), *(project.get("period_videos") or {}).values()]:
+    for match in store.matches():
+        for value in [match.get("video_path"), *(match.get("period_videos") or {}).values()]:
             if value:
                 used.add(os.path.normcase(str(Path(str(value)).resolve())))
     removed = 0
     stale = time.time() - 3600  # a newer .part may be a CSV import still arriving
-    for folder in (store.data_dir / "projects").glob("*/imports"):
+    folders = [*(store.data_dir / "projects").glob("*/imports"), *(store.data_dir / "projects").glob("*/incoming"),
+               *(store.data_dir / "matches").glob("*/imports")]
+    for folder in folders:
         for path in folder.iterdir():
             if not path.is_file():
                 continue
@@ -1155,7 +1437,7 @@ def write_coded_table(store: Any, project: dict[str, Any], document: dict[str, A
     (source "both", milestone C4); the feed itself is never changed, and a
     project whose codes are all deleted goes back to it."""
     from coding import store as coding_store, to_events
-    folder = store.project_path(project["id"]).parent
+    folder = store.match_dir(project["id"], create=True)
     if document is None:
         document = coding_store.read(folder)
     feed, feed_source = feed_of(project)
@@ -1180,7 +1462,8 @@ def write_coded_table(store: Any, project: dict[str, Any], document: dict[str, A
 def has_codes(store: Any, project_id: str) -> bool:
     from coding import store as coding_store
     try:
-        return bool(coding_store.read(store.project_path(project_id).parent)["events"])
+        folder = store.match_dir(project_id)
+        return bool(folder and coding_store.read(folder)["events"])
     except (ValueError, OSError):
         return False
 
@@ -1799,9 +2082,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         project = self.store.get(project_id)
         if project is None:
             raise ValueError("Project not found")
-        folder = self.store.project_path(project_id).parent
+        folder = self.store.match_dir(project_id, create=body is not None)
         if body is None:
-            document = coding_store.read(folder)
+            document = coding_store.read(folder) if folder else coding_store.empty()
         else:
             document = coding_store.apply(folder, body)
             project = write_coded_table(self.store, project, document)
@@ -1868,6 +2151,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if origin and origin not in {f"http://{expected}", f"http://localhost:{self.server.server_port}"}:
             raise ValueError("Requests from other websites are not allowed.")
 
+    def library(self) -> list[dict[str, Any]]:
+        """Every saved match, with the projects that use it."""
+        users: dict[str, list[dict[str, str]]] = {}
+        for project in self.store.list():
+            for match_id in project.get("match_ids", []):
+                users.setdefault(match_id, []).append({"id": project["id"], "project_name": project["project_name"]})
+        return [{**match, "projects": users.get(match["id"], [])} for match in self.store.matches()]
+
     def receive_upload(self) -> None:
         query = parse_qs(urlparse(self.path).query)
         project_id = query.get("project", [""])[0]
@@ -1884,10 +2175,10 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0 or length > 50_000_000:
             raise ValueError("Invalid file size (CSV limit 50 MB).")
-        folder = self.store.project_path(project_id).parent / "imports"
-        folder.mkdir(parents=True, exist_ok=True)
-        destination = folder / f"{uuid.uuid4().hex}{suffix}"
-        temporary = destination.with_suffix(".part")
+        # Read and checked in the project's folder first; it joins a saved match only once it is valid.
+        incoming = self.store.project_path(project_id).parent / "incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        temporary = incoming / f"{uuid.uuid4().hex}.part"
         try:
             with temporary.open("wb") as output:
                 remaining = length
@@ -1910,6 +2201,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 frame["period"] = frame["period"].map(normalize_period)
             home_score, away_score = infer_score(frame, home, away)
             frame.to_csv(temporary, index=False)
+            if feed_of(project)[0]:
+                # This project's match has event data already: the CSV is a new saved match,
+                # and the one it replaces stays in the library.
+                self.store.start_new_match(project_id)
+            folder = self.store.match_dir(project_id, create=True) / "imports"
+            folder.mkdir(parents=True, exist_ok=True)
+            destination = folder / f"{uuid.uuid4().hex}{suffix}"
             os.replace(temporary, destination)
             project = self.store.upsert({"id": project_id, "csv_path": str(destination),
                 "home_team": home, "away_team": away, "home_score": home_score,
@@ -2369,6 +2667,9 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects":
             self.send_json(HTTPStatus.OK, {"projects": self.store.list(), "directory": str(self.store.data_dir / "projects")})
             return
+        if path == "/api/library":
+            self.send_json(HTTPStatus.OK, {"matches": self.library()})
+            return
         if path == "/api/code-templates":
             self.send_json(HTTPStatus.OK, {"templates": self.code_templates.list()})
             return
@@ -2519,6 +2820,23 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     live = self.live.stop(parts[3], project.get("project_name") or "Live recording")
                 self.send_json(HTTPStatus.OK, {"live": live})
                 return
+            if path == "/api/library/delete":
+                match_id = str(body.get("match_id") or "")
+                if any(project.get("match_id") == match_id and project["id"] in self.live.recordings
+                       and self.live.recordings[project["id"]].active for project in self.store.list()):
+                    raise ValueError("Stop the live recording before deleting this match.")
+                self.store.delete_match(match_id)
+                self.send_json(HTTPStatus.OK, {"deleted": match_id, "matches": self.library(),
+                                               "projects": self.store.list()})
+                return
+            if path.startswith("/api/projects/") and path.endswith("/use-match"):
+                parts = path.split("/")
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                project = self.store.use_match(parts[3], str(body.get("match_id") or ""))
+                events = load_event_rows(project["csv_path"]) if project.get("csv_path") else {}
+                self.send_json(HTTPStatus.OK, {"project": {**project, **events}})
+                return
             if path.startswith("/api/projects/") and path.endswith("/delete"):
                 parts = path.split("/")
                 if len(parts) != 5:
@@ -2551,9 +2869,24 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path == "/api/scrape":
                 url = str(body.get("url") or "").strip()
                 project_id = str(body.get("project_id") or "")
-                directory = self.store.project_path(project_id).parent / "match-data" if project_id else self.match_data_dir
-                if project_id and self.store.get(project_id) is None:
+                current = self.store.get(project_id) if project_id else None
+                if project_id and current is None:
                     raise ValueError("Project not found")
+                if current is not None:
+                    coded_only = has_codes(self.store, project_id) and not feed_of(current)[0]
+                    saved_match = None if coded_only else self.store.find_match(url)
+                    if saved_match is not None:
+                        # Scraped before: use the saved match (its kick-offs and videos too) instead of a copy.
+                        if current.get("project_name") == "Untitled project":
+                            self.store.upsert({"id": project_id, "project_name":
+                                               f"{saved_match['home_team']} vs {saved_match['away_team']}"})
+                        saved = self.store.use_match(project_id, saved_match["id"])
+                        self.send_json(HTTPStatus.OK, {"match": {**saved, **load_event_rows(saved["csv_path"]),
+                                                                 "reused": True}})
+                        return
+                    if feed_of(current)[0] and current.get("source_url") != url:
+                        self.store.start_new_match(project_id)  # a different match; the old one stays saved
+                directory = self.store.match_dir(project_id, create=True) / "match-data" if project_id else self.match_data_dir
                 scraped = scrape_match(url, directory)
                 if project_id:
                     events = scraped.get("events", [])

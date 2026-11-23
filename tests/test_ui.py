@@ -147,7 +147,8 @@ class SharedUiTests(unittest.TestCase):
     def test_projects_can_be_deleted_from_intake_and_the_projects_dialog(self):
         projects = (UI / "projects.js").read_text(encoding="utf-8")
         self.assertIn("/delete`", projects)
-        self.assertIn("moves to the project-trash folder", projects)  # asks first, says it is recoverable
+        self.assertIn("deletes the project for good; it cannot be undone", projects)  # asks first, says so plainly
+        self.assertIn("Its matches stay saved", projects)
         self.assertIn("row.append(link, deleteButton(project", projects)
         self.assertIn("unsaved.splice(index, 1)", projects)  # no saves queued for a deleted project
         app = (UI / "app.js").read_text(encoding="utf-8")
