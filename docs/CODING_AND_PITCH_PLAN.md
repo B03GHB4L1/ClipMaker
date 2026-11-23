@@ -349,7 +349,25 @@ metres and player speed.
   shapes beside it (below it on a phone): rectangle, ellipse, triangle, diamond,
   pentagon, hexagon and star. Drag to draw, Shift for equal sides; the shape can be
   changed later in its settings. Filled and patterned like a zone.
-- **P3** Offside line, minimap, distances and speed.
+- **P3** Offside line, minimap, distances and speed. In two parts.
+  - **P3a** Offside line and Measure. *Done 2026-11-23.* A "Pitch" group in the toolbar.
+    - Offside (key O): click a spot, such as a defender's boot, and a line is drawn across
+      the pitch at that spot's depth, touchline to touchline, a true line on the grass in
+      perspective. Its settings say how far it is from each goal line.
+    - Measure (key M): drag between two spots on the grass; the distance in metres is
+      shown on a label at the middle of the grass between them (a far-side metre is
+      smaller on screen, and the number accounts for it).
+    - Both are always flat: they keep the frame they were placed on and stay on the same
+      grass as the camera moves (as flat rings do), are hidden where a frame has no pitch,
+      and appear in screenshots and exports. They need the pitch marked first, and say so.
+      They are fixed to the grass: they do not follow a followed player, and go on the
+      video, not on a board. Following a player with the offside line comes with T3.
+    - Checked: node tests on generated cameras (line depth, metres, placement while
+      panning, hit-testing) and engine validation; in the browser on the real clip
+      (placing both, saving, following the pan, hidden after the cut, phone width, dark).
+      Not yet tried: marking and measuring on other matches.
+  - **P3b** Minimap and speed: not started. The minimap shows followed players' feet on a
+    small pitch; speed turns a followed player's track into km/h through the pitch.
 
 ### Risks
 

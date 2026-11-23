@@ -343,7 +343,7 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         section = lambda start, end: html[html.index(start):html.index(end, html.index(start))]
         rail = section('<div class="annotate-tools"', '<div class="annotate-centre">')
-        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "text"])
+        self.assertEqual(re.findall(r'data-tool="([a-z]+)"', rail), ["arrow", "line", "freehand", "zone", "spotlight", "offside", "measure", "text"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<div class="annotate-bar">', "</div>\n    <p")), ["select"])
         self.assertEqual(re.findall(r'data-tool="([a-z]+)"', section('<section class="annotate-player-tools"', "</section>")), ["ring", "follow", "token"])
 
@@ -353,7 +353,7 @@ class SharedUiTests(unittest.TestCase):
         script = (UI / "annotate.js").read_text(encoding="utf-8")
         css = (UI / "annotate.css").read_text(encoding="utf-8")
         rail = html[html.index('<div class="annotate-tools"'):html.index('<div class="annotate-centre">')]
-        self.assertEqual(re.findall(r'class="annotate-group-title" id="[a-z-]+">([A-Za-z ]+)<', rail), ["Draw", "Highlight", "Write"])
+        self.assertEqual(re.findall(r'class="annotate-group-title" id="[a-z-]+">([A-Za-z ]+)<', rail), ["Draw", "Highlight", "Pitch", "Write"])
         side = html[html.index('<section class="annotate-player-tools"'):html.index("</section>", html.index('<section class="annotate-player-tools"'))]
         self.assertIn(">Mark a player</h2>", side)
         self.assertIn(">Add at this frame</h2>", side)

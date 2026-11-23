@@ -86,7 +86,7 @@ def animation(item: dict[str, Any], t: float) -> dict[str, Any] | None:
     if animate == "fade":
         state["alpha"] *= coming
     elif animate == "draw":
-        if item["kind"] in {"arrow", "line", "freehand", "zone", "ring", "shape"}:
+        if item["kind"] in {"arrow", "line", "freehand", "zone", "ring", "shape", "offside", "measure"}:
             state["draw"] = coming
         else:
             state["alpha"] *= coming  # nothing to trace: fade instead

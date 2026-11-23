@@ -10,7 +10,7 @@ import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, p
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
-import { isFlat, placeFlat, projectItems } from "./annotate/flat.js";
+import { isFlat, PITCH_KINDS, placeFlat, projectItems } from "./annotate/flat.js";
 import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } from "./annotate/camera.js";
 import { fitBox } from "./annotate/fit.js";
 import { showClipStrip, showLibrary } from "./annotate/library.js";
@@ -239,7 +239,9 @@ const boardNow = () => (clip ? boardAt(doc.value, timing, outTime) : null);
 // On a board only its own drawings show; elsewhere the clip's drawings (annotate/board.js).
 // Moving board tokens are placed for the moment on screen (M8).
 // Flat drawings keep their place on the pitch as the camera moves (P2, annotate/camera.js).
-const placeNow = (item) => placeFlat(resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()), clipTrack(), frameNow());
+const placeNow = (item) => withPitch(placeFlat(resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()), clipTrack(), frameNow()));
+// An offside line's or measure's place on the grass on this frame, so it can be hit-tested and outlined as drawn.
+const withPitch = (item) => (PITCH_KINDS.has(item.kind) && !item.offPitch ? projectItems([item], pitchHere()?.calibration || null)[0] : item);
 const shown = () => itemsAt(doc.value, timing, outTime).map(placeNow).filter((item) => !item.offPitch);
 const shownItem = (id) => { const item = doc.find(id); const placed = item && placeNow(item); return placed && !placed.offPitch ? placed : null; };
 // Seconds into the board that drawing `item` is on, at the playhead.
@@ -364,7 +366,7 @@ function itemBounds(item) {
     const box = textBox(item, w, h, measure);
     return [box.x, box.y, box.x + box.width, box.y + box.height];
   }
-  const points = item.points.map(toPixels);
+  const points = item.kind === "offside" && item.projected ? [...item.projected.segments.flat(), item.points[0]].map(toPixels) : item.points.map(toPixels);
   if (item.kind === "ring" || item.kind === "spotlight") {
     const [cx, cy] = points[0];
     const rx = item.geometry.rx * w;
@@ -491,6 +493,8 @@ const HINTS = {
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line). Click on a followed player to make the text follow them.",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
   shape: "Drag to draw the shape. Hold Shift for equal sides, as a square or a circle.",
+  offside: "Click the spot to draw the offside line through, such as a defender's boot. The line lies across the pitch and follows the camera.",
+  measure: "Drag from one spot on the grass to another to read the distance between them in metres.",
   follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
   token: "Click to place a player token. On a board it belongs to that board; on the video it is a fixed marker that does not follow anyone.",
 };
@@ -521,7 +525,7 @@ const select = (id) => {
   scheduleRender();
 };
 
-const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token", shape: "Shape" };
+const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token", shape: "Shape", offside: "Offside line", measure: "Measure" };
 const itemName = (item) => (item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}`
   : item.kind === "shape" ? SHAPES[item.geometry?.shape] || "Shape"
   : item.kind === "token" ? ["Token", item.label, item.name].filter(Boolean).join(" ") : KIND_NAMES[item.kind]);
@@ -558,6 +562,17 @@ const updateStyle = (key, value) => {
     const kind = DEFAULT_STYLE[tool] ? tool : null;
     if (kind) toolStyle[kind][key] = value;
   }
+};
+
+// What an offside line or measure reads off the pitch, or what it needs.
+const pitchToolNote = (item, kind) => {
+  const note = (text) => Object.assign(document.createElement("p"), { className: "annotate-muted", textContent: text });
+  if (!pitchKeys(doc.value).length) return note('Mark the pitch first (under "Add at this frame"): this is read from it.');
+  const reading = item && shownItem(item.id)?.projected;
+  if (!item) return note(kind === "offside" ? "Click the spot to draw the line through." : "Drag between two spots on the grass.");
+  if (!reading) return note("This frame has no pitch to read it from. Mark the pitch here, or move to a frame that has it.");
+  return note(kind === "measure" ? `${reading.metres.toFixed(1)} m on the pitch.`
+    : `${reading.fromLeft.toFixed(1)} m from the left goal line, ${reading.fromRight.toFixed(1)} m from the right.`);
 };
 
 const renderInspector = () => {
@@ -610,6 +625,7 @@ const renderInspector = () => {
     if (kind === "shape") fields.append(shapeField(item));
     let flatNote = null;
     Object.keys(DEFAULT_STYLE[kind]).forEach((key) => {
+      if (key === "flat" && PITCH_KINDS.has(kind)) return; // always on the pitch
       if (key === "flat" && !pitchKeys(doc.value).length) {
         // Flat drawings need the clip's pitch first (P1).
         fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
@@ -675,6 +691,7 @@ const renderInspector = () => {
       fields.append(label);
     });
     if (flatNote) fields.append(flatNote);
+    if (PITCH_KINDS.has(kind)) fields.append(pitchToolNote(item, kind));
   }
   renderFollowPanel(many ? null : item);
   const timing = $("[data-timing]");
@@ -1694,6 +1711,14 @@ const rebased = (original) => {
   const { projected, ...rest } = placed;
   return { ...original, points: rest.points, ...(rest.geometry ? { geometry: rest.geometry } : {}), at: frameNow() };
 };
+// Offside lines and measures are read from the pitch: say what is missing rather than draw nothing.
+const pitchToolBlocked = () => {
+  const why = boardNow() ? "Offside lines and measurements go on the video, not on a board."
+    : !pitchKeys(doc.value).length ? 'Mark the pitch first (under "Add at this frame"): offside lines and distances are read from it.'
+      : !pitchHere() ? "This frame has no pitch (after a cut). Mark the pitch here, or move to a frame that has it." : "";
+  if (why) trackStatus(why, true);
+  return Boolean(why);
+};
 const calibPair = (id) => (calib && id ? calib.pairs.find((pair) => pair.id === id) || null : null);
 const calibFit = () => (calib ? calibrate(calib.pairs, aspect()) : null);
 const round5 = (value) => Math.round(value * 1e5) / 1e5;
@@ -2385,6 +2410,16 @@ canvas.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     openText(clampPoint(at));
     return;
+  } else if (tool === "offside" || tool === "measure") {
+    if (pitchToolBlocked()) return;
+    if (tool === "offside") {
+      // One click: the line is drawn through that spot, on this frame's pitch.
+      const item = { ...placeNew(newItem("offside", [clampPoint(at)], { from, to: total(), style: toolStyle.offside })), at: frameNow() };
+      doc.add(item);
+      select(item.id);
+      return;
+    }
+    gesture = { type: "draw", start: at, draft: newItem("measure", [at, at], { from, to: total(), style: toolStyle.measure }), moved: false };
   } else {
     const style = toolStyle[tool];
     const geometry = tool === "shape" ? { shape: shapeKind }
@@ -2465,14 +2500,14 @@ const endGesture = () => {
   if (!current?.type) return;
   if (current.type === "draw") {
     const draft = current.draft;
-    const tooSmall = !current.moved && ["arrow", "line", "freehand", "shape"].includes(draft.kind);
+    const tooSmall = !current.moved && ["arrow", "line", "freehand", "shape", "measure"].includes(draft.kind);
     if (!tooSmall) {
       if (draft.kind === "freehand") {
         draft.points = simplify(draft.points.map(clampPoint), 3 * (window.devicePixelRatio || 1), canvas.width, canvas.height);
         if (draft.points.length < 2) return scheduleRender();
       }
       // Ring, spotlight, arrow and line ends dropped on a followed player's feet follow that player.
-      const points = draft.kind === "freehand" || draft.kind === "shape" ? draft.points : draft.points.map(snapPoint);
+      const points = ["freehand", "shape", "measure"].includes(draft.kind) ? draft.points : draft.points.map(snapPoint);
       const item = placeNew(newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry }));
       if (isFlat(item)) item.at = frameNow();
       doc.add(item);
@@ -2564,7 +2599,7 @@ function applyEdit({ type, id, index, base, preview, end: pointerAt }) {
     const point = original.points[index];
     const [dx, dy] = [preview.points[index][0] - base.points[index][0], preview.points[index][1] - base.points[index][1]];
     if (isLinked(point)) return correctTrack(point.track, dx, dy);
-    const snapped = snapPoint(preview.points[index]);
+    const snapped = PITCH_KINDS.has(original.kind) ? preview.points[index] : snapPoint(preview.points[index]); // on the grass, never on a player
     doc.replace({ ...original, points: original.points.map((each, i) => (i === index ? snapped : each)) });
     return;
   }
@@ -2600,7 +2635,7 @@ canvas.addEventListener("dblclick", (event) => {
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
-const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token", g: "shape" };
+const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token", g: "shape", o: "offside", m: "measure" };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMenu(false);
   if (!clip) return;

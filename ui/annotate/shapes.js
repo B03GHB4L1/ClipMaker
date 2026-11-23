@@ -17,6 +17,9 @@ export const DEFAULT_STYLE = {
   zone: { stroke: "#2f80ed", width: 3, fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25 },
   shape: { stroke: "#ffffff", width: 3, fill: "#ffffff", pattern: "solid", fillOpacity: 0.15, dashed: false },
   token: { fill: "#d6262e", color: "#ffffff", stroke: "#ffffff", size: 34, width: 2 },
+  // P3: always on the pitch (flat), so they are read through the clip's calibration.
+  offside: { stroke: "#ffd400", width: 4, dashed: false, flat: true },
+  measure: { stroke: "#ffffff", width: 4, dashed: false, flat: true },
 };
 
 /** Geometric shapes (the Shape tool): drawn in the box between two dragged corners. */
@@ -224,6 +227,46 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
       tracePath(ctx, partialPath(points, state.draw));
       ctx.stroke();
       break;
+    case "offside": {
+      // A line across the pitch at the clicked spot's depth, and a dot where the spot is.
+      const segments = item.projected?.segments;
+      (segments || []).forEach((segment) => {
+        const line = segment.map((point) => px(point, w, h));
+        tracePath(ctx, segments.length === 1 ? partialPath(line, state.draw) : line);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.fillStyle = style.stroke;
+      ctx.beginPath();
+      ctx.arc(points[0][0], points[0][1], Math.max(3, width * 0.9), 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "measure": {
+      tracePath(ctx, partialPath(points, state.draw));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = style.stroke;
+      points.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, Math.max(3, width * 0.9), 0, Math.PI * 2); ctx.fill(); });
+      if (item.projected && state.draw >= 1) {
+        // The distance on the grass, on a dark pill at the middle of the line.
+        const [mx, my] = px(item.projected.mid, w, h);
+        const size = Math.max(1, 30 * scale);
+        const label = `${item.projected.metres.toFixed(1)} m`;
+        ctx.font = `700 ${size}px ${TEXT_FONT}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const pill = ctx.measureText(label).width + size * 0.9;
+        ctx.fillStyle = "rgba(23, 24, 23, 0.82)";
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(mx - pill / 2, my - size * 0.8, pill, size * 1.6, size * 0.4);
+        else ctx.rect(mx - pill / 2, my - size * 0.8, pill, size * 1.6);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(label, mx, my + size * 0.04);
+      }
+      break;
+    }
     case "arrow": {
       if (item.projected?.head && state.draw >= 1) {
         // Flat on the pitch (P1): the head lies on the grass, smaller the further away it is.
@@ -419,8 +462,14 @@ export const hitTest = (item, x, y, w, h, tolerance = 6, measure) => {
       }
       return false;
     }
+    case "offside": {
+      const lines = (item.projected?.segments || []).map((segment) => segment.map((point) => px(point, w, h)));
+      return Math.hypot(x - points[0][0], y - points[0][1]) <= reach + 4
+        || lines.some((line) => line.some((point, index) => index > 0 && segmentDistance(at, line[index - 1], point) <= reach));
+    }
     case "arrow":
     case "line":
+    case "measure":
     case "freehand":
       return points.some((point, index) => index > 0 && segmentDistance(at, points[index - 1], point) <= reach)
         || (points.length === 1 && Math.hypot(x - points[0][0], y - points[0][1]) <= reach);

@@ -177,6 +177,32 @@ class DocumentTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
                 annotations.clean_document(document(bad), duration=2, frames=50)
 
+    def test_offside_lines_and_measures_lie_on_the_pitch(self):
+        # P3: always flat, always on the video, fixed on the grass, kept with the frame they were placed on.
+        style = {"stroke": "#ffd400", "width": 4, "flat": True}
+        offside = {"id": "o1", "kind": "offside", "points": [[0.4, 0.6]], "style": style,
+                   "show": {"from": 0, "to": 1, "animate": "draw"}, "at": 12}
+        measure = {"id": "m1", "kind": "measure", "points": [[0.2, 0.5], [0.6, 0.7]], "style": style,
+                   "show": {"from": 0, "to": 1}, "at": 3}
+        clean = annotations.clean_document(document(offside, measure), duration=2, frames=50)
+        self.assertEqual([(item["kind"], item["at"], item["style"]["flat"]) for item in clean["items"]],
+                         [("offside", 12, True), ("measure", 3, True)])
+        for bad, message in (({**offside, "style": {"stroke": "#ffd400"}}, "lies on the pitch"),
+                             ({**offside, "style": {"flat": False}}, "lies on the pitch"),
+                             ({**measure, "style": {}}, "lies on the pitch"),
+                             ({**offside, "points": [[0.4, 0.6], [0.5, 0.6]]}, "1 to 1 points"),
+                             ({**measure, "points": [[0.2, 0.5]]}, "2 to 2 points"),
+                             ({**offside, "on": 0}, "not on a board"),
+                             ({**measure, "on": 0}, "not on a board"),
+                             ({**offside, "show": {"from": 0, "to": 1, "pulse": True}}, "cannot pulse"),
+                             ({**offside, "geometry": {"rx": 0.1, "ry": 0.1}}, "no geometry"),
+                             ({**measure, "text": "12 m"}, "has no text")):
+            with self.subTest(bad=str(bad)[:70]), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document(document(bad), duration=2, frames=50)
+        with self.assertRaises(ValueError):  # linked to a player
+            annotations.clean_document({**document({**offside, "points": [{"track": "t1", "dx": 0, "dy": 0}]}),
+                                        "tracks": []}, duration=2, frames=50)
+
     def test_shapes_keep_which_shape_they_are(self):
         shape = {"id": "s1", "kind": "shape", "points": [[0.1, 0.2], [0.4, 0.5]], "geometry": {"shape": "star"},
                  "style": {"stroke": "#ffffff", "fill": "#2f80ed", "fillOpacity": 0.2, "pattern": "cross", "dashed": True},

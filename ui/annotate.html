@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=26" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=21"></script>
+  <script type="module" src="annotate.js?v=22"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -70,6 +70,11 @@
           <h2 class="annotate-group-title" id="tools-highlight">Highlight</h2>
           <button type="button" data-tool="zone" title="Zone (Z): shade an area of the pitch. Click its corners, then press Enter"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7l7.5-3.5L17 10l-5.5 6.5L3.5 13z"/></svg><span>Zone</span><kbd>Z</kbd></button>
           <button type="button" data-tool="spotlight" title="Spotlight (S): a beam of light on one player"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8.2 3h3.6l4 11M8.2 3l-4 11"/><ellipse cx="10" cy="14.6" rx="5.8" ry="2.2"/></svg><span>Spotlight</span><kbd>S</kbd></button>
+        </div>
+        <div class="annotate-tool-group" role="group" aria-labelledby="tools-pitch">
+          <h2 class="annotate-group-title" id="tools-pitch">Pitch</h2>
+          <button type="button" data-tool="offside" title="Offside line (O): a line across the pitch through a spot you click. Needs the pitch marked"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3l-3 14"/><path d="M11 3l-3 14" stroke-dasharray="1 2.4"/><circle cx="12.5" cy="12" r="1.8"/></svg><span>Offside</span><kbd>O</kbd></button>
+          <button type="button" data-tool="measure" title="Measure (M): the distance in metres between two spots on the grass. Needs the pitch marked"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 12.5l13-5"/><path d="M4.6 9.5l1.6 4.2M8.9 8l1.6 4.2M13.2 6.4l1.6 4.2" /></svg><span>Measure</span><kbd>M</kbd></button>
         </div>
         <div class="annotate-tool-group" role="group" aria-labelledby="tools-write">
           <h2 class="annotate-group-title" id="tools-write">Write</h2>
