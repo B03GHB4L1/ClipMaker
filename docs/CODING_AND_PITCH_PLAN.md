@@ -339,7 +339,8 @@ metres and player speed.
     pitch on every other frame, in the editor, screenshots and exports. Where the
     camera was followed but a frame has no pitch (after a cut), they are hidden.
     Without a followed camera they stay as drawn, as in P1.
-  - Checked: generated pan, zoom and cut clips (under 2 px over 60 frames), and one
+  - Checked: generated pan, zoom and cut clips (under 2 px over 60 frames, also on a
+    softer encode after Linux CI found a 9 px step there), and one
     real 29 s broadcast clip (1,450 frames in 24 s, cuts to close-ups found, a flat ring
     staying on the grass across the pan and hidden after the cut). With marks only on
     the far half, the near touchline was 20 to 40 px off on other frames.

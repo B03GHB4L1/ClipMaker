@@ -44,12 +44,12 @@ def view(frame: int) -> np.ndarray:
     return np.array([[1 / zoom, 0, 300 + 9 * frame], [0, 1 / zoom, 150 + frame], [0, 0, 1]], float)
 
 
-def camera_clip(path: Path, cut_at: int | None = None) -> Path:
+def camera_clip(path: Path, cut_at: int | None = None, crf: int = 16) -> Path:
     ground = world()
     other = cv2.GaussianBlur(np.random.default_rng(9).integers(0, 255, (H, W, 3), dtype=np.uint8), (5, 5), 0)
     process = subprocess.Popen([_find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt",
                                 "bgr24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-pix_fmt", "yuv420p", "-c:v", "libx264",
-                                "-preset", "veryfast", "-crf", "16", str(path)], stdin=subprocess.PIPE)
+                                "-preset", "veryfast", "-crf", str(crf), str(path)], stdin=subprocess.PIPE)
     for index in range(FRAMES):
         if cut_at is not None and index >= cut_at:  # another camera: a different picture, moving its own way
             frame = np.roll(other, 4 * (index - cut_at), axis=1)
@@ -104,6 +104,15 @@ class CameraTests(unittest.TestCase):
         result = camera.follow_camera(_find_ffmpeg(), self.clip, CLIP, 20, 39)
         self.assertEqual((result["from"], len(result["rows"]), result["starts"]), (20, 20, [20]))
         self.assertLess(pixels_off(result["rows"][-1], true_path(39, 20)), 2.0)
+
+    def test_a_softer_encode_is_followed_as_well(self):
+        # Linux's ffmpeg once encoded the clip so that, from frame 20, frame 39 came out 9 px off: the
+        # players' strong corners crowded out the grass's and a homography bent towards them.
+        soft = camera_clip(Path(self.folder.name) / "soft.mp4", crf=23)
+        for first, last in ((0, FRAMES - 1), (20, 39), (10, 45)):
+            result = camera.follow_camera(_find_ffmpeg(), soft, CLIP, first, last)
+            for index, row in enumerate(result["rows"]):
+                self.assertLess(pixels_off(row, true_path(first + index, first)), 2.0, f"{first}-{last}: frame {first + index}")
 
     def test_a_scene_cut_starts_a_new_stretch(self):
         result = camera.follow_camera(_find_ffmpeg(), self.cut, CLIP, 0, FRAMES - 1)
