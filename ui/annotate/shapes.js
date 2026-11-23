@@ -15,7 +15,40 @@ export const DEFAULT_STYLE = {
   freehand: { stroke: "#ff4d4d", width: 5 },
   text: { color: "#ffffff", background: "#171817", size: 40, bold: false },
   zone: { stroke: "#2f80ed", width: 3, fill: "#2f80ed", pattern: "solid", fillOpacity: 0.25 },
+  shape: { stroke: "#ffffff", width: 3, fill: "#ffffff", pattern: "solid", fillOpacity: 0.15, dashed: false },
   token: { fill: "#d6262e", color: "#ffffff", stroke: "#ffffff", size: 34, width: 2 },
+};
+
+/** Geometric shapes (the Shape tool): drawn in the box between two dragged corners. */
+export const SHAPES = { rect: "Rectangle", ellipse: "Ellipse", triangle: "Triangle", diamond: "Diamond", pentagon: "Pentagon", hexagon: "Hexagon", star: "Star" };
+
+// Each shape's outline in a unit box (0..1 both ways), filling it.
+const fitBox = (points) => {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
+  const [w, h] = [Math.max(...xs) - x0 || 1, Math.max(...ys) - y0 || 1];
+  return points.map(([x, y]) => [(x - x0) / w, (y - y0) / h]);
+};
+const around = (count, radius = () => 1) => fitBox(Array.from({ length: count }, (_, i) => {
+  const angle = -Math.PI / 2 + (Math.PI * 2 * i) / count; // from the top, clockwise
+  return [Math.cos(angle) * radius(i), Math.sin(angle) * radius(i)];
+}));
+const UNIT_OUTLINES = {
+  rect: [[0, 0], [1, 0], [1, 1], [0, 1]],
+  ellipse: around(72),
+  triangle: [[0.5, 0], [1, 1], [0, 1]],
+  diamond: [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]],
+  pentagon: around(5),
+  hexagon: around(6),
+  star: around(10, (i) => (i % 2 ? 0.382 : 1)),
+};
+
+/** A shape's outline (closed polygon) in the box between corners `a` and `b`, in the same units as they are. */
+export const shapeOutline = (name, a, b) => {
+  const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
+  const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+  return (UNIT_OUTLINES[name] || UNIT_OUTLINES.rect).map(([u, v]) => [x0 + u * (x1 - x0), y0 + v * (y1 - y0)]);
 };
 
 /** Zone fills: a wash of colour, or lines across the zone (hatching). */
@@ -222,8 +255,10 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
       arrowHead(ctx, [to[0] - ux, to[1] - uy], to, Math.min(head, Math.max(shaft, 1)));
       break;
     }
-    case "zone": {
-      tracePath(ctx, points);
+    case "zone":
+    case "shape": {
+      const outline = item.kind === "shape" ? shapeOutline(item.geometry?.shape, points[0], points[1]) : points;
+      tracePath(ctx, outline);
       ctx.closePath();
       if (style.pattern === "lines" || style.pattern === "cross") {
         // Hatching: a faint wash under lines strong enough to read on grass.
@@ -234,13 +269,13 @@ export const drawItem = (ctx, item, w, h, state = FULL) => {
         ctx.strokeStyle = rgba(style.fill, Math.min(1, style.fillOpacity * 2.6) * state.draw);
         ctx.lineWidth = Math.max(1.5, width * 0.6);
         ctx.setLineDash([]);
-        hatch(ctx, points, h, style.pattern === "cross" ? [1, -1] : [1]);
+        hatch(ctx, outline, h, style.pattern === "cross" ? [1, -1] : [1]);
         ctx.restore(); // back to the outline's colour, width and dashes
       } else {
         ctx.fillStyle = rgba(style.fill, style.fillOpacity * state.draw);
         ctx.fill();
       }
-      tracePath(ctx, partialPath(points, state.draw, true));
+      tracePath(ctx, partialPath(outline, state.draw, true));
       ctx.stroke();
       break;
     }
@@ -390,8 +425,11 @@ export const hitTest = (item, x, y, w, h, tolerance = 6, measure) => {
       return points.some((point, index) => index > 0 && segmentDistance(at, points[index - 1], point) <= reach)
         || (points.length === 1 && Math.hypot(x - points[0][0], y - points[0][1]) <= reach);
     case "zone":
-      return insidePolygon(at, points)
-        || points.some((point, index) => segmentDistance(at, points[(index || points.length) - 1], point) <= reach);
+    case "shape": {
+      const outline = item.kind === "shape" ? shapeOutline(item.geometry?.shape, points[0], points[1]) : points;
+      return insidePolygon(at, outline)
+        || outline.some((point, index) => segmentDistance(at, outline[(index || outline.length) - 1], point) <= reach);
+    }
     case "token":
       return Math.hypot(x - points[0][0], y - points[0][1]) <= (style.size / 2) * scale + tolerance;
     case "text": {

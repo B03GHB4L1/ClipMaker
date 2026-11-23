@@ -97,6 +97,25 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-tools button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
 .annotate-tools button[aria-pressed="true"] { background: var(--cm-ink); color: #fff; }
 .annotate-tools button[aria-pressed="true"] kbd { color: #b9bcb4; }
+/* Shape: one button for the geometric shapes; its menu opens sideways (below it on a phone). */
+.annotate-shape-icon { display: contents; }
+.annotate-shape-more { position: absolute; right: 4px; bottom: 4px; width: 0; height: 0; border-style: solid; border-width: 0 0 5px 5px;
+  border-color: transparent transparent var(--cm-muted) transparent; }
+.annotate-tools button[aria-pressed="true"] .annotate-shape-more { border-bottom-color: #b9bcb4; }
+.annotate-shape-menu {
+  position: fixed; z-index: 30; display: flex; flex-wrap: wrap; gap: 2px; max-width: calc(100vw - 16px); padding: 4px;
+  border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel);
+  box-shadow: 0 6px 20px rgba(23, 24, 23, 0.14);
+}
+.annotate-shape-menu[hidden] { display: none; }
+.annotate-shape-menu button {
+  display: grid; justify-items: center; gap: 3px; min-width: 62px; padding: 8px 4px 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer;
+}
+.annotate-shape-menu button svg { width: 20px; height: 20px; }
+.annotate-shape-menu button:hover:not([aria-checked="true"]) { background: var(--annotate-hover); }
+.annotate-shape-menu button[aria-checked="true"] { background: var(--cm-ink); color: #fff; }
+.annotate-shape-menu button:focus-visible { outline: 2px solid var(--cm-accent-ink, var(--cm-ink)); outline-offset: 1px; }
 /* Players: Ring and Follow work on a player, beside the player settings. */
 .annotate-player-tools { display: flex; flex-direction: column; gap: 12px; padding: 10px 10px 10px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
 .annotate-player-tools h2 { margin: 0 0 6px 2px; font-size: 12px; font-weight: 600; }
@@ -118,6 +137,10 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-pitch-saved button { flex: 1 1 auto; min-height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
 .annotate-pitch-saved button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
 .annotate-pitch-saved button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
+.annotate-pitch-saved button:disabled { opacity: 0.5; cursor: default; }
+.annotate-pitch-saved .annotate-calibrate-progress, .annotate-pitch-saved p { flex: 1 1 100%; }
+.annotate-pitch-saved .annotate-calibrate-progress[hidden], .annotate-pitch-saved [hidden] { display: none; }
+.annotate-pitch-saved p { margin: 2px 0 0; font-size: 11px; line-height: 1.4; }
 
 /* The column is as wide as the video, so transport and timeline line up with it.
    The video's height leaves room for the bars, transport and timeline in one window. */

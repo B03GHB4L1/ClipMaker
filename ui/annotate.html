@@ -6,10 +6,10 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=25" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=26" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=20"></script>
+  <script type="module" src="annotate.js?v=21"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -64,6 +64,7 @@
           <button type="button" data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L15.5 4.5M9 4.5h6.5V11"/></svg><span>Arrow</span><kbd>A</kbd></button>
           <button type="button" data-tool="line" title="Line (L)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 14.5l9-9"/><circle cx="4.5" cy="15.5" r="1.6"/><circle cx="15.5" cy="4.5" r="1.6"/></svg><span>Line</span><kbd>L</kbd></button>
           <button type="button" data-tool="freehand" title="Freehand (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 14c1.6-4.6 3.6-5.2 4.8-2.2s3 3.2 4.6-1.4 3-4.6 4.6-1.4"/></svg><span>Freehand</span><kbd>F</kbd></button>
+          <button type="button" class="annotate-shape-button" data-shape-button aria-haspopup="menu" aria-expanded="false" aria-controls="shape-menu" aria-pressed="false" title="Shape (G): rectangle, ellipse, triangle and more"><span class="annotate-shape-icon" data-shape-icon><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="5" width="13" height="10" rx="0.5"/></svg></span><span>Shape</span><kbd>G</kbd><i class="annotate-shape-more" aria-hidden="true"></i></button>
         </div>
         <div class="annotate-tool-group" role="group" aria-labelledby="tools-highlight">
           <h2 class="annotate-group-title" id="tools-highlight">Highlight</h2>
@@ -74,6 +75,15 @@
           <h2 class="annotate-group-title" id="tools-write">Write</h2>
           <button type="button" data-tool="text" title="Text (T)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 5h11M10 5v11M7.5 16h5"/></svg><span>Text</span><kbd>T</kbd></button>
         </div>
+      </div>
+      <div class="annotate-shape-menu" id="shape-menu" role="menu" aria-label="Shapes" data-shape-menu hidden>
+        <button type="button" role="menuitemradio" aria-checked="true" data-shape="rect" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="5" width="13" height="10" rx="0.5"/></svg><span>Rectangle</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="ellipse" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><ellipse cx="10" cy="10" rx="7" ry="5.2"/></svg><span>Ellipse</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="triangle" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.8l6.8 12.4H3.2z"/></svg><span>Triangle</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="diamond" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3l6.5 7-6.5 7-6.5-7z"/></svg><span>Diamond</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="pentagon" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2l6.9 5-2.6 8.1H5.7L3.1 8.2z"/></svg><span>Pentagon</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="hexagon" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3l6.2 3.5v7L10 17l-6.2-3.5v-7z"/></svg><span>Hexagon</span></button>
+        <button type="button" role="menuitemradio" aria-checked="false" data-shape="star" tabindex="-1"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3l2.1 4.6 5 .5-3.8 3.4 1.1 4.9L10 13.9l-4.4 2.5 1.1-4.9L2.9 8.1l5-.5z"/></svg><span>Star</span></button>
       </div>
       <div class="annotate-centre">
         <div class="annotate-stage" data-stage>
@@ -104,7 +114,7 @@
                 <button type="button" class="annotate-primary" data-calib-find disabled title="Place a token for each player found on this frame">Find players</button>
                 <button type="button" data-calib-empty title="A board with no players; place them with the Token tool">Empty board</button>
                 <button type="button" class="annotate-primary" data-calib-save disabled hidden title="Keep these marks as the clip's pitch">Save pitch</button>
-                <button type="button" class="annotate-danger" data-calib-forget hidden title="Remove the clip's pitch; flat drawings are drawn as usual again">Remove pitch</button>
+                <button type="button" class="annotate-danger" data-calib-forget hidden title="Remove the pitch marks on this frame">Remove marks</button>
                 <button type="button" data-calib-remove disabled title="Remove the selected mark (Delete)">Remove mark</button>
               </div>
               <p class="annotate-muted annotate-calibrate-limits" data-calib-board-note>Works on wide shots that show pitch lines. Players hidden behind others or outside the picture are not found; check teams after.</p>
@@ -155,8 +165,15 @@
             <button type="button" class="annotate-board" data-pitch aria-expanded="false" aria-controls="calibrate-panel" title="Mark the pitch on this frame, so rings and arrows can lie flat on it"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 16l3.5-11h9L18 16z"/><path d="M10 5v11"/><path d="M4.6 11.5h10.8" stroke-dasharray="1.6 1.6"/></svg><span class="annotate-option">Mark the pitch<small>Flat rings and arrows</small></span></button>
           </div>
           <div class="annotate-pitch-saved" data-pitch-saved hidden>
-            <button type="button" data-pitch-lines aria-pressed="false" title="Show the pitch lines on the marked frame">Pitch lines</button>
-            <button type="button" data-pitch-go title="Go to the frame where the pitch is marked">Go to frame <span data-pitch-frame></span></button>
+            <button type="button" data-pitch-lines aria-pressed="false" title="Show the pitch lines on every frame with a pitch">Pitch lines</button>
+            <button type="button" data-pitch-go title="Go to a frame where the pitch is marked">Go to frame</button>
+            <button type="button" data-pitch-follow title="Follow the camera through the clip, so the pitch is known on every frame">Follow the camera</button>
+            <div class="annotate-calibrate-progress" data-pitch-progress hidden>
+              <progress max="1" value="0" aria-label="Following the camera"></progress>
+              <button type="button" class="annotate-export-cancel" data-pitch-stop>Cancel</button>
+            </div>
+            <p class="annotate-muted" data-pitch-state role="status"></p>
+            <button type="button" data-pitch-next hidden title="Go to the next stretch where the pitch needs a look">Next to check</button>
           </div>
         </div>
       </section>

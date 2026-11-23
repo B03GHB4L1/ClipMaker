@@ -17,19 +17,20 @@ from typing import Any
 from . import parts as cuts
 
 VERSION = 1
-KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token"}
+KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape"}
+SHAPES = {"rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "star"}  # the Shape tool's shapes
 ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
 EXIT_ANIMATIONS = {"none", "fade"}
 EASES = {"linear", "ease-out", "ease-in-out"}
-PULSE_KINDS = {"ring", "spotlight", "zone"}
+PULSE_KINDS = {"ring", "spotlight", "zone", "shape"}
 MAX_FREEZES = 50
 MAX_TRACKS = 40
 MAX_KEYFRAMES = 500
 OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its player's feet
 FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
-MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1}
-MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1}
+MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1, "shape": 2}
+MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1, "shape": 2}
 # Tactical boards (M7): a freeze can show a pitch instead of the held frame.
 BOARD_VIEWS = {"full", "left", "right", "blank"}
 BOARD_THEMES = {"grass", "light"}
@@ -52,9 +53,12 @@ STYLE_RULES: dict[str, tuple[str, float, float]] = {
 COLOUR_KEYS = {"stroke", "fill", "color", "background"}
 FLAG_KEYS = {"dashed", "bold", "flat"}
 FLAT_KINDS = {"ring", "arrow"}  # drawn flat on the pitch through the clip's calibration (P1)
-# The clip's pitch calibration (P1): pitch marks clicked on one frame. P2 adds a key per camera move.
-MAX_PITCH_KEYS = 1
+# The clip's pitch calibration (P1): pitch marks clicked on frames of the clip (keys), and the camera's
+# path between them (P2, camera.py): per frame, the homography to the first frame of its stretch.
+MAX_PITCH_KEYS = 50
 PITCH_MARKS = (4, 40)
+MAX_CAMERA_FRAMES = 4500
+CAMERA_ENTRY = 1e6  # a homography entry larger than this is not a camera's
 MARK_ID = re.compile(r"^[a-z0-9-]{3,32}$")
 CHOICE_KEYS = {"pattern": {"solid", "lines", "cross"}}  # zone fill: a wash, or hatching
 
@@ -162,7 +166,11 @@ def _style(value: Any) -> dict[str, Any]:
     return clean
 
 
-def _geometry(kind: str, value: Any) -> dict[str, float]:
+def _geometry(kind: str, value: Any) -> dict[str, Any]:
+    if kind == "shape":  # which shape, drawn in the box between its two corners
+        if not isinstance(value, dict) or set(value) != {"shape"} or value["shape"] not in SHAPES:
+            raise ValueError(f"A shape must be one of: {', '.join(sorted(SHAPES))}.")
+        return {"shape": value["shape"]}
     if kind not in {"ring", "spotlight"}:
         if value not in (None, {}):
             raise ValueError(f"A {kind} has no geometry settings.")
@@ -282,7 +290,7 @@ def _moves(value: Any, kind: str, on_board: bool) -> list[list[float]]:
     return clean
 
 
-def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[str, Any]:
+def _item(value: Any, limit: float, tracks: set[str], boards: set[int], frames: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Each drawing must be an object.")
     item_id = value.get("id")
@@ -303,6 +311,14 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[
     }
     if clean["style"].get("flat") and kind not in FLAT_KINDS:
         raise ValueError(f"A {kind} cannot lie flat on the pitch.")
+    if "at" in value:
+        # The recorded frame a flat drawing's points are for (P2): it keeps that place on the pitch.
+        at = value["at"]
+        if not clean["style"].get("flat"):
+            raise ValueError("Only a drawing flat on the pitch keeps the frame it was drawn on.")
+        if isinstance(at, bool) or not isinstance(at, int) or not 0 <= at < frames:
+            raise ValueError("A flat drawing's frame is not in the clip.")
+        clean["at"] = at
     geometry = _geometry(kind, value.get("geometry"))
     if geometry:
         clean["geometry"] = geometry
@@ -340,20 +356,45 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int]) -> dict[
         clean["on"] = board
     if "moves" in value:
         clean["moves"] = _moves(value["moves"], kind, "on" in clean)
-    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on", "moves"}
+    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on", "moves", "at"}
     extra = set(value) - known
     if extra:
         raise ValueError(f"Unknown drawing setting: {sorted(extra)[0]}.")
     return clean
 
 
+def _camera(value: Any, frames: int) -> dict[str, Any]:
+    """The camera's path (camera.follow_camera): {"from", "rows": [[8 entries, sureness]], "starts": [frames]}."""
+    if not isinstance(value, dict) or set(value) != {"from", "rows", "starts"}:
+        raise ValueError("The camera's path needs its first frame, its rows and where each stretch starts.")
+    start, rows, starts = value["from"], value["rows"], value["starts"]
+    if isinstance(start, bool) or not isinstance(start, int) or not 0 <= start < frames:
+        raise ValueError("The camera's path must start on a frame of the clip.")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= min(MAX_CAMERA_FRAMES, frames - start):
+        raise ValueError(f"The camera's path covers 1 to {MAX_CAMERA_FRAMES} frames of the clip.")
+    clean_rows = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 9:
+            raise ValueError("Each frame of the camera's path needs 8 numbers and how sure it is.")
+        entries = [_number(entry, -CAMERA_ENTRY, CAMERA_ENTRY, "A camera path entry") for entry in row[:8]]
+        clean_rows.append(entries + [_number(row[8], 0, 1, "How sure the camera's path is")])
+    if not isinstance(starts, list) or not starts or len(starts) > len(rows) or starts[0] != start:
+        raise ValueError("The camera's path must say where each stretch starts, from its first frame.")
+    last = start - 1
+    for frame in starts:
+        if isinstance(frame, bool) or not isinstance(frame, int) or not last < frame < start + len(rows):
+            raise ValueError("Each stretch of the camera's path starts on a later frame it covers.")
+        last = frame
+    return {"from": start, "rows": clean_rows, "starts": list(starts)}
+
+
 def _pitch(value: Any, frames: int) -> dict[str, Any]:
-    """The clip's pitch calibration: {"keys": [{"frame", "pairs": [{"id", "at": [x, y]}]}]}.
+    """The clip's pitch calibration: {"keys": [{"frame", "pairs": [{"id", "at": [x, y]}]}], "camera"?}.
     `frame` is a frame of the clip as recorded (not as cut), so cutting the clip keeps it."""
-    if not isinstance(value, dict) or set(value) != {"keys"} or not isinstance(value["keys"], list):
+    if not isinstance(value, dict) or not set(value) <= {"keys", "camera"} or not isinstance(value.get("keys"), list):
         raise ValueError("The pitch calibration must list its calibrated frames.")
     if not 1 <= len(value["keys"]) <= MAX_PITCH_KEYS:
-        raise ValueError(f"A clip can keep {MAX_PITCH_KEYS} calibrated frame.")
+        raise ValueError(f"A clip can keep 1 to {MAX_PITCH_KEYS} calibrated frames.")
     keys = []
     for key in value["keys"]:
         if not isinstance(key, dict) or set(key) != {"frame", "pairs"}:
@@ -373,7 +414,12 @@ def _pitch(value: Any, frames: int) -> dict[str, Any]:
         if len({pair["id"] for pair in clean_pairs}) != len(clean_pairs):
             raise ValueError("A pitch mark is placed twice.")
         keys.append({"frame": frame, "pairs": clean_pairs})
-    return {"keys": keys}
+    if len({key["frame"] for key in keys}) != len(keys):
+        raise ValueError("A frame is calibrated twice.")
+    clean = {"keys": sorted(keys, key=lambda key: key["frame"])}
+    if "camera" in value:
+        clean["camera"] = _camera(value["camera"], frames)
+    return clean
 
 
 def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
@@ -397,7 +443,7 @@ def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
     tracks = _tracks(value.get("tracks", []), frames)
     track_ids = {track["id"] for track in tracks}
     boards = {freeze["atFrame"] for freeze in freezes if "background" in freeze}
-    clean_items = [_item(item, limit, track_ids, boards) for item in items]
+    clean_items = [_item(item, limit, track_ids, boards, frames) for item in items]
     ids = [item["id"] for item in clean_items]
     if len(ids) != len(set(ids)):
         raise ValueError("Two drawings share the same id.")

@@ -3,14 +3,15 @@
 // tracking (M3) will link their points to players.
 import { projectRequest, newProject, rememberProject } from "./projects.js";
 import { saveImage, showSaved, showSaveError } from "./save-clip.js";
-import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS } from "./annotate/shapes.js";
+import { changedTiles, cropDrawn, drawItem, drawItems, handlesFor, itemAt, styleOf, textBox, textFont, visibleAt, DEFAULT_STYLE, PATTERNS, SHAPES } from "./annotate/shapes.js";
 import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, clampPoint } from "./annotate/document.js";
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
   itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
-import { pitchCalibration, pitchKey, projectItems } from "./annotate/flat.js";
+import { isFlat, placeFlat, projectItems } from "./annotate/flat.js";
+import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } from "./annotate/camera.js";
 import { fitBox } from "./annotate/fit.js";
 import { showClipStrip, showLibrary } from "./annotate/library.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
@@ -237,8 +238,10 @@ const cutFrameNow = () => source().frame; // its place on the cut clip: freezes 
 const boardNow = () => (clip ? boardAt(doc.value, timing, outTime) : null);
 // On a board only its own drawings show; elsewhere the clip's drawings (annotate/board.js).
 // Moving board tokens are placed for the moment on screen (M8).
-const shown = () => itemsAt(doc.value, timing, outTime).map((item) => resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()));
-const shownItem = (id) => { const item = doc.find(id); return item ? resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()) : null; };
+// Flat drawings keep their place on the pitch as the camera moves (P2, annotate/camera.js).
+const placeNow = (item) => placeFlat(resolveItem(placedAt(doc.value, timing, item, outTime), tracks(), frameNow()), clipTrack(), frameNow());
+const shown = () => itemsAt(doc.value, timing, outTime).map(placeNow).filter((item) => !item.offPitch);
+const shownItem = (id) => { const item = doc.find(id); const placed = item && placeNow(item); return placed && !placed.offPitch ? placed : null; };
 // Seconds into the board that drawing `item` is on, at the playhead.
 const boardSeconds = (item) => outTime - freezeStart(item.on, timing, doc.freezes);
 const playerName = (track) => track.label || `Player ${tracks().indexOf(track) + 1}`;
@@ -298,10 +301,11 @@ const render = () => {
   const board = boardNow();
   if (board) drawBoard(ctx, w, h, board.background);
   const items = shown().map((item) => (gesture?.previews?.[item.id] || (gesture?.preview && item.id === gesture.preview.id ? gesture.preview : item)));
-  const pitch = clipPitch();
+  const here = board ? null : pitchHere();
+  const pitch = here?.calibration || null;
   drawItems(ctx, projectItems(items, pitch), w, h, time);
   if (calib) return drawCalibration();
-  if (pitchLines && pitch && !board && pitchKey(doc.value).frame === frameNow()) drawPitchLines(pitch);
+  if (pitchLines && pitch) drawPitchLines(pitch, here.state === "check");
   const original = doc.find(selectedId);
   if (original && !board) linkedTracks(original).forEach((id) => { const track = trackById(id); if (track) drawPlayerBox(track); });
   if (!board && ["ring", "spotlight", "arrow", "line", "zone", "text"].includes(tool)) {
@@ -486,6 +490,7 @@ const HINTS = {
   freehand: "Hold and draw.",
   text: "Click where the text goes, type, then press Enter (Shift+Enter for a new line). Click on a followed player to make the text follow them.",
   zone: "Click each corner. Finish with Enter, a double-click or a click on the first corner.",
+  shape: "Drag to draw the shape. Hold Shift for equal sides, as a square or a circle.",
   follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
   token: "Click to place a player token. On a board it belongs to that board; on the video it is a fixed marker that does not follow anyone.",
 };
@@ -497,6 +502,7 @@ const setTool = (next) => {
   zoneDraft = null;
   tool = next;
   document.querySelectorAll("button[data-tool]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.tool === tool)));
+  $("[data-shape-button]").setAttribute("aria-pressed", String(tool === "shape"));
   canvas.dataset.tool = tool;
   $("[data-hint]").textContent = HINTS[tool];
   $("[data-hint]").title = HINTS[tool];
@@ -515,8 +521,9 @@ const select = (id) => {
   scheduleRender();
 };
 
-const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token" };
+const KIND_NAMES = { ring: "Ring", spotlight: "Spotlight", arrow: "Arrow", line: "Line", freehand: "Freehand", text: "Text", zone: "Zone", token: "Token", shape: "Shape" };
 const itemName = (item) => (item.kind === "text" ? `Text: ${item.text.split("\n")[0].slice(0, 24)}`
+  : item.kind === "shape" ? SHAPES[item.geometry?.shape] || "Shape"
   : item.kind === "token" ? ["Token", item.label, item.name].filter(Boolean).join(" ") : KIND_NAMES[item.kind]);
 // Some settings read differently on a token.
 const KIND_LABELS = { token: { fill: "Colour", color: "Number colour", stroke: "Outline", size: "Size", width: "Outline width" } };
@@ -538,7 +545,14 @@ const FIELDS = {
 
 const updateStyle = (key, value) => {
   const item = doc.find(selectedId);
-  if (item) {
+  if (item && key === "flat") {
+    // Laid flat on this frame, or taken off the pitch where it is on screen now.
+    const base = value ? item : rebased(item);
+    const next = { ...base, style: { ...base.style, flat: value } };
+    if (value) next.at = frameNow();
+    else delete next.at;
+    doc.replace(next);
+  } else if (item) {
     doc.replace({ ...item, style: { ...item.style, [key]: value } });
   } else {
     const kind = DEFAULT_STYLE[tool] ? tool : null;
@@ -593,16 +607,17 @@ const renderInspector = () => {
   } else {
     const style = item ? styleOf(item) : toolStyle[kind];
     if (kind === "token") fields.append(...tokenFields(item));
+    if (kind === "shape") fields.append(shapeField(item));
     let flatNote = null;
     Object.keys(DEFAULT_STYLE[kind]).forEach((key) => {
-      if (key === "flat" && !pitchKey(doc.value)) {
+      if (key === "flat" && !pitchKeys(doc.value).length) {
         // Flat drawings need the clip's pitch first (P1).
         fields.append(Object.assign(document.createElement("p"), { className: "annotate-muted",
           textContent: `Mark the pitch (under "Add at this frame") to lay ${kind === "ring" ? "rings" : "arrows"} flat on the grass.` }));
         return;
       }
       if (key === "flat" && item && style.flat) {
-        const flat = projectItems([item], clipPitch())[0].projected;
+        const flat = projectItems([shownItem(item.id) || item], pitchHere()?.calibration)[0].projected;
         if (flat) {
           flatNote = Object.assign(document.createElement("p"), { className: "annotate-muted", // shown under the checkbox
             textContent: kind === "ring" ? `${(flat.metres * 2).toFixed(1)} m across on the pitch.` : `${flat.metres.toFixed(1)} m long on the pitch.` });
@@ -675,11 +690,95 @@ const renderInspector = () => {
     $("[data-ease]").value = item.show.ease || "ease-out";
     const animated = (item.show.animate || "none") !== "none" || (item.show.animateOut || "none") !== "none";
     document.querySelectorAll("[data-anim-detail]").forEach((row) => { row.hidden = !animated; });
-    $("[data-pulse-row]").hidden = !["ring", "spotlight", "zone"].includes(item.kind);
+    $("[data-pulse-row]").hidden = !["ring", "spotlight", "zone", "shape"].includes(item.kind);
     $("[data-pulse]").checked = Boolean(item.show.pulse);
   }
   renderList();
 };
+
+// Which shape a shape drawing is (or the next one drawn).
+function shapeField(item) {
+  const label = document.createElement("label");
+  const choose = document.createElement("select");
+  const current = item?.geometry?.shape || shapeKind;
+  choose.append(...Object.entries(SHAPES).map(([value, text]) => new Option(text, value, false, value === current)));
+  choose.onchange = () => {
+    if (item) {
+      const latest = doc.find(item.id);
+      if (latest) doc.replace({ ...latest, geometry: { shape: choose.value } });
+    } else chooseShape(choose.value, false);
+  };
+  label.append("Shape ", choose);
+  return label;
+}
+
+// ---------------------------------------------------------------------------
+// The Shape tool's menu: opens beside its button (below it on a phone, where the tools are a row)
+// ---------------------------------------------------------------------------
+let shapeKind = "rect";
+const shapeMenu = $("[data-shape-menu]");
+const shapeButton = $("[data-shape-button]");
+const shapeItems = () => [...shapeMenu.querySelectorAll("[data-shape]")];
+function placeShapeMenu() {
+  const box = shapeButton.getBoundingClientRect();
+  const column = getComputedStyle($("[data-tools]")).flexDirection === "column";
+  const width = shapeMenu.offsetWidth;
+  const height = shapeMenu.offsetHeight;
+  const margin = 8;
+  let left = column ? box.right + 6 : box.left;
+  let top = column ? box.top : box.bottom + 6;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  top = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+  shapeMenu.style.left = `${left}px`;
+  shapeMenu.style.top = `${top}px`;
+}
+function openShapeMenu() {
+  shapeMenu.hidden = false;
+  shapeButton.setAttribute("aria-expanded", "true");
+  placeShapeMenu();
+  (shapeItems().find((button) => button.dataset.shape === shapeKind) || shapeItems()[0]).focus();
+}
+function closeShapeMenu(refocus = false) {
+  if (shapeMenu.hidden) return;
+  shapeMenu.hidden = true;
+  shapeButton.setAttribute("aria-expanded", "false");
+  if (refocus) shapeButton.focus();
+}
+/** The shape the Shape tool draws next; `start` picks the tool too. */
+function chooseShape(name, start = true) {
+  if (!SHAPES[name]) return;
+  shapeKind = name;
+  shapeItems().forEach((button) => button.setAttribute("aria-checked", String(button.dataset.shape === name)));
+  const icon = shapeItems().find((button) => button.dataset.shape === name).querySelector("svg").cloneNode(true);
+  $("[data-shape-icon]").replaceChildren(icon);
+  shapeButton.title = `Shape (G): ${SHAPES[name].toLowerCase()}. Click for other shapes.`;
+  if (start) setTool("shape");
+}
+function wireShapeMenu() {
+  shapeButton.onclick = () => (shapeMenu.hidden ? openShapeMenu() : closeShapeMenu());
+  shapeItems().forEach((button) => {
+    button.onclick = () => { chooseShape(button.dataset.shape); closeShapeMenu(true); };
+  });
+  shapeMenu.addEventListener("keydown", (event) => {
+    const buttons = shapeItems();
+    const index = buttons.indexOf(document.activeElement);
+    const moves = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+    if (event.key in moves) buttons[(index + moves[event.key] + buttons.length) % buttons.length].focus();
+    else if (event.key === "Home") buttons[0].focus();
+    else if (event.key === "End") buttons[buttons.length - 1].focus();
+    else if (event.key === "Escape") closeShapeMenu(true);
+    else if (event.key === "Tab") closeShapeMenu();
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!shapeMenu.hidden && !shapeMenu.contains(event.target) && !shapeButton.contains(event.target)) closeShapeMenu();
+  });
+  window.addEventListener("resize", () => closeShapeMenu());
+  window.addEventListener("scroll", () => { if (!shapeMenu.hidden) placeShapeMenu(); }, { passive: true });
+  $("[data-tools]").addEventListener("scroll", () => closeShapeMenu(), { passive: true });
+}
 
 // Team, number and name of a token (or the team of the next one).
 function tokenFields(item) {
@@ -1582,7 +1681,19 @@ const SVG = "http://www.w3.org/2000/svg";
 const calibPanel = $("[data-calibrate]");
 // The clip's own pitch (P1): marks kept on one frame, so rings and arrows can lie flat on the grass.
 let pitchLines = false;
-const clipPitch = () => (clip ? pitchCalibration(doc.value, aspect()) : null);
+const clipTrack = () => (clip ? clipPitchTrack(doc.value, aspect()) : null);
+const pitchHere = () => clipTrack()?.at(frameNow()) || null; // {calibration, state} on the frame on screen
+const CAMERA_FRAMES = 4500; // the engine follows the camera for up to 3 minutes at a time
+let cameraJob = null; // {id, progress} while the camera is being followed
+// A flat drawing is kept for the frame it was placed on (`at`). Edited on another frame, it is kept
+// as it is on screen now, for this frame: what the analyst sees is what is saved.
+const rebased = (original) => {
+  if (!original || !isFlat(original) || !pitchHere()) return original;
+  const placed = shownItem(original.id);
+  if (!placed) return original;
+  const { projected, ...rest } = placed;
+  return { ...original, points: rest.points, ...(rest.geometry ? { geometry: rest.geometry } : {}), at: frameNow() };
+};
 const calibPair = (id) => (calib && id ? calib.pairs.find((pair) => pair.id === id) || null : null);
 const calibFit = () => (calib ? calibrate(calib.pairs, aspect()) : null);
 const round5 = (value) => Math.round(value * 1e5) / 1e5;
@@ -1619,8 +1730,8 @@ function openCalibration(mode = "board") {
   pause();
   select(null);
   // The clip's pitch marks come back when it is reopened on their frame, for either mode.
-  const saved = pitchKey(doc.value);
-  const pairs = saved && saved.frame === frameNow() ? saved.pairs.map((pair) => ({ id: pair.id, at: [...pair.at] })) : [];
+  const saved = keyAt(doc.value, frameNow());
+  const pairs = saved ? saved.pairs.map((pair) => ({ id: pair.id, at: [...pair.at] })) : [];
   calib = { mode, frame: frameNow(), cut: cutFrameNow(), pairs, pick: null, selected: null, drag: null, job: null, model: null, message: null };
   buildPitch();
   const board = mode === "board";
@@ -1655,41 +1766,136 @@ function closeCalibration() {
   showTime();
 }
 
-/** Keep the marks as the clip's pitch (one frame in P1; marking another frame replaces it). */
+/** Keep the marks as the pitch on this frame: a new marked frame, or new marks for this one (P2). */
 function savePitch() {
   if (!calib || calib.mode !== "pitch" || !calibFit()) return;
   const frame = calib.frame;
   const pairs = calib.pairs.map((pair) => ({ id: pair.id, at: pair.at }));
-  doc.commitDocument((value) => ({ ...value, pitch: { keys: [{ frame, pairs }] } }));
+  const first = !pitchKeys(doc.value).length;
+  doc.commitDocument((value) => withKey(value, frame, pairs));
   closeCalibration();
   pitchLines = true;
   renderPitchSaved();
-  trackStatus(`Pitch marked on frame ${frame + 1}. Rings and arrows can now lie flat on it: tick "Flat on the pitch" in their settings.`);
+  trackStatus(first
+    ? `Pitch marked on frame ${frame + 1}. Rings and arrows can now lie flat on it: tick "Flat on the pitch" in their settings. Follow the camera to keep them on the grass as it moves.`
+    : `Pitch marked on frame ${frame + 1} too: the pitch is taken from the nearest marked frames either side.`);
 }
 
 function forgetPitch() {
-  if (!calib || !pitchKey(doc.value)) return;
-  doc.commitDocument((value) => { const next = { ...value }; delete next.pitch; return next; });
+  if (!calib || !keyAt(doc.value, calib.frame)) return;
+  const frame = calib.frame;
+  doc.commitDocument((value) => withoutKey(value, frame));
   closeCalibration();
   renderPitchSaved();
-  trackStatus("The clip's pitch is removed; flat drawings are drawn as usual again. Undo brings it back.");
+  trackStatus(pitchKeys(doc.value).length
+    ? `The pitch marks on frame ${frame + 1} are removed. Undo brings them back.`
+    : "The clip's pitch is removed; flat drawings are drawn as usual again. Undo brings it back.");
 }
 
 function renderPitchSaved() {
-  const key = clip ? pitchKey(doc.value) : null;
-  $("[data-pitch-saved]").hidden = !key;
-  if (!key) return;
-  $("[data-pitch-frame]").textContent = String(key.frame + 1);
+  const keys = clip ? pitchKeys(doc.value) : [];
+  $("[data-pitch-saved]").hidden = !keys.length;
+  if (!keys.length) return;
+  const track = clipTrack();
   $("[data-pitch-lines]").setAttribute("aria-pressed", String(pitchLines));
+  $("[data-pitch-go]").textContent = keys.length === 1 ? `Go to frame ${keys[0].frame + 1}` : "Next marked frame";
+  $("[data-pitch-follow]").textContent = track?.followed ? "Follow again" : "Follow the camera";
+  $("[data-pitch-follow]").disabled = Boolean(cameraJob || exporting);
+  $("[data-pitch-progress]").hidden = !cameraJob;
+  if (cameraJob) $("[data-pitch-progress] progress").value = cameraJob.progress;
+  const marked = `Marked on ${keys.length} frame${keys.length === 1 ? "" : "s"}.`;
+  let state = `${marked} Follow the camera so flat drawings and pitch lines stay on the grass as it moves.`;
+  let todo = 0;
+  if (cameraJob) state = `${marked} Following the camera...`;
+  else if (track?.followed) {
+    const checks = track.runs("check").length;
+    const none = track.runs("none").length;
+    todo = checks + none;
+    const parts = [`${marked} Camera followed.`];
+    if (checks) parts.push(`${checks} stretch${checks === 1 ? " was" : "es were"} hard to follow: check the pitch lines there.`);
+    if (none) parts.push(`${none} stretch${none === 1 ? " has" : "es have"} no pitch (after a cut, or where the camera was lost): mark the pitch there.`);
+    if (!todo) parts.push("Turn on Pitch lines and play to check it.");
+    state = parts.join(" ");
+  }
+  $("[data-pitch-state]").textContent = state;
+  $("[data-pitch-next]").hidden = !todo || Boolean(cameraJob);
 }
 
-function goToPitchFrame() {
-  const key = pitchKey(doc.value);
-  if (!key) return;
-  const place = sourceToCut(key.frame, doc.value.parts, clip.frames)[0];
-  if (place === undefined) { trackStatus(`Frame ${key.frame + 1}, where the pitch is marked, is cut out of the clip now.`, true); return; }
+/** Show recorded frame `frame` (pausing), or say it was cut out. */
+function goToSourceFrame(frame, what) {
+  const place = sourceToCut(frame, doc.value.parts, clip.frames)[0];
+  if (place === undefined) { trackStatus(`Frame ${frame + 1}, ${what}, is cut out of the clip now.`, true); return false; }
   pause();
   seekOutput(playStart(place, timing, doc.freezes));
+  return true;
+}
+
+/** The next marked frame after the one on screen (round to the first). */
+function goToPitchFrame() {
+  const keys = pitchKeys(doc.value).map((key) => key.frame);
+  if (!keys.length) return;
+  const next = keys.find((frame) => frame > frameNow()) ?? keys[0];
+  goToSourceFrame(next, "where the pitch is marked");
+}
+
+/** The next stretch to check, or without a pitch, after the frame on screen (round to the first). */
+function goToPitchCheck() {
+  const track = clipTrack();
+  if (!track) return;
+  const runs = [...track.runs("check"), ...track.runs("none")].sort((a, b) => a[0] - b[0]);
+  if (!runs.length) return;
+  const [first, last] = runs.find(([start]) => start > frameNow()) || runs[0];
+  if (!goToSourceFrame(first, "the start of the stretch to check")) return;
+  pitchLines = true;
+  renderPitchSaved();
+  trackStatus(track.at(first)
+    ? `Frames ${first + 1} to ${last + 1} were hard to follow. If the pitch lines are off, mark the pitch on one of these frames.`
+    : `Frames ${first + 1} to ${last + 1} have no pitch. Mark the pitch on one of them to carry on.`, true);
+}
+
+/** Follow the camera through the clip in the background (P2), then keep its path with the pitch. */
+async function followCamera() {
+  const keys = pitchKeys(doc.value).map((key) => key.frame);
+  if (!clip || cameraJob || exporting || !keys.length) return;
+  const span = Math.min(clip.frames, CAMERA_FRAMES);
+  const start = Math.max(0, Math.min(clip.frames - span, keys[0] - Math.floor(span / 2)));
+  const end = start + span - 1;
+  try {
+    const { job } = await projectRequest(`${editorPath()}/camera`, { from_frame: start, to_frame: end });
+    cameraJob = { id: job.id, progress: 0 };
+    renderPitchSaved();
+    for (;;) {
+      await sleep(250);
+      if (cameraJob?.id !== job.id) return; // cancelled
+      const { job: now } = await projectRequest(`/api/editor-jobs/${job.id}`);
+      if (now.status === "running") { cameraJob.progress = now.progress || 0; renderPitchSaved(); continue; }
+      cameraJob = null;
+      if (now.status === "done") {
+        doc.commitDocument((value) => (value.pitch ? withCamera(value, now.result) : value));
+        pitchLines = true;
+        trackStatus(span < clip.frames
+          ? `Camera followed from frame ${start + 1} to ${end + 1} (3 minutes at a time, round the first marked frame).`
+          : "Camera followed through the clip. Flat drawings now keep their place on the grass.");
+      } else if (now.status === "failed") trackStatus(`Following the camera failed: ${now.error}`, true);
+      else trackStatus("Following the camera was cancelled.");
+      renderPitchSaved();
+      scheduleRender();
+      return;
+    }
+  } catch (error) {
+    cameraJob = null;
+    renderPitchSaved();
+    trackStatus(`Could not follow the camera: ${error.message}`, true);
+  }
+}
+
+function stopCamera() {
+  if (!cameraJob) return;
+  const { id } = cameraJob;
+  cameraJob = null;
+  projectRequest(`/api/editor-jobs/${id}/cancel`, {}).catch(() => {});
+  renderPitchSaved();
+  trackStatus("Following the camera was cancelled.");
 }
 
 function pickMark(id) {
@@ -1774,9 +1980,9 @@ function renderCalibration() {
   $("[data-calib-empty]").disabled = busy || moving;
   $("[data-calib-remove]").disabled = !calibPair(calib.selected) || busy;
   $("[data-calib-save]").disabled = !fit || busy;
-  const replaced = pitchKey(doc.value);
-  if (calib.mode === "pitch" && replaced && replaced.frame !== calib.frame && !problem && count >= 4) {
-    line.textContent = `${state} Saving replaces the pitch marked on frame ${replaced.frame + 1}.`;
+  const others = pitchKeys(doc.value).filter((key) => key.frame !== calib.frame).length;
+  if (calib.mode === "pitch" && others && !keyAt(doc.value, calib.frame) && !problem && count >= 4) {
+    line.textContent = `${state} Saving adds this frame to the ${others} marked already.`;
   }
   $("[data-calib-progress]").hidden = !busy;
   if (busy) $("[data-calib-progress] progress").value = calib.job.progress;
@@ -1800,11 +2006,11 @@ function drawCalibration() {
   if (focus) drawLoupe(focus);
 }
 
-function drawPitchLines(fit) {
+function drawPitchLines(fit, doubtful = false) {
   const ratio = window.devicePixelRatio || 1;
   {
-    ctx.save(); // the fitted pitch markings, in the calibration's green
-    ctx.strokeStyle = "rgba(200, 241, 53, 0.9)";
+    ctx.save(); // the fitted pitch markings, in the calibration's green (amber where the camera was hard to follow)
+    ctx.strokeStyle = doubtful ? "rgba(232, 163, 23, 0.95)" : "rgba(200, 241, 53, 0.9)";
     ctx.lineWidth = 1.5 * ratio;
     ctx.lineJoin = "round";
     projectedLines(fit).forEach((line) => {
@@ -2181,7 +2387,8 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   } else {
     const style = toolStyle[tool];
-    const geometry = tool === "spotlight" ? { ...ringGeometry(0.03, aspect()), h: 0.3 } : ringGeometry(0.03, aspect());
+    const geometry = tool === "shape" ? { shape: shapeKind }
+      : tool === "spotlight" ? { ...ringGeometry(0.03, aspect()), h: 0.3 } : ringGeometry(0.03, aspect());
     const points = tool === "ring" || tool === "spotlight" ? [at] : tool === "freehand" ? [at] : [at, at];
     gesture = { type: "draw", start: at, draft: newItem(tool, points, { from, to: total(), style, geometry }), moved: false };
   }
@@ -2240,6 +2447,11 @@ canvas.addEventListener("pointermove", (event) => {
       if (Math.hypot((at[0] - last[0]) * canvas.width, (at[1] - last[1]) * canvas.height) >= 2 && draft.points.length < 4000) {
         draft.points.push(clampPoint(at));
       }
+    } else if (draft.kind === "shape" && event.shiftKey) {
+      // Equal sides on screen: a square, a circle, a regular polygon.
+      const side = Math.max(Math.abs(dx), Math.abs(dy));
+      draft.points[1] = clampPoint([gesture.start[0] + (Math.sign(dx) || 1) * side / canvas.width,
+        gesture.start[1] + (Math.sign(dy) || 1) * side / canvas.height]);
     } else {
       draft.points[1] = clampPoint(at);
     }
@@ -2253,15 +2465,16 @@ const endGesture = () => {
   if (!current?.type) return;
   if (current.type === "draw") {
     const draft = current.draft;
-    const tooSmall = !current.moved && (draft.kind === "arrow" || draft.kind === "line" || draft.kind === "freehand");
+    const tooSmall = !current.moved && ["arrow", "line", "freehand", "shape"].includes(draft.kind);
     if (!tooSmall) {
       if (draft.kind === "freehand") {
         draft.points = simplify(draft.points.map(clampPoint), 3 * (window.devicePixelRatio || 1), canvas.width, canvas.height);
         if (draft.points.length < 2) return scheduleRender();
       }
       // Ring, spotlight, arrow and line ends dropped on a followed player's feet follow that player.
-      const points = draft.kind === "freehand" ? draft.points : draft.points.map(snapPoint);
+      const points = draft.kind === "freehand" || draft.kind === "shape" ? draft.points : draft.points.map(snapPoint);
       const item = placeNew(newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry }));
+      if (isFlat(item)) item.at = frameNow();
       doc.add(item);
       select(item.id);
     }
@@ -2300,6 +2513,7 @@ function moveGroup({ bases, previews }) {
     const preview = changed.get(original.id);
     if (!preview) return original;
     if (original.points.some(isLinked)) { skipped += 1; return original; }
+    if (isFlat(original)) return { ...rebased(original), points: preview.points };
     if (original.kind === "token" && original.on !== undefined) return setMove(original, boardSeconds(original), preview.points[0]);
     return { ...original, points: preview.points };
   }));
@@ -2328,7 +2542,7 @@ function cursorAt(at) {
 // that player on this frame (a keyframe), and a fixed point dropped on a
 // followed player's feet starts following them.
 function applyEdit({ type, id, index, base, preview, end: pointerAt }) {
-  const original = doc.find(id);
+  const original = rebased(doc.find(id));
   if (!original) return;
   if (original.kind === "text") { // its one handle moves it too
     // Text that follows a player keeps following: a drag changes where it sits next to them (the player's
@@ -2386,7 +2600,7 @@ canvas.addEventListener("dblclick", (event) => {
 // ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
-const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token" };
+const TOOL_KEYS = { v: "select", r: "ring", s: "spotlight", a: "arrow", l: "line", f: "freehand", t: "text", z: "zone", p: "follow", k: "token", g: "shape" };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") setMenu(false);
   if (!clip) return;
@@ -2444,7 +2658,7 @@ const screenshot = async (button) => {
   const board = boardNow();
   if (board) drawBoard(context, shot.width, shot.height, board.background);
   else context.drawImage(video, 0, 0, shot.width, shot.height);
-  drawItems(context, projectItems(shown(), clipPitch()), shot.width, shot.height, currentTime());
+  drawItems(context, projectItems(shown(), board ? null : pitchHere()?.calibration), shot.width, shot.height, currentTime());
   const type = format === "jpeg" ? "image/jpeg" : "image/png";
   const blob = await new Promise((resolve) => shot.toBlob(resolve, type, 0.92));
   const name = `${clip.name} frame ${frameNow() + 1}.${format === "jpeg" ? "jpg" : "png"}`;
@@ -2479,7 +2693,7 @@ const endExport = (text) => {
 const DRAWING_SHARE = 0.35; // of the progress bar: drawing overlays, then rendering
 
 /** What the overlay looks like on output frame `n`: a key that changes only when the picture does. */
-const overlayKey = (value, n) => {
+const overlayKey = (value, n, pitch = null) => {
   const t = n / clip.fps;
   const cut = cutClip(clip, value.parts);
   const frame = cutToSource(outputToSource(t, cut, value.freezes).frame, value.parts, clip.frames);
@@ -2487,10 +2701,11 @@ const overlayKey = (value, n) => {
   const shown = [];
   itemsAt(value, cut, t).forEach((item) => {
     const state = animation(item, t);
-    if (state) shown.push(resolveItem(placedAt(value, cut, item, t), value.tracks || [], frame), state);
+    const placed = state && placeFlat(resolveItem(placedAt(value, cut, item, t), value.tracks || [], frame), pitch, frame);
+    if (placed && !placed.offPitch) shown.push(placed, state);
   });
   const key = JSON.stringify([board ? [board.atFrame, board.background] : null, ...shown.map((entry) => (entry.points ? [entry.id, entry.points] : entry))]);
-  return { t, board, shown, key };
+  return { t, board, shown, key, frame };
 };
 
 // Overlays go in batches: every request is a new connection to the engine, and
@@ -2529,7 +2744,7 @@ const exportVideo = async () => {
     const value = doc.value; // the saved document; edits made during the export are not in it
     ({ export: run.session } = await projectRequest(`${editorPath()}/export`, {}));
     const { id, frames, width, height } = run.session;
-    const exportPitch = pitchCalibration(value, aspect()); // flat drawings, as on screen
+    const exportPitch = clipPitchTrack(value, aspect()); // flat drawings, as on screen
     const sheet = document.createElement("canvas");
     sheet.width = width;
     sheet.height = height;
@@ -2549,14 +2764,14 @@ const exportVideo = async () => {
     };
     for (let n = 0; n < frames; n += 1) {
       if (run.cancelled) return;
-      const { board, shown, key } = overlayKey(value, n);
+      const { board, shown, key, frame } = overlayKey(value, n, exportPitch);
       if (key !== previous) {
         previous = key;
         let entry = { frame: n, crop: null };
         if (shown.length || board) {
           context.clearRect(0, 0, width, height);
           if (board) drawBoard(context, width, height, board.background); // covers the frozen frame
-          for (let index = 0; index < shown.length; index += 2) drawItem(context, projectItems([shown[index]], exportPitch)[0], width, height, shown[index + 1]);
+          for (let index = 0; index < shown.length; index += 2) drawItem(context, projectItems([shown[index]], board ? null : exportPitch?.at(frame)?.calibration)[0], width, height, shown[index + 1]);
           const pixels = context.getImageData(0, 0, width, height).data;
           // Moving tokens change a few places: send those tiles over the overlay already held (M8).
           const tiles = held ? changedTiles(held, pixels, width, height) : null;
@@ -2627,6 +2842,7 @@ const cancelExport = async () => {
 // ---------------------------------------------------------------------------
 const wire = () => {
   document.querySelectorAll("[data-tool]").forEach((button) => { button.onclick = () => setTool(button.dataset.tool); });
+  wireShapeMenu();
   document.querySelectorAll("[data-step]").forEach((button) => { button.onclick = () => step(Number(button.dataset.step)); });
   $("[data-freeze]").onclick = freezeHere;
   $("[data-split]").onclick = splitHere;
@@ -2637,10 +2853,13 @@ const wire = () => {
   $("[data-pitch-lines]").onclick = () => {
     pitchLines = !pitchLines;
     renderPitchSaved();
-    if (pitchLines && pitchKey(doc.value).frame !== frameNow()) goToPitchFrame();
+    if (pitchLines && !pitchHere()) goToPitchFrame();
     scheduleRender();
   };
   $("[data-pitch-go]").onclick = goToPitchFrame;
+  $("[data-pitch-follow]").onclick = followCamera;
+  $("[data-pitch-stop]").onclick = stopCamera;
+  $("[data-pitch-next]").onclick = goToPitchCheck;
   $("[data-calib-find]").onclick = findPlayers;
   $("[data-calib-empty]").onclick = () => makeBoard(null);
   $("[data-calib-remove]").onclick = removeCalibrationPoint;

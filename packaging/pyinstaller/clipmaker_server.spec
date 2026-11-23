@@ -41,6 +41,7 @@ hiddenimports = [
     "telestration.timeline",
     "telestration.segments",
     "telestration.tracker",
+    "telestration.camera",
     "coding",
     "coding.store",
     "coding.to_events",
