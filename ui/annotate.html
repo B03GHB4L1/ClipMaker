@@ -6,10 +6,10 @@
     <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
   <title>VizorPlay - Annotate</title>
   <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=2" /><link rel="stylesheet" href="compact.css?v=15" />
-  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=29" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="analysis/native.css?v=11" /><link rel="stylesheet" href="annotate.css?v=30" />
     <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=1" />
   <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
-  <script type="module" src="annotate.js?v=26"></script>
+  <script type="module" src="annotate.js?v=27"></script>
   <script type="module" src="update.js?v=1"></script>
   <script type="module" src="audio-warm.js?v=2"></script>
 </head>
@@ -208,6 +208,11 @@
             <div class="annotate-follow-group" data-follow-linked>
               <h3>Speed on the pitch</h3>
               <p class="annotate-muted" data-follow-speed role="status"></p>
+              <canvas class="annotate-speed-chart" data-speed-chart width="240" height="110" role="img" aria-label="Speed over time for this player"></canvas>
+              <span class="annotate-pair">
+                <button type="button" data-speed-save title="Save the speed chart as a picture">Save chart</button>
+                <button type="button" data-speed-send title="Add the speed chart to the project's pictures, for Insert picture">Send to clip</button>
+              </span>
             </div>
             <div class="annotate-follow-group" data-follow-linked>
               <h3>Check the tracking</h3>

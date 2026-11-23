@@ -270,6 +270,15 @@ class SharedUiTests(unittest.TestCase):
         self.assertIn('/pictures`', helper)
         self.assertIn('name: "sendToClip"', helper)  # the Plotly charts (comparison, tactical) get the same button
 
+    def test_followed_player_speed_has_a_chart_that_can_be_saved_and_sent(self):
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        for needle in ("data-speed-chart", "data-speed-save", "data-speed-send"):
+            self.assertIn(needle, html)
+        self.assertIn("drawSpeedChart", script)
+        self.assertIn("sendToClip", script)
+        self.assertTrue((UI / "annotate" / "speedchart.js").is_file())
+
     def test_video_lab_reel_is_picked_moment_by_moment(self):
         source = (UI / "analysis" / "tabs" / "tactical.js").read_text(encoding="utf-8")
         self.assertIn('"vl_selected_moment_", "vl_reel_moments_"', source)  # picks saved per playlist

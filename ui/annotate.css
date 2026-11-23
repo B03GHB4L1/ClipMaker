@@ -299,6 +299,7 @@ body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
 .annotate-steps span { color: var(--cm-muted); }
 .annotate-follow-group { display: flex; flex-direction: column; gap: 6px; }
 .annotate-follow-group[hidden] { display: none; }
+.annotate-speed-chart { width: 100%; height: auto; aspect-ratio: 240 / 110; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--annotate-panel); }
 .annotate-follow-group h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; }
 .annotate-follow-group .annotate-pair { display: grid; grid-template-columns: minmax(0, 1fr); }
 .annotate-main .annotate-follow-group > button { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
