@@ -122,3 +122,15 @@ test("a measure end linked to a followed player moves with them", async () => {
   near(late[0][0], 0.6, 1e-6, "ends where the player is later");
   assert.deepEqual(late[1], fixed, "the other end stays put");
 });
+
+test("a measure with both ends on two followed players keeps both on their feet", async () => {
+  const { newTrack, linkTo, resolveItem } = await import("../ui/annotate/tracks.js");
+  const first = newTrack(0, [0.2, 0.9, 0.05, 0.2]);
+  first.keyframes["50"] = [0.4, 0.9, 0.05, 0.2];
+  const second = newTrack(0, [0.8, 0.9, 0.05, 0.2]);
+  second.keyframes["50"] = [0.6, 0.9, 0.05, 0.2];
+  const measure = newItem("measure", [linkTo(first, [0.2, 0.9], 0), linkTo(second, [0.8, 0.9], 0)], { from: 0, to: 60 });
+  const late = resolveItem(measure, [first, second], 50).points;
+  near(late[0][0], 0.4, 1e-6, "first end on the first player");
+  near(late[1][0], 0.6, 1e-6, "second end on the second player");
+});
