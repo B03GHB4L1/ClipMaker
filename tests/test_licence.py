@@ -16,6 +16,15 @@ class LicenceTests(unittest.TestCase):
         self.assertIn("granvskaia@gmail.com", text)
         self.assertNotIn("Permission is hereby granted", text)  # the MIT grant lives in its own file
 
+    def test_licence_summary_speaks_to_the_public(self):
+        # Readers of the installed app or the repo front page know releases, not commits or source paths.
+        summary = (ROOT / "LICENSE").read_text(encoding="utf-8").split("# PolyForm Strict License")[0]
+        self.assertNotIn("552e33f", summary)
+        for path in ("ui/", "app/", ".txt"):
+            self.assertNotIn(path, summary)
+        for part in ("three.js", "Geist Mono", "ViT"):
+            self.assertIn(part, summary)
+
     def test_the_earlier_mit_notice_is_kept(self):
         text = (ROOT / "LICENSE-MIT-EARLIER.md").read_text(encoding="utf-8")
         self.assertIn("Permission is hereby granted, free of charge", text)
