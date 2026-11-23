@@ -67,7 +67,7 @@ export const animation = (item, t) => {
   switch (show.animate || "none") {
     case "fade": state.alpha *= coming; break;
     case "draw":
-      if (["arrow", "line", "freehand", "zone", "ring", "shape"].includes(item.kind)) state.draw = coming;
+      if (["arrow", "line", "freehand", "zone", "ring", "shape", "offside", "measure"].includes(item.kind)) state.draw = coming;
       else state.alpha *= coming;
       break;
     case "grow": state.scale = coming; break;

@@ -17,7 +17,7 @@ from typing import Any
 from . import parts as cuts
 
 VERSION = 1
-KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape"}
+KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape", "offside", "measure"}
 SHAPES = {"rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "star"}  # the Shape tool's shapes
 ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
 EXIT_ANIMATIONS = {"none", "fade"}
@@ -29,8 +29,10 @@ MAX_KEYFRAMES = 500
 OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its player's feet
 FREEZE_SECONDS = (0.04, 60.0)
 MAX_ITEMS = 300
-MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1, "shape": 2}
-MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1, "shape": 2}
+MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1, "shape": 2,
+              "offside": 1, "measure": 2}
+MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1, "shape": 2,
+              "offside": 1, "measure": 2}
 # Tactical boards (M7): a freeze can show a pitch instead of the held frame.
 BOARD_VIEWS = {"full", "left", "right", "blank"}
 BOARD_THEMES = {"grass", "light"}
@@ -52,7 +54,8 @@ STYLE_RULES: dict[str, tuple[str, float, float]] = {
 }
 COLOUR_KEYS = {"stroke", "fill", "color", "background"}
 FLAG_KEYS = {"dashed", "bold", "flat"}
-FLAT_KINDS = {"ring", "arrow"}  # drawn flat on the pitch through the clip's calibration (P1)
+FLAT_KINDS = {"ring", "arrow", "offside", "measure"}  # drawn flat on the pitch through the clip's calibration (P1, P3)
+PITCH_KINDS = {"offside", "measure"}  # P3: only meaningful on the pitch, so always flat, fixed in place and on the video
 # The clip's pitch calibration (P1): pitch marks clicked on frames of the clip (keys), and the camera's
 # path between them (P2, camera.py): per frame, the homography to the first frame of its stretch.
 MAX_PITCH_KEYS = 50
@@ -311,6 +314,14 @@ def _item(value: Any, limit: float, tracks: set[str], boards: set[int], frames: 
     }
     if clean["style"].get("flat") and kind not in FLAT_KINDS:
         raise ValueError(f"A {kind} cannot lie flat on the pitch.")
+    if kind in PITCH_KINDS:
+        name = "An offside line" if kind == "offside" else "A measure"
+        if clean["style"].get("flat") is not True:
+            raise ValueError(f"{name} lies on the pitch.")
+        if "on" in value:
+            raise ValueError(f"{name} goes on the video, not on a board.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError(f"{name} is placed on the grass; it does not follow a player.")
     if "at" in value:
         # The recorded frame a flat drawing's points are for (P2): it keeps that place on the pitch.
         at = value["at"]
