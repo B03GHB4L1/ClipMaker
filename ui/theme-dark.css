@@ -2703,29 +2703,6 @@
 :root[data-theme="dark"] .annotate-main .annotate-session-drop:hover:not(:disabled) {
   color: #ff9888;
 }
-:root[data-theme="dark"] .annotate-strip-name {
-  color: var(--cm-muted);
-}
-:root[data-theme="dark"] .annotate-strip-clip {
-  border: 1px solid var(--cm-rule);
-  background: var(--annotate-panel);
-  color: var(--cm-ink);
-  text-decoration: none;
-}
-:root[data-theme="dark"] .annotate-strip-clip:hover {
-  background: var(--annotate-hover);
-}
-:root[data-theme="dark"] .annotate-strip-clip[aria-current="page"] {
-  border-color: var(--cm-ink);
-}
-:root[data-theme="dark"] .annotate-strip-index {
-  background: var(--annotate-hover);
-  color: var(--cm-muted);
-}
-:root[data-theme="dark"] .annotate-strip-clip[aria-current="page"] .annotate-strip-index {
-  background: var(--cm-ink);
-  color: var(--annotate-panel);
-}
 :root[data-theme="dark"] .annotate-timeline {
   --tl-head: #fe7c79;
 }
@@ -2818,6 +2795,49 @@
 }
 :root[data-theme="dark"] .annotate-timeline .annotate-cover {
   background: color-mix(in srgb, var(--cm-ink) 30%, transparent);
+}
+:root[data-theme="dark"] .annotate-sequence {
+  border-top: 1px solid var(--cm-rule);
+  border-bottom: 1px solid var(--cm-rule);
+}
+:root[data-theme="dark"] .annotate-sequence-head {
+  border-right: 1px solid var(--cm-rule);
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .annotate-sequence-lane {
+  background: var(--tl-lane);
+}
+:root[data-theme="dark"] .annotate-sequence-block {
+  background: color-mix(in srgb, #8bc8b5 55%, var(--annotate-panel));
+  color: #2f2f2f;
+  text-decoration: none;
+}
+:root[data-theme="dark"] .annotate-sequence-block[aria-current="page"] {
+  background: #8bc8b5;
+}
+:root[data-theme="dark"] .annotate-sequence-block:focus-visible {
+  outline: 2px solid var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-sequence-block .annotate-block-label {
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-sequence-index {
+  background: rgba(0,0,0,0.45);
+}
+:root[data-theme="dark"] .annotate-sequence-tools select,
+:root[data-theme="dark"] .annotate-sequence-tools button {
+  border: 1px solid var(--cm-rule);
+  background: transparent;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-sequence-tools button:hover:not(:disabled) {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-sequence-tools svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* code.css */

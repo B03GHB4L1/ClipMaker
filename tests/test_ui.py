@@ -456,11 +456,11 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         self.assertIn('aria-current="page" data-annotate-nav>Annotate</a>', html)
         self.assertIn("data-library-list", html)
-        self.assertIn('data-clip-strip aria-label="Clips in this session"', html)
+        self.assertIn('data-sequence-lane aria-label="Clips in this session, in play order"', html)
         script = (UI / "annotate.js").read_text(encoding="utf-8")
-        # No clip in the link: list the sessions instead of failing; a clip shows its session's other clips.
+        # No clip in the link: list the sessions instead of failing; a clip shows its session as a sequence.
         self.assertIn("if (!clipId) return await startLibrary();", script)
-        self.assertIn('showClipStrip($("[data-clip-strip]"), projectId, clipId);', script)
+        self.assertIn('showSequence($("[data-sequence]"), projectId, clipId, {', script)
         library = (UI / "annotate" / "library.js").read_text(encoding="utf-8")
         for action in ('act("rename"', 'act("delete"', 'act("remove-clip"'):
             self.assertIn(action, library)
@@ -536,6 +536,22 @@ class SharedUiTests(unittest.TestCase):
         # Dragging a freeze edge or a drawing grip snaps, and Alt places freely.
         self.assertIn("snapTime(", script[script.index("drag.next ="):])
         self.assertIn("event?.altKey", script)
+
+    def test_annotate_sequence_reorders_adds_and_exports_as_one_video(self):
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        sequence = (UI / "annotate" / "sequence.js").read_text(encoding="utf-8")
+        for hook in ("data-sequence ", "data-sequence-lane", "data-sequence-add", "data-sequence-export"):
+            self.assertIn(hook, html)
+        self.assertIn('request("reorder", { session_id: session.id, clips: order })', sequence)
+        self.assertIn('request("move-clip", { session_id: session.id, clip_id: chosen })', sequence)
+        self.assertIn("await beforeLeave();", sequence)  # the open clip is saved before another opens
+        self.assertIn('event.altKey || !["ArrowLeft", "ArrowRight"]', sequence)  # reorder by keyboard too
+        # Each clip's overlays are drawn and sent like a single export, then the engine joins them.
+        flow = script[script.index("const exportSequence"):]
+        self.assertIn("drawOverlays(opened.clip, opened.annotations, exportSession", flow)
+        self.assertIn('"/api/editor-sequences/render", { exports: run.sessions.map', flow)
+        self.assertIn("run.sessions || []", script[script.index("const cancelExport"):])
 
     def test_annotate_exports_video_with_progress_and_cancel(self):
         # M4: the page draws overlays with the preview's own code and sends them to the engine.

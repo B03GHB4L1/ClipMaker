@@ -15,7 +15,7 @@ class PartsUiTests(unittest.TestCase):
         for hook in ("data-parts-lane", "data-split", "data-parts-panel", "data-parts-list", "data-parts-count", "data-parts-empty"):
             self.assertIn(hook, self.html, hook)
         self.assertIn('title="Cut the clip into two parts at the playhead (X)"', self.html)
-        self.assertIn(">Parts</span>", self.html)  # the timeline row is named
+        self.assertIn(">Video</span>", self.html)  # the timeline row is named, as in a video editor
 
     def test_every_part_action_has_a_button_with_words_and_a_key_where_it_has_one(self):
         # Dragging is the quick route; the buttons are the keyboard and screen-reader route.

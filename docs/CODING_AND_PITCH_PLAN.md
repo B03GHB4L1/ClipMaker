@@ -556,15 +556,16 @@ play and export it as one video. No new clip format is needed.
 
 Build order, each step shippable on its own:
 
-- **S1 Sequence strip.** A track above the clip's lanes showing every clip of the
-  session as a named block sized by its output length (parts and freezes
-  included). Click a block to open that clip, drag to reorder (saved in
-  `sessions.json`), Add clip / Add picture. Same ruler, zoom and snapping.
-- **S2 Sequence export.** One Export button renders each clip with the existing
-  per-clip path into a temporary file, then joins them with ffmpeg. Clips of a
-  different size or frame rate are scaled and padded to the first clip's. Audio
-  is kept per clip (silence where a clip has none). One progress bar across all
-  clips; cancel stops the current clip and removes everything written.
+- **S1 Sequence strip (done).** A Sequence row at the top of the timeline (Annotate
+  only) shows the session's clips in play order, each block as long as the clip
+  plays once exported. Click to open a clip (the open one is saved first), drag
+  or Alt+arrow to reorder (saved in `sessions.json`), and Add clip moves a clip in
+  from another session. Replaces the old strip of clip links.
+- **S2 Sequence export (done).** Export sequence draws each clip's overlays with
+  the single-clip code, then `/api/editor-sequences/render` renders each clip and
+  joins them (`export.run_sequence`): copied when every clip matches, otherwise
+  scaled and padded to the first clip's size and frame rate, with silence for a
+  clip without sound. One progress bar; cancel removes everything written.
 - **S3 Stand-alone pictures and title cards.** A sequence entry that is only a
   picture (from the existing picture store) or a text card, with a duration;
   rendered as a still segment.

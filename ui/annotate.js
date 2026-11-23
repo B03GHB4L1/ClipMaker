@@ -15,7 +15,8 @@ import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } fro
 import { minimapPlayers, motionOf, pitchPositions, speedAt } from "./annotate/motion.js";
 import { drawSpeedChart, SPEED_PAPER } from "./annotate/speedchart.js";
 import { fitBox } from "./annotate/fit.js";
-import { showClipStrip, showLibrary } from "./annotate/library.js";
+import { showLibrary } from "./annotate/library.js";
+import { showSequence } from "./annotate/sequence.js";
 import { REVIEW, LOST, boxAt, flaggedRuns, isLinked, lastFrame, linkTo, linkedTracks, mergeRows, newTrack, pruneTracks,
   resolveItem, resolvePoint, setKeyframe, spanEnd } from "./annotate/tracks.js";
 
@@ -3061,7 +3062,8 @@ const screenshot = async (button) => {
 // drawings change (raw, cropped: picture encoding stalls in a hidden window); the engine lays them over the frames, holds the freezes (silent)
 // and encodes the clip into the user's VizorPlay folder.
 // ---------------------------------------------------------------------------
-let exporting = null; // {session, job, cancelled}
+let exporting = null; // {session | sessions, job, cancelled}
+let sequence = null; // the session this clip is in (annotate/sequence.js)
 const exportPanel = $("[data-export-panel]");
 const exportStatus = (text, share) => {
   exportPanel.hidden = false;
@@ -3071,6 +3073,7 @@ const exportStatus = (text, share) => {
 const endExport = (text) => {
   exporting = null;
   $("[data-export]").disabled = false;
+  if (sequence) $("[data-sequence-export]").disabled = sequence.clips.length < 2;
   $("[data-export-cancel]").disabled = false;
   if (text) {
     exportStatus(text, 0);
@@ -3082,10 +3085,10 @@ const endExport = (text) => {
 const DRAWING_SHARE = 0.35; // of the progress bar: drawing overlays, then rendering
 
 /** What the overlay looks like on output frame `n`: a key that changes only when the picture does. */
-const overlayKey = (value, n, pitch = null) => {
-  const t = n / clip.fps;
-  const cut = cutClip(clip, value.parts);
-  const frame = cutToSource(outputToSource(t, cut, value.freezes).frame, value.parts, clip.frames);
+const overlayKey = (value, n, pitch = null, record = clip) => {
+  const t = n / record.fps;
+  const cut = cutClip(record, value.parts);
+  const frame = cutToSource(outputToSource(t, cut, value.freezes).frame, value.parts, record.frames);
   const board = boardAt(value, cut, t);
   const shown = [];
   itemsAt(value, cut, t).forEach((item) => {
@@ -3133,9 +3136,26 @@ const exportVideo = async () => {
   try {
     const value = doc.value; // the saved document; edits made during the export are not in it
     ({ export: run.session } = await projectRequest(`${editorPath()}/export`, {}));
-    const { id, frames, width, height } = run.session;
+    if (!(await drawOverlays(clip, value, run.session, run, (done) => exportStatus(`Drawing overlays: frame ${done} of ${run.session.frames}`, (done / run.session.frames) * DRAWING_SHARE)))) return;
+    ({ job: run.job } = await projectRequest(`/api/editor-exports/${run.session.id}/render`, { name: `${clip.name} annotated` }));
+    await followExport(run);
+  } catch (error) {
+    if (!run.cancelled) {
+      showSaveError(error.message, "Video");
+      if (run.session && !run.job) fetch(`/api/editor-exports/${run.session.id}/cancel`, { method: "POST" }).catch(() => {});
+      endExport();
+    }
+  }
+};
+
+/**
+ * Draw the overlays of `value` (the saved drawings of clip `record`) frame by frame, as the preview does, and send
+ * them to export `session`. `report(frame)` shows progress. False when the run was cancelled on the way.
+ */
+const drawOverlays = async (record, value, session, run, report) => {
+    const { id, frames, width, height } = session;
     await picturesReady((value.freezes || []).flatMap((freeze) => (freeze.background?.kind === "picture" ? [freeze.background.id] : [])));
-    const exportPitch = clipPitchTrack(value, aspect()); // flat drawings, as on screen
+    const exportPitch = clipPitchTrack(value, record.width / record.height); // flat drawings, as on screen
     const sheet = document.createElement("canvas");
     sheet.width = width;
     sheet.height = height;
@@ -3154,8 +3174,8 @@ const exportVideo = async () => {
       sending = sendBatch(id, entries);
     };
     for (let n = 0; n < frames; n += 1) {
-      if (run.cancelled) return;
-      const { board, shown, key, frame } = overlayKey(value, n, exportPitch);
+      if (run.cancelled) return false;
+      const { board, shown, key, frame } = overlayKey(value, n, exportPitch, record);
       if (key !== previous) {
         previous = key;
         let entry = { frame: n, crop: null };
@@ -3178,12 +3198,15 @@ const exportVideo = async () => {
         }
         if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_FRAMES) await flush();
       }
-      if (n % 10 === 0) exportStatus(`Drawing overlays: frame ${n + 1} of ${frames}`, (n / frames) * DRAWING_SHARE);
+      if (n % 10 === 0) report(n + 1);
     }
     await flush();
     await sending;
-    if (run.cancelled) return;
-    ({ job: run.job } = await projectRequest(`/api/editor-exports/${id}/render`, { name: `${clip.name} annotated` }));
+    return !run.cancelled;
+};
+
+/** Poll the render job of `run` until it ends, showing its progress. */
+const followExport = async (run) => {
     for (;;) {
       const { job } = await projectRequest(`/api/editor-jobs/${run.job.id}`);
       if (job.status === "running") {
@@ -3203,10 +3226,44 @@ const exportVideo = async () => {
       }
       return;
     }
+};
+
+// The whole sequence (T2): every clip of the session, in its order, drawn and sent like one clip, then rendered
+// and joined by the engine into one video.
+const exportSequence = async (session) => {
+  if (exporting) return;
+  if (playing) pause();
+  finishText();
+  await save();
+  if (dirty) {
+    showSaveError("Save the drawings first; the export uses the saved version.", "Video");
+    return;
+  }
+  const run = { sessions: [], job: null, cancelled: false };
+  exporting = run;
+  $("[data-export]").disabled = true;
+  $("[data-sequence-export]").disabled = true;
+  exportStatus("Starting sequence export...", 0);
+  const count = session.clips.length;
+  try {
+    for (let index = 0; index < count; index += 1) {
+      const entry = session.clips[index];
+      const path = `/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(entry.id)}`;
+      const opened = entry.id === clipId ? { clip, annotations: doc.value } : await projectRequest(path);
+      if (run.cancelled) return;
+      const { export: exportSession } = await projectRequest(`${path}/export`, {});
+      run.sessions.push(exportSession);
+      const label = `Clip ${index + 1} of ${count}: drawing overlays`;
+      const drawn = await drawOverlays(opened.clip, opened.annotations, exportSession, run,
+        (done) => exportStatus(`${label}, frame ${done} of ${exportSession.frames}`, ((index + done / exportSession.frames) / count) * DRAWING_SHARE));
+      if (!drawn) return;
+    }
+    ({ job: run.job } = await projectRequest("/api/editor-sequences/render", { exports: run.sessions.map((each) => each.id), name: session.name }));
+    await followExport(run);
   } catch (error) {
     if (!run.cancelled) {
       showSaveError(error.message, "Video");
-      if (run.session && !run.job) fetch(`/api/editor-exports/${run.session.id}/cancel`, { method: "POST" }).catch(() => {});
+      if (!run.job) run.sessions.forEach((each) => fetch(`/api/editor-exports/${each.id}/cancel`, { method: "POST" }).catch(() => {}));
       endExport();
     }
   }
@@ -3225,6 +3282,7 @@ const cancelExport = async () => {
   }
   run.cancelled = true;
   if (run.session) await projectRequest(`/api/editor-exports/${run.session.id}/cancel`, {}).catch(() => {});
+  await Promise.all((run.sessions || []).map((each) => projectRequest(`/api/editor-exports/${each.id}/cancel`, {}).catch(() => {})));
   endExport("Export cancelled.");
 };
 
@@ -3328,7 +3386,6 @@ const start = async () => {
     if (!/^[a-f0-9]{32}$/.test(clipId)) throw new Error("This clip link is not valid. Open the clip from Annotate.");
     const { project } = await projectRequest(`/api/projects/${encodeURIComponent(projectId)}`);
     rememberProject(project);
-    showClipStrip($("[data-clip-strip]"), projectId, clipId);
     const opened = await projectRequest(`/api/editor/${encodeURIComponent(projectId)}/${encodeURIComponent(clipId)}`);
     clip = opened.clip;
     doc = createDocument(opened.annotations);
@@ -3352,6 +3409,11 @@ const start = async () => {
     renderFreezes();
     renderPlayers();
     seekOutput(0);
+    showSequence($("[data-sequence]"), projectId, clipId, {
+      onExport: exportSequence,
+      beforeLeave: async () => { finishText(); await save(); },
+      onError: (message) => showSaveError(message, "Sequence"),
+    }).then((found) => { sequence = found; });
     status.textContent = `${clip.width}×${clip.height} · ${clip.fps} fps`;
     setSaveStatus("Saved locally");
   } catch (error) {

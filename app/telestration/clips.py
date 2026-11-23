@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import annotations, pictures
+from . import annotations, parts as cuts, pictures
 
 PROJECT_ID = re.compile(r"^[a-zA-Z0-9_-]{1,160}$")
 CLIP_ID = re.compile(r"^[a-f0-9]{32}$")
@@ -206,15 +206,18 @@ class EditorClips:
                 _, _, notes = self._clip_paths(project_id, clip_id)
                 drawings = 0
                 edited = record.get("created_at") or ""
+                seconds = record.get("duration")
                 if notes.is_file():
                     try:
                         saved = json.loads(notes.read_text(encoding="utf-8"))
                         drawings = len(saved.get("items", [])) + len(saved.get("freezes", []))
-                    except (OSError, ValueError):
+                        seconds = output_seconds(record, saved)
+                    except (OSError, ValueError, TypeError, KeyError):
                         pass
                     edited = datetime.fromtimestamp(notes.stat().st_mtime, timezone.utc).isoformat()
                 clips.append({"id": clip_id, "name": record.get("name") or "Clip", "duration": record.get("duration"),
-                              "width": record.get("width"), "height": record.get("height"), "drawings": drawings, "edited_at": edited})
+                              "seconds": seconds, "width": record.get("width"), "height": record.get("height"),
+                              "drawings": drawings, "edited_at": edited})
             updated = max([session.get("updated_at") or "", *(clip["edited_at"] for clip in clips)])
             result.append({**session, "clips": clips, "updated_at": updated})
         return sorted(result, key=lambda session: session["updated_at"], reverse=True)
@@ -239,6 +242,20 @@ class EditorClips:
             target["clips"].append(clip_id)
         target["updated_at"] = _now()
         self._write_sessions(project_id, [session for session in sessions if session["clips"]])
+        return target
+
+    def reorder_session(self, project_id: str, session_id: str, order: Any) -> dict[str, Any]:
+        """Put a session's clips in `order` (the same clip ids, each once): the order a sequence plays and exports."""
+        sessions = self._read_sessions(project_id)
+        target = next((session for session in sessions if session["id"] == session_id), None)
+        if target is None:
+            raise LookupError("That annotate session is not in the project any more.")
+        if (not isinstance(order, list) or len(order) != len(target["clips"])
+                or sorted(str(clip) for clip in order) != sorted(target["clips"])):
+            raise ValueError("The new order must list the session's clips, each once.")
+        target["clips"] = [str(clip) for clip in order]
+        target["updated_at"] = _now()
+        self._write_sessions(project_id, sessions)
         return target
 
     def rename_session(self, project_id: str, session_id: str, name: str) -> dict[str, Any]:
@@ -285,6 +302,14 @@ class EditorClips:
 
 
 SESSION_ID = re.compile(r"^s[a-f0-9]{16}$")
+
+
+def output_seconds(record: dict[str, Any], saved: dict[str, Any]) -> float:
+    """How long the clip plays once exported: its parts joined, plus every freeze and board."""
+    frames = int(record["frames"])
+    cut = cuts.cut_frames(saved.get("parts") or None, frames)
+    held = sum(float(freeze.get("seconds") or 0) for freeze in saved.get("freezes") or [] if isinstance(freeze, dict))
+    return round(cut / float(record["fps"]) + held, 3)
 
 
 def _now() -> str:
