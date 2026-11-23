@@ -1,10 +1,10 @@
 # MIT License (earlier versions)
 
-The ClipMaker 1.x releases, and VizorPlay up to and including commit 552e33f,
-were released under the MIT License below. That licence still applies to those
-versions, and to code contributed under it that remains in later versions.
-Later versions are licensed under the PolyForm Strict License 1.0.0; see
-LICENSE.
+ClipMaker, the app VizorPlay replaces, was released under the MIT License
+below, and that licence still applies to every ClipMaker release. Code
+published in this repository before VizorPlay 1.0 (up to and including commit
+552e33f) also stays under it, including code other people contributed. VizorPlay
+itself is licensed under the PolyForm Strict License 1.0.0; see LICENSE.
 
 ```
 MIT License

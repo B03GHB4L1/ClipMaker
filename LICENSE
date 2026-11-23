@@ -11,12 +11,15 @@ distributing copies of it.
 Commercial licences, for example for professional clubs, paid analysts or
 coaching businesses, are available from B4L1: email granvskaia@gmail.com.
 
-Earlier versions (the ClipMaker 1.x releases, and VizorPlay up to commit
-552e33f) were released under the MIT License. Those versions stay under the MIT
-License, reproduced in LICENSE-MIT-EARLIER.md, along with the notice for code
-contributed under it. Third-party components keep their own licences: see
-ui/vendor/THREE-LICENSE.txt, ui/assets/fonts/OFL-GeistMono.txt and
-app/telestration/models/NOTICE.txt.
+ClipMaker, the app VizorPlay replaces, was released under the MIT License, and
+that licence still applies to every ClipMaker release. Code published in this
+repository before VizorPlay 1.0 also stays under the MIT License. Its text is
+in LICENSE-MIT-EARLIER.md.
+
+VizorPlay also includes parts made by others, which keep their own licences:
+the three.js graphics library (MIT License), the Geist Mono font (SIL Open Font
+License) and OpenCV's ViT player-tracking model (Apache License 2.0). Their
+licence notices are included with VizorPlay.
 
 ---
 

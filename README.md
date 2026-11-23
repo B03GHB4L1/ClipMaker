@@ -161,8 +161,9 @@ sharing copies of it.
 Professional clubs, paid analysts and coaching businesses need a commercial
 licence: email [granvskaia@gmail.com](mailto:granvskaia@gmail.com).
 
-ClipMaker 1.x and earlier VizorPlay code were released under the MIT License,
-which still applies to them ([LICENSE-MIT-EARLIER.md](LICENSE-MIT-EARLIER.md)).
+ClipMaker, the app VizorPlay replaces, was released under the MIT License, and
+that still applies to every ClipMaker release
+([LICENSE-MIT-EARLIER.md](LICENSE-MIT-EARLIER.md)).
 
 ---
 
