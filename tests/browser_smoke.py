@@ -361,7 +361,7 @@ def exercise_clip_editor(page, evidence):
     popup.get_by_role("button", name="Close").click()
     expect(page.locator(".saved-popup.is-visible")).to_have_count(0)
     page.unroute("**/api/files/reopen")
-    page.locator('.export-bar label').filter(has_text="One reel").click()
+    page.locator('.export-bar label').filter(has_text=re.compile(r"^One reel$")).click()
     page.get_by_role("button", name="Select none").click()
     expect(page.locator('[data-project-status]')).to_have_text("Saved locally", timeout=30000)
 

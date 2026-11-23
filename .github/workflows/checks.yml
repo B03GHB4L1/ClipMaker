@@ -53,6 +53,7 @@ jobs:
       - run: node --test tests/moving_board.test.mjs
       - run: node --test tests/parts.test.mjs
       - run: node --test tests/fit.test.mjs
+      - run: node --test tests/match_clips.test.mjs
       - run: node --test tests/player_search.test.mjs
       - run: node --test tests/code.test.mjs
       - run: node --test tests/live.test.mjs

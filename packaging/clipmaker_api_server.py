@@ -367,10 +367,31 @@ class MatchStore:
         view.update({key: match[key] for key in MATCH_KEYS if key in match})
         view.update(project)
         view["match_id"] = match.get("id", "")
+        view["matches"] = [self._summary(item) for item in project.get("match_ids", [])]
         if not view.get("project_name"):
             view["project_name"] = (f"{view['home_team']} vs {view['away_team']}" if view["home_team"]
                                     else "Untitled project")
         return view
+
+    def _summary(self, match_id: str) -> dict[str, Any]:
+        """What Intake and the Filter page show of one of a project's matches."""
+        match = self._read(self.match_path(match_id), "match") or {"id": match_id}
+        teams = [match.get("home_team") or "", match.get("away_team") or ""]
+        markers = match.get("markers") or {}
+        return {"id": match_id, "title": " v ".join(team for team in teams if team) or "Untitled match",
+                "home_team": teams[0], "away_team": teams[1], "event_count": int(match.get("event_count") or 0),
+                "has_events": bool(match.get("csv_path")),
+                "has_video": bool(match.get("video_path") or any((match.get("period_videos") or {}).values())),
+                "kickoffs_set": bool(markers.get("1H")) and bool(markers.get("2H")),
+                "source_url": match.get("source_url") or ""}
+
+    def match_views(self, project_id: str) -> list[dict[str, Any]]:
+        """The project as one flat dict per match it uses (what the clip engine reads for a single match)."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            return [self._view({**project, "active_match_id": match_id}) for match_id in project.get("match_ids", [])]
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -544,6 +565,31 @@ class MatchStore:
             self._write_project({**project, **project_fields, "id": project_id})
             return self.get(project_id)
 
+    def _replace_active(self, project: dict[str, Any], match_id: str) -> None:
+        """Put the match in the place of the project's current one (the others stay), and forget the
+        clip windows built on the old one. A current match that is empty and used nowhere else is dropped."""
+        ids = list(project.get("match_ids", []))
+        old = project.get("active_match_id") or ""
+        if old in ids:
+            ids[ids.index(old)] = match_id
+        else:
+            ids.append(match_id)
+        self._write_project({**project, "match_ids": list(dict.fromkeys(ids)), "active_match_id": match_id,
+                             "preview_windows": [], "preview_range": {}})
+        if old and old != match_id:
+            self._drop_if_empty(old)
+
+    def _drop_if_empty(self, match_id: str) -> None:
+        """Delete a match nobody filled in: no events, videos or kick-offs, and no project using it."""
+        match = self._read(self.match_path(match_id), "match")
+        folder = self.match_path(match_id).parent
+        if (match is None or match.get("csv_path") or match.get("video_path") or match.get("period_videos")
+                or match.get("markers") or match.get("source_url")
+                or any(item.name != "match.json" for item in folder.iterdir())
+                or any(match_id in other.get("match_ids", []) for other in self._projects())):
+            return
+        shutil.rmtree(folder, ignore_errors=True)
+
     def start_new_match(self, project_id: str) -> str:
         """Give the project a new, empty match in place of its current one, which stays in the library."""
         with self._lock:
@@ -552,12 +598,11 @@ class MatchStore:
                 raise ValueError("Project not found")
             match_id = uuid.uuid4().hex
             self._write_match(match_id, {})
-            self._write_project({**project, "match_ids": [match_id], "active_match_id": match_id,
-                                 "preview_windows": [], "preview_range": {}})
+            self._replace_active(project, match_id)
             return match_id
 
     def use_match(self, project_id: str, match_id: str) -> dict[str, Any]:
-        """Make a saved match the project's match; the one it had stays in the library."""
+        """Use a saved match in place of the project's current one; its other matches stay."""
         with self._lock:
             project = self._project(project_id)
             if project is None:
@@ -565,8 +610,59 @@ class MatchStore:
             if self.get_match(match_id) is None:
                 raise ValueError("That saved match is no longer available.")
             if project.get("active_match_id") != match_id:
-                self._write_project({**project, "match_ids": [match_id], "active_match_id": match_id,
-                                     "preview_windows": [], "preview_range": {}})
+                self._replace_active(project, match_id)
+            return self.get(project_id)
+
+    def add_match(self, project_id: str, match_id: str | None = None) -> dict[str, Any]:
+        """Add a saved match (or, without one, a new empty match) to the project and make it the one
+        being edited. An empty match already waiting in the project is reused instead of adding another."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            ids = list(project.get("match_ids", []))
+            if match_id is None:
+                waiting = next((item for item in ids
+                                if not (self._summary(item)["has_events"] or self._summary(item)["has_video"])), None)
+                if waiting is not None:
+                    match_id = waiting
+                else:
+                    match_id = uuid.uuid4().hex
+                    self._write_match(match_id, {})
+            elif self.get_match(match_id) is None:
+                raise ValueError("That saved match is no longer available.")
+            if match_id not in ids:
+                ids.append(match_id)
+            self._write_project({**project, "match_ids": ids, "active_match_id": match_id,
+                                 "preview_windows": [], "preview_range": {}})
+            return self.get(project_id)
+
+    def remove_match(self, project_id: str, match_id: str) -> dict[str, Any]:
+        """Take a match out of the project. It stays in the library."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            if match_id not in project.get("match_ids", []):
+                raise ValueError("That match is not in this project.")
+            ids = [item for item in project["match_ids"] if item != match_id]
+            active = project.get("active_match_id")
+            self._write_project({**project, "match_ids": ids,
+                                 "active_match_id": ids[0] if active == match_id and ids else active,
+                                 "preview_windows": [], "preview_range": {}})
+            self._drop_if_empty(match_id)
+            return self.get(project_id)
+
+    def set_active_match(self, project_id: str, match_id: str) -> dict[str, Any]:
+        """Choose which of the project's matches Intake is editing."""
+        with self._lock:
+            project = self._project(project_id)
+            if project is None:
+                raise ValueError("Project not found")
+            if match_id not in project.get("match_ids", []):
+                raise ValueError("That match is not in this project.")
+            if project.get("active_match_id") != match_id:
+                self._write_project({**project, "active_match_id": match_id})
             return self.get(project_id)
 
     def delete(self, project_id: str) -> None:
@@ -1483,6 +1579,128 @@ def analysis_view(project: dict[str, Any]) -> dict[str, Any]:
     return project
 
 
+def clean_clip_windows(options: dict[str, Any]) -> list[dict[str, Any]]:
+    """The clip windows of a request, checked: numbers and times in range, match ids well formed."""
+    clip_windows = []
+    if "clip_windows" in options:
+        import math
+        if not isinstance(options["clip_windows"], list) or len(options["clip_windows"]) > 2000:
+            raise ValueError("Supply at most 2000 valid clip windows.")
+        if not options["clip_windows"] and not options.get("dry_run", True):
+            raise ValueError("There are no clips selected for export.")
+        for item in options["clip_windows"]:
+            if not isinstance(item, dict):
+                raise ValueError("Invalid clip window.")
+            try:
+                start = float(item.get("start", 0))
+                end = float(item.get("end", 0))
+                period = int(float(item.get("period", 1)))
+                raw_number = item.get("number")
+                number = len(clip_windows) + 1 if raw_number in (None, "") else int(raw_number)
+            except (TypeError, ValueError):
+                raise ValueError("Invalid clip window.")
+            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start or period not in {1, 2, 3, 4, 5}:
+                raise ValueError("Clip end must follow a non-negative start, with a valid period.")
+            if not 1 <= number <= 9999:
+                raise ValueError("Clip numbers must be between 1 and 9999.")
+            window = {
+                "start": start,
+                "end": end,
+                "label": str(item.get("label") or "Edited clip")[:300],
+                "period": period,
+                "number": number,
+            }
+            if STORE_ID.fullmatch(str(item.get("match_id") or "")):
+                window["match_id"] = str(item["match_id"])  # which of a project's matches the clip is from
+            clip_windows.append(window)
+    return clip_windows
+
+
+EXPORT_IGNORES = ("filter_types", "team_filter", "player_filters", "top_n", "xt_min", "minute_min", "minute_max",
+                  "pitch_zone_filter", "depth_zone_filter")
+
+
+def project_scope(store: Any, project: dict[str, Any], options: dict[str, Any]) -> list[dict[str, Any]]:
+    """The matches a project's filters work on: those with event data, narrowed by the Matches filter."""
+    views = [view for view in store.match_views(project["id"]) if view.get("csv_path")]
+    chosen = options.get("match_ids")
+    if isinstance(chosen, list):
+        wanted = {str(item) for item in chosen}
+        views = [view for view in views if view["match_id"] in wanted]
+    return views
+
+
+def project_windows(store: Any, project: dict[str, Any], options: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
+    """Clip windows for every chosen match of the project, each with the match it is from.
+    The match's own kick-offs and videos apply to its clips, exactly as for a single match."""
+    views = project_scope(store, project, options)
+    if not views:
+        raise ValueError("Choose at least one match with event data.")
+    windows: list[dict[str, Any]] = []
+    for view in views:
+        title = match_title(view)
+        try:
+            config = build_clip_config(view, {**options, "dry_run": True, "clip_windows": []}, data_dir)
+        except ValueError as error:
+            if str(error).startswith("No events match"):
+                continue  # this match has none of the chosen players or team
+            raise ValueError(f"{title}: {error}") from None
+        try:
+            found = compute_clip_windows(config)
+        finally:
+            JobManager._cleanup_temporary_data(config)
+        windows.extend({**window, "match_id": view["match_id"], "match_title": title} for window in found)
+    for number, window in enumerate(windows, 1):
+        window["id"] = number
+    return windows
+
+
+def export_jobs(store: Any, jobs: Any, project: dict[str, Any], options: dict[str, Any], data_dir: Path,
+                default_output_dir: Path | None) -> list[dict[str, Any]]:
+    """Start the export of clips that may come from several of the project's matches: one reel
+    (export_mode "combined", the default) or one per match ("per_match")."""
+    views = {view["match_id"]: view for view in store.match_views(project["id"])}
+    active = views.get(project.get("match_id") or "") or next(iter(views.values()), project)
+    # The clips are chosen already, so the filters need not find anything in the first match's table.
+    base = {**options, **{key: [] if key in ("filter_types", "player_filters") else ("" if key == "team_filter" else None)
+                          for key in EXPORT_IGNORES}, "xt_min": 0}
+    for flag in FILTER_FLAGS:
+        base[flag] = False
+    windows = base.get("clip_windows") or []
+    mode = "per_match" if options.get("export_mode") == "per_match" else "combined"
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for window in windows:
+        groups.setdefault(str(window.get("match_id") or "") if str(window.get("match_id") or "") in views else active["match_id"], []).append(window)
+    label_source = {**options}
+
+    def videos_of(window: dict[str, Any], view: dict[str, Any]) -> str:
+        path = video_for_period(view, int(window.get("period") or 1))
+        if not path or not Path(path).is_file():
+            raise ValueError(f"{match_title(view)}: its video was not found. Choose it again on Intake.")
+        return path
+
+    def configure(view_windows: list[dict[str, Any]], first: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+        first_video = videos_of(view_windows[0], first)
+        config = build_clip_config({**first, "video_path": first_video}, {**base, **extra, "clip_windows": view_windows},
+                                   data_dir, default_output_dir)
+        for item in config["clip_windows"]:
+            view = views.get(item.get("match_id") or "") or first
+            item["video"] = videos_of(item, view)
+        config["export_label"] = export_label(project, label_source, config["clip_windows"])
+        return config
+
+    started = []
+    if mode == "per_match" and len(groups) > 1:
+        stem = Path(str(options.get("output_filename") or "Highlights")).stem
+        for match_id, group in groups.items():
+            view = views[match_id]
+            started.append(jobs.start(configure(group, view, {"output_filename": f"{stem} - {match_title(view)}"})))
+    else:
+        first_id = next(iter(groups), active["match_id"])
+        started.append(jobs.start(configure(windows, views.get(first_id) or active, {})))
+    return started
+
+
 def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: Path,
                       default_output_dir: Path | None = None) -> dict[str, Any]:
     csv_path = str(match.get("csv_path") or "").strip()
@@ -1532,37 +1750,7 @@ def build_clip_config(match: dict[str, Any], options: dict[str, Any], data_dir: 
         else Path(default_output_dir).resolve() if default_output_dir
         else (data_dir / "projects" / str(match.get("id") or "match") / "exports").resolve()
     )
-    clip_windows = []
-    if "clip_windows" in options:
-        import math
-        if not isinstance(options["clip_windows"], list) or len(options["clip_windows"]) > 2000:
-            raise ValueError("Supply at most 2000 valid clip windows.")
-        if not options["clip_windows"] and not options.get("dry_run", True):
-            raise ValueError("There are no clips selected for export.")
-        for item in options["clip_windows"]:
-            if not isinstance(item, dict):
-                raise ValueError("Invalid clip window.")
-            try:
-                start = float(item.get("start", 0))
-                end = float(item.get("end", 0))
-                period = int(float(item.get("period", 1)))
-                raw_number = item.get("number")
-                number = len(clip_windows) + 1 if raw_number in (None, "") else int(raw_number)
-            except (TypeError, ValueError):
-                raise ValueError("Invalid clip window.")
-            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start or period not in {1, 2, 3, 4, 5}:
-                raise ValueError("Clip end must follow a non-negative start, with a valid period.")
-            if not 1 <= number <= 9999:
-                raise ValueError("Clip numbers must be between 1 and 9999.")
-            clip_windows.append(
-                {
-                    "start": start,
-                    "end": end,
-                    "label": str(item.get("label") or "Edited clip")[:300],
-                    "period": period,
-                    "number": number,
-                }
-            )
+    clip_windows = clean_clip_windows(options)
 
     config = {
         "video_file": str(match.get("video_path") or ""),
@@ -1738,13 +1926,29 @@ def load_event_rows(csv_path: str) -> dict[str, Any]:
     return {"events": event_table(frame, 5000), "event_count": len(frame), "truncated": len(frame) > 5000}
 
 
-def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
+def match_title(view: dict[str, Any]) -> str:
+    teams = [str(view.get("home_team") or "").strip(), str(view.get("away_team") or "").strip()]
+    return " v ".join(team for team in teams if team) or "Untitled match"
+
+
+def load_filter_options(match: dict[str, Any], views: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The filter page's lists for one match, or for every match of a project (`views`, one flat dict
+    per match): the same lists over all their events together, with each event knowing its match."""
     import pandas as pd
 
-    csv_path = Path(str(match.get("csv_path") or "")).resolve()
-    if not csv_path.is_file():
-        raise ValueError("This match has no saved event table. Scrape it again first.")
-    frame = pd.read_csv(csv_path, low_memory=False)
+    views = [match] if views is None else views
+    frames, matches = [], []
+    for view in views:
+        csv_path = Path(str(view.get("csv_path") or "")).resolve()
+        if not csv_path.is_file():
+            raise ValueError("This match has no saved event table. Scrape it again first." if len(views) == 1 else
+                             f"{match_title(view)} has no saved event table. Scrape it again or take it out of the project.")
+        part = pd.read_csv(csv_path, low_memory=False)
+        part["_match_id"] = str(view.get("match_id") or "")
+        frames.append(part)
+        matches.append({"id": str(view.get("match_id") or ""), "title": match_title(view), "event_count": len(part)})
+    frame = (pd.concat(frames, ignore_index=True) if len(frames) > 1
+             else frames[0] if frames else pd.DataFrame(columns=["_match_id"]))
 
     action_types = []
     if "type" in frame.columns:
@@ -1800,7 +2004,8 @@ def load_filter_options(match: dict[str, Any]) -> dict[str, Any]:
         "action_types": action_types,
         "team_players": team_players,
         "qualifiers": qualifiers,
-        "events": event_index(frame, action_types, team_players, qualifier_rows),
+        "events": event_index(frame, action_types, team_players, qualifier_rows, [item["id"] for item in matches]),
+        "matches": matches,
         "has_xt": "xT" in frame.columns,
         "event_count": len(frame),
         # Coded events without a clicked pitch location: lane and depth filters leave them out.
@@ -1833,6 +2038,7 @@ def event_index(
     action_types: list[str],
     team_players: dict[str, list[str]],
     qualifier_rows: dict[str, list[int]],
+    match_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """A compact per-event table so the filter page can count what is left in a
     scope (team, period, players, action types) without asking the engine.
@@ -1859,7 +2065,10 @@ def event_index(
     else:
         periods = [0] * len(frame)
 
+    match_positions = positions("_match_id", match_ids or [])
     return {
+        "matches": match_ids or [],
+        "match": match_positions,
         "teams": teams,
         "players": players,
         "team": positions("team", teams),
@@ -2870,6 +3079,22 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"deleted": match_id, "matches": self.library(),
                                                "projects": self.store.list()})
                 return
+            if path.startswith("/api/projects/") and path.endswith("/matches"):
+                parts = path.split("/")
+                if len(parts) != 5:
+                    raise ValueError("Unknown project action")
+                action, match_id = str(body.get("action") or ""), str(body.get("match_id") or "")
+                if action == "add":
+                    project = self.store.add_match(parts[3], match_id or None)
+                elif action == "remove":
+                    project = self.store.remove_match(parts[3], match_id)
+                elif action == "activate":
+                    project = self.store.set_active_match(parts[3], match_id)
+                else:
+                    raise ValueError("Choose add, remove or activate.")
+                events = load_event_rows(project["csv_path"]) if project.get("csv_path") else {}
+                self.send_json(HTTPStatus.OK, {"project": {**project, **events}})
+                return
             if path.startswith("/api/projects/") and path.endswith("/use-match"):
                 parts = path.split("/")
                 if len(parts) != 5:
@@ -2989,6 +3214,12 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 match = self.store.get(str(body.get("match_id") or "").strip())
                 if match is None:
                     raise ValueError("That saved match is no longer available.")
+                wanted = str(body.get("source_match_id") or "")
+                if wanted and wanted != match.get("match_id"):
+                    # A project that uses several matches: the video of the one the clip is from.
+                    match = next((view for view in self.store.match_views(match["id"]) if view["match_id"] == wanted), None)
+                    if match is None:
+                        raise ValueError("That match is no longer in this project.")
                 period = {"1H": 1, "2H": 2, "ET1": 3, "ET2": 4, "PEN": 5}.get(str(body.get("period") or "1H"), 1)
                 saved_path = str(video_for_period(match, period) or "").strip()
                 if not saved_path:
@@ -3034,8 +3265,17 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             if path == "/api/filter-options":
                 match = self.store.get(str(body.get("match_id") or "").strip())
                 if match is None:
-                    raise ValueError("Choose a saved match before filtering.")
-                self.send_json(HTTPStatus.OK, load_filter_options(match))
+                    raise ValueError("Choose a project before filtering.")
+                views = self.store.match_views(match["id"])
+                if len(views) > 1 or not match.get("csv_path"):
+                    chosen = [view for view in views if view.get("csv_path")]
+                    options = load_filter_options(match, chosen)
+                    options["project_matches"] = match.get("matches", [])
+                    self.send_json(HTTPStatus.OK, options)
+                    return
+                options = load_filter_options(match)
+                options["project_matches"] = match.get("matches", [])
+                self.send_json(HTTPStatus.OK, options)
                 return
             if path == "/api/previews":
                 match = self.store.get(str(body.get("match_id") or "").strip())
@@ -3043,11 +3283,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     raise ValueError("Choose a saved match before previewing clips.")
                 options = body.get("options") if isinstance(body.get("options"), dict) else {}
                 options = {**options, "dry_run": True, "clip_windows": []}
-                config = build_clip_config(match, options, self.store.data_dir)
-                try:
-                    windows = compute_clip_windows(config)
-                finally:
-                    JobManager._cleanup_temporary_data(config)
+                if len(match.get("match_ids", [])) > 1 or isinstance(options.get("match_ids"), list):
+                    windows = project_windows(self.store, match, options, self.store.data_dir)
+                else:
+                    config = build_clip_config(match, options, self.store.data_dir)
+                    try:
+                        windows = compute_clip_windows(config)
+                    finally:
+                        JobManager._cleanup_temporary_data(config)
                 self.send_json(
                     HTTPStatus.OK,
                     {"windows": windows, "event_count": len(windows)},
@@ -3076,8 +3319,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 video_encoder = str(body.get("video_encoder") or "auto")
                 if video_encoder not in {"auto", "software"}:
                     raise ValueError("Choose automatic or software encoding.")
+                source = match
+                wanted = str(body.get("source_match_id") or "")
+                if wanted and wanted != match.get("match_id"):
+                    source = next((view for view in self.store.match_views(match["id"]) if view["match_id"] == wanted), None)
+                    if source is None:
+                        raise ValueError("That match is no longer in this project.")
                 preview = render_preview_clip(
-                    video_for_period(match, int(body.get("period") or 1)),
+                    video_for_period(source, int(body.get("period") or 1)),
                     start,
                     end,
                     self.store.data_dir / "previews",
@@ -3106,6 +3355,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if match is None:
                     raise ValueError("Save the match setup before building a clip plan.")
                 options = body.get("options") if isinstance(body.get("options"), dict) else {}
+                if len(match.get("match_ids", [])) > 1 and options.get("clip_windows") and not options.get("dry_run"):
+                    # Clips of several matches: each uses its own match's video.
+                    options = {**options, "dry_run": False}
+                    options["clip_windows"] = clean_clip_windows(options)
+                    started = export_jobs(self.store, self.jobs, match, options, self.store.data_dir,
+                                          self.server.default_export_dir)  # type: ignore[attr-defined]
+                    self.send_json(HTTPStatus.ACCEPTED, {"job": started[0], "jobs": started})
+                    return
                 config = build_clip_config(match, options, self.store.data_dir, self.server.default_export_dir)  # type: ignore[attr-defined]
                 job = self.jobs.start(config)
                 self.send_json(HTTPStatus.ACCEPTED, {"job": job})

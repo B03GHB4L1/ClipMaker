@@ -107,9 +107,87 @@ const shortTeamName = (name = "") =>
     .slice(0, 3)
     .toUpperCase() || "—";
 
+// The matches this project uses: one tab each, the one being edited marked. Kick-offs and videos
+// below belong to the marked match, so each match is set up in its own tab.
+const renderMatchTabs = (project) => {
+  const list = document.querySelector("[data-match-tabs]");
+  const matches = project.matches || [];
+  list.replaceChildren(...matches.map((match) => {
+    const item = document.createElement("li");
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "match-tab";
+    tab.dataset.matchId = match.id;
+    const active = match.id === project.match_id;
+    tab.setAttribute("aria-pressed", String(active));
+    tab.setAttribute("aria-label", `${match.title}${active ? ", being edited" : ""}`);
+    const title = document.createElement("strong");
+    title.textContent = match.title;
+    const state = document.createElement("small");
+    const parts = [match.has_events ? `${match.event_count.toLocaleString()} events` : "no events yet",
+      match.has_video ? "video" : "no video", match.kickoffs_set ? "kick-offs set" : "kick-offs not set"];
+    state.textContent = parts.join(" · ");
+    state.classList.toggle("is-incomplete", !match.has_events || !match.has_video || !match.kickoffs_set);
+    tab.append(title, state);
+    tab.addEventListener("click", () => { if (!active) changeMatches("activate", match.id); });
+    item.append(tab);
+    if (matches.length > 1) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "match-remove";
+      remove.textContent = "×";
+      remove.title = "Take this match out of the project (it stays saved)";
+      remove.setAttribute("aria-label", `Remove ${match.title} from this project`);
+      remove.addEventListener("click", () => changeMatches("remove", match.id));
+      item.append(remove);
+    }
+    return item;
+  }));
+  refreshSavedMatches(project);
+};
+
+// Saved matches not yet in this project, to add without scraping them again.
+const refreshSavedMatches = async (project) => {
+  const select = document.querySelector("[data-add-saved]");
+  try {
+    const { matches = [] } = await apiRequest("/api/library");
+    const used = new Set((project.matches || []).map((match) => match.id));
+    const options = matches.filter((match) => match.csv_path && !used.has(match.id)).map((match) => {
+      const option = document.createElement("option");
+      option.value = match.id;
+      option.textContent = `${match.home_team || "Home"} v ${match.away_team || "Away"} · ${Number(match.event_count || 0).toLocaleString()} events`;
+      return option;
+    });
+    select.replaceChildren(new Option("Add a saved match…", ""), ...options);
+    select.disabled = !options.length;
+  } catch (error) { select.disabled = true; }
+};
+
+// Add, take out or switch to one of the project's matches, then show the result.
+const changeMatches = async (action, matchId = "") => {
+  if (!apiAvailable || !activeMatch.id) return;
+  let finish;
+  try {
+    await persistIntake();
+    await flushProject();
+    finish = beginProjectOperation();
+    const { project } = await projectRequest(`/api/projects/${encodeURIComponent(activeMatch.id)}/matches`, { action, match_id: matchId });
+    await openProject(project);
+    if (action === "add" && !matchId) showToast("New match added. Scrape it, import a CSV or choose its video below.");
+  } catch (error) { showToast(error.message); }
+  finally { finish?.(); }
+};
+document.querySelector("[data-add-match]").addEventListener("click", () => changeMatches("add"));
+document.querySelector("[data-add-saved]").addEventListener("change", (event) => {
+  const matchId = event.target.value;
+  event.target.value = "";
+  if (matchId) changeMatches("add", matchId);
+});
+
 const renderMatch = (match) => {
   activeMatch = { ...match };
   if (match.id) rememberProject(match);
+  if (match.matches) renderMatchTabs(match);
   document.querySelector("#match-url").value = match.source_url || "";
   document.querySelector("[data-home-team]").textContent =
     match.home_team || "Home";
@@ -342,19 +420,27 @@ document.querySelector("[data-batch-fetch]").addEventListener("click", async (ev
     await persistIntake();
     await flushProject();
     finish = beginProjectOperation();
+    // Every match goes into this project: its kick-offs and videos are set per match in the tabs.
+    let current = { ...activeMatch };
     for (const [index, url] of urls.entries()) {
       output.textContent = `Scraping ${index + 1} of ${urls.length}...`;
       try {
-        const { project } = await projectRequest("/api/projects", {});
-        await saveProject(project.id, { source_url: url });
-        const result = await apiRequest("/api/scrape", { method: "POST", body: JSON.stringify({ url, project_id: project.id }) });
+        if ((current.matches || []).some((match) => match.source_url === url)) { errors.push(`${index + 1}: already in this project`); continue; }
+        if (current.csv_path) current = (await projectRequest(`/api/projects/${encodeURIComponent(current.id)}/matches`, { action: "add" })).project;
+        await saveProject(current.id, { source_url: url });
+        const result = await apiRequest("/api/scrape", { method: "POST", body: JSON.stringify({ url, project_id: current.id }) });
+        current = { ...result.match };
         completed.push(result.match);
       } catch (error) { errors.push(`${index + 1}: ${error.message}`); }
     }
-    output.textContent = `${completed.length} matches saved. ${errors.join("; ")}`;
+    output.textContent = `${completed.length} ${completed.length === 1 ? "match" : "matches"} added to this project. ${errors.join("; ")}`.trim();
     const result = await projectRequest("/api/projects");
     renderHistory(result.projects);
-    if (completed.length) await openProject(completed[0]);
+    if (completed.length) {
+      // Open the first of them so its kick-offs can be set; the others are one click away in the tabs.
+      const first = await projectRequest(`/api/projects/${encodeURIComponent(current.id)}/matches`, { action: "activate", match_id: completed[0].match_id });
+      await openProject(first.project);
+    }
   } catch (error) { showToast(error.message); }
   finally { finish?.(); button.disabled = false; }
 });
@@ -676,7 +762,7 @@ document
       return;
     }
     try {
-      if (!activeMatch.csv_path) throw new Error("Scrape or import event data before filtering.");
+      if (!activeMatch.csv_path && !(activeMatch.matches || []).some((match) => match.has_events)) throw new Error("Scrape or import event data before filtering.");
       await persistIntake();
       await flushProject();
       sessionStorage.setItem("clipmaker.active-match", activeMatch.id);
