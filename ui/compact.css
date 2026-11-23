@@ -432,3 +432,12 @@ button.drawer-link { display: block; padding: 12px 0; text-align: left; backgrou
 .confirm-actions button { min-height: 36px; padding: 0 14px; border: 1px solid #c9cbc3; border-radius: 4px; background: #fff; color: #151916; font: inherit; font-size: 13px; cursor: pointer; }
 .confirm-actions .danger { border-color: #b3261e; background: #b3261e; color: #fff; }
 .file-row.is-missing .file-ready, .file-row.is-missing .file-info small { color: #b3261e; }
+.prepare-note { display: grid; gap: 8px; margin-top: 8px; padding: 10px 12px; border: 1px solid #d9b45a; border-radius: 8px; background: #fbf5e4; }
+.prepare-note[hidden] { display: none; }
+.prepare-note p { margin: 0; font-size: 12px; line-height: 1.45; color: #4d4532; }
+.prepare-note progress { width: 100%; height: 6px; accent-color: #9a6b00; }
+.prepare-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.prepare-actions button { min-height: 32px; padding: 0 12px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.prepare-start { border: 1px solid #9a6b00; background: #9a6b00; color: #fff; }
+.prepare-stop { border: 1px solid #b9ad8c; background: transparent; color: #4d4532; }
+.prepare-actions button:disabled { opacity: .6; cursor: default; }

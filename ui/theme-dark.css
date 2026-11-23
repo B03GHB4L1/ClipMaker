@@ -1166,6 +1166,26 @@
 :root[data-theme="dark"] .file-row.is-missing .file-info small {
   color: #ff9888;
 }
+:root[data-theme="dark"] .prepare-note {
+  border: 1px solid #d9b45a;
+  background: rgba(207,189,138,0.2);
+}
+:root[data-theme="dark"] .prepare-note p {
+  color: #c6c3bc;
+}
+:root[data-theme="dark"] .prepare-note progress {
+  accent-color: #d6ad6c;
+}
+:root[data-theme="dark"] .prepare-start {
+  border: 1px solid #d6ad6c;
+  background: #d6ad6c;
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .prepare-stop {
+  border: 1px solid #b9ad8c;
+  background: transparent;
+  color: #c6c3bc;
+}
 
 /* design.css */
 :root[data-theme="dark"] {
