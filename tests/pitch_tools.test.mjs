@@ -108,3 +108,17 @@ test("a minimap is a box from its top-left corner, hit anywhere inside it", () =
   assert.ok(!isFlat(map), "it is placed on the picture, not on the grass");
   assert.equal(projectItems([map], calibration())[0], map, "and is not read through the calibration");
 });
+
+test("a measure end linked to a followed player moves with them", async () => {
+  const { newTrack, linkTo, resolveItem } = await import("../ui/annotate/tracks.js");
+  // A player who walks from left to right across the frame over 50 frames.
+  const track = { ...newTrack(0, [0.2, 0.9, 0.05, 0.2]), boxes: [] };
+  track.keyframes["50"] = [0.6, 0.9, 0.05, 0.2];
+  const fixed = [0.9, 0.5];
+  const measure = newItem("measure", [linkTo(track, [0.2, 0.9], 0), fixed], { from: 0, to: 60 });
+  const early = resolveItem(measure, [track], 0).points;
+  const late = resolveItem(measure, [track], 50).points;
+  near(early[0][0], 0.2, 1e-6, "starts at the player's feet");
+  near(late[0][0], 0.6, 1e-6, "ends where the player is later");
+  assert.deepEqual(late[1], fixed, "the other end stays put");
+});
