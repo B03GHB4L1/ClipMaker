@@ -33,6 +33,8 @@ except ImportError:  # pragma: no cover - exercised only in a broken installatio
     np = None
 
 CORNERS = 500  # corners followed from each frame
+QUALITY = 0.003  # weakest corner kept, against the strongest: low enough that the grass and stands
+# get corners, not only the players and lines, whose corners can move their own way
 MIN_CORNERS = 12  # fewer followed corners than this and the step is not trusted at all
 FULL_CORNERS = 80  # this many agreeing corners or more counts as fully sure
 RANSAC_PIXELS = 2.0  # at TRACK_HEIGHT; a corner further than this from the fit is an outlier
@@ -91,14 +93,21 @@ def _fit(after: Any, before: Any, threshold: float) -> tuple[Any | None, Any | N
     if full is None or full_in is None:
         return (simple, simple_in.reshape(-1).astype(bool)) if simple is not None else (None, None)
     full_in = full_in.reshape(-1).astype(bool)
-    if simple is None or full_in.sum() < PERSPECTIVE_CORNERS:
-        return (simple, simple_in.reshape(-1).astype(bool)) if simple is not None else (full, full_in)
-    points = after[full_in].reshape(-1, 1, 2)
-    targets = before[full_in].reshape(-1, 2)
+    if simple is None:
+        return full, full_in
+    simple_in = simple_in.reshape(-1).astype(bool)
+    # With more freedom a homography should agree with at least the corners a pan, tilt and zoom does;
+    # when it agrees with fewer, it has bent towards something else.
+    if full_in.sum() < max(PERSPECTIVE_CORNERS, simple_in.sum()):
+        return simple, simple_in
+    # Judged on the corners the pan, tilt and zoom agrees with: a homography bends to take in a few
+    # wrong corners (a player's shirt moving its own way), so on its own corners it always looks better.
+    points = after[simple_in].reshape(-1, 1, 2)
+    targets = before[simple_in].reshape(-1, 2)
     error = lambda matrix: float(np.median(np.linalg.norm(cv2.perspectiveTransform(points, matrix).reshape(-1, 2) - targets, axis=1)))
     if error(full) < PERSPECTIVE_GAIN * error(simple):
         return full, full_in
-    return simple, simple_in.reshape(-1).astype(bool)
+    return simple, simple_in
 
 
 class Reference:
@@ -108,7 +117,7 @@ class Reference:
         self.gray = gray
         self.path = path  # this frame to the first frame of the stretch
         self.frame = frame
-        self.corners = cv2.goodFeaturesToTrack(gray, maxCorners=CORNERS, qualityLevel=0.01, minDistance=7, blockSize=7)
+        self.corners = cv2.goodFeaturesToTrack(gray, maxCorners=CORNERS, qualityLevel=QUALITY, minDistance=7, blockSize=7)
 
 
 def measure(reference: Reference, current: Any, guess: Any, size: tuple[int, int]) -> tuple[Any | None, float, float]:
