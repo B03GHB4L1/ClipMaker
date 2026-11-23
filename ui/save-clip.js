@@ -31,6 +31,9 @@ export const revealFolder = async (apiPath) => {
   if (folder) await window.__TAURI__?.core?.invoke("raise_folder_window", { folder }).catch(() => {});
 };
 
+// Plotly icon: a picture with an arrow into a film frame.
+const SEND_ICON = { width: 24, height: 24, path: "M3 5h14v3h-2V7H5v10h10v-1h2v3H3V5zm12 3l5 4-5 4v-3H9v-2h6V8z" };
+
 let popup;
 let hideTimer;
 
@@ -127,6 +130,28 @@ export const saveImage = async (image, name) => {
   }
 };
 
+/** Add a chart picture (a Blob, data: URL or a promise of one) to the active project's pictures, for "Insert picture" in the clip editor. */
+export const sendToClip = async (image, name) => {
+  try {
+    const project = activeProjectId();
+    if (!project) throw new Error("Open a project first; pictures are kept with a project.");
+    const picture = await image;
+    const blob = typeof picture === "string" ? await (await fetch(picture)).blob() : picture;
+    const response = await fetch(`/api/projects/${encodeURIComponent(project)}/pictures`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(name || "") },
+      body: blob,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+    show({ title: "Sent to the clip editor", file: `${payload.picture?.name || "Picture"}: open a clip, then choose Insert picture.` });
+    return payload.picture;
+  } catch (error) {
+    show({ title: "Could not send the picture", file: error.message, error: true });
+    return null;
+  }
+};
+
 // Hints such as "Hover points for event details." only make sense in the app.
 const HOVER_HINT = /[^.]*\bhover\b[^.]*\.?/gi;
 const NOTE_ROOM = 40; // bottom margin once a note under the chart is gone
@@ -214,6 +239,17 @@ export const plotlyConfig = (config = {}, Plotly = window.Plotly) => {
     ...config,
     modeBarButtonsToRemove: [...(config.modeBarButtonsToRemove || []), "toImage"],
     modeBarButtonsToAdd: [...(config.modeBarButtonsToAdd || []), fullscreen, {
+      name: "sendToClip",
+      title: "Send to clip",
+      icon: SEND_ICON,
+      click: (chart) => {
+        const figure = exportFigure(chart);
+        return sendToClip(import("./analysis/brand-export.js").then(({ brandPicture }) => brandPicture(Plotly.toImage(figure, {
+          format: "png", scale: options.scale || 2,
+          width: options.width || figure.layout.width, height: options.height || figure.layout.height }))),
+        `${options.filename || "VizorPlay chart"}.png`);
+      },
+    }, {
       name: "saveImage",
       title: "Save as PNG",
       icon: Plotly.Icons.camera,

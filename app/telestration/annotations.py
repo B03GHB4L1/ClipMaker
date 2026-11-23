@@ -226,10 +226,31 @@ def _show(value: Any, limit: float, kind: str) -> dict[str, Any]:
     return clean
 
 
+PICTURE_FITS = {"contain", "fill"}
+PICTURE_ID = re.compile(r"^[a-f0-9]{32}$")
+
+
+def _picture_background(value: dict[str, Any]) -> dict[str, Any]:
+    """A picture insert (section I): {"kind": "picture", "id", "fit": contain|fill, "colour"}."""
+    extra = set(value) - {"kind", "id", "fit", "colour"}
+    if extra:
+        raise ValueError(f"Unknown picture setting: {sorted(extra)[0]}.")
+    if not isinstance(value.get("id"), str) or not PICTURE_ID.match(value["id"]):
+        raise ValueError("An inserted picture must be one of the project's pictures.")
+    if value.get("fit") not in PICTURE_FITS:
+        raise ValueError(f"A picture is fitted as: {', '.join(sorted(PICTURE_FITS))}.")
+    if not isinstance(value.get("colour"), str) or not COLOUR.match(value["colour"]):
+        raise ValueError("The colour round a picture must be a colour like #1f6f3a.")
+    return {"kind": "picture", "id": value["id"], "fit": value["fit"], "colour": value["colour"].lower()}
+
+
 def _background(value: Any, frames: int) -> dict[str, Any]:
-    """A board's picture: {"kind": "board", "view", "theme", optional "fromFrame" and team colours}."""
+    """A freeze's picture: a board {"kind": "board", "view", "theme", optional "fromFrame" and team colours},
+    or an inserted picture (`_picture_background`)."""
+    if isinstance(value, dict) and value.get("kind") == "picture":
+        return _picture_background(value)
     if not isinstance(value, dict) or value.get("kind") != "board":
-        raise ValueError("A freeze's picture must be a board.")
+        raise ValueError("A freeze's picture must be a board or a picture.")
     extra = set(value) - {"kind", "view", "theme", "fromFrame", "home", "away"}
     if extra:
         raise ValueError(f"Unknown board setting: {sorted(extra)[0]}.")

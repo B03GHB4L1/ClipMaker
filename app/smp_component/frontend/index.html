@@ -1282,6 +1282,19 @@
       : { type: "vizorplay:save-failed", error: payload.error || `Request failed (${response.status})` }, location.origin);
   }
 
+  // "Send to clip": the same branded picture goes to the page around this frame,
+  // which adds it to the active project's pictures (ui/analysis/component-host.js).
+  async function sendChartToClip(url, filename) {
+    try {
+      let blob = await (await fetch(url)).blob();
+      const { brandPicture } = await import("/analysis/brand-export.js");
+      blob = await brandPicture(blob);
+      window.parent.postMessage({ type: "vizorplay:send-to-clip", blob, name: filename }, location.origin);
+    } catch (error) {
+      window.parent.postMessage({ type: "vizorplay:save-failed", error: "The picture could not be prepared." }, location.origin);
+    }
+  }
+
   function exportAnimationKey(args) {
     const parts = [
       args && args.component_type,
@@ -1311,6 +1324,7 @@
     const selectedMode = options.some(([value]) => value === defaultMode) ? defaultMode : fallbackMode;
     return [
       '<button type="button" data-export="png" title="Save as PNG">PNG</button>',
+      '<button type="button" data-export="send" title="Add this picture to a clip in the analyst editor">Send to clip</button>',
       '<select data-export-animation title="GIF animation" aria-label="GIF animation">',
       ...options.map(([value, label]) => `<option value="${value}"${selectedMode === value ? " selected" : ""}>${label}</option>`),
       '</select>',
@@ -1819,7 +1833,7 @@
       restore();
       idle();
     };
-    controls.querySelector('[data-export="png"]').onclick = () => {
+    const exportPicture = (deliver) => {
       stopAnimation();
       const plan = _cmExportLabels;
       let labelled = false;
@@ -1833,8 +1847,10 @@
       }
       const url = chart.getDataURL({ type: "png", pixelRatio: 3, backgroundColor: bg });
       if (labelled) restore();
-      downloadDataUrl(url, `${exportFilenameFromArgs(args || {})}.png`);
+      deliver(url, `${exportFilenameFromArgs(args || {})}.png`);
     };
+    controls.querySelector('[data-export="png"]').onclick = () => exportPicture(downloadDataUrl);
+    controls.querySelector('[data-export="send"]').onclick = () => exportPicture(sendChartToClip);
     previewButton.onclick = async () => {
       if (_cmPlaying && _cmPlaying.kind === "preview" && _cmPlaying.controls === controls) {
         stopAnimation();

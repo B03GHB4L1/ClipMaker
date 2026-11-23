@@ -14,6 +14,36 @@ export const TEAMS = { home: "Home", away: "Away", other: "Other" };
 export const DEFAULT_TEAM_COLOURS = { home: "#d6262e", away: "#1f5fd1", other: "#f2c200" };
 export const BOARD_SECONDS = 4;
 
+// Picture inserts (docs/CODING_AND_PITCH_PLAN.md, section I): a freeze whose picture is one from the project's library.
+export const PICTURE_FITS = { contain: "Whole picture", fill: "Fill the frame" };
+export const PICTURE_COLOURS = { "#000000": "Black", "#f2f3ee": "Paper", "#2f6b3a": "Pitch green" };
+export const pictureInsert = (id, fit = "contain", colour = "#000000") => ({ kind: "picture", id, fit, colour });
+
+/** Where a picture of iw x ih goes in a w x h frame: the whole picture, or cropped to fill. */
+export const pictureRect = (iw, ih, w, h, fit) => {
+  const scale = (fit === "fill" ? Math.max : Math.min)(w / iw, h / ih);
+  const [width, height] = [iw * scale, ih * scale];
+  return { x: (w - width) / 2, y: (h - height) / 2, width, height };
+};
+
+const drawPicture = (ctx, w, h, background, pictures) => {
+  ctx.save();
+  ctx.fillStyle = background.colour;
+  ctx.fillRect(0, 0, w, h);
+  const image = pictures?.get(background.id);
+  if (image?.naturalWidth) {
+    const at = pictureRect(image.naturalWidth, image.naturalHeight, w, h, background.fit);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, at.x, at.y, at.width, at.height);
+  } else {
+    ctx.fillStyle = "#808080";
+    ctx.font = `${Math.round(h * 0.04)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("This picture is not available", w / 2, h / 2);
+  }
+  ctx.restore();
+};
+
 /** The board on screen at output time `t`, or null (a plain freeze or the clip). */
 export const boardAt = (value, clip, t) => {
   const at = outputToSource(t, clip, value.freezes || []);
@@ -28,8 +58,10 @@ export const itemsAt = (value, clip, t) => {
   return value.items.filter((item) => (board ? item.on === board.atFrame : item.on === undefined));
 };
 
-/** Draw the board picture (pitch and lines) over the whole w x h canvas. */
-export const drawBoard = (ctx, w, h, background) => {
+/** Draw the board picture (pitch and lines, or an inserted picture) over the whole w x h canvas.
+ *  `pictures.get(id)` gives the loaded image of an inserted picture. */
+export const drawBoard = (ctx, w, h, background, pictures = null) => {
+  if (background.kind === "picture") return drawPicture(ctx, w, h, background, pictures);
   const theme = THEMES[background.theme] || THEMES.grass;
   const layout = boardLayout(background.view === "blank" ? "full" : background.view, w / h);
   ctx.save();

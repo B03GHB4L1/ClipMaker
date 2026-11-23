@@ -2525,6 +2525,39 @@
   background: #2f2f2f;
   color: var(--cm-ink);
 }
+:root[data-theme="dark"] .annotate-picture-name {
+  color: var(--cm-muted);
+}
+:root[data-theme="dark"] .annotate-picture-panel {
+  border: 1px solid var(--cm-rule);
+  background: var(--annotate-panel);
+}
+:root[data-theme="dark"] .annotate-picture-add {
+  border: 1px solid var(--cm-ink);
+  background: var(--cm-ink);
+  color: #2f2f2f;
+}
+:root[data-theme="dark"] .annotate-picture-add:focus-within {
+  outline: 2px solid var(--annotate-freeze);
+}
+:root[data-theme="dark"] .annotate-picture-list li > button:first-child {
+  border: 1px solid var(--cm-rule);
+  background: transparent;
+  color: var(--cm-ink);
+}
+:root[data-theme="dark"] .annotate-picture-list li > button:first-child:hover {
+  background: var(--annotate-hover);
+}
+:root[data-theme="dark"] .annotate-picture-list img {
+  background: #474943;
+}
+:root[data-theme="dark"] .annotate-picture-list .annotate-remove {
+  border: 0;
+  background: rgba(47,47,47,0.85);
+}
+:root[data-theme="dark"] .annotate-picture-panel .is-error {
+  color: var(--annotate-lost);
+}
 :root[data-theme="dark"] .annotate-main .annotate-remove {
   color: var(--cm-muted);
 }
