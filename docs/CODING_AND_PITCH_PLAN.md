@@ -546,10 +546,40 @@ and snapping (10 px to the playhead, clip ends and other blocks' edges; Alt
 places freely) with a dashed snap line. Ideas for the ruler and snapping come
 from OpenCut (MIT); nothing is copied, only reimplemented.
 
-**Stage 2 (later): several clips on one sequence.** Annotated clips, pictures
-and freezes from different clips in one ordered timeline, exported in one go.
-Needs a sequence document saved with the project, drag-to-reorder, and an
-export that renders each clip's overlays in turn. To be scoped with the user.
+**Stage 2: several clips on one sequence (scoped 2026-11-23).**
+
+What exists: a project already has *sessions* (`sessions.json`, an ordered list of
+clip ids), each clip has its own annotations (parts, freezes, boards, picture
+inserts, drawings), and export renders one clip at a time with overlays drawn by
+the page (`run_export`). So a sequence is a session with order, plus a way to
+play and export it as one video. No new clip format is needed.
+
+Build order, each step shippable on its own:
+
+- **S1 Sequence strip.** A track above the clip's lanes showing every clip of the
+  session as a named block sized by its output length (parts and freezes
+  included). Click a block to open that clip, drag to reorder (saved in
+  `sessions.json`), Add clip / Add picture. Same ruler, zoom and snapping.
+- **S2 Sequence export.** One Export button renders each clip with the existing
+  per-clip path into a temporary file, then joins them with ffmpeg. Clips of a
+  different size or frame rate are scaled and padded to the first clip's. Audio
+  is kept per clip (silence where a clip has none). One progress bar across all
+  clips; cancel stops the current clip and removes everything written.
+- **S3 Stand-alone pictures and title cards.** A sequence entry that is only a
+  picture (from the existing picture store) or a text card, with a duration;
+  rendered as a still segment.
+- **S4 Play across clips.** The preview keeps one video element, so playing the
+  sequence swaps clips at each boundary (preload the next). Needed for a true
+  one-timeline feel; hardest, so last. Until then the strip is for arranging
+  and exporting, and playback is per clip.
+
+Decisions: cuts only (no fades or transitions) in the first version; trimming
+stays per clip (parts) rather than trimming blocks on the strip; sequence
+export goes to the project's export folder like a single clip.
+
+Tests: ordering and persistence (pytest), join plan for mixed sizes/fps and
+audio gaps (pytest, tiny ffmpeg clips), strip markup and reorder (test_ui and
+browser smoke), cancel leaves no files.
 
 ---
 
