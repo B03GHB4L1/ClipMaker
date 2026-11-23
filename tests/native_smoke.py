@@ -317,10 +317,15 @@ def main():
                         stage(evidence, "verify the licence files were installed")
                         if sys.platform == "win32":
                             resources = app.parent
-                        else:
-                            resources = next(path.parent for path in Path("/usr/lib").glob("*/backend/vizorplay-engine"))
+                            listing = []
+                        else:  # read the package's own file list rather than guess its folder
+                            listing = subprocess.run(["dpkg-deb", "--contents", str(args.package)], check=True,
+                                                     capture_output=True, text=True, timeout=30).stdout.splitlines()
+                            licence = [line.split()[-1].lstrip(".") for line in listing if line.endswith("/LICENSE.txt")]
+                            resources = Path(licence[0]).parent if licence else Path("/usr/lib/VizorPlay")
                         missing = [name for name in INSTALLED_LICENCES if not (resources / name).is_file()]
-                        assert not missing, f"Installed app is missing licence files: {missing}"
+                        shown = [line for line in listing if "_internal" not in line]
+                        assert not missing, f"Installed app is missing licence files: {missing} in {resources}; package has {shown}"
                         assert "PolyForm Strict License 1.0.0" in (resources / "LICENSE.txt").read_text(encoding="utf-8")
                 if args.package:
                     stage(evidence, "uninstall package and verify saved project data remains")
