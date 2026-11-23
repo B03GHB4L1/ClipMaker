@@ -506,7 +506,7 @@ const HINTS = {
   shape: "Drag to draw the shape. Hold Shift for equal sides, as a square or a circle.",
   minimap: "Click where the minimap's top-left corner goes. It shows the players you follow on a small pitch, and needs the pitch marked.",
   offside: "Click the spot to draw the offside line through, such as a defender's boot. The line lies across the pitch and follows the camera.",
-  measure: "Drag from one spot on the grass to another to read the distance between them in metres.",
+  measure: "Drag from one spot on the grass to another to read the distance between them in metres. An end dropped on a followed player's feet follows that player.",
   follow: "Drag a box around a player, head to boots. It is fitted to them, and a ring follows them; drag it back if it slips.",
   token: "Click to place a player token. On a board it belongs to that board; on the video it is a fixed marker that does not follow anyone.",
 };
@@ -2690,7 +2690,8 @@ const endGesture = () => {
         if (draft.points.length < 2) return scheduleRender();
       }
       // Ring, spotlight, arrow and line ends dropped on a followed player's feet follow that player.
-      const points = ["freehand", "shape", "measure"].includes(draft.kind) ? draft.points : draft.points.map(snapPoint);
+      // A measure's ends dropped on followed players' feet follow them, so its distance updates as they move.
+      const points = ["freehand", "shape"].includes(draft.kind) ? draft.points : draft.points.map(snapPoint);
       const item = placeNew(newItem(draft.kind, points, { from: draft.show.from, to: draft.show.to, style: draft.style, geometry: draft.geometry }));
       if (isFlat(item)) item.at = frameNow();
       doc.add(item);
