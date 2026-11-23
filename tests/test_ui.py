@@ -460,7 +460,7 @@ class SharedUiTests(unittest.TestCase):
         script = (UI / "annotate.js").read_text(encoding="utf-8")
         # No clip in the link: list the sessions instead of failing; a clip shows its session as a sequence.
         self.assertIn("if (!clipId) return await startLibrary();", script)
-        self.assertIn('showSequence($("[data-sequence]"), projectId, clipId, {', script)
+        self.assertIn('showSequence($(".annotate-timeline"), projectId, clipId, {', script)
         library = (UI / "annotate" / "library.js").read_text(encoding="utf-8")
         for action in ('act("rename"', 'act("delete"', 'act("remove-clip"'):
             self.assertIn(action, library)
@@ -541,24 +541,42 @@ class SharedUiTests(unittest.TestCase):
         html = (UI / "annotate.html").read_text(encoding="utf-8")
         script = (UI / "annotate.js").read_text(encoding="utf-8")
         sequence = (UI / "annotate" / "sequence.js").read_text(encoding="utf-8")
-        for hook in ("data-sequence ", "data-sequence-lane", "data-sequence-add", "data-sequence-export"):
+        for hook in ("data-sequence ", "data-sequence-lane", "data-sequence-add", "data-sequence-card", "data-card-form", "data-sequence-tools"):
             self.assertIn(hook, html)
         self.assertIn('request("reorder", { session_id: session.id, clips: order })', sequence)
         self.assertIn('request("move-clip", { session_id: session.id, clip_id: chosen })', sequence)
-        self.assertIn("await beforeLeave();", sequence)  # the open clip is saved before another opens
         self.assertIn('event.altKey || !["ArrowLeft", "ArrowRight"]', sequence)  # reorder by keyboard too
-        # Each clip's overlays are drawn and sent like a single export, then the engine joins them.
+        for call in ('request("add-card"', 'request("update-card"', 'request("remove-card"'):
+            self.assertIn(call, sequence)
+        # Export video exports the whole timeline when the session holds more than one entry.
+        self.assertIn("if (session && session.items.length > 1) return exportSequence(session);", script)
         flow = script[script.index("const exportSequence"):]
         self.assertIn("drawOverlays(opened.clip, opened.annotations, exportSession", flow)
         self.assertIn('"/api/editor-sequences/render", { items, name: session.name }', flow)
         self.assertIn("/api/editor-sequences/cards", flow)  # a text card is drawn here and sent as a picture
         self.assertIn("picture: entry.picture_id", flow)
-        for hook in ("data-sequence-card", "data-card-form", "data-sequence-play"):
-            self.assertIn(hook, html)
-        for call in ('request("add-card"', 'request("update-card"', 'request("remove-card"'):
-            self.assertIn(call, sequence)
-        self.assertIn("sequence?.endOfClip()", script)  # a play-through goes on at the end of a clip
         self.assertIn("run.sessions || []", script[script.index("const cancelExport"):])
+
+    def test_annotate_timeline_is_the_whole_sequence(self):
+        # T2: one timeline for the session: every clip and card on the tracks, one playhead, playback straight through.
+        html = (UI / "annotate.html").read_text(encoding="utf-8")
+        script = (UI / "annotate.js").read_text(encoding="utf-8")
+        css = (UI / "annotate.css").read_text(encoding="utf-8")
+        for row in ('data-ghosts="parts"', 'data-ghosts="inserts"', 'data-ghosts="drawings"'):
+            self.assertIn(row, html)
+        self.assertIn("data-video-standby", html)  # the next clip loads here while this one plays
+        self.assertNotIn("location.href = editorUrl", script)  # another clip opens in place, never by a page load
+        self.assertIn('history.replaceState(null, "", editorUrl(projectId, id));', script)
+        self.assertIn("const togglePlay = () => (playing ? pause() : playSequence());", script)
+        self.assertIn("advanceFrom(clipEntry()); // on to the next clip or card", script)
+        self.assertIn("preloadNext();", script[script.index("const play = () => {"):script.index("const togglePlay")])
+        self.assertIn("scrub.oninput = () => seekSequence(Number(scrub.value));", script)
+        self.assertIn("seekSequence(((event.clientX - rect.left) / rect.width) * seqTotal());", script)  # the ruler
+        # A save goes to the clip it was made in, even when another clip opens before it runs.
+        save = script[script.index("const save = () => {"):script.index("const queueSave")]
+        self.assertIn("const path = `/api/editor/", save)
+        self.assertIn("projectRequest(path, body)", save)
+        self.assertIn("margin-left: calc(var(--clip-start, 0) * var(--lane-width));", css)
 
     def test_annotate_exports_video_with_progress_and_cancel(self):
         # M4: the page draws overlays with the preview's own code and sends them to the engine.

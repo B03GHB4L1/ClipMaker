@@ -4,7 +4,7 @@ import { test } from "node:test";
 // sequence.js loads the page's request helpers, which listen on the document: give them one.
 globalThis.document ??= { addEventListener() {} };
 globalThis.window ??= { addEventListener() {} };
-const { clipSeconds, clock, dropIndex, itemAfter, moveInOrder, sequenceLayout, wrapLines } = await import("../ui/annotate/sequence.js");
+const { cardName, clipSeconds, clock, dropIndex, entryAt, moveInOrder, sequenceLayout, wrapLines } = await import("../ui/annotate/sequence.js");
 
 test("blocks are sized by how long each clip plays once exported", () => {
   const layout = sequenceLayout([{ id: "a", seconds: 10, duration: 8 }, { id: "b", duration: 30 }]);
@@ -46,12 +46,20 @@ test("a card's block is as long as it is shown", () => {
   assert.equal(layout[1].start, 0.75);
 });
 
-test("the entry after the current one is the next to play", () => {
-  const items = [{ id: "a" }, { id: "k1", kind: "card" }, { id: "b" }];
-  assert.equal(itemAfter(items, "a").id, "k1");
-  assert.equal(itemAfter(items, "k1").id, "b");
-  assert.equal(itemAfter(items, "b"), null);
-  assert.equal(itemAfter(items, "missing"), null);
+test("the playhead's place in the sequence finds its clip or card", () => {
+  const layout = [{ id: "a", start: 0, length: 16 }, { id: "k1", start: 16, length: 2 }, { id: "b", start: 18, length: 29 }];
+  assert.equal(entryAt(layout, 0).id, "a");
+  assert.equal(entryAt(layout, 15.99).id, "a");
+  assert.equal(entryAt(layout, 16).id, "k1"); // the end of one entry is the start of the next
+  assert.equal(entryAt(layout, 18).id, "b");
+  assert.equal(entryAt(layout, 47).id, "b"); // the very end stays on the last
+  assert.equal(entryAt([], 3), null);
+});
+
+test("a card is named by its words or its picture", () => {
+  assert.equal(cardName({ type: "text", text: "Half time" }), "“Half time”");
+  assert.equal(cardName({ type: "picture", picture_id: "p1" }, [{ id: "p1", name: "Shape" }]), "Shape");
+  assert.equal(cardName({ type: "picture", picture_id: "gone" }, []), "Picture");
 });
 
 test("card text wraps on words and keeps explicit lines", () => {

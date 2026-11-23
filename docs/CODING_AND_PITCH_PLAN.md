@@ -573,12 +573,19 @@ Build order, each step shippable on its own:
   the first clip's size and sends it as a picture; the engine renders each card as
   a still piece and joins it. A picture a card shows cannot be deleted from the
   project until the card is removed.
-- **S4 Play across clips (done, with a limit).** Play on the strip plays this clip,
-  then each next entry: a card is shown over the stage for its seconds, a clip is
-  opened and starts by itself (a hand-over kept in the tab's session storage for
-  20 seconds). The preview keeps one video element, so each clip change is a page
-  load: expect a short gap, and the browser may refuse to start a video by itself
-  (then the run waits on the Play button). Stop ends the run.
+- **S4 One timeline for the session (done).** The Annotate timeline is the whole
+  sequence, not one clip: a Clips track names every clip and card in order, the
+  Video, Inserts and Drawings tracks show every clip's parts, inserts and drawings
+  in their place, and one ruler and playhead run through them all. The clip under
+  the playhead is the one being edited; its tracks sit in its slot and stay fully
+  editable. Clicking, scrubbing or stepping anywhere moves there, opening another
+  clip in place (no page load; the address follows). Play runs straight through
+  clips and cards: the next clip is loaded into a standby video while the current
+  one plays, so at the cut its first frame is already on screen (measured: frames
+  moving about 70 ms after the switch). Export video exports the whole timeline
+  when the session holds more than one entry. Each clip's drawings still save with
+  that clip. A first version that reloaded the page per clip was wrong and was
+  replaced the same day.
 
 Decisions: cuts only (no fades or transitions) in the first version; trimming
 stays per clip (parts) rather than trimming blocks on the strip; sequence
