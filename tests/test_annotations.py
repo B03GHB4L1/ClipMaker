@@ -203,6 +203,26 @@ class DocumentTests(unittest.TestCase):
             annotations.clean_document({**document({**offside, "points": [{"track": "t1", "dx": 0, "dy": 0}]}),
                                         "tracks": []}, duration=2, frames=50)
 
+    def test_a_minimap_stays_where_it_is_put_on_the_video(self):
+        # P3b: a small pitch in the picture; its players come from the followed tracks, not from the document.
+        style = {"stroke": "#ffffff", "width": 2, "fill": "#1f6f3a", "fillOpacity": 0.85, "color": "#ffd400", "size": 60}
+        minimap = {"id": "n1", "kind": "minimap", "points": [[0.7, 0.05]], "style": style, "show": {"from": 0, "to": 1}}
+        clean = annotations.clean_document(document(minimap), duration=2, frames=50)
+        self.assertEqual((clean["items"][0]["kind"], clean["items"][0]["points"], clean["items"][0]["style"]["size"]),
+                         ("minimap", [[0.7, 0.05]], 60))
+        for bad, message in (({**minimap, "points": [[0.7, 0.05], [0.8, 0.1]]}, "1 to 1 points"),
+                             ({**minimap, "on": 0}, "not on a board"),
+                             ({**minimap, "style": {**style, "flat": True}}, "cannot lie flat"),
+                             ({**minimap, "style": {**style, "size": 500}}, "size"),
+                             ({**minimap, "at": 3}, "Only a drawing flat"),
+                             ({**minimap, "show": {"from": 0, "to": 1, "pulse": True}}, "cannot pulse"),
+                             ({**minimap, "geometry": {"rx": 0.1, "ry": 0.1}}, "no geometry")):
+            with self.subTest(bad=str(bad)[:70]), self.assertRaisesRegex(ValueError, message):
+                annotations.clean_document(document(bad), duration=2, frames=50)
+        with self.assertRaises(ValueError):  # a corner linked to a player
+            annotations.clean_document({**document({**minimap, "points": [{"track": "t1", "dx": 0, "dy": 0}]}), "tracks": []},
+                                       duration=2, frames=50)
+
     def test_shapes_keep_which_shape_they_are(self):
         shape = {"id": "s1", "kind": "shape", "points": [[0.1, 0.2], [0.4, 0.5]], "geometry": {"shape": "star"},
                  "style": {"stroke": "#ffffff", "fill": "#2f80ed", "fillOpacity": 0.2, "pattern": "cross", "dashed": True},
