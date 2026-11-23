@@ -113,7 +113,7 @@ input[type=file]::file-selector-button { background: #e9ede4; font: inherit; fon
 .file-row { padding-top: 12px; margin-top: 12px; }
 .file-info strong { font-size: 12px; font-weight: 500; }
 .file-info small, .file-ready { font-size: 11px; }
-.period-files, .period-files label, .period-files input, .period-files span { font-size: 10px; }
+.period-files, .period-files .period-row, .period-files .period-choose, .period-files .period-file { font-size: 10px; }
 .sync-section { padding: 24px 0; gap: 32px; }
 .sync-copy h2, .recent-section h2 { font-size: 26px; font-weight: 450; line-height: 1.2; margin: 10px 0; }
 .sync-copy > p { font-size: 11px; line-height: 1.7; }

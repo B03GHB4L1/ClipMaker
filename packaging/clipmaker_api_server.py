@@ -506,25 +506,85 @@ FILTER_FLAGS = {definition[0] for definition in FILTER_QUALIFIERS} | {
 }
 
 
-def choose_video_file() -> Path | None:
-    import tkinter as tk
-    from tkinter import filedialog
+PICKER_TITLES = {
+    "1H": "Choose full match footage",
+    "2H": "Choose the second-half video",
+    "ET1": "Choose the extra-time first-half video",
+    "ET2": "Choose the extra-time second-half video",
+    "PEN": "Choose the penalty shootout video",
+}
 
-    root = tk.Tk()
+
+def choose_video_file(title: str = PICKER_TITLES["1H"]) -> Path | None:
+    """The system's own file dialog. Videos are used where they are: VizorPlay
+    keeps the path and never copies the file.
+
+    VIZORPLAY_TEST_VIDEO_PICK (set only by the test harness) names a text file
+    holding the path to return, so browser tests need no real dialog."""
+    test_pick = os.environ.get("VIZORPLAY_TEST_VIDEO_PICK")
+    if test_pick:
+        text = Path(test_pick).read_text(encoding="utf-8").strip() if Path(test_pick).is_file() else ""
+        return Path(text).resolve() if text else None
+    if sys.platform == "darwin":
+        import subprocess
+        prompt = title.replace('"', "'")
+        selected = subprocess.run(["osascript", "-e", f'POSIX path of (choose file with prompt "{prompt}")'],
+                                  capture_output=True, text=True)
+        if selected.returncode:
+            if "-128" in selected.stderr:
+                return None
+            raise ValueError("The macOS file picker is unavailable, so no video was chosen.")
+        return Path(selected.stdout.strip()).resolve()
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        raise ValueError("Choosing a video needs Tk, which is missing. On Linux install python3-tk "
+                         "(for example: sudo apt install python3-tk), then restart VizorPlay.") from None
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        raise ValueError("The file picker could not open a window (Tk found no display).") from None
     root.withdraw()
     root.attributes("-topmost", True)
     try:
         selected = filedialog.askopenfilename(
             parent=root,
-            title="Choose full match footage",
+            title=title,
             filetypes=[
-                ("Video files", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v"),
+                ("Video files", " ".join(f"*{suffix}" for suffix in sorted(VIDEO_SUFFIXES))),
                 ("All files", "*.*"),
             ],
         )
     finally:
         root.destroy()
     return Path(selected).resolve() if selected else None
+
+
+def remove_unused_imports(store: "MatchStore") -> int:
+    """Delete video copies earlier versions made in projects/<id>/imports/
+    that no saved project uses any more, plus files left by interrupted imports.
+    Imported CSVs are kept. Returns how many files went."""
+    used = set()
+    for project in store.list():
+        for value in [project.get("video_path"), *(project.get("period_videos") or {}).values()]:
+            if value:
+                used.add(os.path.normcase(str(Path(str(value)).resolve())))
+    removed = 0
+    stale = time.time() - 3600  # a newer .part may be a CSV import still arriving
+    for folder in (store.data_dir / "projects").glob("*/imports"):
+        for path in folder.iterdir():
+            if not path.is_file():
+                continue
+            suffix = path.suffix.lower()
+            if (suffix == ".part" and path.stat().st_mtime < stale) or (
+                    suffix in VIDEO_SUFFIXES and os.path.normcase(str(path.resolve())) not in used):
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    pass  # Open in the player (Windows): it goes next time.
+    return removed
 
 
 def choose_output_folder(initial_dir: str = "") -> Path | None:
@@ -1816,12 +1876,14 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
             raise ValueError("Open a project before importing files.")
         filename = Path(unquote(self.headers.get("X-File-Name", ""))).name
         suffix = Path(filename).suffix.lower()
-        is_csv = suffix == ".csv"
-        if suffix != ".csv" and suffix not in VIDEO_SUFFIXES:
-            raise ValueError("Choose a match CSV or a supported video file.")
+        if suffix in VIDEO_SUFFIXES:
+            # Match videos are never copied into VizorPlay: the file picker gives their path.
+            raise ValueError("Videos are used where they are, not copied. Choose the video with the file picker.")
+        if suffix != ".csv":
+            raise ValueError("Choose a match CSV.")
         length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0 or length > (50_000_000 if is_csv else 100_000_000_000):
-            raise ValueError("Invalid file size (CSV limit 50 MB; video limit 100 GB).")
+        if length <= 0 or length > 50_000_000:
+            raise ValueError("Invalid file size (CSV limit 50 MB).")
         folder = self.store.project_path(project_id).parent / "imports"
         folder.mkdir(parents=True, exist_ok=True)
         destination = folder / f"{uuid.uuid4().hex}{suffix}"
@@ -1836,32 +1898,25 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                     output.write(chunk)
                     remaining -= len(chunk)
                     self._body_read = getattr(self, "_body_read", 0) + len(chunk)
-            if is_csv:
-                import pandas as pd
-                from clipmaker_core import read_csv_safe
-                frame = read_csv_safe(str(temporary))
-                missing = {"minute", "second", "type"} - set(frame.columns)
-                if missing or frame.empty:
-                    raise ValueError("Match CSV needs event rows and minute, second, type columns.")
-                teams = frame["team"].dropna().astype(str).unique().tolist() if "team" in frame else []
-                home = str(frame["homeTeam"].dropna().iloc[0]) if "homeTeam" in frame and frame["homeTeam"].notna().any() else (teams[0] if teams else "Home")
-                away = str(frame["awayTeam"].dropna().iloc[0]) if "awayTeam" in frame and frame["awayTeam"].notna().any() else (teams[1] if len(teams) > 1 else "Away")
-                if "period" in frame:
-                    frame["period"] = frame["period"].map(normalize_period)
-                home_score, away_score = infer_score(frame, home, away)
-                frame.to_csv(temporary, index=False)
+            from clipmaker_core import read_csv_safe
+            frame = read_csv_safe(str(temporary))
+            missing = {"minute", "second", "type"} - set(frame.columns)
+            if missing or frame.empty:
+                raise ValueError("Match CSV needs event rows and minute, second, type columns.")
+            teams = frame["team"].dropna().astype(str).unique().tolist() if "team" in frame else []
+            home = str(frame["homeTeam"].dropna().iloc[0]) if "homeTeam" in frame and frame["homeTeam"].notna().any() else (teams[0] if teams else "Home")
+            away = str(frame["awayTeam"].dropna().iloc[0]) if "awayTeam" in frame and frame["awayTeam"].notna().any() else (teams[1] if len(teams) > 1 else "Away")
+            if "period" in frame:
+                frame["period"] = frame["period"].map(normalize_period)
+            home_score, away_score = infer_score(frame, home, away)
+            frame.to_csv(temporary, index=False)
             os.replace(temporary, destination)
-            if is_csv:
-                project = self.store.upsert({"id": project_id, "csv_path": str(destination),
-                    "home_team": home, "away_team": away, "home_score": home_score,
-                    "away_score": away_score, "event_count": len(frame), "source": "csv", "status": "in_progress"})
-                if has_codes(self.store, project_id):
-                    project = write_coded_table(self.store, project)
-                self.send_json(HTTPStatus.OK, {"match": {**project, **load_event_rows(str(project["csv_path"]))}})
-            else:
-                token = uuid.uuid4().hex
-                self.media_files[token] = destination
-                self.send_json(HTTPStatus.OK, {"file": {"name": filename, "path": str(destination), "size": length, "url": f"/api/media/{token}"}})
+            project = self.store.upsert({"id": project_id, "csv_path": str(destination),
+                "home_team": home, "away_team": away, "home_score": home_score,
+                "away_score": away_score, "event_count": len(frame), "source": "csv", "status": "in_progress"})
+            if has_codes(self.store, project_id):
+                project = write_coded_table(self.store, project)
+            self.send_json(HTTPStatus.OK, {"match": {**project, **load_event_rows(str(project["csv_path"]))}})
         finally:
             if temporary.exists():
                 temporary.unlink()
@@ -2482,6 +2537,11 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                                                                               "home_team", "away_team"}:
                     # Coded events are kept in video time: re-time their table to the new kick-offs.
                     saved = write_coded_table(self.store, saved)
+                if set(body) & {"video_path", "period_videos"}:
+                    try:
+                        remove_unused_imports(self.store)  # a copy an older version made may be unused now
+                    except (OSError, ValueError):
+                        pass  # the project is saved; the copy goes at the next start
                 self.send_json(HTTPStatus.OK, {"project": saved})
                 return
             if path == "/api/matches":
@@ -2508,13 +2568,15 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"match": scraped})
                 return
             if path == "/api/files/video":
-                if sys.platform == "darwin":
-                    self.send_json(HTTPStatus.OK, {"browser_picker": True})
-                    return
-                selected = choose_video_file()
+                period = str(body.get("period") or "1H")
+                if period not in PERIOD_KEYS:
+                    raise ValueError("Period videos must be for 1H, 2H, ET1, ET2 or PEN.")
+                selected = choose_video_file(PICKER_TITLES[period])
                 if selected is None:
                     self.send_json(HTTPStatus.OK, {"cancelled": True})
                     return
+                if selected.suffix.lower() not in VIDEO_SUFFIXES or not selected.is_file():
+                    raise ValueError("Choose a video file (MP4, MKV, MOV, AVI, WebM, M4V or TS).")
                 token = uuid.uuid4().hex
                 self.media_files[token] = selected
                 self.send_json(
@@ -2534,9 +2596,13 @@ class ClipMakerHandler(SimpleHTTPRequestHandler):
                 if match is None:
                     raise ValueError("That saved match is no longer available.")
                 period = {"1H": 1, "2H": 2, "ET1": 3, "ET2": 4, "PEN": 5}.get(str(body.get("period") or "1H"), 1)
-                selected = Path(video_for_period(match, period)).resolve()
+                saved_path = str(video_for_period(match, period) or "").strip()
+                if not saved_path:
+                    raise ValueError("No video is chosen for this match yet. Choose it on Intake.")
+                selected = Path(saved_path).resolve()
                 if not selected.is_file():
-                    raise ValueError("The saved video has moved or is no longer available.")
+                    raise ValueError(f"Video not found: {selected.name} has moved, been renamed or its drive is "
+                                     "not connected. Find it again on Intake.")
                 token = uuid.uuid4().hex
                 self.media_files[token] = selected
                 self.send_json(
@@ -2812,6 +2878,16 @@ def main() -> int:
     server.update_status = update_check.UpdateStatus(desktop=owner_pid is not None)
     if owner_pid is not None:
         watch_process_owner(owner_pid, server.shutdown)
+
+    def sweep_imports() -> None:
+        try:
+            removed = remove_unused_imports(server.match_store)
+            if removed:
+                print(f"Removed {removed} unused video cop{'y' if removed == 1 else 'ies'} from older imports")
+        except (OSError, ValueError) as error:
+            print(f"Could not check for unused video copies: {error}", file=sys.stderr)
+
+    threading.Thread(target=sweep_imports, name="import-sweep", daemon=True).start()
     print(f"VizorPlay shared UI running at http://{args.host}:{args.port}")
     try:
         server.serve_forever()

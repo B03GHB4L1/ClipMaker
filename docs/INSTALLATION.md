@@ -150,9 +150,12 @@ browser's full path to choose one.
 ## Projects and backups
 
 Projects save locally, including match events, kickoff markers, filter settings
-and export settings. Video references may point to files elsewhere on your
-computer: keep those video files in place. Browser-imported video is copied into
-the project. Closing the desktop window stops its engine and active work. With
+and export settings. Match videos are never copied: a project keeps only the
+path of each video you choose, so keep those files in place. If one moves, is
+renamed or its drive is unplugged, Intake marks it as not found; choose it again
+there. Copies that earlier versions made inside projects are deleted
+automatically once no project uses them. Choosing a video needs the system file
+dialog (on Linux, Tk: install `python3-tk` if it is missing). Closing the desktop window stops its engine and active work. With
 `vizorplay --browser` on macOS, stop the launcher with Control-C in its terminal;
 closing the browser tab alone leaves the launcher running.
 

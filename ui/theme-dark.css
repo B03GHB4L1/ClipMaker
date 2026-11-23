@@ -920,10 +920,18 @@
 :root[data-theme="dark"] .period-files {
   border-top: 1px solid #434343;
 }
-:root[data-theme="dark"] .period-files label {
+:root[data-theme="dark"] .period-files .period-row {
   border-bottom: 1px solid #2c2c2c;
 }
-:root[data-theme="dark"] .period-files button {
+:root[data-theme="dark"] .period-files .period-choose {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+}
+:root[data-theme="dark"] .period-files .period-file.is-missing {
+  color: #ff9888;
+}
+:root[data-theme="dark"] .period-files .period-remove {
   border: 0;
   background: transparent;
 }
@@ -1153,6 +1161,10 @@
   border-color: #ff9888;
   background: #ff9888;
   color: #2f2f2f;
+}
+:root[data-theme="dark"] .file-row.is-missing .file-ready,
+:root[data-theme="dark"] .file-row.is-missing .file-info small {
+  color: #ff9888;
 }
 
 /* design.css */

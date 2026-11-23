@@ -211,14 +211,8 @@
           <button class="dropzone" type="button" data-dropzone>
             <span class="drop-icon" aria-hidden="true">+</span
             ><span class="drop-title">Choose match footage</span
-            ><span class="drop-detail">or choose a video · MP4, MKV, MOV</span>
+            ><span class="drop-detail">Used where it is, never copied · MP4, MKV, MOV</span>
           </button>
-          <input
-            class="sr-only"
-            type="file"
-            accept="video/*,.mkv"
-            data-video-input
-          />
           <div class="file-row" data-file-row hidden>
             <span class="file-thumb"><i></i></span
             ><span class="file-info"
@@ -236,10 +230,10 @@
           </div>
           <details class="period-files">
             <summary>Separate period videos</summary>
-            <label>Second half <input type="file" accept="video/*,.mkv,.ts" data-period-video="2H" /><span data-period-file="2H"></span><button type="button" data-remove-period="2H" aria-label="Remove second-half video">&times;</button></label>
-            <label>Extra time 1 <input type="file" accept="video/*,.mkv,.ts" data-period-video="ET1" /><span data-period-file="ET1"></span><button type="button" data-remove-period="ET1" aria-label="Remove extra-time first-half video">&times;</button></label>
-            <label>Extra time 2 <input type="file" accept="video/*,.mkv,.ts" data-period-video="ET2" /><span data-period-file="ET2"></span><button type="button" data-remove-period="ET2" aria-label="Remove extra-time second-half video">&times;</button></label>
-            <label>Penalties <input type="file" accept="video/*,.mkv,.ts" data-period-video="PEN" /><span data-period-file="PEN"></span><button type="button" data-remove-period="PEN" aria-label="Remove penalty video">&times;</button></label>
+            <div class="period-row" role="group" aria-label="Second half video"><span class="period-name">Second half</span><button type="button" class="period-choose" data-period-video="2H" aria-label="Choose second-half video">Choose</button><span class="period-file" data-period-file="2H"></span><button type="button" class="period-remove" data-remove-period="2H" aria-label="Remove second-half video">&times;</button></div>
+            <div class="period-row" role="group" aria-label="Extra time 1 video"><span class="period-name">Extra time 1</span><button type="button" class="period-choose" data-period-video="ET1" aria-label="Choose extra-time first-half video">Choose</button><span class="period-file" data-period-file="ET1"></span><button type="button" class="period-remove" data-remove-period="ET1" aria-label="Remove extra-time first-half video">&times;</button></div>
+            <div class="period-row" role="group" aria-label="Extra time 2 video"><span class="period-name">Extra time 2</span><button type="button" class="period-choose" data-period-video="ET2" aria-label="Choose extra-time second-half video">Choose</button><span class="period-file" data-period-file="ET2"></span><button type="button" class="period-remove" data-remove-period="ET2" aria-label="Remove extra-time second-half video">&times;</button></div>
+            <div class="period-row" role="group" aria-label="Penalties video"><span class="period-name">Penalties</span><button type="button" class="period-choose" data-period-video="PEN" aria-label="Choose penalty video">Choose</button><span class="period-file" data-period-file="PEN"></span><button type="button" class="period-remove" data-remove-period="PEN" aria-label="Remove penalty video">&times;</button></div>
           </details>
         </div>
       </section>
