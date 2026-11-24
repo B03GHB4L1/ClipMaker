@@ -143,6 +143,28 @@ export const removeInsert = (value, clip, frame) => {
   return { ...next, items: next.items.filter((item) => item.on !== frame) };
 };
 
+/**
+ * The document with the insert on source frame `from` moved to frame `to`: it keeps its length, background and
+ * drawings (they keep their place inside it), and everything else in the clip retimes around it.
+ * Unchanged when `to` is not a free frame of the clip.
+ */
+export const moveInsert = (value, clip, from, to) => {
+  const freezes = value.freezes || [];
+  const insert = freezes.find((f) => f.atFrame === from);
+  if (!insert || from === to || to < 0 || to >= clip.frames || freezes.some((f) => f.atFrame === to)) return value;
+  const start = freezeStart(from, clip, freezes);
+  const inside = new Map(value.items.filter((item) => item.on === from).map((item) => [item.id, [item.show.from - start, item.show.to - start]]));
+  const placed = setFreeze(setFreeze(value, clip, from, 0), clip, to, insert.seconds);
+  const nextFreezes = placed.freezes.map((f) => (f.atFrame === to ? { ...insert, atFrame: to } : f));
+  const at = freezeStart(to, clip, nextFreezes);
+  const round = (t) => Math.round(t * 1000) / 1000;
+  const items = placed.items.map((item) => {
+    const offsets = inside.get(item.id);
+    return offsets ? { ...item, on: to, show: { ...item.show, from: round(at + offsets[0]), to: round(at + offsets[1]) } } : item;
+  });
+  return { ...placed, freezes: nextFreezes, items };
+};
+
 /** The board on `frame` with `patch` applied to its background (view, theme, colours). */
 export const changeBoard = (value, frame, patch) => ({
   ...value,

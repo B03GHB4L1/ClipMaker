@@ -1,7 +1,7 @@
 // Picture inserts (docs/CODING_AND_PITCH_PLAN.md, section I): ui/annotate/board.js.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addBoard, boardAt, changeBoard, drawBoard, itemsAt, pictureInsert, pictureRect, removeInsert } from "../ui/annotate/board.js";
+import { addBoard, boardAt, changeBoard, drawBoard, itemsAt, pictureInsert, moveInsert, pictureRect, removeInsert } from "../ui/annotate/board.js";
 import { freezeStart } from "../ui/annotate/timeline.js";
 
 const clip = { fps: 25, duration: 2, frames: 50 };
@@ -71,4 +71,25 @@ test("an insert holds its picture for its seconds, with its own drawings, and is
   // Removing the insert takes its drawings with it.
   const gone = removeInsert(changed, clip, 10);
   assert.deepEqual([gone.freezes.length, gone.items.length], [0, 0]);
+});
+
+test("an insert moves to another frame with its length, picture and drawings, and the footage around it retimes", () => {
+  const start = addBoard(empty(), clip, 10, 4, pictureInsert(ID, "fill", "#000000"));
+  const from = freezeStart(10, clip, start.freezes);
+  const ring = { id: "r1", kind: "ring", points: [[0.5, 0.5]], show: { from: from + 1, to: from + 3 }, on: 10 };
+  const footage = { id: "f1", kind: "ring", points: [[0.2, 0.2]], show: { from: 4.9, to: 5.1 } }; // footage at 0.9 s, played after the insert
+  const value = { ...start, items: [ring, footage] };
+  const moved = moveInsert(value, clip, 10, 30);
+  assert.deepEqual(moved.freezes.map((f) => [f.atFrame, f.seconds]), [[30, 4]]);
+  assert.equal(moved.freezes[0].background.id, ID);
+  const at = freezeStart(30, clip, moved.freezes);
+  const inside = moved.items.find((item) => item.id === "r1");
+  assert.deepEqual([inside.on, inside.show.from, inside.show.to], [30, at + 1, at + 3]);
+  // That footage now plays before the insert, so its drawing moves to 0.9 s.
+  assert.deepEqual([moved.items.find((item) => item.id === "f1").show.from, moved.items.find((item) => item.id === "f1").show.to], [0.9, 1.1]);
+  // Moving back restores the document, and a taken or off-clip frame leaves it alone.
+  assert.deepEqual(moveInsert(moved, clip, 30, 10), value);
+  assert.equal(moveInsert(value, clip, 10, 10), value);
+  assert.equal(moveInsert(value, clip, 10, 50), value);
+  assert.equal(moveInsert(value, clip, 10, -1), value);
 });
