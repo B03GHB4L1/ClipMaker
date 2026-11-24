@@ -34,22 +34,19 @@ for you.
   the shot map, an xG race chart, player comparisons, team style and the Video
   Lab.
 
-Everything stays on your computer. Your work is saved as you go, and starting
-a new project never deletes an old one.
+Everything stays on your computer and your work is saved as you go.
 
-VizorPlay used to be called ClipMaker.
+_VizorPlay used to be called ClipMaker._
 
 ### About VizorPlay xG
 
 VizorPlay xG was trained on free match data published by StatsBomb
-([StatsBomb open data](https://github.com/statsbomb/open-data)). Only the
-finished model ships with the app, so nothing is downloaded and your matches
-never leave your computer. It looks at the distance and angle to goal, headers,
-volleys, free kicks, set pieces, counter-attacks, through balls, crosses,
-one-on-ones and Opta's "big chance" flag. The match data doesn't say where
-defenders and the goalkeeper were, so a single shot's value can be off; totals
-over a match or a season are much steadier. Penalties count as 0.76; own goals
-have no xG.
+([StatsBomb open data](https://github.com/statsbomb/open-data)). It looks at
+the distance and angle to goal, headers, volleys, free kicks, set pieces, 
+counter-attacks, through balls, crosses, one-on-ones and Opta's "big chance" flag. 
+The match data doesn't say where defenders and the goalkeeper were, so a 
+single shot's value can be off; totals over a match or a season are much steadier.
+Penalties count as 0.76; own goals have no xG.
 
 Data: StatsBomb.
 
@@ -60,15 +57,14 @@ Data: StatsBomb.
 > Version 1.0 is not out yet. When it is, the files below will be on the
 > [Releases](../../releases) page. Everything on this page is about version 1.0.
 
-VizorPlay needs nothing else installed: no Python, no FFmpeg. Pick your
-computer below.
+Pick your computer below.
 
 | Your computer | Download this file | Needs |
 |---|---|---|
-| Windows 10 or 11 (64-bit) | `VizorPlay_1.0.0_x64-setup.exe` | Nothing else |
+| Windows 10 or 11 (64-bit) | `VizorPlay_1.0.0_x64-setup.exe` | - |
 | Mac with an Apple chip (M1, M2, M3, M4) | `VizorPlay_1.0.0_aarch64.dmg` | macOS 14 (Sonoma) or newer |
 | Mac with an Intel chip | `VizorPlay_1.0.0_x64.dmg` | macOS 12 (Monterey) or newer |
-| Ubuntu 22.04 or newer, Debian, Linux Mint (64-bit) | `VizorPlay_1.0.0_amd64.deb` | Nothing else |
+| Ubuntu 22.04 or newer, Debian, Linux Mint (64-bit) | `VizorPlay_1.0.0_amd64.deb` | - |
 
 ### Windows 10 and 11
 
@@ -93,23 +89,13 @@ left, then **About This Mac**.
 - It says **Processor: Intel**: you have an **Intel** Mac. Download the
   `x64.dmg` file. You need macOS 12 or newer.
 
-Not sure? The same window shows your macOS version. If it is older than the
-number above, VizorPlay will tell you it can't open on your Mac. Every Apple
-Silicon Mac can be updated to macOS 14; an Intel Mac stuck on macOS 11 or older
-can't run VizorPlay. An Intel Mac can't run the Apple Silicon file. An Apple
-Silicon Mac can run the Intel file, but use the Apple Silicon one.
-
-The Intel file is still being tested. Until it is on the Releases page, Intel
-Mac users should use Homebrew (see the Intel note below).
-
 **Step 2: install.** Open the file you downloaded. A window shows VizorPlay and
 your Applications folder. Drag **VizorPlay** onto **Applications**, then eject
 the disk (the eject button next to it in the Finder sidebar).
 
-**Step 3: open it the first time.** VizorPlay isn't approved by Apple (there is
-no Apple Developer membership behind it), so your Mac blocks the first launch
-with a message that it can't verify the app. You do this once, and later
-launches open normally.
+**Step 3: open it the first time.** VizorPlay isn't notarized/signed by Apple,
+so your Mac blocks the first launch with a message that it can't verify the app.
+You do this once and subsequent launches open normally:
 
 - **macOS 15 (Sequoia) or newer:** open VizorPlay from Applications and close
   the message. Open **System Settings**, then **Privacy & Security**, scroll
@@ -124,13 +110,11 @@ launches open normally.
   xattr -dr com.apple.quarantine /Applications/VizorPlay.app
   ```
 
-This doesn't get around Apple's check: you are telling your Mac to trust this
-one app. More detail is in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+More details in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-To remove VizorPlay, drag it from Applications to the Bin. Your projects stay on
-your Mac.
+To remove/uninstall VizorPlay, drag it from Applications to the Bin.
 
-**Or install with Homebrew** (slower, because it builds the app on your Mac).
+**Or install with Homebrew**.
 If you don't have Homebrew, follow the one-step instructions at
 [brew.sh](https://brew.sh) (Apple Silicon only; for an Intel Mac, see the Intel
 note below). Then open **Terminal** and type these three lines,
@@ -151,12 +135,10 @@ security message the first time.
 the installer on brew.sh only works on Apple Silicon Macs. Homebrew still runs
 on Intel Macs with macOS 11 or newer; it just has no official installer for
 them. This matters to you if you have an Intel Mac on macOS 11 (the disk image
-needs macOS 12), or you want Homebrew on an Intel Mac before the Intel disk image
-is out. Apple Silicon Macs use the normal brew.sh installer and can skip this.
+needs macOS 12). Apple Silicon Macs use the normal brew.sh installer and can skip this.
 
 A community-made, unofficial installer called `homebrew-intel` sets Homebrew up
-on Intel Macs. It is not made by VizorPlay or Homebrew, so read its script
-before you run it. First install Apple's command line tools: open **Terminal**,
+on Intel Macs. First install Apple's command line tools: open **Terminal**,
 type `xcode-select --install` and press Enter. Then paste this one line and
 press Enter:
 
@@ -166,8 +148,7 @@ press Enter:
 
 (Its [page](https://github.com/itsmaclol/homebrew-intel) also offers a `.pkg`
 installer you can verify.) When it finishes, follow the Homebrew steps above
-(`brew tap`, `brew install`, `vizorplay`). On Intel, VizorPlay compiles on your
-Mac, so it can take a long time, and VizorPlay hasn't tested it.
+(`brew tap`, `brew install`, `vizorplay`).
 
 ### Linux (Ubuntu 22.04 or newer, Debian, Linux Mint)
 
@@ -188,17 +169,15 @@ yet. To remove it later: `sudo apt remove vizorplay`. Your projects stay.
 
 ## Updating
 
-When a new version comes out, a message appears at the bottom of the app. Your
-projects are kept every time; they are stored apart from the program. Close
-VizorPlay before you update by hand.
+When a new version comes out, a message appears at the bottom of the app.
 
 - **Windows:** click **Update and restart**. VizorPlay downloads the new
   version, checks it is genuine, closes, updates and opens again by itself. You
-  can also just run a newer setup file.
+  can also just run a newer setup file, but Close VizorPlay before you update manually.
 - **Mac (disk image):** this doesn't update itself yet. Download the newer
   `.dmg` for your chip (see the table above), open it and drag **VizorPlay** onto
   **Applications** again. Choose **Replace** when asked. You don't need to do
-  the Open Anyway step again if macOS remembers it; if the message comes back,
+  the 'Open Anyway' step again if macOS remembers it; if the message comes back,
   repeat step 3.
 - **Mac (Homebrew):** close VizorPlay, then type these three lines in Terminal,
   pressing Enter after each one. It takes a few minutes because it rebuilds the
