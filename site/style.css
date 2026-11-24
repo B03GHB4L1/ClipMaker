@@ -74,18 +74,11 @@ h2{font-size:clamp(26px,3.6vw,42px);line-height:1.12;letter-spacing:-.03em;font-
 
 .features{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
 .feat{background:var(--paper);padding:28px}
+.feat.wide{grid-column:span 2}
 .feat h3{font-size:17px;letter-spacing:-.015em;margin:0 0 8px}
 .feat p{margin:0;color:var(--muted);font-size:14.5px}
 .feat .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--ink);padding:2px 7px;margin-bottom:14px;border-radius:2px}
 
-.privacy{background:var(--dark);color:var(--on-dark)}
-.privacy .eyebrow{color:var(--lime)}
-.privacy .sub{color:var(--on-dark-muted);margin-bottom:0}
-.privacy .grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,6vw,80px);align-items:start}
-.privacy ul{list-style:none;margin:0;padding:0;display:grid;gap:0}
-.privacy li{display:flex;gap:16px;padding:18px 0;border-bottom:1px solid #333;font-size:15px}
-.privacy li:first-child{border-top:1px solid #333}
-.privacy li::before{content:"";flex:none;width:12px;height:12px;margin-top:6px;background:var(--lime);clip-path:polygon(50% 0,100% 100%,0 100%)}
 
 /* install */
 .os-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
@@ -140,8 +133,8 @@ footer small{display:block;margin-top:32px;padding-top:20px;border-top:1px solid
   .hero .wrap{grid-template-columns:1fr}
   .ball{order:-1;width:min(46%,200px);margin-bottom:-8px}
   .steps,.features,.update-grid{grid-template-columns:1fr}
+  .feat.wide{grid-column:auto}
   .step{border-right:0;border-bottom:1px solid var(--rule)}
   .step:last-child{border-bottom:0}
-  .privacy .grid,.licence .cols,.chips{grid-template-columns:1fr}
-  .top .btn.small{display:none}
+    .top .btn.small{display:none}
 }
