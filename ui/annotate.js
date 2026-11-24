@@ -8,7 +8,7 @@ import { createDocument, dragHandle, moveItem, newItem, ringGeometry, simplify, 
 import { animation, freezeStart, outputToSource, playStart, setFreeze, stops, totalSeconds } from "./annotate/timeline.js";
 import { MAX_PARTS, cutClip, cutToSource, deletePart, duplicatePart, movePart, partAt, partSpans, sourceToCut, spansOf, splitAt, trimPart } from "./annotate/parts.js";
 import { DEFAULT_TEAM_COLOURS, TEAMS, THEMES, BOARD_SECONDS, PICTURE_COLOURS, PICTURE_FITS, pictureInsert, addBoard, boardAt, boardFrame, changeBoard, changeBoardView, drawBoard,
-  itemsAt, newToken, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
+  itemsAt, newToken, moveInsert, removeInsert, textOn, tokensFromPlayers, placedAt, setMove, clearMoves, moveBoard, playersOnPitch } from "./annotate/board.js";
 import { LANDMARKS, LINES, VIEWS, calibrate, landmark, projectedLines } from "./annotate/pitch.js";
 import { isFlat, PITCH_KINDS, placeFlat, projectItems } from "./annotate/flat.js";
 import { clipPitchTrack, keyAt, pitchKeys, withCamera, withKey, withoutKey } from "./annotate/camera.js";
@@ -1649,7 +1649,7 @@ const renderFreezes = () => {
     block.className = `annotate-lane-freeze${freeze.background ? " is-board" : ""}${freeze.atFrame === selectedFreeze ? " is-selected" : ""}`;
     block.append(Object.assign(document.createElement("span"), { className: "annotate-block-label", textContent: `${insertName(freeze)} · ${freeze.seconds} s` }));
     block.dataset.laneFreeze = String(freeze.atFrame);
-    block.title = `${insertName(freeze)} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag its right edge to change the length.`;
+    block.title = `${insertName(freeze)} at frame ${freeze.atFrame + 1}: ${freeze.seconds} s. Click to select it (Delete removes it); drag it to move it, or its right edge to change the length.`;
     const remove = Object.assign(document.createElement("button"), { type: "button", className: "annotate-lane-remove",
       innerHTML: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>' });
     remove.dataset.freezeRemove = String(freeze.atFrame);
@@ -1851,7 +1851,7 @@ function renderParts() {
 }
 
 {
-  // Click or drag on the lane to move the playhead; drag a freeze's right edge to resize it.
+  // Click or drag on the lane to move the playhead; drag a freeze or insert to move it, or its right edge to resize it.
   const lane = $("[data-lane]");
   let drag = null;
   const timeAt = (event) => {
@@ -1868,6 +1868,11 @@ function renderParts() {
       const frame = Number(block.dataset.laneFreeze);
       selectFreeze(frame);
       seekOutput(freezeStart(frame, timing, doc.freezes));
+      // Dragging it moves it: it lands on the footage frame under its left edge.
+      const without = doc.freezes.filter((f) => f.atFrame !== frame);
+      const startNow = freezeStart(frame, timing, doc.freezes);
+      drag = { move: true, frame, without, x: event.clientX, grab: timeAt(event) - startNow, block, target: frame, moved: false };
+      lane.setPointerCapture(event.pointerId);
       return;
     }
     if (edge) {
@@ -1883,6 +1888,17 @@ function renderParts() {
   lane.addEventListener("pointermove", (event) => {
     if (!drag) return;
     if (drag.seek) return seekOutput(timeAt(event));
+    if (drag.move) {
+      if (!drag.moved && Math.abs(event.clientX - drag.x) < 4) return;
+      drag.moved = true;
+      const wanted = outputToSource(Math.max(0, timeAt(event) - drag.grab), timing, drag.without).frame;
+      const free = boardFrame({ freezes: drag.without }, timing, wanted);
+      drag.target = free === undefined ? drag.frame : free;
+      const length = total();
+      drag.block.style.left = `${(freezeStart(drag.target, timing, drag.without) / length) * 100}%`;
+      drag.block.title = `Starts at ${formatTime(freezeStart(drag.target, timing, drag.without))}`;
+      return;
+    }
     const start = freezeStart(drag.frame, timing, doc.freezes);
     const raw = drag.seconds + ((event.clientX - drag.x) / drag.width) * drag.length;
     const snapped = snapTime(start + raw, null, event);
@@ -1891,6 +1907,18 @@ function renderParts() {
     drag.block.title = `${drag.next} s`;
   });
   const finish = () => {
+    if (drag?.move) {
+      const { frame, target, moved } = drag;
+      drag = null;
+      if (moved && target !== frame) {
+        doc.commitDocument((value) => moveInsert(value, timing, frame, target));
+        selectedFreeze = target;
+        renderFreezes();
+        seekOutput(freezeStart(target, timing, doc.freezes));
+        trackStatus(`Moved to ${formatTime(freezeStart(target, timing, doc.freezes))}. Undo puts it back.`);
+      } else renderFreezes();
+      return;
+    }
     if (drag?.next) changeFreeze(drag.frame, drag.next);
     drag = null;
     showSnap(null);
