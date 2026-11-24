@@ -133,7 +133,7 @@ your Mac.
 **Or install with Homebrew** (slower, because it builds the app on your Mac).
 If you don't have Homebrew, follow the one-step instructions at
 [brew.sh](https://brew.sh) (Apple Silicon only; for an Intel Mac, see the Intel
-note above). Then open **Terminal** and type these three lines,
+note below). Then open **Terminal** and type these three lines,
 pressing Enter after each one:
 
 ```sh
@@ -165,7 +165,7 @@ press Enter:
 ```
 
 (Its [page](https://github.com/itsmaclol/homebrew-intel) also offers a `.pkg`
-installer you can verify.) When it finishes, follow the Homebrew steps below
+installer you can verify.) When it finishes, follow the Homebrew steps above
 (`brew tap`, `brew install`, `vizorplay`). On Intel, VizorPlay compiles on your
 Mac, so it can take a long time, and VizorPlay hasn't tested it.
 
