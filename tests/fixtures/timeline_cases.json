@@ -1,0 +1,29 @@
+{
+  "_about": "Shared by tests/test_annotations.py and tests/annotate.test.mjs: app/telestration/timeline.py and ui/annotate/timeline.js must agree.",
+  "clip": {"fps": 25, "duration": 4, "frames": 100},
+  "freezes": [{"atFrame": 50, "seconds": 2.5}, {"atFrame": 0, "seconds": 1}],
+  "total": 7.5,
+  "mapping": [
+    {"t": 0, "frame": 0, "freeze": 0},
+    {"t": 0.99, "frame": 0, "freeze": 0},
+    {"t": 1.0, "frame": 0, "freeze": null},
+    {"t": 1.5, "frame": 12, "freeze": null},
+    {"t": 2.96, "frame": 49, "freeze": null},
+    {"t": 3.0, "frame": 50, "freeze": 50},
+    {"t": 5.49, "frame": 50, "freeze": 50},
+    {"t": 5.5, "frame": 50, "freeze": null},
+    {"t": 7.5, "frame": 99, "freeze": null},
+    {"t": 9.0, "frame": 99, "freeze": null}
+  ],
+  "animation": [
+    {"item": {"kind": "ring", "show": {"from": 1, "to": 3}}, "t": 0.5, "state": null},
+    {"item": {"kind": "ring", "show": {"from": 1, "to": 3}}, "t": 1, "state": {"alpha": 1, "draw": 1, "scale": 1, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "ring", "show": {"from": 1, "to": 3, "animate": "fade", "animateOut": "fade", "animSeconds": 0.5, "ease": "linear"}}, "t": 1.25, "state": {"alpha": 0.5, "draw": 1, "scale": 1, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "ring", "show": {"from": 1, "to": 3, "animate": "fade", "animateOut": "fade", "animSeconds": 0.5, "ease": "linear"}}, "t": 2.75, "state": {"alpha": 0.5, "draw": 1, "scale": 1, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "arrow", "show": {"from": 1, "to": 3, "animate": "draw", "animSeconds": 0.5}}, "t": 1.25, "state": {"alpha": 1, "draw": 0.875, "scale": 1, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "text", "show": {"from": 1, "to": 3, "animate": "draw", "animSeconds": 0.5, "ease": "linear"}}, "t": 1.25, "state": {"alpha": 0.5, "draw": 1, "scale": 1, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "zone", "show": {"from": 1, "to": 3, "animate": "grow", "animSeconds": 1, "ease": "ease-in-out"}}, "t": 1.25, "state": {"alpha": 1, "draw": 1, "scale": 0.0625, "offsetY": 0, "pulse": null}},
+    {"item": {"kind": "text", "show": {"from": 1, "to": 3, "animate": "slide", "animSeconds": 0.5, "ease": "linear"}}, "t": 1.25, "state": {"alpha": 0.5, "draw": 1, "scale": 1, "offsetY": 0.02, "pulse": null}},
+    {"item": {"kind": "ring", "show": {"from": 1, "to": 5, "pulse": true}}, "t": 2.8, "state": {"alpha": 1, "draw": 1, "scale": 1, "offsetY": 0, "pulse": 0.5}}
+  ]
+}

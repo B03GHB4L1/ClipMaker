@@ -1,342 +1,240 @@
 <p align="center">
-  <img src="./assets/ClipMaker_logo.png" alt="ClipMaker logo" width="140">
+  <img src="./ui/assets/brand/vizorplay-lockup.svg" alt="VizorPlay" width="260">
 </p>
 
-<div align="center">
-  <h1>ClipMaker</h1>
+<h1 align="center">VizorPlay</h1>
 
-  **Football video clipping and analysis workstation built from match event data**
+<p align="center">Turn a football match video into clips of the moments you care about.</p>
 
-Built by [@B03GHB4L1](https://x.com/B03GHB4L1)
-
-Current version: **v1.2.3**
-</div>
+<p align="center">Made by <a href="https://x.com/B03GHB4L1">@B03GHB4L1</a></p>
 
 ---
 
 ## What it does
 
-ClipMaker turns match event data and match video into a local football analysis and clipping workflow.
+Pick a match, choose what you want to see (for example, every pass by one
+player, or every shot), and VizorPlay cuts those moments out of your match video
+for you.
 
-You can use it to:
+- **Get the match details automatically.** Paste a link to a match on Scoresway
+  or WhoScored and VizorPlay downloads the list of everything that happened in
+  it: every pass, shot, tackle and more, with the time it happened. You can
+  also use your own spreadsheet file (CSV).
+- **Add your match video.** One file for the whole match, or a separate file
+  for each half.
+- **Choose the moments you want.** Filter by player, team, type of action,
+  area of the pitch and more. Watch every clip before you save it, and make any
+  clip longer or shorter.
+- **Save your clips.** As separate video files, or joined into one highlights
+  video.
+- **Look deeper.** See shot maps, pass maps and other charts for a match, and
+  how a team plays across several matches.
+- **See how good each chance was.** VizorPlay xG gives every shot a value from
+  0 to 1: the chance it is scored, from where and how it was taken. It shows on
+  the shot map, an xG race chart, player comparisons, team style and the Video
+  Lab.
 
-- scrape match events from WhoScored or Scoresway
-- load your own event CSV and match video files
-- explore the match inside an interactive Analyst Room
-- profile team style, transitions, and set pieces inside the Tactical Lab
-- filter events manually or with AI-assisted prompts
-- generate individual clips or a combined highlight reel automatically
+Everything stays on your computer and your work is saved as you go.
 
-It started as a clip cutter. In `v1.2.3`, it is much closer to a full analyst toolkit.
+_VizorPlay used to be called ClipMaker._
 
----
+### About VizorPlay xG
 
-## Core Features
+VizorPlay xG was trained on free match data published by StatsBomb
+([StatsBomb open data](https://github.com/statsbomb/open-data)). It looks at
+the distance and angle to goal, headers, volleys, free kicks, set pieces, 
+counter-attacks, through balls, crosses, one-on-ones and Opta's "big chance" flag. 
+The match data doesn't say where defenders and the goalkeeper were, so a 
+single shot's value can be off; totals over a match or a season are much steadier.
+Penalties count as 0.76; own goals have no xG.
 
-### Data ingestion
-
-- **WhoScored scraper built in** — load a match directly from a WhoScored URL
-- **Scoresway scraper built in** — paste Scoresway match URLs and let ClipMaker normalize the event data into the same workflow
-- **CSV import workflow** for your own event data
-- **Single-file or split-video support** for one full match file, separate half files, extra-time files, and penalty shootout files
-- **Kick-off timestamp mapping** for 1st half, 2nd half, extra time, and penalties where needed
-- **First penalty timestamp mapping** so penalty shootouts can be aligned more reliably
-
-### Clipping and output
-
-- **Automatic clip generation** from event timestamps
-- **Individual clips or combined reel** output
-- **Dry run mode** to preview clip windows before rendering
-- **Merge-gap logic** to combine nearby actions into cleaner sequences
-- **Live progress feedback** during clip rendering and reel assembly
-- **FFmpeg-based cutting and concatenation** for faster and more reliable output handling
-- **Improved event ordering and match-clock mapping** across normal time, extra time, and shootouts
-
-### Manual filtering
-
-- **Multi-player reel building** from the Manual Filters tab
-- **Action type filters** for passes, carries, shots, defensive actions, and more
-- **xT threshold filter**
-- **Top N by xT**
-- **Progressive action filter**
-- **Half filter**
-- **Pitch zone filter**
-- **Depth zone filter**
-- **Boolean event filters** such as:
-  - key passes
-  - crosses
-  - long balls
-  - switches of play
-  - diagonals
-  - through balls
-  - deep completions
-  - box entry passes
-  - final third entries
-  - big chances created
-  - assist sub-types
-  - touch in box
-  - and other computed football event flags
-
-### AI-assisted filtering
-
-- **ClipMaker AI tab** for natural-language clip requests
-- **Deterministic + LLM hybrid query pipeline**
-  - first resolves teams, players, halves, event types, and boolean tags using code
-  - then uses an LLM layer for interpretation and response generation
-- **Natural-language filter parsing** into app filter settings
-- **AI-generated clip outputs** with downloadable rendered clips/reels
-- **Football glossary and alias system** to improve prompt understanding
-- **Expanded football query support** for switches, diagonals, box entries, final-third entries, touch-in-box actions, penalties, and successful take-ons in the box
-- **Proxy-backed model fallback flow** for the AI layer
-
-### Workflow helpers
-
-- **Quick filter presets** like set pieces, ball progression, attacking chaos, and defensive display
-- **Filter snapshots** so users can save and reload filter configurations across sessions
-- **Browser-based local UI** built in Streamlit
-- **PNG and animated GIF exports** for interactive analysis maps
-- **Cleaner chart export names, titles, match context, and ClipMaker branding**
-- **Packaged launchers** for Windows, macOS, and Linux
+Data: StatsBomb.
 
 ---
 
-## Analyst Room
+## Install
 
-The Analyst Room is a separate multi-view analysis workspace inside the app.
+> Version 1.0 is not out yet. When it is, the files below will be on the
+> [Releases](../../releases) page. Everything on this page is about version 1.0.
 
-It includes:
+Pick your computer below.
 
-- **Shot Map**
-  - normal shot view
-  - goalframe view
-  - penalty shootout mode
-- **Pass Map**
-  - player pass view
-  - pass network view
-- **Defensive Actions Map**
-- **Dribbles & Carries Map**
-- **Goalkeeper Map**
-  - actions view
-  - shots faced view
-- **Build-Up View**
-  - progressive chain detection
-  - chain inspection and clip extraction
-- **Player Comparison**
-  - comparison radar
-  - role-aware comparison logic
-  - Top 5 Moments widgets
+| Your computer | Download this file | Needs |
+|---|---|---|
+| Windows 10 or 11 (64-bit) | `VizorPlay_1.0.0_x64-setup.exe` | - |
+| Mac with an Apple chip (M1, M2, M3, M4) | `VizorPlay_1.0.0_aarch64.dmg` | macOS 14 (Sonoma) or newer |
+| Mac with an Intel chip | `VizorPlay_1.0.0_x64.dmg` | macOS 12 (Monterey) or newer |
+| Ubuntu 22.04 or newer, Debian, Linux Mint (64-bit) | `VizorPlay_1.0.0_amd64.deb` | - |
 
-Recent improvements also include:
+### Windows 10 and 11
 
-- professional goalframe proportions
-- adaptive goalframe scaling for out-of-frame shots
-- dedicated penalty shootout layout
-- chronological shootout ordering
-- wrapped shootout rows after 5 penalties
-- export-ready map context with match, team, player, and filter labels
-- cleaner PNG exports for charts and maps
+1. Download `VizorPlay_1.0.0_x64-setup.exe` from the [Releases](../../releases) page.
+2. Close VizorPlay if it is open, then open the file you downloaded. It
+   installs for your own account, so you don't need an administrator password.
+3. If Windows says "Windows protected your PC", click **More info**, then
+   **Run anyway**. This appears because the app isn't registered with
+   Microsoft, not because something is wrong.
+4. Open **VizorPlay** from the Start menu.
 
----
+To remove it later: **Settings**, **Apps**, **VizorPlay**, **Uninstall**. Your
+projects stay on your computer.
 
-## Tactical Lab
+### Mac
 
-The Tactical Lab is a team-level analysis workspace for style and phase-of-play profiling.
+**Step 1: find out which kind of Mac you have.** Click the Apple menu in the top
+left, then **About This Mac**.
 
-It includes:
+- It says **Chip: Apple M1** (or M2, M3, M4): you have an **Apple Silicon** Mac.
+  Download the `aarch64.dmg` file. You need macOS 14 or newer.
+- It says **Processor: Intel**: you have an **Intel** Mac. Download the
+  `x64.dmg` file. You need macOS 12 or newer.
 
-- **Multi-match team analysis**
-  - select up to 20 saved matches
-  - compare team style across a wider sample
-- **Style Profile radar**
-  - possession control
-  - PPDA-based pressing intensity
-  - directness
-  - wide play share
-  - final-third penetration
-  - set-piece reliance
-  - transition threat
-- **Radar Info** explanations for every radar metric
-- **Threat split chart** showing pass xT versus carry xT
-- **Progression Funnel** showing territory gain and final-third/box progression
-- **Territory Heatmap** for team field tilt and area usage
-- **Defensive Transitions**
-  - possession-loss locations
-  - recovery, progression conceded, box entry conceded, and shot conceded outcomes
-- **Attacking Transitions**
-  - recovery locations
-  - threat and progression after ball-wins
-- **Set-Piece and Restart Profile**
-  - restart delivery map
-  - restart mix and outcome table
-  - corner normalization so `Corner` and `CornerAwarded` are treated as one restart type
-- **Video Lab**
-  - cut tactical moments directly from transition, xT, box-entry, and restart playlists
-  - build tactical reels from selected moments
-- **Export polish**
-  - chart titles, notes, filenames, and branding are prepared for presentation use
+**Step 2: install.** Open the file you downloaded. A window shows VizorPlay and
+your Applications folder. Drag **VizorPlay** onto **Applications**, then eject
+the disk (the eject button next to it in the Finder sidebar).
 
----
+**Step 3: open it the first time.** VizorPlay isn't notarized/signed by Apple,
+so your Mac blocks the first launch with a message that it can't verify the app.
+You do this once and subsequent launches open normally:
 
-## Download
+- **macOS 15 (Sequoia) or newer:** open VizorPlay from Applications and close
+  the message. Open **System Settings**, then **Privacy & Security**, scroll
+  down to **Security**, find "VizorPlay was blocked" and click **Open Anyway**.
+  Confirm with your password or Touch ID, then click **Open**.
+- **macOS 14 (Sonoma) or older:** in Applications, Control-click (or right-click)
+  **VizorPlay**, choose **Open**, then click **Open** again.
+- **Still blocked, or it says the app is damaged?** Open **Terminal** and type
+  the line below, then open VizorPlay again:
 
-Go to the [Releases](../../releases) page and download the package for your platform:
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/VizorPlay.app
+  ```
 
-- **Windows**
-- **macOS**
-- **Linux**
+More details in [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-## Or clone only one platform folder
+To remove/uninstall VizorPlay, drag it from Applications to the Bin.
 
-### Windows
-```bash
-git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
-cd ClipMaker
-git sparse-checkout init --cone
-git sparse-checkout set Windows
-git checkout main
+**Or install with Homebrew**.
+If you don't have Homebrew, follow the one-step instructions at
+[brew.sh](https://brew.sh) (Apple Silicon only; for an Intel Mac, see the Intel
+note below). Then open **Terminal** and type these three lines,
+pressing Enter after each one:
+
+```sh
+brew tap B03GHB4L1/vizorplay
+brew install vizorplay
+vizorplay
 ```
 
-### macOS
-```bash
-git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
-cd ClipMaker
-git sparse-checkout init --cone
-git sparse-checkout set Mac
-git checkout main
+Installing takes a few minutes. The first time VizorPlay opens, it also needs a
+few minutes and an internet connection to get ready. After that it opens
+straight away: just type `vizorplay` in Terminal. Your Mac may still show a
+security message the first time.
+
+**Intel Macs that need Homebrew (including macOS 11).** Since September 2026
+the installer on brew.sh only works on Apple Silicon Macs. Homebrew still runs
+on Intel Macs with macOS 11 or newer; it just has no official installer for
+them. This matters to you if you have an Intel Mac on macOS 11 (the disk image
+needs macOS 12). Apple Silicon Macs use the normal brew.sh installer and can skip this.
+
+A community-made, unofficial installer called `homebrew-intel` sets Homebrew up
+on Intel Macs. First install Apple's command line tools: open **Terminal**,
+type `xcode-select --install` and press Enter. Then paste this one line and
+press Enter:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/itsmaclol/homebrew-intel/HEAD/install.sh)"
 ```
 
-### Linux
-```bash
-git clone --filter=blob:none --no-checkout https://github.com/B03GHB4L1/ClipMaker.git
-cd ClipMaker
-git sparse-checkout init --cone
-git sparse-checkout set Linux
-git checkout main
-```
+(Its [page](https://github.com/itsmaclol/homebrew-intel) also offers a `.pkg`
+installer you can verify.) When it finishes, follow the Homebrew steps above
+(`brew tap`, `brew install`, `vizorplay`).
 
-Each package includes platform-specific setup instructions and launchers.
+### Linux (Ubuntu 22.04 or newer, Debian, Linux Mint)
 
----
+1. Download `VizorPlay_1.0.0_amd64.deb` from the [Releases](../../releases) page.
+2. Close VizorPlay if it is open. Then double-click the file to install it, or
+   open a terminal in your Downloads folder and type:
 
-## Requirements
+   ```sh
+   sudo apt install ./VizorPlay_1.0.0_amd64.deb
+   ```
 
-- Python 3.10 or later recommended
-- Match video file(s)
-- Event CSV data, a WhoScored match URL, or a Scoresway match URL
+3. Open **VizorPlay** from your apps menu.
 
-Packaged launchers handle first-run dependency setup for supported builds.
+Other Linux types (Fedora, Arch and so on) and ARM computers aren't supported
+yet. To remove it later: `sudo apt remove vizorplay`. Your projects stay.
 
 ---
 
-## How it works
+## Updating
 
-1. Load a match by scraping WhoScored, scraping Scoresway, or importing your own CSV
-2. Load the match video file, separate half files, or separate extra-time/penalty files where needed
-3. Enter kick-off timestamps that match your video timeline
-4. Explore the match in the Analyst Room or go straight to filtering
-5. Build your export using manual filters or AI prompts
-6. Render either individual clips or a combined reel
+When a new version comes out, a message appears at the bottom of the app.
 
-ClipMaker maps event times to the video timeline, builds clip windows around the selected moments, merges nearby events when appropriate, and exports the final result locally. For penalty shootouts, users can enter the timestamp of the first penalty kick and ClipMaker derives the period anchor from the match data.
+- **Windows:** click **Update and restart**. VizorPlay downloads the new
+  version, checks it is genuine, closes, updates and opens again by itself. You
+  can also just run a newer setup file, but Close VizorPlay before you update manually.
+- **Mac (disk image):** click **Update and restart**. VizorPlay downloads the
+  new version, checks it is genuine, replaces itself and opens again. This has
+  not been tried on a real Mac yet; if macOS asks you to allow the app again,
+  repeat step 3, and if the button reports a problem, download the newer `.dmg`
+  for your chip (see the table above), open it, drag **VizorPlay** onto
+  **Applications** and choose **Replace**.
+- **Mac (Homebrew):** close VizorPlay, then type these three lines in Terminal,
+  pressing Enter after each one. It takes a few minutes because it rebuilds the
+  app:
 
----
+  ```sh
+  brew update
+  brew upgrade vizorplay
+  vizorplay
+  ```
 
-## CSV Format
-
-Minimum required columns:
-
-| Column | Description |
-|--------|-------------|
-| `minute` | Match clock minute |
-| `second` | Match clock second |
-| `type` | Event type, e.g. `Pass`, `Carry`, `Shot` |
-| `period` | Half identifier, e.g. `FirstHalf` / `SecondHalf` or `1` / `2` |
-
-Useful optional columns:
-
-| Column | Unlocks |
-|--------|---------|
-| `xT` | xT threshold filters and Top N by xT |
-| `prog_pass` | Progressive pass filtering |
-| `prog_carry` | Progressive carry filtering |
-| `goal_mouth_y` | Goalframe shot placement views |
-| `goal_mouth_z` | Goalframe shot placement views |
-| `team` | Team filtering and comparison features |
-| `playerName` | Player filtering, AI prompts, comparison, and map views |
-| computed `is_*` flags | Rich boolean filters and AI-assisted interpretation |
+- **Linux:** click **Update and restart**. VizorPlay downloads the new `.deb`,
+  checks it is genuine, then asks for your password in the usual system window
+  and installs it. If you cancel that window, nothing changes and VizorPlay keeps
+  running. If no password window can open, download the newer `.deb` from the
+  Releases page and install it with the same command as before.
 
 ---
 
-## Data Source Notes
+## Version history
 
-- WhoScored and Scoresway data do not always contain identical event tags or qualifiers.
-- Scoresway matches are normalized into the ClipMaker workflow, but some analysis outputs may differ slightly from the equivalent WhoScored workflow.
-- All clipping and video rendering still happens locally on your machine.
+### VizorPlay 1.0 (coming soon)
 
----
+- A brand-new app for Windows, Mac and Linux, under a new name
+- Smaller download, and it updates itself on Windows, Linux and the Mac disk-image app
+- Much faster video saving on computers with an NVIDIA graphics card
+- VizorPlay xG: how good every chance was, on the shot map, an xG race and more
+- Your projects are saved and reopen exactly as you left them
+- The AI filter from older versions has been removed
 
-## Changelog
+### Older versions (as ClipMaker)
 
-### v1.2.3
+- **1.2.3:** match details from Scoresway, save charts as pictures or
+  animations, support for extra time and penalty shootouts
+- **1.2.2:** see how a team plays across matches, highlights of several players
+  at once, get several matches at once
+- **1.2.1:** pressing chart, trim clips while watching them, faster previews
+- **1.2:** match details from WhoScored, match charts, saved filters
+- **1.1:** more ways to filter, support for videos split into halves
+- **1.0:** first version
 
-- Added **Scoresway scraping** alongside WhoScored, with automatic source detection from pasted match URLs
-- Added **Scoresway event normalization** for xT, progressive actions, carries, box entries, goalkeeper actions, set pieces, and shot/save classification where available
-- Added **PNG and animated GIF export controls** for interactive analysis maps
-- Improved **extra-time and penalty shootout handling**, including optional separate files for extra-time halves and shootouts
-- Added easier **penalty shootout timestamp alignment** using the first penalty kick timestamp
-- Expanded the **Tactical Lab** with multi-match selection, transition analysis, style profiles, progression funnels, territory heatmaps, restart profiles, and tactical video playlists
-- Improved **Analyst Room exports** with clearer titles, match context, labels, notes, filenames, and ClipMaker branding
-- Improved **AI and manual filtering** for xT, progressive actions, switches, diagonals, box entries, final-third entries, penalties, and touch-in-box queries
-- Improved event ordering, timestamp conversion, and handling of missing or incomplete event clocks
-- Improved macOS file handling with browser-safe upload controls
+## Licence
 
-### v1.2.2
+VizorPlay is source-available, not open source. It is free for noncommercial
+use: personal study, hobby and amateur analysis, charities, schools, public
+research and government. The licence, the
+[PolyForm Strict License 1.0.0](LICENSE), does not allow changing VizorPlay or
+sharing copies of it.
 
-- Added the **Tactical Lab** for team style, transition, and set-piece analysis
-- Added **multi-player reels** in the Manual Filters tab
-- Normalized `Foul + Successful` events to **Foul Drawn**
-- Added **multi-match scraping**
-  
-### v1.2.1
+Professional clubs, paid analysts and coaching businesses need a commercial
+licence: email [granvskaia@gmail.com](mailto:granvskaia@gmail.com).
 
-- Added a **Pressing Map** to The Analyst's Room for viewing high ball-wins by press zone
-- Added a **timeline scrubber** and per-clip buffer controls so individual clips can be trimmed and re-cut directly from preview
-- Improved manual filtering with smarter qualifier options that only appear when relevant to the current player, team, and action type
-- Made clip previews load faster by streaming videos instead of loading whole files into memory
-- Added clearer controls for dismissing AI video output and individual clip previews
-- Fixed individual clip and highlight reel download issues
-- Cleaned up filter labels while preserving compatibility with saved v1.2 filters
-
-### v1.2
-
-- Expanded from a simple clip generator into a **multi-page analysis + clipping app**
-- Added **WhoScored scraping**
-- Added the **Analyst Room**
-- Added **Shot Map**, **Pass Map**, **Defensive Actions**, **Dribbles & Carries**, **Goalkeeper**, **Build-Up**, and **Comparison** views
-- Added **Penalty Shootout analysis**
-- Added **ClipMaker AI** with natural-language filtering and AI-generated clip workflows
-- Added **quick presets** and **filter snapshots**
-- Added richer computed football event flags and query parsing
-- Improved packaged launchers and first-run setup flow
-- Added custom frontend map components, local assets, and stronger theming
-
-### v1.1
-
-- Action type, progressive, xT, and Top N filters
-- Split video file support
-- Half filter
-- Live assembly progress bar with ETA
-- Finalising message during muxing
-- Switched from MoviePy-heavy output flow to direct FFmpeg-based cutting and assembly for faster rendering and better multi-audio support
-
-### v1.0
-
-- Initial release
-- Auto clip cutting and merging from event CSV
-- Combined reel and individual clips modes
-- Dry run preview
-- Browser UI with file browse buttons
+ClipMaker, the app VizorPlay replaces, was released under the MIT License, and
+that still applies to every ClipMaker release
+([LICENSE-MIT-EARLIER.md](LICENSE-MIT-EARLIER.md)).
 
 ---
 
-*ClipMaker by B4L1 — [@B03GHB4L1](https://x.com/B03GHB4L1)*
+<p align="center">VizorPlay by B4L1 · <a href="https://x.com/B03GHB4L1">@B03GHB4L1</a></p>

@@ -1,0 +1,192 @@
+# Desktop release process
+
+VizorPlay uses the shared frontend in `ui/`, its local API in `packaging/`, and
+the existing clipping and analytical implementations in `app/`.
+
+Release readiness is tracked in `docs/FEATURE_PARITY.md`. Do not treat a
+successful build as proof that installation, native interactions, or upgrades
+have passed. Public test runs are authorized; publishing a release still requires
+the owner's separate instruction. No release has been published by these tests.
+
+The release workflow first calls Full Desktop E2E against the same commit, and the
+two Mac disk-image workflows. It then assembles the exact NSIS/DEB installer bytes,
+the Mac disk images and the Homebrew source archive retained by successful
+acceptance jobs; it never rebuilds after acceptance.
+SHA-256 receipts bind every payload to that commit and its passing evidence.
+Missing receipts, changed files, mismatched commits or failed jobs block the
+candidate. Optional live-provider URLs are not set by this workflow: skipped
+means not tested, not provider certification. The current release gates are in
+`RELEASE_1_0_CHECKLIST.md`.
+
+Manually dispatch **Desktop release** on `B4L1/release-packaging` to prepare a
+candidate without publishing. Download `VizorPlay-1.0.0-candidate` from that
+run's artifacts: it includes installers, the Mac disk images, the exact tested source archive,
+Homebrew formula, WinGet manifests, acceptance receipts, a candidate manifest
+and SHA256SUMS. Artifacts expire after 30 days. Verify checksums before use.
+
+## Windows and Linux
+
+Only after separate owner authorization, pushing `v1.0.0` starts acceptance and
+attaches its exact tested candidate to the GitHub release. No tag should be
+created merely to test the workflow. Windows NSIS and Ubuntu 22.04 `.deb` are
+the supported native paths. Untested RPM packages are excluded from this
+candidate rather than being advertised as verified installers.
+
+The release also includes a three-file WinGet manifest set. After the first
+version is accepted into the WinGet community repository, Windows users can
+install with `winget install --id B4L1.VizorPlay -e` and receive later versions
+with `winget upgrade --id B4L1.VizorPlay -e`.
+
+The desktop shell starts the packaged shared-UI backend on an available local
+port and displays it inside the VizorPlay window. The analysis workspaces run
+in the same backend. The user does not need Python, FFmpeg, Node.js, or Rust.
+Scoresway pages that hide their data links are read with an installed Microsoft
+Edge or Google Chrome (Edge ships with Windows 10 and 11); no browser is bundled.
+
+## macOS
+
+There are two Mac routes. The disk image is the main one; Homebrew is the
+alternative.
+
+**Disk images (the main route).** `VizorPlay_1.0.0_aarch64.dmg` (Apple Silicon,
+macOS 14 or later) and `VizorPlay_1.0.0_x64.dmg` (Intel, macOS 12 or later) hold
+`VizorPlay.app` with its engine inside, plus an Applications shortcut, so
+installing is one drag and needs no Terminal. They are built and tested by
+`.github/workflows/mac-dmg.yml` and `mac-dmg-intel.yml` (mount, copy out, check the
+chip and minimum macOS of every file, open the app, close it and check the engine
+stops). The release workflow calls both, records a receipt for each tested image
+(`receipt-macOS-AppleSilicon.json`, `receipt-macOS-Intel.json`) and attaches the
+exact tested bytes to the release with the other files, covered by `SHA256SUMS`.
+The Apple Silicon image is required: without a passed receipt there is no candidate.
+The Intel image is still being tested, so it is attached only when it passed; the
+candidate summary says whether it is included. The images are ad hoc signed and
+not notarized (there is no Apple Developer membership), so the first launch needs
+**Open Anyway**; nothing here claims to pass Gatekeeper. They do not update
+themselves: users download the newer image and choose Replace.
+
+**Homebrew (the alternative).** The formula installs the shared source and builds
+`VizorPlay.app` on the Mac (Rust and Node.js are build-only dependencies), ad hoc
+signed and never quarantined because nothing was downloaded as an app. The app has
+no frozen engine inside: it starts the formula's engine launcher, which creates a
+private Python environment under the user's Library on first run and installs the
+pinned dependencies (no browser download). `vizorplay` opens the app;
+`vizorplay --browser` keeps the older default-browser route. The app is not
+notarized; acceptance records Gatekeeper's assessment rather than claiming it passes.
+The formula includes the process-owner adapter. Video and CSV selection use
+browser-safe local imports on macOS; the export-folder picker uses macOS's own
+folder chooser, with a typed-path fallback. No quarantine-removal workaround is
+installed or promised.
+
+Since September 2026 the installer on brew.sh is Apple Silicon only. Homebrew still
+runs on Intel Macs with macOS 11 or newer (a Tier 3 configuration: most packages
+compile on the Mac). For an Intel Mac on macOS 11, which cannot run the disk image,
+the README points to the unofficial `homebrew-intel` installer
+(github.com/itsmaclol/homebrew-intel). It is third-party, not tested by VizorPlay and
+not signed or notarized.
+
+The prepared formula downloads the exact source archive attached to the release,
+using the checksum of the archive installed during acceptance. The source repo
+is public by the owner's instruction. The separate tap remains private and
+empty until an authorized publication step; `brew tap` is not yet a public
+installation path.
+
+The candidate includes a rendered `vizorplay.rb` formula with its source SHA-256.
+To render a tag-archive formula locally when troubleshooting, run:
+
+```text
+python packaging/render_homebrew_formula.py --version 1.0.0 --sha256 HASH --output Formula/vizorplay.rb
+```
+
+The resulting formula belongs in the separate `homebrew-vizorplay` tap.
+Once that tap is published, macOS users install and upgrade with:
+
+```text
+brew tap B03GHB4L1/vizorplay
+brew install vizorplay
+brew upgrade vizorplay
+```
+
+## Linux installation and upgrades
+
+Ubuntu, Debian, and Linux Mint users install a downloaded package with:
+
+```text
+sudo apt install ./VizorPlay_1.0.0_amd64.deb
+```
+
+Installing a newer package with the same command upgrades the existing app and
+keeps VizorPlay's per-user runtime data. Debian packages declare GStreamer
+playback dependencies. There is no apt/dnf repository and DEB packages cannot
+update themselves: the app shows a notice and opens the release page. Fedora/RPM and
+other distributions remain outside the verified 1.0 candidate scope.
+
+Acceptance installs a 0.9.0 predecessor built from the last commit before the
+program rename (so it is `clipmaker.exe` / `/usr/bin/clipmaker`), saves
+project data, upgrades to 1.0.0, checks the old program and engine are gone, relaunches and renders/exports, reinstalls,
+then uninstalls while preserving the isolated project. macOS likewise upgrades
+a local test formula from 0.9.0 to 1.0.0 and reopens the project, then opens the
+Homebrew-built VizorPlay.app, checks its signature and lack of quarantine, that it
+starts its own engine with the projects folder it was given, and that closing it
+stops the engine (tests/macos_app_smoke.py). macOS has no WebDriver for app
+windows, so the screens are exercised against the same engine in a browser.
+These checks exercise different-version package lifecycle; they do not certify migration
+from every historical ClipMaker binary/schema or the public package channels.
+
+## Verification
+
+Run the source tests and a real local-media smoke test:
+
+```text
+python -m unittest discover -s tests -v
+python packaging/smoke_test.py
+```
+
+After PyInstaller builds, use `--server` with the actual packaged executable.
+The smoke test creates disposable synthetic data, renders and decodes a clip,
+checks media seeking, and starts the analytical server. It does not operate
+on the user's saved projects.
+
+The Checks workflow has Windows, Linux, and macOS matrices plus a CI-only
+browser regression in `tests/browser_smoke.py`. Do not claim those runs passed
+until there are actual results from the latest commit.
+
+Local project JSON lives under `projects/<id>/project.json` in the backend's
+data directory. Legacy `matches.json` is read without being overwritten.
+Project video paths reference selected files; browser imports make a local copy
+under the project. Snapshots live in `filter-snapshots.json`, independent of the
+random server port. Deleted snapshots are retained under `snapshot-trash/`.
+
+## In-app updates
+
+Every release publishes `latest.json` next to its installers. Installed copies
+read `https://github.com/B03GHB4L1/ClipMaker/releases/latest/download/latest.json`
+once per launch (`packaging/update_check.py`) and show a notice in the bottom
+bar of every screen when its `version` is newer:
+
+| Install | What the notice offers |
+|---|---|
+| Windows desktop app | **Update and restart**: the desktop shell downloads the installer named in the feed, verifies its signature, stops the engine, runs the installer in passive mode and VizorPlay reopens by itself |
+| Linux DEB | **Update and restart**: the signed `.deb` is installed with the system package manager (password dialog) |
+| macOS disk image | **Update and restart**: the updater swaps VizorPlay.app for the signed `.app.tar.gz` named in the feed (`darwin-aarch64`, `darwin-x86_64`). Not yet tried on a real Mac |
+| macOS Homebrew | the `brew upgrade vizorplay` command |
+
+Windows installers are signed for the updater with a minisign key generated by
+`tauri signer generate`. This is not Microsoft code signing: it only proves an
+update came from this project. The public key is built into the app
+(`src-tauri/tauri.conf.json`, `plugins.updater.pubkey`) and cannot be replaced
+at run time. The private key is the `TAURI_SIGNING_PRIVATE_KEY` repository
+secret; the owner keeps an offline backup. **If the private key is lost,
+installed copies can no longer update in the app** and need one manual install
+of a build with a new key. If it leaks, publish a build with a new key at once.
+
+The acceptance build signs the Windows installer (`createUpdaterArtifacts`) and
+fails if the secret is missing. `tests/windows_update.py` then installs it,
+serves a feed announcing 1.0.1 over HTTPS from a throwaway local certificate
+authority, and drives the real footer button: an update signed for other bytes
+is refused while the app keeps working, the genuine update installs, VizorPlay
+reopens by itself and the project is unchanged. The release candidate refuses
+to assemble without the installer's signature and that evidence, and writes
+`latest.json` from the tested installer's signature.
+
+`VIZORPLAY_UPDATE_URL` points the check and the installer at another HTTPS feed
+(acceptance tests only). `VIZORPLAY_UPDATE_CHECK=0` turns the check off.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>VizorPlay records a match from a camera or capture card you choose on the Code screen. The recording stays on this Mac.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>VizorPlay records the sound of a match from a microphone you choose on the Code screen. The recording stays on this Mac.</string>
+</dict>
+</plist>

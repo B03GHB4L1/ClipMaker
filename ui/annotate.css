@@ -1,0 +1,550 @@
+/* Analyst editor (annotate.html). Light theme on design.css tokens, with the Clips screen's
+   component vocabulary: white 6px controls, a black play toggle, white 8px panels. */
+/* The analysis shell locks the page to the window; the editor is taller than that, so let it scroll. */
+body.annotate-page { overflow-y: auto; height: auto; min-height: 100vh; }
+.annotate-page .annotate-main { flex: 1 0 auto; } /* grow with the content so the page padding clears the footer */
+.annotate-main {
+  --annotate-panel: #fff;
+  --annotate-hover: #f3f4ef;
+  --annotate-control: 32px;
+  --annotate-review: #d08a00;
+  --annotate-lost: #ac302e;
+  --annotate-freeze: #2f6fd6;
+  --annotate-board: #2f7a43;
+  gap: 8px;
+}
+.annotate-page ::selection { background: var(--cm-accent); color: var(--cm-ink); }
+.annotate-main svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.annotate-main svg .is-solid { fill: currentColor; stroke: none; }
+
+/* Shared control: white, hairline border, 6px radius (as .transport button on the Clips screen). */
+.annotate-main :where(.annotate-command, .annotate-shot, .annotate-export-button, .annotate-export-cancel, .annotate-format, .annotate-transport button, .annotate-pair button,
+  .annotate-row-action, .annotate-primary, .annotate-remove) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--annotate-control); padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px;
+  background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500;
+  white-space: nowrap; cursor: pointer; transition: background-color 150ms var(--cm-settle), border-color 150ms var(--cm-settle);
+}
+/* Low specificity on purpose: pressed and coloured buttons keep their own background. */
+.annotate-main :where(button, select):where(:hover:not(:disabled)) { background-color: var(--annotate-hover); }
+.annotate-main :is(button, select, input, a, summary, canvas):focus-visible { outline: 2px solid #6e8f12; outline-offset: 2px; }
+.annotate-main button:disabled { color: #a3a69e; cursor: not-allowed; }
+
+/* Command bar */
+.annotate-bar { display: flex; align-items: center; gap: 14px; min-height: 36px; }
+.annotate-back { display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px 6px 4px; margin-left: -4px; border-radius: 6px; color: var(--cm-muted); font-size: 11px; text-decoration: none; }
+.annotate-back:hover { background: var(--annotate-hover); color: var(--cm-ink); }
+.annotate-heading { display: flex; align-items: baseline; gap: 10px; flex: 0 1 auto; min-width: min(96px, 100%); }
+.annotate-bar .annotate-hint { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--cm-muted); font-size: 11px; line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; text-wrap: pretty; }
+/* The hint keeps room for a sentence; the clip name gives way first. */
+.annotate-bar .annotate-hint { flex: 1 1 0; min-width: 150px; }
+@media (max-width: 1060px) {
+  /* No room beside the commands: the hint takes its own line under them. */
+  .annotate-bar { flex-wrap: wrap; row-gap: 4px; }
+  .annotate-bar .annotate-hint { order: 5; flex-basis: 100%; min-width: 0; -webkit-line-clamp: 3; }
+  .annotate-commands { margin-left: auto; }
+}
+.annotate-heading h1 { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-save { flex: none; color: var(--cm-muted); font-size: 11px; }
+.annotate-commands { display: flex; align-items: center; gap: 6px; }
+.annotate-main .annotate-command { width: var(--annotate-control); padding: 0; }
+.annotate-main .annotate-select { width: auto; padding: 0 10px; }
+.annotate-select kbd { color: var(--cm-muted); font: inherit; font-size: 10px; }
+.annotate-main .annotate-select[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
+.annotate-select[aria-pressed="true"] kbd { color: #b9bcb4; }
+.annotate-divider { width: 1px; height: 20px; margin: 0 4px; background: var(--cm-rule); }
+.annotate-main .annotate-format { padding: 0 6px; }
+/* Export video is the one primary action (lime, as Export on the Clips screen); a screenshot is secondary. */
+.annotate-main .annotate-export-button { border-color: var(--cm-accent); background: var(--cm-accent); color: var(--cm-ink); font-weight: 600; }
+.annotate-main .annotate-export-button:hover:not(:disabled) { background: #b8e123; }
+.annotate-main .annotate-export-button:disabled { border-color: var(--cm-rule); background: var(--annotate-panel); }
+.annotate-export { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); font-size: 11px; }
+.annotate-export[hidden] { display: none; }
+.annotate-export-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.annotate-export progress { flex: 1; min-width: 80px; height: 6px; border: 0; border-radius: 3px; background: #eff0ec; accent-color: var(--cm-ink); }
+.annotate-export progress::-webkit-progress-bar { border-radius: 3px; background: #eff0ec; }
+.annotate-export progress::-webkit-progress-value { border-radius: 3px; background: var(--cm-ink); }
+.annotate-export progress::-moz-progress-bar { border-radius: 3px; background: var(--cm-ink); }
+.annotate-main .annotate-export-cancel { height: 28px; }
+.annotate-main .annotate-delete:not(:disabled) { color: #9b2a28; }
+.annotate-main .annotate-delete:hover:not(:disabled) { border-color: #e7b9b7; background: #fdf0ef; }
+.annotate-warning, .annotate-error { margin: 0; padding: 8px 12px; border: 1px solid #ecd39a; border-radius: 6px; background: #fff6df; color: #5c4300; font-size: 12px; }
+.annotate-error { border-color: #e7b9b7; background: #fdf0ef; color: #7d2321; }
+
+/* Workspace: tools | stage and timeline | inspector */
+.annotate-workspace { display: grid; grid-template-columns: 76px minmax(0, 1fr) 256px; grid-template-rows: auto 1fr; gap: 10px 12px; align-items: start; padding-bottom: 12px; }
+.annotate-tools { grid-column: 1; grid-row: 1 / span 2; }
+.annotate-centre { grid-column: 2; grid-row: 1 / span 2; }
+.annotate-player-tools { grid-column: 3; grid-row: 1; }
+.annotate-inspector { grid-column: 3; grid-row: 2; }
+.annotate-workspace[hidden] { display: none; }
+
+.annotate-tools {
+  position: sticky; top: 8px; display: flex; flex-direction: column; padding: 4px;
+  border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel);
+}
+.annotate-tool-group { display: flex; flex-direction: column; gap: 2px; }
+.annotate-tool-group + .annotate-tool-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--cm-rule); }
+.annotate-group-title { margin: 2px 0 1px; color: var(--cm-muted); font-size: 10px; font-weight: 600; text-align: center; }
+.annotate-tools button {
+  position: relative; display: grid; justify-items: center; gap: 3px; padding: 8px 2px 6px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer;
+  transition: background-color 150ms var(--cm-settle), color 150ms var(--cm-settle);
+}
+.annotate-tools button svg { width: 20px; height: 20px; }
+.annotate-tools kbd { position: absolute; top: 3px; right: 4px; color: var(--cm-muted); font: inherit; font-size: 10px; }
+.annotate-tools button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
+.annotate-tools button[aria-pressed="true"] { background: var(--cm-ink); color: #fff; }
+.annotate-tools button[aria-pressed="true"] kbd { color: #b9bcb4; }
+/* Shape: one button for the geometric shapes; its menu opens sideways (below it on a phone). */
+.annotate-shape-icon { display: contents; }
+.annotate-shape-more { position: absolute; right: 4px; bottom: 4px; width: 0; height: 0; border-style: solid; border-width: 0 0 5px 5px;
+  border-color: transparent transparent var(--cm-muted) transparent; }
+.annotate-tools button[aria-pressed="true"] .annotate-shape-more { border-bottom-color: #b9bcb4; }
+.annotate-shape-menu {
+  position: fixed; z-index: 30; display: flex; flex-wrap: wrap; gap: 2px; max-width: calc(100vw - 16px); padding: 4px;
+  border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel);
+  box-shadow: 0 6px 20px rgba(23, 24, 23, 0.14);
+}
+.annotate-shape-menu[hidden] { display: none; }
+.annotate-shape-menu button {
+  display: grid; justify-items: center; gap: 3px; min-width: 62px; padding: 8px 4px 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer;
+}
+.annotate-shape-menu button svg { width: 20px; height: 20px; }
+.annotate-shape-menu button:hover:not([aria-checked="true"]) { background: var(--annotate-hover); }
+.annotate-shape-menu button[aria-checked="true"] { background: var(--cm-ink); color: #fff; }
+.annotate-shape-menu button:focus-visible { outline: 2px solid var(--cm-accent-ink, var(--cm-ink)); outline-offset: 1px; }
+/* Players: Ring and Follow work on a player, beside the player settings. */
+.annotate-player-tools { display: flex; flex-direction: column; gap: 12px; padding: 10px 10px 10px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-player-tools h2 { margin: 0 0 6px 2px; font-size: 12px; font-weight: 600; }
+.annotate-player-buttons { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.annotate-option { display: flex; flex-direction: column; min-width: 0; }
+.annotate-option small { color: var(--cm-muted); font-size: 10.5px; font-weight: 400; line-height: 1.3; }
+.annotate-player-buttons button[aria-pressed="true"] small { color: #c9ccc4; }
+.annotate-player-buttons button {
+  position: relative; display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 4px 22px 4px 8px;
+  border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink);
+  font: inherit; font-size: 11px; font-weight: 500; line-height: 1.25; text-align: left; cursor: pointer;
+}
+.annotate-player-buttons button svg { width: 20px; height: 20px; }
+.annotate-player-buttons kbd { position: absolute; top: 3px; right: 5px; color: var(--cm-muted); font: inherit; font-size: 10px; }
+.annotate-player-buttons button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
+.annotate-player-buttons button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
+.annotate-player-buttons button[aria-pressed="true"] kbd { color: #b9bcb4; }
+.annotate-pitch-saved { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.annotate-pitch-saved button { flex: 1 1 auto; min-height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.annotate-pitch-saved button:hover:not([aria-pressed="true"]) { background: var(--annotate-hover); }
+.annotate-pitch-saved button[aria-pressed="true"] { border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
+.annotate-pitch-saved button:disabled { opacity: 0.5; cursor: default; }
+.annotate-pitch-saved .annotate-calibrate-progress, .annotate-pitch-saved p { flex: 1 1 100%; }
+.annotate-pitch-saved .annotate-calibrate-progress[hidden], .annotate-pitch-saved [hidden] { display: none; }
+.annotate-pitch-saved p { margin: 2px 0 0; font-size: 11px; line-height: 1.4; }
+
+/* The column is as wide as the video, so transport and timeline line up with it.
+   The video's height leaves room for the bars, transport and timeline in one window. */
+.annotate-centre {
+  display: flex; flex-direction: column; gap: 8px; justify-self: center; min-width: min(100%, 320px);
+  width: min(100%, calc((100vh - 200px) * var(--clip-ratio, 1.7778)));
+  width: min(100%, calc((100svh - 200px) * var(--clip-ratio, 1.7778)));
+}
+/* The stage takes the clip's own shape, so drawing coordinates are the video's. */
+.annotate-stage { position: relative; width: 100%; overflow: hidden; border-radius: 6px; background: #0d0e0c; aspect-ratio: var(--clip-ratio, 16 / 9); }
+.annotate-stage video, .annotate-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.annotate-stage video.is-standby { visibility: hidden; }
+.annotate-stage canvas { cursor: crosshair; touch-action: none; }
+.annotate-stage canvas:focus-visible { outline-offset: -2px; }
+.annotate-stage canvas[data-tool="select"] { cursor: default; }
+.annotate-stage canvas[data-tool="select"].is-over { cursor: move; }
+.annotate-stage canvas[data-tool="text"] { cursor: text; }
+.annotate-text-input {
+  position: absolute; z-index: 2; min-width: 60px; max-width: 90%; padding: 0.2em 0.35em; margin: 0;
+  border: 1px dashed var(--cm-accent); outline: none; resize: none; overflow: hidden; line-height: 1.25; white-space: pre;
+}
+
+/* Transport (as on the Clips screen) */
+.annotate-transport { display: flex; align-items: center; gap: 6px; }
+.annotate-main .annotate-transport button { height: 36px; }
+.annotate-main .annotate-transport [data-step] { width: 36px; padding: 0; }
+.annotate-main .annotate-play { width: 44px; padding: 0; border-color: var(--cm-ink); background: var(--cm-ink); color: #fff; }
+.annotate-main .annotate-play:hover:not(:disabled) { background: #2c2f29; }
+.annotate-play .annotate-icon-pause, .annotate-play.is-playing .annotate-icon-play { display: none; }
+.annotate-play.is-playing .annotate-icon-pause { display: inline; }
+.annotate-transport input[type="range"] { flex: 1; min-width: 80px; margin: 0 4px; accent-color: var(--cm-ink); }
+.annotate-time { color: var(--cm-ink); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.annotate-time .is-frozen { color: var(--annotate-freeze); font-weight: 600; }
+
+/* Timeline: a label column, then one lane per row in output time. */
+.annotate-timeline { display: flex; flex-direction: column; gap: 2px; padding: 5px 10px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-players { display: contents; }
+.annotate-row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 76px; align-items: center; gap: 10px; min-height: 26px; font-size: 11px; }
+.annotate-row-name { overflow: hidden; color: var(--cm-muted); text-overflow: ellipsis; white-space: nowrap; }
+.annotate-player .annotate-row-name { color: var(--cm-ink); font-weight: 500; }
+.annotate-main .annotate-row-action { height: 24px; padding: 0 8px; font-size: 11px; }
+.annotate-main .annotate-row-action.is-busy { border-color: var(--cm-ink); font-variant-numeric: tabular-nums; }
+.annotate-lane { position: relative; height: 18px; border-radius: 4px; background: #eff0ec; cursor: pointer; touch-action: none; }
+.annotate-player .annotate-lane { height: 14px; }
+.annotate-lane-head { position: absolute; top: -4px; bottom: -4px; z-index: 1; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--cm-ink); pointer-events: none; }
+.annotate-lane-freeze { position: absolute; top: 0; bottom: 0; min-width: 4px; border-radius: 3px; background: color-mix(in srgb, var(--annotate-freeze) 30%, transparent); box-shadow: inset 2px 0 var(--annotate-freeze); }
+.annotate-lane-freeze.is-current { background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent); }
+.annotate-lane-freeze.is-board { background: color-mix(in srgb, var(--annotate-board) 30%, transparent); box-shadow: inset 2px 0 var(--annotate-board); }
+.annotate-lane-freeze.is-board.is-current { background: color-mix(in srgb, var(--annotate-board) 50%, transparent); }
+.annotate-lane-freeze.is-board .annotate-lane-edge::after { background: var(--annotate-board); }
+.annotate-lane-freeze { cursor: pointer; }
+.annotate-lane-freeze.is-selected { outline: 1.5px solid var(--cm-ink); outline-offset: 0; }
+/* Delete from the timeline: a small cross on the block, shown on hover or when it is selected. */
+.annotate-main .annotate-lane-remove {
+  position: absolute; top: 50%; left: 4px; z-index: 2; display: none; place-items: center; width: 14px; height: 14px; padding: 0;
+  border: 0; border-radius: 3px; background: var(--cm-ink); color: #fff; transform: translateY(-50%); cursor: pointer;
+}
+.annotate-lane-remove svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.annotate-lane-freeze:hover .annotate-lane-remove, .annotate-lane-freeze.is-selected .annotate-lane-remove { display: grid; }
+.annotate-main .annotate-lane-remove:hover { background: #c62828; }
+.annotate-main .annotate-danger { height: 30px; padding: 0 10px; border: 1px solid #c62828; border-radius: 6px; background: #fff; color: #b3261e; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.annotate-main .annotate-danger:hover { background: #fdecea; }
+/* Parts: one block per part, in play order, as wide as it plays (freezes included). */
+.annotate-parts .annotate-lane { height: 28px; overflow: hidden; background: #e4e6df; cursor: default; }
+.annotate-part {
+  position: absolute; top: 2px; bottom: 2px; min-width: 6px; overflow: hidden; box-sizing: border-box;
+  border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 1px #c3c6bd; cursor: grab; touch-action: none;
+}
+.annotate-part:hover { box-shadow: inset 0 0 0 1px var(--cm-muted); }
+.annotate-part.is-selected { background: color-mix(in srgb, var(--cm-accent) 55%, #fff); box-shadow: inset 0 0 0 2px var(--cm-ink); }
+.annotate-part.is-dragging { opacity: 0.55; cursor: grabbing; }
+.annotate-part.is-drop { box-shadow: inset 0 0 0 2px var(--annotate-freeze); }
+.annotate-part-label { position: absolute; inset: 0 8px; display: flex; align-items: center; overflow: hidden; font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.annotate-part-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.annotate-part-edge.is-from { left: 0; }
+.annotate-part-edge.is-to { right: 0; }
+.annotate-part-edge::after { content: ""; position: absolute; top: 7px; bottom: 7px; left: 3px; width: 2px; border-radius: 1px; background: var(--cm-ink); opacity: 0; transition: opacity 120ms var(--cm-settle); }
+.annotate-part:hover .annotate-part-edge::after, .annotate-part.is-selected .annotate-part-edge::after { opacity: 0.55; }
+.annotate-parts-list { padding: 0; max-height: none; }
+.annotate-parts-list li { display: flex; flex-direction: column; gap: 4px; padding-bottom: 2px; }
+.annotate-parts-list li.is-selected { padding-bottom: 6px; }
+.annotate-part-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 2px; }
+.annotate-main .annotate-part-act { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-part-act:hover:not(:disabled) { background: var(--annotate-hover); }
+.annotate-main .annotate-part-act:disabled { color: #a3a69e; cursor: not-allowed; }
+.annotate-main .annotate-part-act svg { width: 14px; height: 14px; }
+.annotate-lane-edge { position: absolute; top: -3px; bottom: -3px; right: -5px; width: 10px; cursor: ew-resize; }
+.annotate-lane-edge::after { content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 2px; border-radius: 1px; background: var(--annotate-freeze); }
+.annotate-drawings .annotate-lane { height: auto; min-height: 18px; }
+.annotate-lane[data-empty]:not(:has(.annotate-lane-freeze, .annotate-lane-drawing))::before {
+  content: attr(data-empty); position: absolute; inset: 0 8px; overflow: hidden; color: var(--cm-muted); font-size: 10.5px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-lane-drawing {
+  position: absolute; height: 6px; min-width: 4px; border-radius: 3px; background: #a9ada2; cursor: pointer;
+}
+.annotate-lane-drawing.is-selected { z-index: 2; height: 8px; background: var(--cm-ink); }
+.annotate-lane-drawing .annotate-lane-grip { position: absolute; top: -5px; bottom: -5px; width: 10px; cursor: ew-resize; }
+.annotate-lane-drawing .annotate-lane-grip[data-grip="from"] { left: -5px; }
+.annotate-lane-drawing .annotate-lane-grip[data-grip="to"] { right: -5px; }
+.annotate-lane-drawing .annotate-lane-grip::after { content: ""; position: absolute; top: 2px; bottom: 2px; left: 3px; width: 4px; border-radius: 2px; background: var(--cm-ink); box-shadow: 0 0 0 1.5px #fff; }
+.annotate-cover { position: absolute; top: 3px; bottom: 3px; border-radius: 2px; background: #c3c6bd; pointer-events: none; }
+.annotate-progress { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 4px; background: var(--cm-accent); box-shadow: inset 0 0 0 1px #8fae1c; pointer-events: none; }
+.annotate-flag { position: absolute; top: 3px; bottom: 3px; min-width: 2px; pointer-events: none; }
+.annotate-flag.is-review { background: var(--annotate-review); }
+.annotate-flag.is-lost { background: var(--annotate-lost); }
+.annotate-key { position: absolute; top: 3px; width: 8px; height: 8px; margin-left: -4px; background: var(--cm-ink); transform: rotate(45deg); pointer-events: none; }
+.annotate-track-status { margin: 2px 0 0 98px; font-size: 11px; }
+.annotate-track-status.is-problem { color: #8a5a00; }
+
+/* Inspector: one panel, collapsible sections divided by rules. */
+/* It scrolls inside itself, so the video stays in view while settings change. */
+.annotate-inspector {
+  position: sticky; top: 8px; max-height: calc(100vh - 262px); max-height: calc(100svh - 262px); overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); font-size: 12px; scrollbar-width: thin;
+}
+.annotate-inspector details + details { border-top: 1px solid var(--cm-rule); }
+.annotate-inspector details[hidden] { display: none; }
+.annotate-inspector summary {
+  display: flex; align-items: center; gap: 6px; padding: 10px 12px; list-style: none;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.annotate-inspector summary::-webkit-details-marker { display: none; }
+.annotate-inspector summary::after {
+  content: ""; width: 6px; height: 6px; margin: -3px 2px 0 auto; border: solid var(--cm-muted); border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg); transition: transform 150ms var(--cm-settle);
+}
+.annotate-inspector details[open] > summary::after { margin-top: 3px; transform: rotate(-135deg); }
+.annotate-inspector summary:hover::after { border-color: var(--cm-ink); }
+.annotate-count { color: var(--cm-muted); font-weight: 400; }
+.annotate-fields { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; }
+.annotate-fields label { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; color: var(--cm-muted); font-size: 11px; }
+.annotate-fields label > * { color: var(--cm-ink); }
+.annotate-fields :is(select, input[type="number"], input[type="text"]) {
+  height: 28px; padding: 0 6px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px;
+}
+.annotate-fields select { min-width: 112px; cursor: pointer; }
+.annotate-fields input[type="number"] { width: 72px; font-variant-numeric: tabular-nums; }
+.annotate-fields input[type="text"] { width: 140px; }
+.annotate-fields input[type="range"] { width: 96px; height: 20px; min-height: 0; margin: 0; accent-color: var(--cm-ink); } /* the shared 44px touch height left gaps between rows */
+.annotate-slider { display: inline-flex; align-items: center; gap: 6px; }
+.annotate-slider output { min-width: 3.5ch; color: var(--cm-ink); font-variant-numeric: tabular-nums; text-align: right; }
+.annotate-fields input[type="color"] { width: 32px; height: 24px; padding: 2px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; cursor: pointer; }
+.annotate-fields input[type="color"]:disabled { opacity: 0.35; cursor: not-allowed; }
+.annotate-fields input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--cm-ink); }
+.annotate-fields label.annotate-check, .annotate-check { display: inline-flex; justify-content: flex-start; gap: 6px; color: var(--cm-ink); }
+.annotate-pair { display: inline-flex; gap: 4px; }
+.annotate-fields > .annotate-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.annotate-main .annotate-pair button { height: 28px; padding: 0 8px; }
+.annotate-main .annotate-primary { height: 34px; border-color: var(--cm-accent); background: var(--cm-accent); font-weight: 600; }
+.annotate-main .annotate-primary:hover:not(:disabled) { background: #b8e123; }
+.annotate-muted { margin: 0; color: var(--cm-muted); font-size: 11px; line-height: 1.5; }
+.annotate-steps { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.annotate-steps li { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 8px; font-size: 11px; line-height: 1.45; counter-increment: step; }
+.annotate-steps li::before {
+  content: counter(step); grid-row: span 2; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--cm-ink); color: #fff; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.annotate-steps strong { font-weight: 600; }
+.annotate-steps span { color: var(--cm-muted); }
+.annotate-follow-group { display: flex; flex-direction: column; gap: 6px; }
+.annotate-follow-group[hidden] { display: none; }
+.annotate-speed-chart { width: 100%; height: auto; aspect-ratio: 240 / 110; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--annotate-panel); }
+.annotate-follow-group h3 { margin: 4px 0 0; font-size: 11px; font-weight: 600; }
+.annotate-follow-group .annotate-pair { display: grid; grid-template-columns: minmax(0, 1fr); }
+.annotate-main .annotate-follow-group > button { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-follow-group > button:hover:not(:disabled) { background: var(--annotate-hover); }
+
+.annotate-list { list-style: none; margin: 0; padding: 0 6px 8px; max-height: 260px; overflow: auto; }
+.annotate-list button:hover:not(.is-selected) { background: var(--annotate-hover); }
+.annotate-list button {
+  width: 100%; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--cm-ink);
+  font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer;
+}
+.annotate-list button.is-selected, .annotate-list button.is-selected:hover { background: var(--cm-ink); color: #fff; }
+.annotate-freezes { padding: 0; }
+.annotate-freezes li { display: flex; align-items: center; gap: 4px; }
+.annotate-freezes li > button:first-child { flex: 1; }
+.annotate-freezes input { width: 56px; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; font: inherit; font-size: 11px; font-variant-numeric: tabular-nums; }
+.annotate-freezes li.is-board { flex-wrap: wrap; padding-bottom: 4px; }
+.annotate-board-settings { display: flex; flex: 1 0 100%; box-sizing: border-box; flex-wrap: wrap; gap: 4px; padding-left: 8px; }
+.annotate-board-settings select { flex: 1; min-width: 0; height: 26px; padding: 0 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-picture-name { flex: 1 0 100%; padding-left: 8px; overflow: hidden; color: var(--cm-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-picture-panel { display: grid; gap: 6px; margin-top: 6px; padding: 8px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-picture-panel[hidden] { display: none; }
+.annotate-picture-head { display: flex; align-items: center; gap: 6px; }
+.annotate-picture-head strong { flex: 1; font-size: 12px; }
+.annotate-picture-add { position: relative; display: inline-flex; align-items: center; min-height: 30px; padding: 0 10px; border: 1px solid var(--cm-ink); border-radius: 6px; background: var(--cm-ink); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; }
+.annotate-picture-add input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.annotate-picture-add:focus-within { outline: 2px solid var(--annotate-freeze); outline-offset: 2px; }
+.annotate-picture-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+.annotate-picture-list li { position: relative; min-width: 0; }
+.annotate-picture-list li > button:first-child { display: grid; gap: 3px; width: 100%; padding: 4px; border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.annotate-picture-list li > button:first-child:hover { background: var(--annotate-hover); }
+.annotate-picture-list img { width: 100%; aspect-ratio: 16 / 10; border-radius: 3px; background: #d9dbd4; object-fit: contain; }
+.annotate-picture-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-picture-list .annotate-remove { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.85); cursor: pointer; }
+.annotate-picture-panel .is-error { color: var(--annotate-lost); }
+.annotate-main .annotate-remove { width: 26px; height: 26px; padding: 0; color: var(--cm-muted); }
+.annotate-main .annotate-remove svg { width: 12px; height: 12px; }
+.annotate-main .annotate-remove:hover:not(:disabled) { color: #9b2a28; }
+
+@media (max-width: 1100px) {
+  /* Settings stay beside the video, in a narrower column. */
+  .annotate-workspace { grid-template-columns: 76px minmax(0, 1fr) 216px; gap: 10px; }
+  .annotate-fields select { min-width: 96px; }
+  .annotate-fields input[type="range"] { width: 72px; }
+}
+@media (max-width: 720px) {
+  .annotate-bar { flex-wrap: wrap; gap: 8px; }
+  .annotate-commands { flex-basis: 100%; }
+  .annotate-commands .annotate-divider, .annotate-select kbd, .annotate-wide-only { display: none; }
+  .annotate-commands { flex-wrap: wrap; }
+  .annotate-commands .annotate-format { margin-left: auto; }
+  .annotate-workspace { grid-template-columns: minmax(0, 1fr); }
+  .annotate-tools, .annotate-centre, .annotate-player-tools, .annotate-inspector { grid-column: 1; grid-row: auto; }
+  .annotate-bar .annotate-hint { order: 5; flex-basis: 100%; white-space: normal; }
+  .annotate-tools { position: static; flex-direction: row; overflow-x: auto; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  .annotate-tools::after { content: ""; flex: none; width: 20px; }
+  .annotate-tool-group { flex-direction: row; }
+  .annotate-group-title { display: none; }
+  .annotate-tool-group + .annotate-tool-group { margin: 0 0 0 4px; padding: 0 0 0 4px; border-top: 0; border-left: 1px solid var(--cm-rule); }
+  .annotate-tools button { min-width: 58px; }
+  .annotate-centre { width: 100%; min-width: 0; }
+  .annotate-transport { flex-wrap: wrap; }
+  .annotate-transport input[type="range"] { order: 10; flex: 1 1 100%; margin: 4px 0 0; }
+  .annotate-time { order: 11; }
+  .annotate-row { grid-template-columns: 64px minmax(0, 1fr) 68px; gap: 8px; }
+  .annotate-track-status { margin-left: 0; }
+  .annotate-inspector { position: static; max-height: none; }
+}
+
+/* Board from this frame: pitch marks to click, then the video to click them on. */
+.annotate-transport[hidden], .annotate-timeline[hidden], .annotate-calibrate[hidden] { display: none; }
+.annotate-calibrate { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); font-size: 12px; }
+.annotate-calibrate-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.annotate-calibrate h2 { margin: 0; font-size: 12px; font-weight: 600; }
+.annotate-main .annotate-calibrate-close { height: 28px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-calibrate-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.annotate-main svg.annotate-pitch { width: 100%; height: auto; stroke: none; stroke-width: 0; }
+.annotate-pitch-ground { fill: #2f6b3a; }
+.annotate-pitch-line { fill: none; stroke: rgba(255, 255, 255, 0.85); stroke-width: 0.45; stroke-linejoin: round; }
+.annotate-pitch-mark { cursor: pointer; outline: none; }
+.annotate-pitch-hit { fill: transparent; }
+.annotate-pitch-dot { fill: #fff; stroke: #171817; stroke-width: 0.45; transition: r 120ms var(--cm-settle); }
+.annotate-pitch-mark:hover .annotate-pitch-dot, .annotate-pitch-mark:focus-visible .annotate-pitch-dot { r: 1.8; }
+.annotate-pitch-mark:focus-visible .annotate-pitch-hit { stroke: #fff; stroke-width: 0.5; }
+.annotate-pitch-mark.is-placed .annotate-pitch-dot { fill: var(--cm-accent); }
+.annotate-pitch-mark.is-selected .annotate-pitch-dot { r: 1.8; stroke: #fff; }
+.annotate-pitch-mark.is-picked .annotate-pitch-dot { r: 2.1; fill: var(--cm-accent); stroke: #fff; stroke-width: 0.7; }
+.annotate-calibrate-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.annotate-calibrate-state { margin: 0; font-size: 12px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.annotate-calibrate-state.is-problem { color: #8a5a00; }
+.annotate-calibrate-progress { display: flex; align-items: center; gap: 8px; }
+.annotate-calibrate-progress[hidden], .annotate-calibrate-install[hidden] { display: none; }
+.annotate-calibrate-progress progress { flex: 1; min-width: 60px; height: 6px; border: 0; border-radius: 3px; background: #eff0ec; accent-color: var(--cm-ink); }
+.annotate-calibrate-progress progress::-webkit-progress-bar { border-radius: 3px; background: #eff0ec; }
+.annotate-calibrate-progress progress::-webkit-progress-value { border-radius: 3px; background: var(--cm-ink); }
+.annotate-calibrate-install { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid #ecd39a; border-radius: 6px; background: #fff9ea; }
+.annotate-calibrate-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.annotate-calibrate-actions .annotate-primary { grid-column: 1 / -1; }
+.annotate-main .annotate-calibrate-actions button:not(.annotate-primary) { height: 30px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-main .annotate-calibrate-actions button:disabled { color: #a3a69e; cursor: not-allowed; }
+.annotate-calibrate-limits { font-size: 10.5px; }
+.annotate-calibrate-target { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--cm-muted); font-size: 11px; }
+.annotate-calibrate-target[hidden] { display: none; }
+.annotate-calibrate-target select { flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-token-moves { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.annotate-main .annotate-token-moves button { flex: none; height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: #fff; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+@media (max-width: 720px) {
+  .annotate-calibrate-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The Annotate tab without a clip: the project's sessions (annotate/library.js). */
+.annotate-library-mode :is(.annotate-commands, .annotate-hint, .annotate-save) { display: none; }
+.annotate-library { display: grid; gap: 12px; max-width: 920px; }
+.annotate-library-head { display: grid; gap: 4px; }
+.annotate-library-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.annotate-library-empty { margin: 0; padding: 18px; border: 1px dashed var(--cm-rule); border-radius: 8px; color: var(--cm-muted); font-size: 12px; }
+.annotate-sessions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.annotate-session { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--cm-rule); border-radius: 8px; background: var(--annotate-panel); }
+.annotate-session-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.annotate-session-title { flex: 1 1 220px; min-width: 0; }
+.annotate-session-name { margin: 0; overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-session-meta { margin: 2px 0 0; color: var(--cm-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.annotate-session-tools { display: flex; gap: 6px; }
+.annotate-main .annotate-session-open { height: 30px; text-decoration: none; color: #171817; } /* dark text on the lime fill in both themes */
+.annotate-main .annotate-session-tool { height: 30px; padding: 0 10px; border: 1px solid var(--cm-rule); border-radius: 6px; background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.annotate-main .annotate-session-tool.annotate-danger { font-size: 11px; }
+.annotate-session-rename { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--cm-ink); border-radius: 6px; background: var(--annotate-panel); color: var(--cm-ink); font: inherit; font-size: 13px; font-weight: 600; }
+.annotate-session-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }
+.annotate-session-clip { display: flex; align-items: stretch; min-width: 0; border: 1px solid var(--cm-rule); border-radius: 6px; }
+.annotate-session-clip-link { display: grid; flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; color: var(--cm-ink); text-decoration: none; }
+.annotate-session-clip-link:hover { background: var(--annotate-hover); }
+.annotate-session-clip-name { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-session-clip-meta { color: var(--cm-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.annotate-main .annotate-session-drop { display: inline-flex; align-items: center; justify-content: center; width: 30px; flex: none; padding: 0; border: 0; border-left: 1px solid var(--cm-rule); border-radius: 0 6px 6px 0; background: transparent; color: var(--cm-muted); cursor: pointer; }
+.annotate-main .annotate-session-drop:hover:not(:disabled) { color: #b3261e; }
+
+/* A session's clips above the editor: switch clip without going back to the list. */
+
+/* Timeline, editor style: a ruler, track headers that stay put, blocks that carry their names, zoom, and one
+   playhead through every track (docs/CODING_AND_PITCH_PLAN.md, section T2). */
+.annotate-timeline { --head-width: 120px; --tl-lane: color-mix(in srgb, var(--cm-ink) 7%, transparent); --tl-head: #e5484d;
+  gap: 0; padding: 8px 0 6px; overflow: hidden; }
+.annotate-tl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 10px 8px; }
+.annotate-tl-zoom { display: inline-flex; gap: 4px; margin-left: auto; }
+.annotate-tl-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; min-width: 28px; padding: 0 9px;
+  border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; cursor: pointer; }
+.annotate-tl-bar button:hover:not(:disabled) { background: var(--annotate-hover); }
+.annotate-tl-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-tl-bar svg, .annotate-row-head svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.annotate-tl-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.annotate-tl-body { --lane-width: 600px; position: relative; width: calc(var(--head-width) + var(--lane-width)); }
+.annotate-timeline .annotate-row { grid-template-columns: var(--head-width) var(--lane-width); gap: 0; min-height: 0; margin-top: 4px; align-items: stretch; }
+.annotate-row-head { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; gap: 6px; min-width: 0; box-sizing: border-box; padding: 0 8px 0 10px;
+  border-right: 1px solid var(--cm-rule); background: var(--annotate-panel); color: var(--cm-muted); }
+.annotate-row-head .annotate-row-name { min-width: 0; flex: 1; }
+.annotate-row-head .annotate-row-action { flex: none; height: 22px; padding: 0 6px; }
+.annotate-timeline .annotate-lane { height: 32px; border-radius: 0; background: var(--tl-lane); }
+.annotate-timeline .annotate-player .annotate-lane { height: 26px; }
+.annotate-timeline .annotate-lane[data-empty]:not(:has(.annotate-lane-freeze, .annotate-lane-drawing))::before { line-height: 32px; }
+.annotate-timeline .annotate-drawings .annotate-lane { min-height: 28px; }
+
+/* Ruler */
+.annotate-ruler { margin-top: 0; }
+.annotate-ruler-lane { position: relative; height: 24px; border-bottom: 1px solid var(--cm-rule); cursor: ew-resize; touch-action: none; user-select: none; }
+.annotate-tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--cm-rule); pointer-events: none; }
+.annotate-tick.is-major { top: 0; height: auto; width: auto; padding-left: 4px; border-left: 1px solid var(--cm-muted); background: none;
+  color: var(--cm-muted); font-size: 10px; font-variant-numeric: tabular-nums; line-height: 12px; white-space: nowrap; }
+
+/* Playhead: one line through the ruler and every track */
+.annotate-playhead { position: absolute; top: 0; bottom: 0; z-index: 2; left: calc(var(--head-width) + var(--head, 0) * var(--lane-width)); width: 2px; margin-left: -1px;
+  background: var(--tl-head); pointer-events: none; }
+.annotate-playhead::before { content: ""; position: absolute; top: 0; left: -5px; width: 12px; height: 10px; background: var(--tl-head); clip-path: polygon(0 0, 100% 0, 100% 45%, 50% 100%, 0 45%); }
+
+.annotate-snap { position: absolute; top: 0; bottom: 0; z-index: 2; left: calc(var(--head-width) + var(--snap, 0) * var(--lane-width)); width: 0; border-left: 1px dashed var(--cm-ink); pointer-events: none; }
+.annotate-snap[hidden] { display: none; }
+/* Blocks carry their names */
+.annotate-timeline .annotate-block-label { position: absolute; inset: 0 8px; display: flex; align-items: center; overflow: hidden; color: #fff; font-size: 10.5px; font-weight: 500;
+  text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.annotate-timeline .annotate-parts .annotate-lane { height: 46px; overflow: hidden; background: var(--tl-lane); }
+.annotate-timeline .annotate-part { top: 3px; bottom: 3px; border-radius: 5px; background: #2d7d68; box-shadow: none; }
+.annotate-timeline .annotate-part:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.annotate-timeline .annotate-part.is-selected { background: #2d7d68; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-part-label { inset: 0 10px; color: #fff; font-size: 11px; font-weight: 500; }
+.annotate-timeline .annotate-part-edge::after { background: #fff; }
+.annotate-timeline .annotate-lane-freeze { top: 3px; bottom: 3px; border-radius: 5px; background: var(--annotate-freeze); box-shadow: none; }
+.annotate-timeline .annotate-lane-freeze.is-current { background: color-mix(in srgb, var(--annotate-freeze) 82%, #fff); }
+.annotate-timeline .annotate-lane-freeze.is-board, .annotate-timeline .annotate-lane-freeze.is-board.is-current { background: var(--annotate-board); box-shadow: none; }
+.annotate-timeline .annotate-lane-freeze.is-selected { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); outline: 0; }
+.annotate-timeline .annotate-lane-edge::after, .annotate-timeline .annotate-lane-freeze.is-board .annotate-lane-edge::after { background: #fff; }
+.annotate-timeline .annotate-lane-drawing { height: 16px; min-width: 6px; border-radius: 4px; background: #6f62a8; }
+.annotate-timeline .annotate-lane-drawing.is-selected { height: 16px; background: #6f62a8; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-lane-drawing .annotate-block-label { inset: 0 6px; font-size: 10px; }
+.annotate-timeline .annotate-lane-drawing .annotate-lane-grip::after { background: #fff; box-shadow: 0 0 0 1px var(--cm-ink); }
+.annotate-timeline .annotate-cover { top: 5px; bottom: 5px; border-radius: 3px; background: color-mix(in srgb, var(--cm-ink) 30%, transparent); }
+.annotate-timeline .annotate-track-status { margin: 4px 10px 0; }
+@media (max-width: 900px) { .annotate-timeline { --head-width: 92px; } .annotate-row-head .annotate-row-action { padding: 0 4px; font-size: 10px; } }
+
+/* The sequence (T2): one timeline for the session. The open clip's tracks sit in its slot (--clip-start, --clip-span);
+   the other clips and cards show as blocks around them, and a Clips track names every entry. */
+.annotate-timeline .annotate-row > .annotate-lane { grid-column: 2; grid-row: 1; box-sizing: border-box;
+  margin-left: calc(var(--clip-start, 0) * var(--lane-width)); width: calc(var(--clip-span, 1) * var(--lane-width)); }
+.annotate-ghosts { grid-column: 2; grid-row: 1; position: relative; min-height: 100%; background: var(--tl-lane); cursor: pointer; }
+.annotate-ghost { position: absolute; top: 3px; bottom: 3px; box-sizing: border-box; border-radius: 5px; border-left: 1px solid var(--annotate-panel);
+  background: color-mix(in srgb, #2d7d68 45%, transparent); overflow: hidden; }
+.annotate-ghost.is-card { background: color-mix(in srgb, #7a5a1e 70%, transparent); }
+.annotate-ghost.is-insert { background: color-mix(in srgb, var(--annotate-freeze) 50%, transparent); }
+.annotate-ghost.is-board { background: color-mix(in srgb, var(--annotate-board) 50%, transparent); }
+.annotate-ghost.is-drawing { top: 6px; bottom: auto; height: 12px; min-width: 4px; border-left: 0; border-radius: 4px; background: color-mix(in srgb, #6f62a8 50%, transparent); }
+.annotate-ghosts .annotate-block-label { opacity: 0.85; }
+.annotate-clips .annotate-row-name { display: grid; overflow: hidden; }
+.annotate-sequence-name { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
+.annotate-sequence-lane { position: relative; height: 28px; margin: 0; padding: 0; list-style: none; background: var(--tl-lane); }
+.annotate-sequence-item { position: absolute; top: 3px; bottom: 3px; padding: 0 1px; box-sizing: border-box; }
+.annotate-sequence-block { position: relative; display: flex; align-items: center; gap: 6px; height: 100%; min-width: 0; padding: 0 6px 0 3px; box-sizing: border-box;
+  border: 0; border-radius: 5px; background: color-mix(in srgb, #2d7d68 55%, var(--annotate-panel)); color: #fff; font: inherit; text-align: left; text-decoration: none;
+  cursor: grab; touch-action: none; user-select: none; overflow: hidden; }
+.annotate-sequence-block:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); }
+.annotate-sequence-block[aria-current] { background: #2d7d68; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-sequence-block:focus-visible { outline: 2px solid var(--cm-ink); outline-offset: 1px; }
+.annotate-sequence-block.is-dragging { z-index: 3; cursor: grabbing; opacity: 0.9; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+.annotate-sequence-block .annotate-block-label { position: static; inset: auto; flex: 1; min-width: 0; display: block; overflow: hidden; color: #fff; font-size: 10.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.annotate-sequence-index { flex: none; display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 4px; background: rgba(0, 0, 0, 0.25); font-size: 10px; font-variant-numeric: tabular-nums; }
+.annotate-sequence-block.is-card { background: #7a5a1e; cursor: pointer; }
+.annotate-sequence-block.is-card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--cm-ink); }
+.annotate-tl-seq { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.annotate-tl-seq[hidden] { display: none; }
+.annotate-tl-seq select { height: 26px; max-width: 170px; min-width: 0; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px;
+  background: transparent; color: var(--cm-ink); font: inherit; font-size: 11px; }
+.annotate-tl-seq :disabled { opacity: 0.4; cursor: not-allowed; }
+.annotate-tl-seq button[aria-expanded="true"] { background: var(--annotate-hover); border-color: var(--cm-ink); }
+.annotate-card-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 10px 8px; padding: 8px 10px; border: 1px solid var(--cm-rule); border-radius: 6px; }
+.annotate-card-form[hidden] { display: none; }
+.annotate-card-form label { display: grid; gap: 2px; font-size: 10.5px; }
+.annotate-card-form label[hidden] { display: none; }
+.annotate-card-form input, .annotate-card-form select, .annotate-card-form button { height: 26px; padding: 0 8px; border: 1px solid var(--cm-rule); border-radius: 6px; background: transparent; color: var(--cm-ink); font: inherit; font-size: 12px; }
+.annotate-card-form input[type="text"] { width: 220px; max-width: 100%; }
+.annotate-card-form input[type="number"] { width: 64px; }
+.annotate-card-form button { cursor: pointer; }
+.annotate-card-form button:hover { background: var(--annotate-hover); }
+.annotate-card-error { flex-basis: 100%; min-height: 0; color: #b3261e; font-size: 11px; }
+.annotate-card-error:empty { display: none; }
+.annotate-stage.is-card > video, .annotate-stage.is-card > canvas { visibility: hidden; }
+.annotate-card-show { position: absolute; inset: 0; display: grid; place-items: center; padding: 6%; background: #10201b; color: #f4f7f2; text-align: center; }
+.annotate-card-show p { margin: 0; font-size: clamp(18px, 4vw, 40px); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.annotate-card-show img { max-width: 100%; max-height: 100%; object-fit: contain; }
+

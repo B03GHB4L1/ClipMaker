@@ -1,0 +1,225 @@
+"""Default export folder (the user's videos folder + VizorPlay) and opening a finished export."""
+import json
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from packaging import user_folders  # noqa: E402
+from packaging.clipmaker_api_server import build_clip_config, create_server  # noqa: E402
+
+
+def finished(stdout="", code=0):
+    return subprocess.CompletedProcess([], code, stdout=stdout, stderr="")
+
+
+class VideosFolderTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.home = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_windows_uses_the_videos_known_folder_wherever_it_was_moved(self):
+        moved = Path("D:/Media/My Videos")
+        self.assertEqual(user_folders.default_export_dir(platform="win32", home=self.home, windows_lookup=lambda: moved),
+                         moved / "VizorPlay")
+        self.assertEqual(user_folders.videos_dir(platform="win32", home=self.home, windows_lookup=lambda: None),
+                         self.home / "Videos")
+
+    def test_macos_uses_movies(self):
+        self.assertEqual(user_folders.default_export_dir(platform="darwin", home=self.home), self.home / "Movies" / "VizorPlay")
+
+    def test_linux_asks_the_desktop_for_its_videos_folder(self):
+        run = Mock(return_value=finished(f"{self.home / 'Vidéos'}\n"))
+        self.assertEqual(user_folders.videos_dir(platform="linux", home=self.home, env={}, run=run), self.home / "Vidéos")
+        self.assertEqual(run.call_args.args[0], ["xdg-user-dir", "VIDEOS"])
+
+    def test_linux_falls_back_to_user_dirs_then_home_videos(self):
+        unset = Mock(return_value=finished(f"{self.home}\n"))  # xdg-user-dir answers $HOME when unset
+        self.assertEqual(user_folders.videos_dir(platform="linux", home=self.home, env={}, run=unset), self.home / "Videos")
+        config = self.home / ".config"
+        config.mkdir()
+        (config / "user-dirs.dirs").write_text('XDG_DESKTOP_DIR="$HOME/Desktop"\nXDG_VIDEOS_DIR="$HOME/Clips"\n', encoding="utf-8")
+        missing = Mock(side_effect=FileNotFoundError("xdg-user-dir"))
+        self.assertEqual(user_folders.videos_dir(platform="linux", home=self.home, env={}, run=missing), self.home / "Clips")
+
+    def test_reveal_opens_the_folder_with_the_platform_file_manager(self):
+        for platform, command in (("darwin", "open"), ("linux", "xdg-open")):
+            opener = Mock()
+            user_folders.reveal_folder(self.home, platform=platform, run=opener)
+            self.assertEqual(opener.call_args.args[0], [command, str(self.home)])
+        with self.assertRaises(ValueError):
+            user_folders.reveal_folder(self.home / "gone", platform="linux", run=Mock())
+
+    def test_clip_config_uses_the_default_folder_unless_one_is_chosen(self):
+        csv = self.home / "events.csv"
+        csv.write_text("minute,second,period,type,team\n1,0,1,Goal,Home\n", encoding="utf-8")
+        match = {"id": "m1", "csv_path": str(csv), "markers": {"1H": "00:00:00", "2H": "00:50:00"}}
+        videos = self.home / "Videos" / "VizorPlay"
+        self.assertEqual(Path(build_clip_config(match, {}, self.home, videos)["output_dir"]), videos.resolve())
+        chosen = build_clip_config(match, {"output_dir": str(self.home / "Mine")}, self.home, videos)["output_dir"]
+        self.assertEqual(Path(chosen), (self.home / "Mine").resolve())
+        # Without the app's default (embedded use, tests) exports stay inside the project.
+        self.assertEqual(Path(build_clip_config(match, {}, self.home)["output_dir"]),
+                         (self.home / "projects" / "m1" / "exports").resolve())
+
+
+class ExportFolderApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.server = create_server("127.0.0.1", 0, Path(self.temporary.name))
+        self.server.default_export_dir = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temporary.cleanup()
+
+    def request(self, path, payload=None):
+        data = None if payload is None else json.dumps(payload).encode()
+        request = Request(self.base + path, data=data, headers={"Content-Type": "application/json"},
+                          method="GET" if payload is None else "POST")
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            with error:
+                return error.code, json.loads(error.read())
+
+    def test_default_folder_is_reported_to_the_page(self):
+        status, result = self.request("/api/folders/output/default")
+        self.assertEqual(status, 200)
+        self.assertEqual(Path(result["path"]), Path(self.temporary.name) / "Videos" / "VizorPlay")
+
+    def test_reveal_only_opens_a_finished_jobs_own_folder(self):
+        folder = Path(self.temporary.name) / "out"
+        folder.mkdir()
+        jobs = self.server.jobs
+        jobs._jobs["done1"] = {"id": "done1", "status": "complete", "dry_run": False, "output_dir": str(folder)}
+        jobs._jobs["busy1"] = {"id": "busy1", "status": "running", "dry_run": False, "output_dir": str(folder)}
+        with patch("packaging.user_folders.reveal_folder") as reveal:
+            self.assertEqual(self.request("/api/jobs/busy1/reveal", {})[0], 404)
+            self.assertEqual(self.request("/api/jobs/nope/reveal", {"path": "C:/Windows"})[0], 404)
+            reveal.assert_not_called()
+            # The reply names the job's own folder (so the app can raise its window), never the requested path.
+            self.assertEqual(self.request("/api/jobs/done1/reveal", {"path": "C:/Windows"}),
+                             (200, {"opened": True, "folder": str(folder)}))
+            reveal.assert_called_once_with(folder)
+
+
+
+class SavedClipApiTests(ExportFolderApiTests):
+    """"Save clip" copies a clip VizorPlay cut for watching into Videos/VizorPlay.
+    The desktop windows ignore <a download>, so the engine does the saving."""
+
+    def watched_clip(self, folder="analysis-clips", data=b"clip-bytes"):
+        clip = Path(self.temporary.name) / folder / "preview-abc123.mp4"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(data)
+        self.server.media_files["tok1"] = clip
+        return clip
+
+    def test_save_copies_the_clip_into_the_videos_folder_under_its_name(self):
+        clip = self.watched_clip()
+        status, result = self.request("/api/media/tok1/save", {"name": "Bukayo Saka 34'.mp4"})
+        self.assertEqual(status, 200)
+        saved = result["saved"]
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(Path(saved["folder"]), folder)
+        self.assertEqual(saved["name"], "Bukayo Saka 34'.mp4")
+        self.assertEqual((folder / saved["name"]).read_bytes(), b"clip-bytes")
+        self.assertTrue(clip.is_file(), "the watched clip keeps playing in the page")
+        self.assertEqual([p.name for p in folder.iterdir()], [saved["name"]], "no temporary files left behind")
+
+    def test_saving_again_never_replaces_an_earlier_clip(self):
+        self.watched_clip()
+        names = [self.request("/api/media/tok1/save", {"name": "Saka 34'"})[1]["saved"]["name"] for _ in range(3)]
+        self.assertEqual(names, ["Saka 34'.mp4", "Saka 34' (2).mp4", "Saka 34' (3).mp4"])
+
+    def test_names_cannot_leave_the_folder(self):
+        self.watched_clip(folder="previews")
+        saved = self.request("/api/media/tok1/save", {"name": "../../Windows/evil:name"})[1]["saved"]
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(Path(saved["folder"]), folder)
+        self.assertTrue((folder / saved["name"]).is_file())
+        self.assertNotIn("/", saved["name"])
+        self.assertNotIn(":", saved["name"])
+
+    def test_only_clips_cut_for_watching_can_be_saved(self):
+        # The user's match video is also served by the engine; it is not a clip to copy.
+        match_video = Path(self.temporary.name) / "match.mp4"
+        match_video.write_bytes(b"whole match")
+        self.server.media_files["video"] = match_video
+        self.assertEqual(self.request("/api/media/video/save", {"name": "x"})[0], 404)
+        self.assertEqual(self.request("/api/media/unknown/save", {"name": "x", "path": str(match_video)})[0], 404)
+        self.assertFalse((Path(self.temporary.name) / "Videos").exists())
+
+    def test_open_folder_shows_where_the_clip_was_saved(self):
+        self.watched_clip()
+        saved = self.request("/api/media/tok1/save", {"name": "Saka"})[1]["saved"]
+        with patch("packaging.user_folders.reveal_folder") as reveal:
+            self.assertEqual(self.request("/api/saved/nope/reveal", {"path": "C:/Windows"})[0], 404)
+            reveal.assert_not_called()
+            self.assertEqual(self.request(f"/api/saved/{saved['id']}/reveal", {}),
+                             (200, {"opened": True, "folder": str(Path(self.temporary.name) / "Videos" / "VizorPlay")}))
+            reveal.assert_called_once_with(Path(self.temporary.name) / "Videos" / "VizorPlay")
+
+
+class SavedPictureApiTests(ExportFolderApiTests):
+    """Chart PNG/GIF buttons send the picture to the engine, which saves it in
+    Videos/VizorPlay (the desktop windows ignore <a download>)."""
+
+    PNG = b"\x89PNG\r\n\x1a\n" + bytes(64)
+    GIF = b"GIF89a" + bytes(64)
+
+    def send(self, data, name):
+        request = Request(self.base + "/api/images/save", data=data, method="POST",
+                          headers={"Content-Type": "application/octet-stream", "X-File-Name": name})
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            with error:
+                return error.code, json.loads(error.read())
+
+    def test_png_and_gif_pictures_are_saved_under_their_names(self):
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        status, result = self.send(self.PNG, "shot_map_saka.png")
+        self.assertEqual(status, 200)
+        self.assertEqual(Path(result["saved"]["folder"]), folder)
+        self.assertEqual((folder / "shot_map_saka.png").read_bytes(), self.PNG)
+        self.assertEqual(self.send(self.PNG, "shot_map_saka.png")[1]["saved"]["name"], "shot_map_saka (2).png")
+        self.assertEqual(self.send(self.GIF, "build%20up.gif")[1]["saved"]["name"], "build up.gif")
+        with patch("packaging.user_folders.reveal_folder") as reveal:
+            self.assertEqual(self.request(f"/api/saved/{result['saved']['id']}/reveal", {}),
+                             (200, {"opened": True, "folder": str(folder)}))
+            reveal.assert_called_once_with(folder)
+
+    def test_the_file_type_comes_from_the_picture_not_the_name(self):
+        folder = Path(self.temporary.name) / "Videos" / "VizorPlay"
+        self.assertEqual(self.send(self.GIF, "chart.png")[1]["saved"]["name"], "chart.png.gif")
+        status, result = self.send(b"MZ not a picture", "run.exe")
+        self.assertEqual(status, 400)
+        self.assertIn("PNG and GIF", result["error"])
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ["chart.png.gif"])
+
+    def test_names_cannot_leave_the_folder(self):
+        saved = self.send(self.PNG, "..%2F..%2FWindows%2Fevil.png")[1]["saved"]
+        self.assertEqual(Path(saved["folder"]), Path(self.temporary.name) / "Videos" / "VizorPlay")
+        self.assertEqual(saved["name"], "evil.png")
+
+if __name__ == "__main__":
+    unittest.main()

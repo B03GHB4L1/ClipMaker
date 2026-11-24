@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "engine-pages",
+  "description": "The VizorPlay pages the local engine serves may call the app's own window commands (allow_foreground, raise_folder_window, window_fullscreen) and nothing else from Tauri's core.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*"
+    ]
+  },
+  "permissions": [
+    "core:app:allow-version",
+    "allow-allow-foreground",
+    "allow-raise-folder-window",
+    "allow-window-fullscreen"
+  ]
+}

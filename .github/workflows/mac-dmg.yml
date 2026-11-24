@@ -1,0 +1,170 @@
+name: Mac disk image (Apple Silicon)
+
+# Builds VizorPlay_<version>_aarch64.dmg: the app with its engine inside, plus an
+# Applications shortcut, so installing is one drag. Tests it the way a user meets it
+# (mount, copy out, open, close). It is ad hoc signed and not notarized (there is no
+# Apple Developer membership), so the first launch needs "Open Anyway"; the image and
+# docs/INSTALLATION.md say so. This job builds and tests only: it publishes nothing.
+#
+# Runs on pushes that change the packaging, or by hand from the Actions tab.
+
+on:
+  push:
+    branches: ["B4L1/release-packaging"]
+    paths:
+      - ".github/workflows/mac-dmg.yml"
+      - "packaging/macos/**"
+      - "tests/macos_dmg_smoke.py"
+      - "tests/macos_app_smoke.py"
+      - "src-tauri/**"
+  workflow_dispatch:
+  # Called by the release workflow, which attaches the tested image to the release.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    name: VizorPlay.dmg for Apple Silicon Macs
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      # The engine's packages (numpy, curl_cffi) are built for macOS 14 (Sonoma), so that is the
+      # oldest macOS this image opens on. tests/macos_dmg_smoke.py checks every file against it.
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check this runner is Apple Silicon
+        run: |
+          uname -m
+          test "$(uname -m)" = "arm64"
+
+      - name: Install the engine's packages and the disk image builder
+        run: |
+          python -m pip install --upgrade pip
+          # Pillow is not part of the engine; it only draws the disk image's window background.
+          python -m pip install -r requirements-build.txt dmgbuild==1.6.5 pillow==11.3.0
+          python -c "import platform, numpy, cv2; print(platform.machine(), numpy.__version__, cv2.__version__)"
+
+      - name: Freeze the engine
+        run: |
+          python -m PyInstaller --noconfirm packaging/pyinstaller/clipmaker_server.spec
+          file dist/vizorplay-engine/vizorplay-engine
+          mkdir -p src-tauri/resources/backend
+          cp -a dist/vizorplay-engine/. src-tauri/resources/backend/
+
+      - name: Check the frozen engine (media, cancellation, server)
+        run: python packaging/smoke_test.py --server dist/vizorplay-engine/vizorplay-engine
+
+      - run: npm ci
+
+      - name: Build VizorPlay.app
+        env:
+          # Signs the update archive (VizorPlay.app.tar.gz) that installed copies download.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is unavailable, so the Mac update archive cannot be signed for in-app updates."
+            exit 1
+          fi
+          mkdir -p build
+          # Ad hoc signature: Apple Silicon will not run unsigned code. Not notarized.
+          printf '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"minimumSystemVersion":"14.0","signingIdentity":"-"}}}\n' > build/mac-config.json
+          npm run tauri build -- --bundles app --config "$PWD/build/mac-config.json"
+          ls -la src-tauri/target/release/bundle/macos/
+          # The update archive is the same VizorPlay.app as the one in the disk image.
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          mkdir -p build/update
+          cp src-tauri/target/release/bundle/macos/VizorPlay.app.tar.gz "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz"
+          cp src-tauri/target/release/bundle/macos/VizorPlay.app.tar.gz.sig "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz.sig"
+          ls -la build/update
+
+      - name: Build the disk image
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          mkdir -p build/dmg
+          python packaging/macos/make_dmg.py \
+            --app src-tauri/target/release/bundle/macos/VizorPlay.app \
+            --output "build/dmg/VizorPlay_${VERSION}_aarch64.dmg"
+          ls -la build/dmg
+          (cd build/dmg && shasum -a 256 "VizorPlay_${VERSION}_aarch64.dmg" > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Install from the disk image and open the app
+        timeout-minutes: 15
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          python tests/macos_dmg_smoke.py --dmg "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --expect-arch arm64 --evidence build/dmg-evidence
+
+      - name: Retain the exact disk image that passed (the release attaches these bytes)
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          python packaging/release_candidate.py receipt --platform macOS-AppleSilicon --payload "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --evidence build/dmg-evidence/result.json --output build/release-packages \
+            --signature "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz.sig" --updater-archive "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-package-macOS-AppleSilicon
+          path: build/release-packages/
+          retention-days: 30
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg
+          path: build/dmg/
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg-evidence
+          path: build/dmg-evidence/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # The same disk image, opened on the other macOS version GitHub still offers. macOS 14
+  # runners were retired on 2 November 2026 and 11 to 13 never existed here, so those
+  # versions are covered only by the "needs macOS ..." check in the job above.
+  other-macos:
+    name: Same disk image on macos-15 (Apple Silicon)
+    needs: dmg
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check this runner is Apple Silicon
+        run: |
+          sw_vers
+          uname -m
+          test "$(uname -m)" = "arm64"
+      - uses: actions/download-artifact@v4
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg
+          path: build/dmg/
+      - name: Install from the disk image and open the app
+        timeout-minutes: 15
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          sw_vers | tee -a "$RUNNER_TEMP/os.txt"
+          python tests/macos_dmg_smoke.py --dmg "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --expect-arch arm64 --evidence build/dmg-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VizorPlay-macOS-AppleSilicon-dmg-evidence-macos-15
+          path: build/dmg-evidence/
+          retention-days: 7
+          if-no-files-found: warn

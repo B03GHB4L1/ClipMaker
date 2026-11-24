@@ -1,0 +1,60 @@
+{
+  "label": "VizorPlay xG",
+  "fitted": "2026-11-16",
+  "source": "StatsBomb open data (https://github.com/statsbomb/open-data), 2015/16 men's league matches",
+  "matches": 274,
+  "shots": 6701,
+  "intercept": -1.276701,
+  "coefficients": {
+    "distance": -0.113375,
+    "angle": 1.800487,
+    "header": -1.263206,
+    "header_distance": -0.017749,
+    "volley": -0.381564,
+    "direct_freekick": 0.812413,
+    "set_piece": -0.163869,
+    "fast_break": 0.329253,
+    "through_ball": 1.143227,
+    "cross": -0.059972,
+    "one_on_one": 0.497317,
+    "follows_dribble": -0.031287
+  },
+  "penalty_xg": 0.76,
+  "penalties_in_sample": {
+    "taken": 77,
+    "scored": 56
+  },
+  "check": {
+    "vizorplay_cross_validated": {
+      "log_loss": 0.2555,
+      "brier": 0.0724,
+      "auc": 0.7932
+    },
+    "statsbomb_xg_same_shots": {
+      "log_loss": 0.2423,
+      "brier": 0.0681,
+      "auc": 0.8189
+    },
+    "opta_shots": {
+      "matches": 14,
+      "shots": 371,
+      "goals": 45,
+      "xg_total": 38.48,
+      "big_chances": 71,
+      "big_chance_goals": 27,
+      "big_chance_mean_xg": 0.38,
+      "other_mean_xg": 0.038,
+      "other_goal_rate": 0.06,
+      "log_loss": 0.32,
+      "brier": 0.0909,
+      "auc": 0.7728
+    }
+  },
+  "big_chance": {
+    "offset_yes": 0.654519,
+    "offset_no": -0.562244,
+    "target_conversion": 0.38,
+    "calibration_shots": 371,
+    "calibration_big_chances": 71
+  }
+}

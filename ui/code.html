@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="theme.js?v=1"></script>
+  <link rel="icon" href="assets/brand/vizorplay-mark.svg" type="image/svg+xml" />
+  <title>VizorPlay - Code</title>
+  <link rel="stylesheet" href="styles.css?v=11" /><link rel="stylesheet" href="filters.css?v=4" /><link rel="stylesheet" href="compact.css?v=15" />
+  <link rel="stylesheet" href="design.css?v=6" /><link rel="stylesheet" href="code.css?v=14" />
+  <link rel="stylesheet" href="theme-dark.css?v=1" /><link rel="stylesheet" href="theme.css?v=2" />
+  <link rel="preload" href="assets/fonts/GeistMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
+  <script type="module" src="code.js?v=11"></script>
+  <script type="module" src="update.js?v=1"></script>
+</head>
+<body class="analysis-page code-page">
+  <header class="filter-topbar">
+    <button type="button" class="filter-brand" data-code-menu aria-label="Open navigation" aria-expanded="false" aria-controls="code-menu"><span class="cm-logo" aria-hidden="true"><img src="assets/brand/vizorplay-wordmark.svg" alt="" width="94" height="20" /></span><span class="menu-dots" aria-hidden="true">•••</span></button>
+    <nav aria-label="Workflow"><a href="/" data-project-navigation>Intake</a><a class="is-active" href="/code.html" aria-current="page" data-project-navigation>Code</a><a href="/filters.html" data-project-navigation>Filter</a><a href="/analysis.html?view=analyst" data-project-navigation>Analyst</a><a href="/analysis.html?view=tactical" data-project-navigation>Tactical</a><a href="/annotate.html" data-project-navigation>Annotate</a></nav>
+    <span data-code-status role="status">Loading project...</span>
+  </header>
+  <nav id="code-menu" class="project-menu" aria-label="Primary navigation" hidden><button type="button" data-open-projects>Local projects</button><button type="button" data-new-project>New project</button></nav>
+  <main class="analysis-main code-main">
+    <div class="project-bar"><strong data-code-project></strong><span data-project-status role="status">Saved locally</span></div>
+    <p class="code-error" data-code-error role="alert" hidden></p>
+    <section class="code-empty" data-code-empty hidden>
+      <h1>Code a match from its video</h1>
+      <p data-code-empty-text>Choose the match video on Intake first. Then press a key each time something happens, and VizorPlay makes the events for you.</p>
+      <a class="code-primary" href="/" data-project-navigation>Go to Intake</a>
+      <form class="code-live-form" data-live-form hidden>
+        <h2>Or record it live</h2>
+        <fieldset class="code-live-kind">
+          <legend>Record from</legend>
+          <label><input type="radio" name="live-kind" value="url" checked /> A stream address</label>
+          <label><input type="radio" name="live-kind" value="listen" /> OBS or a phone app on this computer</label>
+          <label><input type="radio" name="live-kind" value="device" /> A camera or capture card</label>
+          <label><input type="radio" name="live-kind" value="screen" /> This computer's screen</label>
+        </fieldset>
+        <label class="code-live-field" data-live-url-row>Stream address
+          <input type="text" data-live-url placeholder="rtmp://, srt://, rtsp:// or https://" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="code-live-field code-live-listen" data-live-listen-row hidden>
+          <label>Protocol <select data-live-protocol></select></label>
+          <label>Port <input type="number" data-live-port min="1024" max="65535" inputmode="numeric" /></label>
+        </div>
+        <div class="code-live-field code-live-devices" data-live-devices-row hidden>
+          <label data-live-camera-row>Camera <select data-live-camera></select></label>
+          <label data-live-screen-row>Screen <select data-live-screen></select></label>
+          <label>Sound <select data-live-audio></select></label>
+          <button type="button" data-live-rescan>Look again</button>
+        </div>
+        <p class="code-muted" data-live-device-note hidden></p>
+        <p class="code-muted">Record only what you have the right to record; recording a broadcast from the screen is your responsibility. VizorPlay saves the stream in 2-second pieces as it goes, so a crash loses a few seconds at most.</p>
+        <p class="code-error" data-live-form-error role="alert" hidden></p>
+        <button type="submit" class="code-primary">Start recording</button>
+      </form>
+      <div class="code-live-form" data-live-unfinished hidden>
+        <h2>Unfinished recording</h2>
+        <p data-live-unfinished-text></p>
+        <button type="button" class="code-primary" data-live-save>Save the recording</button>
+      </div>
+    </section>
+    <div class="code-workspace" data-code-workspace hidden>
+      <div class="code-centre">
+        <div class="code-live-bar" data-live-bar hidden>
+          <span class="code-live-dot" aria-hidden="true"></span>
+          <p data-live-text role="status" aria-live="polite"></p>
+          <button type="button" data-live-kickoff title="Mark the kick-off at the playhead">Kick-off: 1st half</button>
+          <button type="button" data-live-edge title="Jump to what is happening now">Live</button>
+          <button type="button" data-live-stop>Stop and save</button>
+        </div>
+        <div class="code-stage">
+          <video data-video preload="auto" playsinline></video>
+        </div>
+        <div class="code-transport">
+          <button type="button" data-seek="-5" title="Back 5 seconds (Shift+Left)" aria-label="Back 5 seconds">-5s</button>
+          <button type="button" data-seek="-1" title="Back 1 second (Left)" aria-label="Back 1 second">-1s</button>
+          <button type="button" class="code-play" data-play title="Play or pause (Space)" aria-label="Play"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="code-icon-play" d="M5 3l8 5-8 5z"/><path class="code-icon-pause" d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
+          <button type="button" data-seek="1" title="Forward 1 second (Right)" aria-label="Forward 1 second">+1s</button>
+          <button type="button" data-seek="5" title="Forward 5 seconds (Shift+Right)" aria-label="Forward 5 seconds">+5s</button>
+          <input type="range" data-scrub min="0" max="1" step="0.1" value="0" aria-label="Playhead" />
+          <output class="code-time" data-time>0:00</output>
+          <label class="code-source" data-source-row hidden>Video <select data-source></select></label>
+        </div>
+        <p class="code-warning" data-kickoff-note role="note" hidden></p>
+        <details class="code-pitch-panel" open>
+          <summary>Pitch location <span class="code-muted" data-pitch-status></span></summary>
+          <div class="code-pitch-wrap">
+            <p class="code-pitch-direction" data-pitch-direction aria-hidden="true"></p>
+            <svg class="code-pitch" data-pitch viewBox="-2 -2 109 72" role="img" aria-labelledby="pitch-help">
+              <rect class="code-pitch-grass" x="-2" y="-2" width="109" height="72"/>
+              <g class="code-pitch-lines">
+                <rect x="0" y="0" width="105" height="68"/><path d="M52.5 0v68"/><circle cx="52.5" cy="34" r="9.15"/>
+                <rect x="0" y="13.84" width="16.5" height="40.32"/><rect x="88.5" y="13.84" width="16.5" height="40.32"/>
+                <rect x="0" y="24.84" width="5.5" height="18.32"/><rect x="99.5" y="24.84" width="5.5" height="18.32"/>
+                <path d="M16.5 26.7a9.15 9.15 0 0 1 0 14.6M88.5 26.7a9.15 9.15 0 0 0 0 14.6"/>
+              </g>
+              <g data-pitch-marks></g>
+            </svg>
+            <div class="code-pitch-foot">
+              <p class="code-muted" id="pitch-help">Click where the chosen event happened; drag to also mark where it ended (a pass's target).</p>
+              <button type="button" data-pitch-clear hidden>Clear location</button>
+            </div>
+          </div>
+        </details>
+      </div>
+      <aside class="code-side">
+        <section class="code-panel" aria-labelledby="codes-title">
+          <div class="code-panel-head">
+            <h1 id="codes-title">Codes</h1>
+            <div class="code-teams" role="radiogroup" aria-label="Team for new codes">
+              <button type="button" role="radio" data-team="home" aria-checked="true"><span data-team-name="home">Home</span><kbd>H</kbd></button>
+              <button type="button" role="radio" data-team="away" aria-checked="false"><span data-team-name="away">Away</span><kbd>A</kbd></button>
+            </div>
+          </div>
+          <div class="code-grid" data-code-grid></div>
+          <h2 class="code-subhead" id="intervals-title">Intervals <small>press to start, again to stop</small></h2>
+          <div class="code-grid" data-interval-grid role="group" aria-labelledby="intervals-title"></div>
+          <div data-tag-section hidden>
+            <h2 class="code-subhead" id="tags-title">Tags <small data-tag-hint>Shift+letter labels the chosen event</small></h2>
+            <div class="code-tags" data-tag-grid role="group" aria-labelledby="tags-title"></div>
+          </div>
+          <p class="code-last" data-last role="status" aria-live="polite"></p>
+          <details class="code-details">
+            <summary>Teams and keys</summary>
+            <div class="code-fields">
+              <label>Home <input type="text" data-team-input="home" maxlength="60" placeholder="Home" /></label>
+              <label>Away <input type="text" data-team-input="away" maxlength="60" placeholder="Away" /></label>
+              <p class="code-muted">A code's letter makes an event at the playhead for the chosen team; an interval's letter starts it, and again stops it. H and A choose the team. Space plays and pauses; the arrows move 1 second (with Shift, 5). Comma and full stop nudge the chosen event by a frame (with Shift, a second). Delete removes the chosen event, Backspace the last one you made. Shift and a tag's letter tags the chosen event (or, with none chosen, the next one); a number typed after a code names its player. Ctrl+Z undoes, Ctrl+Shift+Z redoes. Keys do nothing while you type in a field.</p>
+            </div>
+          </details>
+          <details class="code-details">
+            <summary>Squads</summary>
+            <p class="code-muted code-leads-note">Optional. One player per line, shirt number first ("9 Saka"). Type a number straight after a code, or with an event chosen, to name its player.</p>
+            <div class="code-squads">
+              <label><span data-squad-name="home">Home</span><textarea data-squad="home" rows="5" spellcheck="false" placeholder="1 Keeper&#10;9 Striker"></textarea></label>
+              <label><span data-squad-name="away">Away</span><textarea data-squad="away" rows="5" spellcheck="false" placeholder="1 Keeper&#10;9 Striker"></textarea></label>
+            </div>
+          </details>
+          <details class="code-details">
+            <summary>Code panel: <span data-panel-name>Match: two teams</span></summary>
+            <div class="code-fields">
+              <div class="code-template-row">
+                <label>Panel <select data-template-select aria-label="Code panels"></select></label>
+                <button type="button" data-template-use>Use</button>
+                <button type="button" data-template-delete>Delete</button>
+              </div>
+              <div class="code-template-row">
+                <label>Name <input type="text" data-template-name maxlength="40" placeholder="My panel" /></label>
+                <button type="button" data-template-save>Save as template</button>
+              </div>
+              <div class="code-template-row">
+                <button type="button" data-template-edit>Edit codes and tags</button>
+                <button type="button" data-template-import>Import</button>
+                <button type="button" data-template-export>Export</button>
+                <input type="file" accept=".json,application/json" data-template-file hidden />
+              </div>
+              <p class="code-muted">A panel is the set of codes and tags you code with. Templates are shared by all projects and import and export as JSON files. A project keeps its own copy, so changing a template later never touches its codes.</p>
+            </div>
+          </details>
+          <details class="code-details">
+            <summary>Clip lead-in and lead-out</summary>
+            <p class="code-muted code-leads-note">Seconds each code's clip starts before and runs after the moment; an interval's clip runs from its start to its end. These replace Filter's clip length for coded events.</p>
+            <table class="code-leads" data-leads>
+              <thead><tr><th scope="col">Code</th><th scope="col">Before</th><th scope="col">After</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </details>
+        </section>
+        <section class="code-list-panel" aria-labelledby="list-title">
+          <div class="code-panel-head">
+            <h2 id="list-title">Coded events <span class="code-count" data-count>(0)</span></h2>
+            <div class="code-history">
+              <button type="button" data-undo disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4L3 7l3 3"/><path d="M3 7h6.5a3.5 3.5 0 010 7H7"/></svg></button>
+              <button type="button" data-redo disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4l3 3-3 3"/><path d="M13 7H6.5a3.5 3.5 0 000 7H9"/></svg></button>
+              <a class="code-link" href="/filters.html" data-project-navigation data-filter-link hidden>Filter and export</a>
+            </div>
+          </div>
+          <div class="code-editor" data-editor hidden>
+            <p class="code-editor-title" data-editor-title></p>
+            <div class="code-editor-row" data-edge="t">
+              <span class="code-editor-label">Start</span>
+              <button type="button" data-nudge="-1" aria-label="Start 1 second earlier">-1s</button>
+              <button type="button" data-nudge="-0.04" aria-label="Start one frame earlier">-1f</button>
+              <button type="button" data-nudge="0.04" aria-label="Start one frame later">+1f</button>
+              <button type="button" data-nudge="1" aria-label="Start 1 second later">+1s</button>
+              <button type="button" data-here title="Move to the playhead">Here</button>
+            </div>
+            <div class="code-editor-row" data-edge="end" data-end-row>
+              <span class="code-editor-label">End</span>
+              <button type="button" data-nudge="-1" aria-label="End 1 second earlier">-1s</button>
+              <button type="button" data-nudge="-0.04" aria-label="End one frame earlier">-1f</button>
+              <button type="button" data-nudge="0.04" aria-label="End one frame later">+1f</button>
+              <button type="button" data-nudge="1" aria-label="End 1 second later">+1s</button>
+              <button type="button" data-here title="Move to the playhead, or stop a running interval there">Here</button>
+            </div>
+            <div class="code-editor-row">
+              <label>Code <select data-edit-code></select></label>
+              <label>Team <select data-edit-team><option value="home">Home</option><option value="away">Away</option><option value="">No team</option></select></label>
+              <button type="button" class="code-delete" data-edit-delete>Delete</button>
+            </div>
+            <div class="code-editor-row">
+              <label>Player <input type="number" min="0" max="99" step="1" data-edit-player aria-label="Shirt number" /></label>
+              <span class="code-muted" data-edit-player-name></span>
+            </div>
+            <div class="code-editor-tags" data-edit-tags role="group" aria-label="Tags of the chosen event"></div>
+          </div>
+          <p class="code-muted" data-list-empty>No codes yet. Play the video and press a code's key.</p>
+          <ol class="code-list" data-list></ol>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <dialog class="code-dialog" data-panel-dialog aria-labelledby="panel-dialog-title">
+    <form method="dialog" data-panel-form>
+      <div class="code-dialog-head">
+        <h2 id="panel-dialog-title">Edit codes and tags</h2>
+        <label>Name <input type="text" data-panel-edit-name maxlength="40" required /></label>
+      </div>
+      <div class="code-dialog-body">
+        <h3>Codes</h3>
+        <table class="code-edit-table">
+          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Colour</th><th scope="col">Kind</th><th scope="col"><span class="code-sr">Links</span></th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
+          <tbody data-panel-codes></tbody>
+        </table>
+        <div class="code-template-row"><button type="button" data-add-code="instant">Add code</button><button type="button" data-add-code="interval">Add interval</button></div>
+        <h3>Tags</h3>
+        <table class="code-edit-table">
+          <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Group</th><th scope="col"><span class="code-sr">Remove</span></th></tr></thead>
+          <tbody data-panel-tags></tbody>
+        </table>
+        <div class="code-template-row"><button type="button" data-add-tag>Add tag</button></div>
+        <p class="code-muted">Code keys are single letters (not H or A); tag keys are pressed with Shift. Tags in one group exclude each other. Links let one press do more: a Goal can stop Possession, and Ball won can start it.</p>
+        <p class="code-error" data-panel-error role="alert" hidden></p>
+      </div>
+      <div class="code-dialog-foot">
+        <button type="button" data-panel-cancel>Cancel</button>
+        <button type="submit" class="code-apply" data-panel-apply>Use these codes</button>
+      </div>
+    </form>
+  </dialog>
+  <footer class="app-footer"><span>VizorPlay</span><span>Version 1.0</span></footer>
+</body>
+</html>

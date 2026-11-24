@@ -1,0 +1,501 @@
+"""Validate the drawings saved for one clip.
+
+The editor sends the whole document on every save. Anything that does not
+match this schema is refused rather than repaired, so a bad request can never
+overwrite good drawings with something half-understood.
+
+Coordinates are fractions of the frame (0 = left/top, 1 = right/bottom), with
+a margin so shapes may hang slightly off the picture. Sizes (`width`, `size`)
+are pixels on a 1080-pixel-high frame and scale with the video.
+"""
+from __future__ import annotations
+
+import math
+import re
+from typing import Any
+
+from . import parts as cuts
+
+VERSION = 1
+KINDS = {"ring", "spotlight", "arrow", "line", "freehand", "text", "zone", "token", "shape", "offside", "measure", "minimap"}
+SHAPES = {"rect", "ellipse", "triangle", "diamond", "pentagon", "hexagon", "star"}  # the Shape tool's shapes
+ANIMATIONS = {"none", "fade", "draw", "grow", "slide"}  # how a drawing comes in
+EXIT_ANIMATIONS = {"none", "fade"}
+EASES = {"linear", "ease-out", "ease-in-out"}
+PULSE_KINDS = {"ring", "spotlight", "zone", "shape"}
+MAX_FREEZES = 50
+MAX_TRACKS = 40
+MAX_KEYFRAMES = 500
+OFFSET = 1.0  # a linked point may sit up to a frame's width or height from its player's feet
+FREEZE_SECONDS = (0.04, 60.0)
+MAX_ITEMS = 300
+MAX_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2000, "text": 1, "zone": 40, "token": 1, "shape": 2,
+              "offside": 1, "measure": 2, "minimap": 1}
+MIN_POINTS = {"ring": 1, "spotlight": 1, "arrow": 2, "line": 2, "freehand": 2, "text": 1, "zone": 3, "token": 1, "shape": 2,
+              "offside": 1, "measure": 2, "minimap": 1}
+# Tactical boards (M7): a freeze can show a pitch instead of the held frame.
+BOARD_VIEWS = {"full", "left", "right", "blank"}
+BOARD_THEMES = {"grass", "light"}
+TEAMS = {"home", "away", "other"}
+MAX_LABEL = 3
+MAX_NAME = 30
+MAX_MOVES = 100
+MAX_TEXT = 300
+COORD_MIN, COORD_MAX = -0.5, 1.5
+COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
+ITEM_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+STYLE_RULES: dict[str, tuple[str, float, float]] = {
+    # key: (type, minimum, maximum) for numbers; colours are checked separately.
+    "width": ("number", 1, 40),
+    "opacity": ("number", 0, 1),
+    "fillOpacity": ("number", 0, 1),
+    "size": ("number", 8, 160),
+}
+COLOUR_KEYS = {"stroke", "fill", "color", "background"}
+FLAG_KEYS = {"dashed", "bold", "flat"}
+FLAT_KINDS = {"ring", "arrow", "offside", "measure"}  # drawn flat on the pitch through the clip's calibration (P1, P3)
+PITCH_KINDS = {"offside", "measure"}  # P3: only meaningful on the pitch, so always flat, fixed in place and on the video
+# The clip's pitch calibration (P1): pitch marks clicked on frames of the clip (keys), and the camera's
+# path between them (P2, camera.py): per frame, the homography to the first frame of its stretch.
+MAX_PITCH_KEYS = 50
+PITCH_MARKS = (4, 40)
+MAX_CAMERA_FRAMES = 4500
+CAMERA_ENTRY = 1e6  # a homography entry larger than this is not a camera's
+MARK_ID = re.compile(r"^[a-z0-9-]{3,32}$")
+CHOICE_KEYS = {"pattern": {"solid", "lines", "cross"}}  # zone fill: a wash, or hatching
+
+
+def _number(value: Any, low: float, high: float, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{what} must be a number.")
+    if not low <= value <= high:
+        raise ValueError(f"{what} must be between {low:g} and {high:g}.")
+    return float(value)
+
+
+def _point(value: Any, what: str, tracks: set[str]) -> list[float] | dict[str, Any]:
+    """A fixed [x, y], or a point linked to a tracked player: {"track", "dx", "dy"}."""
+    if isinstance(value, dict):
+        if set(value) != {"track", "dx", "dy"} or value["track"] not in tracks:
+            raise ValueError(f"{what} is linked to a player that is not tracked.")
+        return {"track": value["track"], "dx": round(_number(value["dx"], -OFFSET, OFFSET, what), 5),
+                "dy": round(_number(value["dy"], -OFFSET, OFFSET, what), 5)}
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"{what} must be an [x, y] pair.")
+    return [round(_number(v, COORD_MIN, COORD_MAX, what), 5) for v in value]
+
+
+def clean_box(value: Any, what: str) -> list[float]:
+    """[footX, footY, w, h] as fractions of the frame."""
+    if not isinstance(value, list) or len(value) != 4:
+        raise ValueError(f"{what} must be [footX, footY, width, height].")
+    fx, fy = (_number(v, COORD_MIN, COORD_MAX, what) for v in value[:2])
+    w, h = (_number(v, 0.001, 1.0, what) for v in value[2:])
+    return [round(fx, 5), round(fy, 5), round(w, 5), round(h, 5)]
+
+
+def _tracks(value: Any, frames: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > MAX_TRACKS:
+        raise ValueError(f"A clip can follow up to {MAX_TRACKS} players.")
+    clean = []
+    for track in value:
+        if not isinstance(track, dict) or set(track) - {"id", "label", "keyframes", "from", "boxes"}:
+            raise ValueError("A followed player has unknown settings.")
+        track_id = track.get("id")
+        if not isinstance(track_id, str) or not ITEM_ID.match(track_id):
+            raise ValueError("Each followed player needs a short id.")
+        label = track.get("label", "")
+        if not isinstance(label, str) or len(label) > 40:
+            raise ValueError("A player label can have up to 40 characters.")
+        keyframes = track.get("keyframes")
+        if not isinstance(keyframes, dict) or not 1 <= len(keyframes) <= MAX_KEYFRAMES:
+            raise ValueError("A followed player needs at least one placed frame.")
+        clean_keys = {}
+        for key, box in keyframes.items():
+            if not isinstance(key, str) or not key.isdigit() or int(key) >= frames:
+                raise ValueError("A placed frame must be a frame of the clip.")
+            clean_keys[str(int(key))] = clean_box(box, "A placed player box")
+        start = track.get("from", 0)
+        boxes = track.get("boxes", [])
+        if isinstance(start, bool) or not isinstance(start, int) or not 0 <= start < frames:
+            raise ValueError("Tracking must start on a frame of the clip.")
+        if not isinstance(boxes, list) or start + len(boxes) > frames:
+            raise ValueError("Tracking runs past the end of the clip.")
+        clean_boxes: list[list[float] | None] = []
+        for row in boxes:
+            if row is None:
+                clean_boxes.append(None)
+                continue
+            if not isinstance(row, list) or len(row) != 6 or row[5] not in (0, 1, 2, 3) or isinstance(row[5], bool):
+                raise ValueError("A tracked frame must be [footX, footY, width, height, confidence, state].")
+            clean_boxes.append(clean_box(row[:4], "A tracked player box") + [round(_number(row[4], 0, 1, "Confidence"), 3), row[5]])
+        entry = {"id": track_id, "keyframes": clean_keys, "from": start, "boxes": clean_boxes}
+        if label:
+            entry["label"] = label
+        clean.append(entry)
+    if len({track["id"] for track in clean}) != len(clean):
+        raise ValueError("Two followed players share the same id.")
+    return clean
+
+
+def _style(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("A drawing style must be an object.")
+    clean: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in COLOUR_KEYS:
+            if key == "background" and item is None:
+                clean[key] = None  # transparent text background
+            elif isinstance(item, str) and COLOUR.match(item):
+                clean[key] = item.lower()
+            else:
+                raise ValueError(f"Style {key} must be a colour like #ffd400.")
+        elif key in FLAG_KEYS:
+            if not isinstance(item, bool):
+                raise ValueError(f"Style {key} must be true or false.")
+            clean[key] = item
+        elif key in CHOICE_KEYS:
+            if item not in CHOICE_KEYS[key]:
+                raise ValueError(f"Style {key} must be one of {', '.join(sorted(CHOICE_KEYS[key]))}.")
+            clean[key] = item
+        elif key in STYLE_RULES:
+            _, low, high = STYLE_RULES[key]
+            clean[key] = _number(item, low, high, f"Style {key}")
+        else:
+            raise ValueError(f"Unknown style setting: {key}.")
+    return clean
+
+
+def _geometry(kind: str, value: Any) -> dict[str, Any]:
+    if kind == "shape":  # which shape, drawn in the box between its two corners
+        if not isinstance(value, dict) or set(value) != {"shape"} or value["shape"] not in SHAPES:
+            raise ValueError(f"A shape must be one of: {', '.join(sorted(SHAPES))}.")
+        return {"shape": value["shape"]}
+    if kind not in {"ring", "spotlight"}:
+        if value not in (None, {}):
+            raise ValueError(f"A {kind} has no geometry settings.")
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"A {kind} needs its size.")
+    clean = {
+        "rx": _number(value.get("rx"), 0.002, 0.5, "Ring width"),
+        "ry": _number(value.get("ry"), 0.001, 0.5, "Ring height"),
+    }
+    if kind == "spotlight":
+        clean["h"] = _number(value.get("h", 0.3), 0.02, 1.0, "Spotlight height")
+    extra = set(value) - set(clean)
+    if extra:
+        raise ValueError(f"Unknown {kind} setting: {sorted(extra)[0]}.")
+    return clean
+
+
+def _show(value: Any, limit: float, kind: str) -> dict[str, Any]:
+    """`limit` is the output length in seconds: the clip plus its freezes."""
+    if not isinstance(value, dict):
+        raise ValueError("A drawing needs the time it shows from and to.")
+    start = _number(value.get("from"), 0, limit, "Show-from time")
+    end = _number(value.get("to"), 0, limit, "Show-to time")
+    if end < start:
+        raise ValueError("A drawing cannot end before it starts.")
+    animate = value.get("animate", "none")
+    if animate not in ANIMATIONS:
+        raise ValueError(f"Unknown animation: {animate}.")
+    exit_animation = value.get("animateOut", "none")
+    if exit_animation not in EXIT_ANIMATIONS:
+        raise ValueError(f"Unknown exit animation: {exit_animation}.")
+    ease = value.get("ease", "ease-out")
+    if ease not in EASES:
+        raise ValueError(f"Unknown easing: {ease}.")
+    pulse = value.get("pulse", False)
+    if not isinstance(pulse, bool) or (pulse and kind not in PULSE_KINDS):
+        raise ValueError(f"A {kind} cannot pulse.")
+    extra = set(value) - {"from", "to", "animate", "animateOut", "animSeconds", "ease", "pulse"}
+    if extra:
+        raise ValueError(f"Unknown timing setting: {sorted(extra)[0]}.")
+    clean: dict[str, Any] = {"from": round(start, 3), "to": round(end, 3), "animate": animate}
+    if exit_animation != "none":
+        clean["animateOut"] = exit_animation
+    if animate != "none" or exit_animation != "none":
+        clean["animSeconds"] = round(_number(value.get("animSeconds", 0.5), 0.05, 5, "Animation length"), 3)
+        clean["ease"] = ease
+    if pulse:
+        clean["pulse"] = True
+    return clean
+
+
+PICTURE_FITS = {"contain", "fill"}
+PICTURE_ID = re.compile(r"^[a-f0-9]{32}$")
+
+
+def _picture_background(value: dict[str, Any]) -> dict[str, Any]:
+    """A picture insert (section I): {"kind": "picture", "id", "fit": contain|fill, "colour"}."""
+    extra = set(value) - {"kind", "id", "fit", "colour"}
+    if extra:
+        raise ValueError(f"Unknown picture setting: {sorted(extra)[0]}.")
+    if not isinstance(value.get("id"), str) or not PICTURE_ID.match(value["id"]):
+        raise ValueError("An inserted picture must be one of the project's pictures.")
+    if value.get("fit") not in PICTURE_FITS:
+        raise ValueError(f"A picture is fitted as: {', '.join(sorted(PICTURE_FITS))}.")
+    if not isinstance(value.get("colour"), str) or not COLOUR.match(value["colour"]):
+        raise ValueError("The colour round a picture must be a colour like #1f6f3a.")
+    return {"kind": "picture", "id": value["id"], "fit": value["fit"], "colour": value["colour"].lower()}
+
+
+def _background(value: Any, frames: int) -> dict[str, Any]:
+    """A freeze's picture: a board {"kind": "board", "view", "theme", optional "fromFrame" and team colours},
+    or an inserted picture (`_picture_background`)."""
+    if isinstance(value, dict) and value.get("kind") == "picture":
+        return _picture_background(value)
+    if not isinstance(value, dict) or value.get("kind") != "board":
+        raise ValueError("A freeze's picture must be a board or a picture.")
+    extra = set(value) - {"kind", "view", "theme", "fromFrame", "home", "away"}
+    if extra:
+        raise ValueError(f"Unknown board setting: {sorted(extra)[0]}.")
+    if value.get("view") not in BOARD_VIEWS:
+        raise ValueError(f"A board shows one of: {', '.join(sorted(BOARD_VIEWS))}.")
+    if value.get("theme") not in BOARD_THEMES:
+        raise ValueError(f"A board's look is one of: {', '.join(sorted(BOARD_THEMES))}.")
+    clean = {"kind": "board", "view": value["view"], "theme": value["theme"]}
+    if "fromFrame" in value:
+        source = value["fromFrame"]
+        if isinstance(source, bool) or not isinstance(source, int) or not 0 <= source < frames:
+            raise ValueError("A board must be made from a frame of the clip.")
+        clean["fromFrame"] = source
+    for team in ("home", "away"):
+        if team in value:
+            if not isinstance(value[team], str) or not COLOUR.match(value[team]):
+                raise ValueError(f"The {team} colour must be a colour like #d6262e.")
+            clean[team] = value[team].lower()
+    return clean
+
+
+def _freezes(value: Any, frames: int, source: int | None = None) -> list[dict[str, Any]]:
+    """`frames` is the cut clip's frame count (freezes sit on cut frames); `source` the clip's own (a board's fromFrame)."""
+    if not isinstance(value, list) or len(value) > MAX_FREEZES:
+        raise ValueError(f"A clip can hold up to {MAX_FREEZES} freezes.")
+    clean = []
+    for freeze in value:
+        if not isinstance(freeze, dict) or not {"atFrame", "seconds"} <= set(freeze) <= {"atFrame", "seconds", "background"}:
+            raise ValueError("Each freeze needs its frame and length, and may have a board.")
+        frame = freeze["atFrame"]
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
+            raise ValueError("A freeze must be on a frame of the clip.")
+        seconds = _number(freeze["seconds"], *FREEZE_SECONDS, "Freeze length")
+        entry = {"atFrame": frame, "seconds": round(seconds, 3)}
+        if "background" in freeze:
+            entry["background"] = _background(freeze["background"], source if source is not None else frames)
+        clean.append(entry)
+    if len({freeze["atFrame"] for freeze in clean}) != len(clean):
+        raise ValueError("Two freezes are on the same frame.")
+    return sorted(clean, key=lambda freeze: freeze["atFrame"])
+
+
+def _moves(value: Any, kind: str, on_board: bool) -> list[list[float]]:
+    """Where a board token glides to: [[seconds from the board's start, x, y], ...], in time order (M8)."""
+    if kind != "token" or not on_board:
+        raise ValueError("Only tokens on a board can move.")
+    if not isinstance(value, list) or len(value) > MAX_MOVES:
+        raise ValueError(f"A token can have up to {MAX_MOVES} moves.")
+    clean, last = [], 0.0
+    for key in value:
+        if (not isinstance(key, list) or len(key) != 3
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in key)):
+            raise ValueError("Each move is a time and a place.")
+        seconds, x, y = (float(v) for v in key)
+        if not last < seconds <= FREEZE_SECONDS[1]:
+            raise ValueError("A token's moves must come one after another, within its board.")
+        if not (COORD_MIN <= x <= COORD_MAX and COORD_MIN <= y <= COORD_MAX):
+            raise ValueError("A token's move goes off the picture.")
+        clean.append([round(seconds, 3), round(x, 5), round(y, 5)])
+        last = seconds
+    return clean
+
+
+def _item(value: Any, limit: float, tracks: set[str], boards: set[int], frames: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("Each drawing must be an object.")
+    item_id = value.get("id")
+    if not isinstance(item_id, str) or not ITEM_ID.match(item_id):
+        raise ValueError("Each drawing needs a short id.")
+    kind = value.get("kind")
+    if kind not in KINDS:
+        raise ValueError(f"Unknown drawing type: {kind}.")
+    points = value.get("points")
+    if not isinstance(points, list) or not MIN_POINTS[kind] <= len(points) <= MAX_POINTS[kind]:
+        raise ValueError(f"A {kind} needs {MIN_POINTS[kind]} to {MAX_POINTS[kind]} points.")
+    clean = {
+        "id": item_id,
+        "kind": kind,
+        "points": [_point(p, f"A {kind} point", tracks) for p in points],
+        "style": _style(value.get("style")),
+        "show": _show(value.get("show"), limit, kind),
+    }
+    if clean["style"].get("flat") and kind not in FLAT_KINDS:
+        raise ValueError(f"A {kind} cannot lie flat on the pitch.")
+    if kind in PITCH_KINDS:
+        name = "An offside line" if kind == "offside" else "A measure"
+        if clean["style"].get("flat") is not True:
+            raise ValueError(f"{name} lies on the pitch.")
+        if "on" in value:
+            raise ValueError(f"{name} goes on the video, not on a board.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError(f"{name} is placed on the grass; it does not follow a player.")
+    if kind == "minimap":  # P3b: a small pitch in a corner of the picture, with the followed players on it
+        if "on" in value:
+            raise ValueError("A minimap goes on the video, not on a board.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError("A minimap stays where it is put; it does not follow a player.")
+    if "at" in value:
+        # The recorded frame a flat drawing's points are for (P2): it keeps that place on the pitch.
+        at = value["at"]
+        if not clean["style"].get("flat"):
+            raise ValueError("Only a drawing flat on the pitch keeps the frame it was drawn on.")
+        if isinstance(at, bool) or not isinstance(at, int) or not 0 <= at < frames:
+            raise ValueError("A flat drawing's frame is not in the clip.")
+        clean["at"] = at
+    geometry = _geometry(kind, value.get("geometry"))
+    if geometry:
+        clean["geometry"] = geometry
+    if kind == "text":
+        text = value.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+            raise ValueError(f"Text must have 1 to {MAX_TEXT} characters.")
+        clean["text"] = text
+    elif "text" in value:
+        raise ValueError(f"A {kind} has no text.")
+    if kind == "token":
+        team = value.get("team", "home")
+        if team not in TEAMS:
+            raise ValueError("A token's team must be home, away or other.")
+        clean["team"] = team
+        label = value.get("label", "")
+        if not isinstance(label, str) or len(label) > MAX_LABEL:
+            raise ValueError(f"A token's number can have up to {MAX_LABEL} characters.")
+        clean["label"] = label
+        if "name" in value:
+            name = value["name"]
+            if not isinstance(name, str) or len(name) > MAX_NAME:
+                raise ValueError(f"A token's name can have up to {MAX_NAME} characters.")
+            if name.strip():
+                clean["name"] = name
+    elif {"team", "label", "name"} & set(value):
+        raise ValueError(f"A {kind} has no team, number or name.")
+    if "on" in value:
+        # Drawn on a board: shown only on it, and fixed in place (no player on a board to follow).
+        board = value["on"]
+        if isinstance(board, bool) or not isinstance(board, int) or board not in boards:
+            raise ValueError("A drawing belongs to a board that is not in the clip.")
+        if any(isinstance(point, dict) for point in clean["points"]):
+            raise ValueError("Drawings on a board cannot follow a player.")
+        clean["on"] = board
+    if "moves" in value:
+        clean["moves"] = _moves(value["moves"], kind, "on" in clean)
+    known = {"id", "kind", "points", "style", "show", "geometry", "text", "team", "label", "name", "on", "moves", "at"}
+    extra = set(value) - known
+    if extra:
+        raise ValueError(f"Unknown drawing setting: {sorted(extra)[0]}.")
+    return clean
+
+
+def _camera(value: Any, frames: int) -> dict[str, Any]:
+    """The camera's path (camera.follow_camera): {"from", "rows": [[8 entries, sureness]], "starts": [frames]}."""
+    if not isinstance(value, dict) or set(value) != {"from", "rows", "starts"}:
+        raise ValueError("The camera's path needs its first frame, its rows and where each stretch starts.")
+    start, rows, starts = value["from"], value["rows"], value["starts"]
+    if isinstance(start, bool) or not isinstance(start, int) or not 0 <= start < frames:
+        raise ValueError("The camera's path must start on a frame of the clip.")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= min(MAX_CAMERA_FRAMES, frames - start):
+        raise ValueError(f"The camera's path covers 1 to {MAX_CAMERA_FRAMES} frames of the clip.")
+    clean_rows = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 9:
+            raise ValueError("Each frame of the camera's path needs 8 numbers and how sure it is.")
+        entries = [_number(entry, -CAMERA_ENTRY, CAMERA_ENTRY, "A camera path entry") for entry in row[:8]]
+        clean_rows.append(entries + [_number(row[8], 0, 1, "How sure the camera's path is")])
+    if not isinstance(starts, list) or not starts or len(starts) > len(rows) or starts[0] != start:
+        raise ValueError("The camera's path must say where each stretch starts, from its first frame.")
+    last = start - 1
+    for frame in starts:
+        if isinstance(frame, bool) or not isinstance(frame, int) or not last < frame < start + len(rows):
+            raise ValueError("Each stretch of the camera's path starts on a later frame it covers.")
+        last = frame
+    return {"from": start, "rows": clean_rows, "starts": list(starts)}
+
+
+def _pitch(value: Any, frames: int) -> dict[str, Any]:
+    """The clip's pitch calibration: {"keys": [{"frame", "pairs": [{"id", "at": [x, y]}]}], "camera"?}.
+    `frame` is a frame of the clip as recorded (not as cut), so cutting the clip keeps it."""
+    if not isinstance(value, dict) or not set(value) <= {"keys", "camera"} or not isinstance(value.get("keys"), list):
+        raise ValueError("The pitch calibration must list its calibrated frames.")
+    if not 1 <= len(value["keys"]) <= MAX_PITCH_KEYS:
+        raise ValueError(f"A clip can keep 1 to {MAX_PITCH_KEYS} calibrated frames.")
+    keys = []
+    for key in value["keys"]:
+        if not isinstance(key, dict) or set(key) != {"frame", "pairs"}:
+            raise ValueError("A calibrated frame needs its frame and its pitch marks.")
+        frame = key["frame"]
+        if isinstance(frame, bool) or not isinstance(frame, int) or not 0 <= frame < frames:
+            raise ValueError("The calibrated frame is not in the clip.")
+        pairs = key["pairs"]
+        if not isinstance(pairs, list) or not PITCH_MARKS[0] <= len(pairs) <= PITCH_MARKS[1]:
+            raise ValueError(f"A calibration needs {PITCH_MARKS[0]} to {PITCH_MARKS[1]} pitch marks.")
+        clean_pairs = []
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {"id", "at"} or not isinstance(pair["id"], str)                     or not MARK_ID.match(pair["id"]):
+                raise ValueError("Each pitch mark needs its name and where it was clicked.")
+            at = _point(pair["at"], "A pitch mark", set())
+            clean_pairs.append({"id": pair["id"], "at": at})
+        if len({pair["id"] for pair in clean_pairs}) != len(clean_pairs):
+            raise ValueError("A pitch mark is placed twice.")
+        keys.append({"frame": frame, "pairs": clean_pairs})
+    if len({key["frame"] for key in keys}) != len(keys):
+        raise ValueError("A frame is calibrated twice.")
+    clean = {"keys": sorted(keys, key=lambda key: key["frame"])}
+    if "camera" in value:
+        clean["camera"] = _camera(value["camera"], frames)
+    return clean
+
+
+def clean_document(value: Any, duration: float, frames: int) -> dict[str, Any]:
+    """The document to store, or ValueError explaining what is wrong.
+
+    `duration` is the clip length in seconds and `frames` its frame count.
+    Drawing times are output seconds, so they may run into the freezes' time.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("Annotations must be an object.")
+    if value.get("version") != VERSION:
+        raise ValueError("These annotations were made by a different version of the editor.")
+    items = value.get("items")
+    if not isinstance(items, list) or len(items) > MAX_ITEMS:
+        raise ValueError(f"A clip can hold up to {MAX_ITEMS} drawings.")
+    parts = cuts.clean(value.get("parts"), frames)
+    cut_count = cuts.cut_frames(parts, frames)
+    freezes = _freezes(value.get("freezes", []), cut_count, frames)
+    cut_duration = duration * cut_count / frames if parts else duration
+    limit = cut_duration + sum(freeze["seconds"] for freeze in freezes) + 0.5
+    tracks = _tracks(value.get("tracks", []), frames)
+    track_ids = {track["id"] for track in tracks}
+    boards = {freeze["atFrame"] for freeze in freezes if "background" in freeze}
+    clean_items = [_item(item, limit, track_ids, boards, frames) for item in items]
+    ids = [item["id"] for item in clean_items]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Two drawings share the same id.")
+    extra = set(value) - {"version", "items", "freezes", "tracks", "parts", "pitch"}
+    if extra:
+        raise ValueError(f"Unknown annotation setting: {sorted(extra)[0]}.")
+    clean = {"version": VERSION, "items": clean_items, "freezes": freezes}
+    if tracks:
+        clean["tracks"] = tracks
+    if parts:
+        clean["parts"] = parts
+    if value.get("pitch") is not None:
+        clean["pitch"] = _pitch(value["pitch"], frames)
+    return clean
+
+
+def empty_document() -> dict[str, Any]:
+    return {"version": VERSION, "items": [], "freezes": []}

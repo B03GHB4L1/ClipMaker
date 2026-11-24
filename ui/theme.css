@@ -1,0 +1,57 @@
+/* Theme switch and hand-tuned dark-theme rules. Loads after ui/theme-dark.css,
+   which tools/make_dark_theme.py generates from the other stylesheets. */
+
+.theme-switch {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--cm-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.theme-switch:hover { color: var(--cm-ink); border-color: currentColor; }
+.theme-switch:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 2px; }
+.fullscreen-switch { margin-left: 6px; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  /* Graphite, not black: the page sits mid-dark, cards a step above it,
+     fields a step below the cards. Matches tools/make_dark_theme.py's ramp. */
+  --cm-paper: #242424;
+  --cm-ink: #e9eae9;
+  --cm-muted: #a7aaa7;
+  --cm-rule: #3a3b39;
+  --cm-surface: #2f2f2f;
+  --cm-field: #292929;
+}
+:root[data-theme="dark"] body { background: var(--cm-paper); color: var(--cm-ink); }
+:root[data-theme="dark"] :is(input, select, textarea) {
+  background-color: var(--cm-field);
+  color: var(--cm-ink);
+  border-color: #464745;
+}
+:root[data-theme="dark"] :is(input, select, textarea):focus { border-color: #8d908c; }
+:root[data-theme="dark"] option { background: var(--cm-surface); color: var(--cm-ink); }
+:root[data-theme="dark"] ::placeholder { color: #81837f; }
+:root[data-theme="dark"] img[src*="vizorplay-wordmark.svg"] { content: url("assets/brand/vizorplay-wordmark-on-dark.svg"); }
+:root[data-theme="dark"] img[src*="vizorplay-lockup.svg"] { content: url("assets/brand/vizorplay-lockup-on-dark.svg"); }
+:root[data-theme="dark"] img[src*="vizorplay-mark.svg"] { content: url("assets/brand/vizorplay-mark-on-dark.svg"); }
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #4a4b49; }
+/* Scrims behind the drawer and dialogs darken the page; a flipped light scrim would wash it out. */
+:root[data-theme="dark"] .drawer-overlay { background: rgba(0, 0, 0, 0.45); }
+/* The page-change wipe is already dark in light mode; flipping it would flash light grey. */
+:root[data-theme="dark"] .page-wipe { background: var(--cm-paper); color: var(--cm-muted); }
+/* A see-through lime over graphite reads as olive, so the trimmed span is a light
+   lime wash with lime edges instead. */
+:root[data-theme="dark"] .trim-region { background: rgba(200, 241, 53, 0.16); border-block-color: #c8f135; }
+:root[data-theme="dark"] .app-footer { background: var(--cm-paper); color: var(--cm-muted); }
+/* Lime buttons keep dark text; clips keep a black surround (Annotate sessions). */
+:root[data-theme="dark"] .annotate-main .annotate-session-open { color: #171817; }
+:root[data-theme="dark"] .code-stage { background: #000; }
+/* A card in a sequence is drawn the same dark green with light words in the export, so the preview keeps it. */
+:root[data-theme="dark"] .annotate-card-show { background: #10201b; color: #f4f7f2; }
