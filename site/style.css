@@ -134,6 +134,7 @@ footer small{display:block;margin-top:32px;padding-top:20px;border-top:1px solid
   .ball{order:-1;width:min(46%,200px);margin-bottom:-8px}
   .steps,.features,.update-grid{grid-template-columns:1fr}
   .feat.wide{grid-column:auto}
+  .licence .cols,.chips{grid-template-columns:1fr}
   .step{border-right:0;border-bottom:1px solid var(--rule)}
   .step:last-child{border-bottom:0}
     .top .btn.small{display:none}
