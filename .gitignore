@@ -11,3 +11,8 @@ node_modules/
 .clipmaker_theme
 match data/
 .secrets/
+
+# local tooling and reference material
+.claude/
+.impeccable/
+older versions/
