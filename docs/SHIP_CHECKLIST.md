@@ -14,8 +14,6 @@ Nothing below happens on its own. Each step that changes what the public sees
 - [ ] The Mac in-app update is built but unproven: after the first release, try
       one update from 1.0 to a test 1.0.1 on a real Mac (Apple Silicon) and note
       whether Gatekeeper asks again. If it fails, say so in the README and page.
-- [ ] Open items from the earlier review are settled: `design/chrome_ball`,
-      `docs/MAC_INSTALLERS_PLAN.md`, the `Windows/` deletions.
 - [ ] Merge PR #8 into `main` only when you say the work is done.
 
 ## 2. Release
