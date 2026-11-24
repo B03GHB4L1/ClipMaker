@@ -71,12 +71,26 @@ jobs:
       - run: npm ci
 
       - name: Build VizorPlay.app
+        env:
+          # Signs the update archive (VizorPlay.app.tar.gz) that installed copies download.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is unavailable, so the Mac update archive cannot be signed for in-app updates."
+            exit 1
+          fi
           mkdir -p build
           # Ad hoc signature: Apple Silicon will not run unsigned code. Not notarized.
-          printf '{"bundle":{"createUpdaterArtifacts":false,"macOS":{"minimumSystemVersion":"14.0","signingIdentity":"-"}}}\n' > build/mac-config.json
+          printf '{"bundle":{"createUpdaterArtifacts":true,"macOS":{"minimumSystemVersion":"14.0","signingIdentity":"-"}}}\n' > build/mac-config.json
           npm run tauri build -- --bundles app --config "$PWD/build/mac-config.json"
           ls -la src-tauri/target/release/bundle/macos/
+          # The update archive is the same VizorPlay.app as the one in the disk image.
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          mkdir -p build/update
+          cp src-tauri/target/release/bundle/macos/VizorPlay.app.tar.gz "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz"
+          cp src-tauri/target/release/bundle/macos/VizorPlay.app.tar.gz.sig "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz.sig"
+          ls -la build/update
 
       - name: Build the disk image
         run: |
@@ -97,7 +111,8 @@ jobs:
       - name: Retain the exact disk image that passed (the release attaches these bytes)
         run: |
           VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
-          python packaging/release_candidate.py receipt --platform macOS-AppleSilicon --payload "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --evidence build/dmg-evidence/result.json --output build/release-packages
+          python packaging/release_candidate.py receipt --platform macOS-AppleSilicon --payload "build/dmg/VizorPlay_${VERSION}_aarch64.dmg" --evidence build/dmg-evidence/result.json --output build/release-packages \
+            --signature "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz.sig" --updater-archive "build/update/VizorPlay_${VERSION}_aarch64.app.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: tested-package-macOS-AppleSilicon

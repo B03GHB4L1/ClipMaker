@@ -174,11 +174,12 @@ When a new version comes out, a message appears at the bottom of the app.
 - **Windows:** click **Update and restart**. VizorPlay downloads the new
   version, checks it is genuine, closes, updates and opens again by itself. You
   can also just run a newer setup file, but Close VizorPlay before you update manually.
-- **Mac (disk image):** this doesn't update itself yet. Download the newer
-  `.dmg` for your chip (see the table above), open it and drag **VizorPlay** onto
-  **Applications** again. Choose **Replace** when asked. You don't need to do
-  the 'Open Anyway' step again if macOS remembers it; if the message comes back,
-  repeat step 3.
+- **Mac (disk image):** click **Update and restart**. VizorPlay downloads the
+  new version, checks it is genuine, replaces itself and opens again. This has
+  not been tried on a real Mac yet; if macOS asks you to allow the app again,
+  repeat step 3, and if the button reports a problem, download the newer `.dmg`
+  for your chip (see the table above), open it, drag **VizorPlay** onto
+  **Applications** and choose **Replace**.
 - **Mac (Homebrew):** close VizorPlay, then type these three lines in Terminal,
   pressing Enter after each one. It takes a few minutes because it rebuilds the
   app:
@@ -202,7 +203,7 @@ When a new version comes out, a message appears at the bottom of the app.
 ### VizorPlay 1.0 (coming soon)
 
 - A brand-new app for Windows, Mac and Linux, under a new name
-- Smaller download, and it updates itself on Windows and Linux
+- Smaller download, and it updates itself on Windows, Linux and the Mac disk-image app
 - Much faster video saving on computers with an NVIDIA graphics card
 - VizorPlay xG: how good every chance was, on the shot map, an xG race and more
 - Your projects are saved and reopen exactly as you left them

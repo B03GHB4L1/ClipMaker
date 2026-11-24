@@ -21,8 +21,11 @@ PLATFORMS = {"Windows": ".exe", "Linux": ".deb", "macOS": ".tar.gz",
 # its absence does not block the other packages.
 OPTIONAL_PLATFORMS = {"macOS-Intel"}
 DISK_IMAGES = {"macOS-AppleSilicon": ("aarch64", "arm64"), "macOS-Intel": ("x64", "x86_64")}
-# Feed keys the desktop updater looks up; Windows and Linux install in the app.
+# Feed keys the desktop updater looks up; Windows and Linux update from their own package.
 UPDATER_TARGETS = {"Windows": "windows-x86_64", "Linux": "linux-x86_64"}
+# The Mac disk-image app updates from a signed archive of the same VizorPlay.app that is inside
+# the disk image (the disk image itself is only for first installs).
+MAC_UPDATER_TARGETS = {"macOS-AppleSilicon": "darwin-aarch64", "macOS-Intel": "darwin-x86_64"}
 
 
 def digest(path):
@@ -47,12 +50,19 @@ def update_verified(results):
     return any(result.get("update_installed") and result.get("bad_signature_rejected") for result in results)
 
 
-def record_receipt(platform, payload, evidence, output, commit, signature=None):
+def record_receipt(platform, payload, evidence, output, commit, signature=None, updater_archive=None):
     validate_commit(commit)
     if platform not in PLATFORMS or not payload.name.endswith(PLATFORMS[platform]):
         raise ValueError("Unexpected release payload type")
-    if signature is not None and platform not in UPDATER_TARGETS:
-        raise ValueError("Only the Windows installer and the Linux .deb are installed by the in-app updater")
+    if platform in MAC_UPDATER_TARGETS:
+        if (signature is None) != (updater_archive is None):
+            raise ValueError("A Mac update archive and its signature go together")
+        if updater_archive is not None and updater_archive.name != payload.name.replace(".dmg", ".app.tar.gz"):
+            raise ValueError(f"Unexpected Mac update archive name {updater_archive.name}")
+    elif updater_archive is not None:
+        raise ValueError("Only the Mac disk-image apps have an update archive")
+    elif signature is not None and platform not in UPDATER_TARGETS:
+        raise ValueError("Only the Windows installer, the Linux .deb and the Mac update archives are installed by the in-app updater")
     results = [json.loads(path.read_text(encoding="utf-8")) for path in evidence]
     if not results or any(result.get("status") != "passed" for result in results):
         raise ValueError("Every acceptance result must be passed")
@@ -76,9 +86,14 @@ def record_receipt(platform, payload, evidence, output, commit, signature=None):
             raise ValueError("Evidence that the Homebrew-built VizorPlay.app starts and stops its engine is required")
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(payload, output / payload.name)
+    if updater_archive is not None:
+        shutil.copy2(updater_archive, output / updater_archive.name)
     receipt = {"schema": 1, "platform": platform, "version": "1.0.0", "commit": commit,
                "payload": payload.name, "sha256": digest(payload), "size": payload.stat().st_size,
                "acceptance": results}
+    if updater_archive is not None:
+        receipt["updater_archive"] = {"name": updater_archive.name, "sha256": digest(updater_archive),
+                                      "size": updater_archive.stat().st_size}
     if signature is not None:
         receipt["updater_signature"] = read_signature(signature)
     (output / f"receipt-{platform}.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
@@ -101,6 +116,17 @@ def verify_receipts(directory, commit):
         payload = directory / filename
         if payload.is_symlink() or digest(payload) != receipt["sha256"] or payload.stat().st_size != receipt["size"]:
             raise ValueError(f"Tested {platform} payload has changed")
+        archive = receipt.get("updater_archive")
+        if archive is not None:
+            name = archive.get("name") if isinstance(archive, dict) else None
+            if (platform not in MAC_UPDATER_TARGETS or not isinstance(name, str) or Path(name).name != name
+                    or "/" in name or "\\" in name or name != filename.replace(".dmg", ".app.tar.gz")):
+                raise ValueError("The update archive must be a flat filename that matches its disk image")
+            tested = directory / name
+            if tested.is_symlink() or digest(tested) != archive.get("sha256") or tested.stat().st_size != archive.get("size"):
+                raise ValueError(f"Tested {platform} update archive has changed")
+            if not receipt.get("updater_signature"):
+                raise ValueError(f"The {platform} update archive has no signature")
         receipts.append(receipt)
     return receipts
 
@@ -115,6 +141,8 @@ def assemble(directory, output, commit, repository):
     for receipt in receipts:
         shutil.copy2(directory / receipt["payload"], output / receipt["payload"])
         shutil.copy2(directory / f"receipt-{receipt['platform']}.json", output / f"receipt-{receipt['platform']}.json")
+        if "updater_archive" in receipt:
+            shutil.copy2(directory / receipt["updater_archive"]["name"], output / receipt["updater_archive"]["name"])
     base = f"https://github.com/{repository}/releases/download/v1.0.0/"
     source = next(receipt for receipt in receipts if receipt["platform"] == "macOS")
     windows = next(receipt for receipt in receipts if receipt["platform"] == "Windows")
@@ -129,12 +157,20 @@ def assemble(directory, output, commit, repository):
                     "--installer-url", base + quote(windows["payload"]), "--output", str(output)], check=True)
     if not linux.get("updater_signature"):
         raise ValueError("A Linux release needs a signed .deb for in-app updates")
+    platforms = {UPDATER_TARGETS[receipt["platform"]]: {"signature": receipt["updater_signature"],
+                                                        "url": base + quote(receipt["payload"])}
+                 for receipt in (windows, linux)}
+    # Mac: the Apple Silicon archive is required; the Intel one is listed when that image passed.
+    for receipt in receipts:
+        if receipt["platform"] in MAC_UPDATER_TARGETS and "updater_archive" in receipt:
+            platforms[MAC_UPDATER_TARGETS[receipt["platform"]]] = {
+                "signature": receipt["updater_signature"], "url": base + quote(receipt["updater_archive"]["name"])}
+    if "darwin-aarch64" not in platforms:
+        raise ValueError("A Mac release needs a signed update archive for Apple Silicon")
     # The feed every installed copy reads (releases/latest/download/latest.json).
     feed = {"version": "1.0.0", "notes": "See the release page for what changed.",
             "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": {UPDATER_TARGETS[receipt["platform"]]: {"signature": receipt["updater_signature"],
-                                                                 "url": base + quote(receipt["payload"])}
-                          for receipt in (windows, linux)}}
+            "platforms": platforms}
     (output / "latest.json").write_text(json.dumps(feed, indent=2) + "\n", encoding="utf-8")
     manifest = {"schema": 1, "version": "1.0.0", "commit": commit, "published": False,
                 "repository": repository, "artifacts": receipts,
@@ -142,7 +178,7 @@ def assemble(directory, output, commit, repository):
                            "Unsigned Windows installer may show a security warning",
                            "macOS: the disk images are ad hoc signed and not notarized, so the first launch needs Open Anyway; Homebrew builds VizorPlay.app on the Mac instead",
                            "The Intel (x64) disk image is included only when it passed its tests; real Macs and macOS 11 to 13 are not tested",
-                           "In-app updates install on Windows only; Linux and macOS show a notice",
+                           "In-app updates: Windows, Linux and the Mac disk-image app install them; the Mac update has not been tried on a real Mac, and a Homebrew install updates with brew",
                            "Public Homebrew tap and WinGet submissions are separate publication steps",
                            "Linux support verified on Ubuntu 22.04 DEB; RPM is not included",
                            "Skipped live-provider checks do not certify current provider availability"]}
@@ -156,8 +192,8 @@ def assemble(directory, output, commit, repository):
         "if present), drag VizorPlay onto Applications and use Open Anyway the first time (it is "
         "not notarized). The Homebrew formula requires publication of the "
         "source asset and Homebrew tap before its public install command will work.\n\n"
-        "latest.json is the update feed: once it is published with the release, installed Windows "
-        "copies offer the update in the app and Linux and macOS copies show a notice.\n\n"
+        "latest.json is the update feed: once it is published with the release, installed Windows, "
+        "Linux and Mac (disk image) copies offer the update in the app; a Homebrew install shows a notice.\n\n"
         "No release, tap update or WinGet submission has been published by this candidate job. "
         "See candidate-manifest.json for acceptance evidence and limits.\n",
         encoding="utf-8")
@@ -175,7 +211,8 @@ def main():
     receipt.add_argument("--payload", type=Path, required=True)
     receipt.add_argument("--evidence", type=Path, action="append", required=True)
     receipt.add_argument("--output", type=Path, required=True)
-    receipt.add_argument("--signature", type=Path, help="Windows and Linux: the package's updater .sig file")
+    receipt.add_argument("--signature", type=Path, help="Windows, Linux and Mac: the updater .sig file")
+    receipt.add_argument("--updater-archive", type=Path, help="Mac disk images: the signed VizorPlay .app.tar.gz")
     candidate = commands.add_parser("assemble")
     candidate.add_argument("--input", type=Path, required=True)
     candidate.add_argument("--output", type=Path, required=True)
@@ -184,7 +221,7 @@ def main():
         command.add_argument("--commit", default=os.environ.get("GITHUB_SHA", ""))
     args = parser.parse_args()
     if args.command == "receipt":
-        record_receipt(args.platform, args.payload, args.evidence, args.output, args.commit, args.signature)
+        record_receipt(args.platform, args.payload, args.evidence, args.output, args.commit, args.signature, args.updater_archive)
     else:
         assemble(args.input, args.output, args.commit, args.repository)
 

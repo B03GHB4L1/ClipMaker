@@ -207,8 +207,8 @@ fn is_install_request(url: &Url, port: u16) -> bool {
 }
 
 /// Download the update named by the release feed, check its signature against
-/// the public key built into this app, and install it (Windows installer or
-/// Linux .deb; see install_downloaded).
+/// the public key built into this app, and install it (Windows installer, Mac
+/// app archive or Linux .deb; see install_downloaded).
 async fn install_update(app: AppHandle) -> Result<(), String> {
     let mut builder = app.updater_builder();
     // Acceptance tests point at a local https feed. The public key cannot be
@@ -234,7 +234,10 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 
 /// Windows: the installer replaces the engine's files, so the engine must exit
 /// first; the installer then closes VizorPlay, updates it and reopens it.
-#[cfg(windows)]
+/// Mac (disk-image app): the updater swaps VizorPlay.app for the signed archive's
+/// copy in place, so the engine inside it must exit first; the app then reopens.
+/// A Homebrew-built app never reaches this (the engine reports "homebrew").
+#[cfg(any(windows, target_os = "macos"))]
 async fn install_downloaded(app: &AppHandle, update: &tauri_plugin_updater::Update, installer: Vec<u8>) -> Result<(), String> {
     stop_backend(app);
     update
@@ -295,7 +298,7 @@ extern "C" {
     fn libc_geteuid() -> u32;
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 async fn install_downloaded(_app: &AppHandle, _update: &tauri_plugin_updater::Update, _installer: Vec<u8>) -> Result<(), String> {
     Err("this computer updates outside the app".to_string())
 }
@@ -426,7 +429,7 @@ pub fn run() {
                         return true;
                     }
                     // Homebrew and Mac disk images update outside the app.
-                    if cfg!(any(windows, target_os = "linux")) && !UPDATING.swap(true, Ordering::SeqCst) {
+                    if cfg!(any(windows, target_os = "macos", target_os = "linux")) && !UPDATING.swap(true, Ordering::SeqCst) {
                         let app = updater_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Some(window) = app.get_webview_window("main") {

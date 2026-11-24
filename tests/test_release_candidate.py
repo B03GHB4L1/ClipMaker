@@ -79,10 +79,20 @@ class ReleaseCandidateTests(unittest.TestCase):
         evidence.write_text(json.dumps({"status": "passed", "update_installed": passed, "bad_signature_rejected": True}))
         return signature, evidence
 
+    def mac_archive(self, payload):
+        """The signed VizorPlay.app.tar.gz the Mac workflows build beside the disk image."""
+        archive = self.root / payload.name.replace(".dmg", ".app.tar.gz")
+        archive.write_bytes(("update archive for " + payload.name).encode())
+        signature, _ = self.updater(name=archive.name + ".sig")
+        return archive, signature
+
     def record_all(self, signed=True, intel=False):
         for platform in ("Windows", "Linux", "macOS", "macOS-AppleSilicon") + (("macOS-Intel",) if intel else ()):
             payload, evidence = self.fixture(platform)
-            if platform == "Windows" and signed:
+            if platform.startswith("macOS-") and signed:
+                archive, signature = self.mac_archive(payload)
+                record_receipt(platform, payload, [evidence], self.receipts, self.commit, signature, archive)
+            elif platform == "Windows" and signed:
                 signature, update = self.updater()
                 record_receipt(platform, payload, [evidence, update], self.receipts, self.commit, signature)
             elif platform == "Linux" and signed:
@@ -114,9 +124,17 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.assertEqual(feed["platforms"]["windows-x86_64"], {
             "signature": windows["updater_signature"],
             "url": "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_x64-setup.exe"})
-        self.assertEqual(set(feed["platforms"]), {"windows-x86_64", "linux-x86_64"}, "Only Windows and Linux install in the app")
+        self.assertEqual(set(feed["platforms"]), {"windows-x86_64", "linux-x86_64", "darwin-aarch64"},
+                         "Windows, Linux and the Apple Silicon Mac app install in the app (Intel only when it passed)")
         self.assertEqual(feed["platforms"]["linux-x86_64"]["url"],
                          "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_amd64.deb")
+        # The Mac feed entry is the signed update archive, not the disk image, and it ships in the release.
+        mac = next(item for item in manifest["artifacts"] if item["platform"] == "macOS-AppleSilicon")
+        self.assertEqual(feed["platforms"]["darwin-aarch64"], {
+            "signature": mac["updater_signature"],
+            "url": "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_aarch64.app.tar.gz"})
+        self.assertEqual(digest(target / "VizorPlay_1.0.0_aarch64.app.tar.gz"), mac["updater_archive"]["sha256"])
+        self.assertIn("VizorPlay_1.0.0_aarch64.app.tar.gz", (target / "SHA256SUMS").read_text())
         with self.assertRaises(ValueError):
             assemble(self.receipts, target, self.commit, "B03GHB4L1/ClipMaker")
 
@@ -143,6 +161,37 @@ class ReleaseCandidateTests(unittest.TestCase):
         record_receipt("Linux", linux, [linux_evidence], self.receipts, self.commit)
         with self.assertRaisesRegex(ValueError, "signed .deb"):
             assemble(self.receipts, self.root / "unsigned-linux", self.commit, "B03GHB4L1/ClipMaker")
+
+    def test_release_needs_a_signed_apple_silicon_update_archive(self):
+        self.record_all()
+        (self.receipts / "receipt-macOS-AppleSilicon.json").unlink()
+        payload, evidence = self.fixture("macOS-AppleSilicon")
+        record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit)
+        with self.assertRaisesRegex(ValueError, "Apple Silicon"):
+            assemble(self.receipts, self.root / "no-mac-archive", self.commit, "B03GHB4L1/ClipMaker")
+
+    def test_mac_update_archive_checks(self):
+        payload, evidence = self.fixture("macOS-AppleSilicon")
+        archive, signature = self.mac_archive(payload)
+        with self.assertRaisesRegex(ValueError, "go together"):
+            record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit, signature)
+        with self.assertRaisesRegex(ValueError, "go together"):
+            record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit, None, archive)
+        wrong = self.root / "VizorPlay_1.0.0_x64.app.tar.gz"  # the Intel archive cannot go with the Apple Silicon image
+        wrong.write_bytes(b"x")
+        with self.assertRaisesRegex(ValueError, "archive name"):
+            record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit, signature, wrong)
+        windows, windows_evidence = self.fixture("Windows")
+        with self.assertRaisesRegex(ValueError, "disk-image"):
+            record_receipt("Windows", windows, [windows_evidence], self.receipts, self.commit, signature, archive)
+        record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit, signature, archive)
+        self.assertEqual(digest(self.receipts / archive.name), digest(archive))
+        # The retained archive is checked again when the release is assembled.
+        self.record_all()
+        verify_receipts(self.receipts, self.commit)
+        (self.receipts / archive.name).write_bytes(b"replaced after testing")
+        with self.assertRaisesRegex(ValueError, "update archive has changed"):
+            verify_receipts(self.receipts, self.commit)
 
     def test_rejects_modified_payload_wrong_commit_and_path_escape(self):
         self.record_all()

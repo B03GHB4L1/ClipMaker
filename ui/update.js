@@ -1,6 +1,6 @@
 // Footer notice for a newer VizorPlay release, on every screen.
-// The engine checks the release feed (GET /api/update). Windows desktop
-// installs update in the app: navigating to INSTALL_PATH is intercepted by
+// The engine checks the release feed (GET /api/update). Windows, Linux and
+// Mac disk-image desktop installs update in the app: navigating to INSTALL_PATH is intercepted by
 // the desktop shell, which downloads, verifies and installs the signed
 // installer, then reports back through window.vizorplayUpdateStatus.
 const INSTALL_PATH = "/__vizorplay__/install-update";

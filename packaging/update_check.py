@@ -1,13 +1,15 @@
 """Whether a newer VizorPlay release exists, and how this install should get it.
 
 The engine checks the release feed once per run. Installing is not done here:
-on Windows and Linux the desktop shell downloads, verifies and installs the
-signed installer or .deb; Mac and Homebrew get a notice with the way to update.
+on Windows, Linux and the Mac disk-image app the desktop shell downloads,
+verifies and installs the signed installer, .deb or app archive; a Homebrew
+install gets a notice with the way to update.
 """
 from __future__ import annotations
 
 import json
 import os
+import platform as platform_module
 import re
 import sys
 import threading
@@ -20,9 +22,17 @@ CURRENT_VERSION = "1.0.0"
 RELEASES_URL = "https://github.com/B03GHB4L1/ClipMaker/releases/latest"
 DEFAULT_FEED = RELEASES_URL + "/download/latest.json"
 MAX_FEED_BYTES = 64 * 1024
-# The desktop shell installs Windows and Linux updates itself; these are the
-# feed keys its updater looks for.
+# The desktop shell installs Windows, Linux and Mac (disk image) updates itself;
+# these are the feed keys its updater looks for.
 IN_APP_TARGETS = {"win32": "windows-x86_64", "linux": "linux-x86_64"}
+MAC_TARGETS = {"arm64": "darwin-aarch64", "aarch64": "darwin-aarch64", "x86_64": "darwin-x86_64"}
+
+
+def update_target(platform: str, machine: str = "") -> str | None:
+    """The feed key for this computer, or None when its updates are not installed in the app."""
+    if platform == "darwin":
+        return MAC_TARGETS.get(machine.lower())
+    return IN_APP_TARGETS.get(platform)
 
 
 def parse_version(value: object) -> tuple[int, int, int] | None:
@@ -39,9 +49,13 @@ def feed_url(env: Mapping[str, str] = os.environ) -> str:
     return url
 
 
-def install_method(platform: str, desktop: bool) -> str:
-    """How this install updates: in the app, with Homebrew, or by downloading."""
-    if desktop and platform in IN_APP_TARGETS:
+def install_method(platform: str, desktop: bool, machine: str = "", packaged: bool = False) -> str:
+    """How this install updates: in the app, with Homebrew, or by downloading.
+
+    A Mac app installs updates itself only when it is the disk-image app, which carries
+    its own engine (packaged). The Homebrew build has no engine inside, and Homebrew
+    owns its files, so it keeps `brew upgrade`."""
+    if desktop and update_target(platform, machine) and (platform != "darwin" or packaged):
         return "in-app"
     if platform == "darwin":
         return "homebrew"
@@ -58,9 +72,12 @@ def fetch_feed(url: str, timeout: float = 6.0) -> bytes:
 
 
 def check(env: Mapping[str, str] = os.environ, platform: str = sys.platform, desktop: bool = False,
-          fetch: Callable[[str], bytes] = fetch_feed) -> dict:
+          fetch: Callable[[str], bytes] = fetch_feed, machine: str | None = None,
+          packaged: bool | None = None) -> dict:
+    machine = platform_module.machine() if machine is None else machine
+    packaged = bool(getattr(sys, "frozen", False)) if packaged is None else packaged
     status = {"available": False, "current": CURRENT_VERSION,
-              "install": install_method(platform, desktop), "release_url": RELEASES_URL}
+              "install": install_method(platform, desktop, machine, packaged), "release_url": RELEASES_URL}
     if env.get("VIZORPLAY_UPDATE_CHECK") == "0":
         status["disabled"] = True
         return status
@@ -79,7 +96,7 @@ def check(env: Mapping[str, str] = os.environ, platform: str = sys.platform, des
     notes = feed.get("notes")
     status["notes"] = notes[:500] if isinstance(notes, str) else ""
     platforms = feed.get("platforms")
-    target = IN_APP_TARGETS.get(platform)
+    target = update_target(platform, machine)
     if status["install"] == "in-app" and not (isinstance(platforms, dict) and target in platforms):
         status["install"] = "download"  # no signed package for this computer to install in the app
     return status

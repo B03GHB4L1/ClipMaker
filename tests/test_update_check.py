@@ -22,9 +22,10 @@ def feed(version, platforms=("windows-x86_64",), notes="Faster exports"):
 
 
 class FeedCheckTests(unittest.TestCase):
-    def check(self, data=None, error=None, platform="win32", desktop=True, env=None):
+    def check(self, data=None, error=None, platform="win32", desktop=True, env=None, machine="x86_64", packaged=False):
         fetch = Mock(side_effect=error) if error else Mock(return_value=data)
-        return update_check.check(env=env or {}, platform=platform, desktop=desktop, fetch=fetch), fetch
+        return update_check.check(env=env or {}, platform=platform, desktop=desktop, fetch=fetch,
+                                  machine=machine, packaged=packaged), fetch
 
     def test_newer_release_is_offered_in_the_windows_desktop_app(self):
         status, fetch = self.check(feed("1.1.0"))
@@ -45,6 +46,14 @@ class FeedCheckTests(unittest.TestCase):
         self.assertEqual(self.check(feed("1.1.0", platforms=("linux-x86_64",)), platform="linux")[0]["install"], "in-app")
         self.assertEqual(self.check(feed("1.1.0"), platform="linux")[0]["install"], "download")
         self.assertEqual(self.check(feed("1.1.0", platforms=("linux-x86_64",)), platform="linux", desktop=False)[0]["install"], "download")
+        # The Mac disk-image app (it carries its own engine) installs in the app once the feed
+        # has the signed archive for its chip; the Homebrew build never does.
+        self.assertEqual(self.check(feed("1.1.0", platforms=("darwin-aarch64",)), platform="darwin", machine="arm64", packaged=True)[0]["install"], "in-app")
+        self.assertEqual(self.check(feed("1.1.0", platforms=("darwin-x86_64",)), platform="darwin", machine="x86_64", packaged=True)[0]["install"], "in-app")
+        self.assertEqual(self.check(feed("1.1.0", platforms=("darwin-x86_64",)), platform="darwin", machine="arm64", packaged=True)[0]["install"], "download")
+        self.assertEqual(self.check(feed("1.1.0", platforms=("darwin-aarch64",)), platform="darwin", machine="arm64", packaged=False)[0]["install"], "homebrew")
+        self.assertEqual(self.check(feed("1.1.0"), platform="darwin", machine="arm64", packaged=True)[0]["install"], "download")
+        self.assertEqual(self.check(feed("1.1.0", platforms=("darwin-aarch64",)), platform="darwin", machine="arm64", packaged=True, desktop=False)[0]["install"], "homebrew")
         # A Windows package in the feed never makes a Linux or Mac install update itself.
         self.assertEqual(self.check(feed("1.1.0"), platform="darwin")[0]["install"], "homebrew")
         self.assertEqual(self.check(feed("1.1.0"), platform="darwin", desktop=False)[0]["install"], "homebrew")
@@ -189,10 +198,22 @@ class UpdaterWiringTests(unittest.TestCase):
         # Linux: the signed .deb goes through apt, and the app keeps running if the install fails.
         self.assertIn('Command::new("pkexec")', lib)
         self.assertLess(lib.index("result??;"), lib.index("stop_backend(app);\n    app.restart();"))
-        self.assertIn('cfg!(any(windows, target_os = "linux"))', lib)
+        self.assertIn('cfg!(any(windows, target_os = "macos", target_os = "linux"))', lib)
+        # Mac: the disk-image app swaps itself from the signed archive; Homebrew builds never get here.
+        self.assertIn('#[cfg(any(windows, target_os = "macos"))]\nasync fn install_downloaded', lib)
         # The window is created in setup so its navigations can be watched.
         self.assertFalse(next(w for w in config["app"]["windows"] if w["label"] == "main")["create"])
         self.assertIn("tauri-plugin-updater", (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+
+    def test_mac_workflows_sign_the_update_archive_and_release_passes_the_secret(self):
+        for name, arch in (("mac-dmg", "aarch64"), ("mac-dmg-intel", "x64")):
+            workflow = (ROOT / f".github/workflows/{name}.yml").read_text(encoding="utf-8")
+            self.assertIn('"createUpdaterArtifacts":true', workflow)
+            self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", workflow)
+            self.assertIn(f"VizorPlay_${{VERSION}}_{arch}.app.tar.gz", workflow)
+            self.assertIn("--updater-archive", workflow)
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(release.count("secrets: inherit"), 3)
 
     def test_ci_signs_and_tests_the_windows_update_and_release_publishes_the_feed(self):
         e2e = (ROOT / ".github/workflows/e2e.yml").read_text(encoding="utf-8")

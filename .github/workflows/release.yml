@@ -32,6 +32,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/mac-dmg.yml
+    secrets: inherit
 
   # Still being tested: if the Intel image fails, the release goes ahead without it
   # (the candidate summary says which images are included).
@@ -39,6 +40,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/mac-dmg-intel.yml
+    secrets: inherit
 
   candidate:
     needs: [acceptance, mac-dmg, mac-dmg-intel]

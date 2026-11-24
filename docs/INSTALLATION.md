@@ -81,10 +81,12 @@ published yet, so these steps describe the supported install once it is.
    VizorPlay is ad hoc signed so Apple Silicon will run it, but ad hoc signing
    does not satisfy Gatekeeper and nothing here bypasses it: you are telling
    macOS to trust this one app. Later launches open normally.
-4. **Updating and removing.** Download the newer disk image and drag VizorPlay
-   onto Applications again, choosing **Replace**; your projects stay (they live
-   in your user Library, outside the app). Updates do not install themselves on
-   macOS yet. To remove VizorPlay, drag it from Applications to the Bin; projects
+4. **Updating and removing.** Click **Update and restart** in the bottom bar:
+   VizorPlay downloads the new version, checks it is signed with VizorPlay's
+   update key, replaces itself and opens again. This has not been tried on a real
+   Mac yet, and macOS may ask you to allow the app again. If it fails, download the
+   newer disk image and drag VizorPlay onto Applications, choosing **Replace**. Your
+   projects stay either way (they live in your user Library, outside the app). To remove VizorPlay, drag it from Applications to the Bin; projects
    stay until you delete them (the local-project picker shows where).
 
 The image's own window repeats the Open Anyway step, so it is seen before the
