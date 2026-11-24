@@ -147,9 +147,18 @@ straight away: just type `vizorplay` in Terminal. Your Mac may still show a
 security message the first time.
 
 **Older Intel Macs (macOS 11 or older).** The disk image can't run on these, and
-Apple and Homebrew no longer support them, so Homebrew may not install
-VizorPlay on them either. A separate install method for these Macs is planned
-and its command will be added here.
+Apple and Homebrew no longer support them, so the normal Homebrew installer
+won't work. A community-made installer, `homebrew-intel`, sets Homebrew up on
+these Macs. It is made by someone else, not by VizorPlay, so read the script
+before you run it. Open **Terminal**, paste this one line and press Enter:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/itsmaclol/homebrew-intel/HEAD/install.sh)"
+```
+
+When it finishes, follow the Homebrew steps above (`brew tap`, `brew install`,
+`vizorplay`). Installing VizorPlay this way compiles it on your Mac, so it can
+take a long time, and it isn't tested by VizorPlay.
 
 ### Linux (Ubuntu 22.04 or newer, Debian, Linux Mint)
 
