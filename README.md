@@ -175,11 +175,10 @@ When a new version comes out, a message appears at the bottom of the app.
   version, checks it is genuine, closes, updates and opens again by itself. You
   can also just run a newer setup file, but Close VizorPlay before you update manually.
 - **Mac (disk image):** click **Update and restart**. VizorPlay downloads the
-  new version, checks it is genuine, replaces itself and opens again. This has
-  not been tried on a real Mac yet; if macOS asks you to allow the app again,
-  repeat step 3, and if the button reports a problem, download the newer `.dmg`
-  for your chip (see the table above), open it, drag **VizorPlay** onto
-  **Applications** and choose **Replace**.
+  new version, checks it is genuine, replaces itself and opens again. If macOS asks
+  you to allow the app again, repeat step 3, and if the button reports a problem,
+  download the newer `.dmg` for your chip (see the table above), open it,
+  drag **VizorPlay** onto **Applications** and choose **Replace**.
 - **Mac (Homebrew):** close VizorPlay, then type these three lines in Terminal,
   pressing Enter after each one. It takes a few minutes because it rebuilds the
   app:
