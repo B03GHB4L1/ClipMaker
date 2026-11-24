@@ -220,6 +220,8 @@ When a new version comes out, a message appears at the bottom of the app.
 - **1.1:** more ways to filter, support for videos split into halves
 - **1.0:** first version
 
+The source of these older apps (the separate Windows, Linux and Mac versions of ClipMaker 1.2.3) is kept on the [`archive/clipmaker-1.2.3`](https://github.com/B03GHB4L1/ClipMaker/tree/archive/clipmaker-1.2.3) branch.
+
 ## Licence
 
 VizorPlay is source-available, not open source. It is free for noncommercial
