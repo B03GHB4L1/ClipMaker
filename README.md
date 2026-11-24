@@ -100,7 +100,7 @@ can't run VizorPlay. An Intel Mac can't run the Apple Silicon file. An Apple
 Silicon Mac can run the Intel file, but use the Apple Silicon one.
 
 The Intel file is still being tested. Until it is on the Releases page, Intel
-Mac users should use Homebrew (below).
+Mac users should use Homebrew (see the Intel note below).
 
 **Step 2: install.** Open the file you downloaded. A window shows VizorPlay and
 your Applications folder. Drag **VizorPlay** onto **Applications**, then eject
@@ -132,7 +132,8 @@ your Mac.
 
 **Or install with Homebrew** (slower, because it builds the app on your Mac).
 If you don't have Homebrew, follow the one-step instructions at
-[brew.sh](https://brew.sh). Then open **Terminal** and type these three lines,
+[brew.sh](https://brew.sh) (Apple Silicon only; for an Intel Mac, see the Intel
+note above). Then open **Terminal** and type these three lines,
 pressing Enter after each one:
 
 ```sh

@@ -101,10 +101,16 @@ because it was built on your Mac rather than downloaded, so macOS does not
 quarantine it. This is not a way around Gatekeeper, and it does not promise that
 no macOS security prompt will ever appear.
 
-Older Intel Macs (macOS 11 or earlier) cannot run the disk image and are outside
-Homebrew's supported range. For those, a community-made, third-party installer
-sets Homebrew up first. It is not made or tested by VizorPlay: read the script
-before running it.
+Since September 2026, Homebrew's own installer on brew.sh is Apple Silicon only.
+Homebrew itself still runs on Intel Macs with macOS 11 or newer (Intel is a
+Tier 3 configuration: no new prebuilt packages, so most things compile on the
+Mac). This matters for an Intel Mac on macOS 11, which cannot run the disk image,
+and for an Intel Mac before the Intel disk image is published. For those, the
+unofficial third-party installer
+[`homebrew-intel`](https://github.com/itsmaclol/homebrew-intel) sets Homebrew
+up first. It is not affiliated with Homebrew or VizorPlay and its package is
+not signed or notarized: read the script before running it. Install Apple's
+command line tools first with `xcode-select --install`.
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/itsmaclol/homebrew-intel/HEAD/install.sh)"
