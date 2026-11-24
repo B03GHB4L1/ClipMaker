@@ -14,7 +14,13 @@ import sys
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-PLATFORMS = {"Windows": ".exe", "Linux": ".deb", "macOS": ".tar.gz"}
+# "macOS" is the Homebrew source archive; the two disk images are the Mac downloads.
+PLATFORMS = {"Windows": ".exe", "Linux": ".deb", "macOS": ".tar.gz",
+             "macOS-AppleSilicon": ".dmg", "macOS-Intel": ".dmg"}
+# The Intel disk image is still being tested: it is attached when it passed, and
+# its absence does not block the other packages.
+OPTIONAL_PLATFORMS = {"macOS-Intel"}
+DISK_IMAGES = {"macOS-AppleSilicon": ("aarch64", "arm64"), "macOS-Intel": ("x64", "x86_64")}
 # Feed key the desktop updater looks up; only Windows installs in the app.
 UPDATER_TARGET = "windows-x86_64"
 
@@ -55,6 +61,14 @@ def record_receipt(platform, payload, evidence, output, commit, signature=None):
                    and result.get("shutdown_verified") and result.get("reinstall_and_uninstall")
                    for result in results):
             raise ValueError("Native upgrade, reinstall, uninstall and shutdown evidence is required")
+    elif platform in DISK_IMAGES:
+        suffix, arch = DISK_IMAGES[platform]
+        if payload.name != f"VizorPlay_1.0.0_{suffix}.dmg":
+            raise ValueError(f"Unexpected disk image name {payload.name}")
+        if not any(result.get("dmg") == payload.name and result.get("expected_arch") == arch
+                   and result.get("architectures") == arch and result.get("needs_newer_than_promised") == {}
+                   for result in results):
+            raise ValueError("Evidence that this disk image was mounted, opened and stopped on the right chip is required")
     else:
         if not any(result.get("installed_versions") == ["0.9.0", "1.0.0"] for result in results):
             raise ValueError("Homebrew upgrade evidence is required")
@@ -75,7 +89,10 @@ def verify_receipts(directory, commit):
     validate_commit(commit)
     receipts = []
     for platform, suffix in PLATFORMS.items():
-        receipt = json.loads((directory / f"receipt-{platform}.json").read_text(encoding="utf-8"))
+        path = directory / f"receipt-{platform}.json"
+        if platform in OPTIONAL_PLATFORMS and not path.exists():
+            continue
+        receipt = json.loads(path.read_text(encoding="utf-8"))
         if (receipt.get("schema"), receipt.get("platform"), receipt.get("version"), receipt.get("commit")) != (1, platform, "1.0.0", commit):
             raise ValueError(f"Wrong commit, platform or version in {platform} receipt")
         filename = receipt["payload"]
@@ -119,7 +136,8 @@ def assemble(directory, output, commit, repository):
                 "repository": repository, "artifacts": receipts,
                 "limits": ["Controlled predecessor uses the same source, not a historical binary",
                            "Unsigned Windows installer may show a security warning",
-                           "macOS: Homebrew builds VizorPlay.app on the Mac (not notarized; opens because it is built locally)",
+                           "macOS: the disk images are ad hoc signed and not notarized, so the first launch needs Open Anyway; Homebrew builds VizorPlay.app on the Mac instead",
+                           "The Intel (x64) disk image is included only when it passed its tests; real Macs and macOS 11 to 13 are not tested",
                            "In-app updates install on Windows only; Linux and macOS show a notice",
                            "Public Homebrew tap and WinGet submissions are separate publication steps",
                            "Linux support verified on Ubuntu 22.04 DEB; RPM is not included",
@@ -130,7 +148,9 @@ def assemble(directory, output, commit, repository):
         f"Commit: `{commit}`. These are the exact acceptance-tested bytes.\n\n"
         "Verify SHA256SUMS before installing. Windows: run the setup EXE; reinstalling a newer "
         "package preserves local projects. Ubuntu 22.04: `sudo apt install ./VizorPlay_1.0.0_amd64.deb` "
-        "(use the actual DEB filename). macOS: the prepared formula requires publication of the "
+        "(use the actual DEB filename). macOS: open the disk image for your chip (aarch64 for Apple Silicon, x64 for Intel, "
+        "if present), drag VizorPlay onto Applications and use Open Anyway the first time (it is "
+        "not notarized). The Homebrew formula requires publication of the "
         "source asset and Homebrew tap before its public install command will work.\n\n"
         "latest.json is the update feed: once it is published with the release, installed Windows "
         "copies offer the update in the app and Linux and macOS copies show a notice.\n\n"

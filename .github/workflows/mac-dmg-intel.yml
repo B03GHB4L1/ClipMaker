@@ -18,6 +18,8 @@ on:
       - "tests/macos_app_smoke.py"
       - "src-tauri/**"
   workflow_dispatch:
+  # Called by the release workflow, which attaches the tested image to the release.
+  workflow_call:
 
 permissions:
   contents: read
@@ -98,6 +100,16 @@ jobs:
           VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
           python tests/macos_dmg_smoke.py --dmg "build/dmg/VizorPlay_${VERSION}_x64.dmg" --expect-arch x86_64 --evidence build/dmg-evidence
 
+      - name: Retain the exact disk image that passed (the release attaches these bytes)
+        run: |
+          VERSION="$(python -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
+          python packaging/release_candidate.py receipt --platform macOS-Intel --payload "build/dmg/VizorPlay_${VERSION}_x64.dmg" --evidence build/dmg-evidence/result.json --output build/release-packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-package-macOS-Intel
+          path: build/release-packages/
+          retention-days: 30
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: VizorPlay-macOS-Intel-dmg

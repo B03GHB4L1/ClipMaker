@@ -26,8 +26,23 @@ jobs:
       scoresway_url: ${{ inputs.scoresway_url || '' }}
       whoscored_url: ${{ inputs.whoscored_url || '' }}
 
+  # The Mac disk images are built and tested by their own workflows; the exact tested
+  # bytes are attached to the release with the other packages.
+  mac-dmg:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mac-dmg.yml
+
+  # Still being tested: if the Intel image fails, the release goes ahead without it
+  # (the candidate summary says which images are included).
+  mac-dmg-intel:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/mac-dmg-intel.yml
+
   candidate:
-    needs: acceptance
+    needs: [acceptance, mac-dmg, mac-dmg-intel]
+    if: ${{ !cancelled() && needs.acceptance.result == 'success' && needs.mac-dmg.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +64,12 @@ jobs:
           if-no-files-found: error
       - name: Candidate summary
         run: |
-          echo 'Candidate contains the exact tested NSIS, DEB and Homebrew source archive, SHA256SUMS, acceptance receipts and prepared distribution manifests. No rebuild or publication occurs in this job.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Candidate contains the exact tested NSIS, DEB, Apple Silicon disk image and Homebrew source archive, SHA256SUMS, acceptance receipts and prepared distribution manifests. No rebuild or publication occurs in this job.' >> "$GITHUB_STEP_SUMMARY"
+          if ls release-artifacts/*_x64.dmg >/dev/null 2>&1; then
+            echo 'The Intel disk image passed its tests and is included.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'The Intel disk image did not pass or did not run, so it is NOT included. Intel Macs use Homebrew until it is.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   publish:
     if: github.ref == 'refs/tags/v1.0.0'
@@ -70,6 +90,7 @@ jobs:
           files: |
             release-artifacts/*.exe
             release-artifacts/*.deb
+            release-artifacts/*.dmg
             release-artifacts/*-source.tar.gz
             release-artifacts/vizorplay.rb
             release-artifacts/B4L1.VizorPlay*.yaml

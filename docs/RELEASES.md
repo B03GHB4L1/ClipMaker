@@ -8,9 +8,10 @@ successful build as proof that installation, native interactions, or upgrades
 have passed. Public test runs are authorized; publishing a release still requires
 the owner's separate instruction. No release has been published by these tests.
 
-The release workflow first calls Full Desktop E2E against the same commit. It
-then assembles the exact NSIS/DEB installer bytes and Homebrew source archive
-retained by successful acceptance jobs; it never rebuilds after acceptance.
+The release workflow first calls Full Desktop E2E against the same commit, and the
+two Mac disk-image workflows. It then assembles the exact NSIS/DEB installer bytes,
+the Mac disk images and the Homebrew source archive retained by successful
+acceptance jobs; it never rebuilds after acceptance.
 SHA-256 receipts bind every payload to that commit and its passing evidence.
 Missing receipts, changed files, mismatched commits or failed jobs block the
 candidate. Optional live-provider URLs are not set by this workflow: skipped
@@ -19,7 +20,7 @@ means not tested, not provider certification. The current release gates are in
 
 Manually dispatch **Desktop release** on `B4L1/release-packaging` to prepare a
 candidate without publishing. Download `VizorPlay-1.0.0-candidate` from that
-run's artifacts: it includes installers, the exact tested source archive,
+run's artifacts: it includes installers, the Mac disk images, the exact tested source archive,
 Homebrew formula, WinGet manifests, acceptance receipts, a candidate manifest
 and SHA256SUMS. Artifacts expire after 30 days. Verify checksums before use.
 
@@ -44,19 +45,44 @@ Edge or Google Chrome (Edge ships with Windows 10 and 11); no browser is bundled
 
 ## macOS
 
-macOS uses a Homebrew formula rather than a downloaded, unsigned application
-bundle. The formula installs the shared source and builds `VizorPlay.app` on the
-Mac (Rust and Node.js are build-only dependencies), ad hoc signed and never
-quarantined because nothing was downloaded as an app. The app has no frozen
-engine inside: it starts the formula's engine launcher, which creates a private
-Python environment under the user's Library on first run and installs the pinned
-dependencies (no browser download). `vizorplay` opens the app;
+There are two Mac routes. The disk image is the main one; Homebrew is the
+alternative.
+
+**Disk images (the main route).** `VizorPlay_1.0.0_aarch64.dmg` (Apple Silicon,
+macOS 14 or later) and `VizorPlay_1.0.0_x64.dmg` (Intel, macOS 12 or later) hold
+`VizorPlay.app` with its engine inside, plus an Applications shortcut, so
+installing is one drag and needs no Terminal. They are built and tested by
+`.github/workflows/mac-dmg.yml` and `mac-dmg-intel.yml` (mount, copy out, check the
+chip and minimum macOS of every file, open the app, close it and check the engine
+stops). The release workflow calls both, records a receipt for each tested image
+(`receipt-macOS-AppleSilicon.json`, `receipt-macOS-Intel.json`) and attaches the
+exact tested bytes to the release with the other files, covered by `SHA256SUMS`.
+The Apple Silicon image is required: without a passed receipt there is no candidate.
+The Intel image is still being tested, so it is attached only when it passed; the
+candidate summary says whether it is included. The images are ad hoc signed and
+not notarized (there is no Apple Developer membership), so the first launch needs
+**Open Anyway**; nothing here claims to pass Gatekeeper. They do not update
+themselves: users download the newer image and choose Replace.
+
+**Homebrew (the alternative).** The formula installs the shared source and builds
+`VizorPlay.app` on the Mac (Rust and Node.js are build-only dependencies), ad hoc
+signed and never quarantined because nothing was downloaded as an app. The app has
+no frozen engine inside: it starts the formula's engine launcher, which creates a
+private Python environment under the user's Library on first run and installs the
+pinned dependencies (no browser download). `vizorplay` opens the app;
 `vizorplay --browser` keeps the older default-browser route. The app is not
 notarized; acceptance records Gatekeeper's assessment rather than claiming it passes.
 The formula includes the process-owner adapter. Video and CSV selection use
 browser-safe local imports on macOS; the export-folder picker uses macOS's own
 folder chooser, with a typed-path fallback. No quarantine-removal workaround is
 installed or promised.
+
+Since September 2026 the installer on brew.sh is Apple Silicon only. Homebrew still
+runs on Intel Macs with macOS 11 or newer (a Tier 3 configuration: most packages
+compile on the Mac). For an Intel Mac on macOS 11, which cannot run the disk image,
+the README points to the unofficial `homebrew-intel` installer
+(github.com/itsmaclol/homebrew-intel). It is third-party, not tested by VizorPlay and
+not signed or notarized.
 
 The prepared formula downloads the exact source archive attached to the release,
 using the checksum of the archive installed during acceptance. The source repo

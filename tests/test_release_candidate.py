@@ -17,16 +17,51 @@ class ReleaseCandidateTests(unittest.TestCase):
 
     def fixture(self, platform):
         names = {"Windows": "VizorPlay_1.0.0_x64-setup.exe", "Linux": "VizorPlay_1.0.0_amd64.deb",
-                 "macOS": "vizorplay-1.0.0-source.tar.gz"}
+                 "macOS": "vizorplay-1.0.0-source.tar.gz", "macOS-AppleSilicon": "VizorPlay_1.0.0_aarch64.dmg",
+                 "macOS-Intel": "VizorPlay_1.0.0_x64.dmg"}
         payload = self.root / names[platform]
         payload.write_bytes((platform + " tested payload").encode())
         result = {"status": "passed", "installed_versions": ["0.9.0", "1.0.0"] if platform == "macOS"
                   else ["0.9.0", "1.0.0", "1.0.0"], "shutdown_verified": True, "reinstall_and_uninstall": True}
         if platform == "macOS":  # tests/macos_app_smoke.py: the Homebrew-built app ran its engine
             result["engine_stopped"] = {"pid": True, "parent_pid": True}
+        if platform.startswith("macOS-"):  # tests/macos_dmg_smoke.py result.json
+            arch = "arm64" if platform == "macOS-AppleSilicon" else "x86_64"
+            result = {"status": "passed", "dmg": payload.name, "expected_arch": arch, "architectures": arch,
+                      "needs_newer_than_promised": {}}
         evidence = self.root / f"{platform}.json"
         evidence.write_text(json.dumps(result))
         return payload, evidence
+
+    def test_disk_images_need_matching_name_chip_and_passed_launch_evidence(self):
+        payload, evidence = self.fixture("macOS-AppleSilicon")
+        good = json.loads(evidence.read_text())
+        for change in ({"architectures": "x86_64"}, {"expected_arch": "x86_64"}, {"dmg": "other.dmg"},
+                       {"needs_newer_than_promised": {"libfoo.dylib": "15.0"}}, {"status": "failed"}):
+            evidence.write_text(json.dumps({**good, **change}))
+            with self.assertRaises(ValueError):
+                record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit)
+        evidence.write_text(json.dumps(good))
+        record_receipt("macOS-AppleSilicon", payload, [evidence], self.receipts, self.commit)
+        intel, intel_evidence = self.fixture("macOS-Intel")
+        with self.assertRaisesRegex(ValueError, "right chip"):
+            record_receipt("macOS-Intel", intel, [evidence], self.receipts, self.commit)
+        record_receipt("macOS-Intel", intel, [intel_evidence], self.receipts, self.commit)
+
+    def test_release_includes_the_apple_silicon_image_and_intel_only_when_it_passed(self):
+        self.record_all(intel=False)
+        target = self.root / "without-intel"
+        manifest = assemble(self.receipts, target, self.commit, "B03GHB4L1/ClipMaker")
+        names = {item["payload"] for item in manifest["artifacts"]}
+        self.assertIn("VizorPlay_1.0.0_aarch64.dmg", names)
+        self.assertNotIn("VizorPlay_1.0.0_x64.dmg", names)
+        self.assertIn("VizorPlay_1.0.0_aarch64.dmg", (target / "SHA256SUMS").read_text())
+        (self.receipts / "receipt-macOS-AppleSilicon.json").unlink()
+        with self.assertRaises(FileNotFoundError):  # the Apple Silicon image is required
+            verify_receipts(self.receipts, self.commit)
+        self.record_all(intel=True)
+        with_intel = assemble(self.receipts, self.root / "with-intel", self.commit, "B03GHB4L1/ClipMaker")
+        self.assertIn("VizorPlay_1.0.0_x64.dmg", {item["payload"] for item in with_intel["artifacts"]})
 
     def test_macos_needs_the_homebrew_app_launch_evidence(self):
         payload, evidence = self.fixture("macOS")
@@ -44,8 +79,8 @@ class ReleaseCandidateTests(unittest.TestCase):
         evidence.write_text(json.dumps({"status": "passed", "update_installed": passed, "bad_signature_rejected": True}))
         return signature, evidence
 
-    def record_all(self, signed=True):
-        for platform in ("Windows", "Linux", "macOS"):
+    def record_all(self, signed=True, intel=False):
+        for platform in ("Windows", "Linux", "macOS", "macOS-AppleSilicon") + (("macOS-Intel",) if intel else ()):
             payload, evidence = self.fixture(platform)
             if platform == "Windows" and signed:
                 signature, update = self.updater()
