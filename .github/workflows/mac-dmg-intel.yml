@@ -10,7 +10,7 @@ name: Mac disk image (Intel)
 
 on:
   push:
-    branches: ["codex/release-packaging"]
+    branches: ["B4L1/release-packaging"]
     paths:
       - ".github/workflows/mac-dmg-intel.yml"
       - "packaging/macos/**"

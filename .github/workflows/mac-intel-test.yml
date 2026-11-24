@@ -9,7 +9,7 @@ name: Mac Intel test build
 
 on:
   push:
-    branches: ["codex/release-packaging"]
+    branches: ["B4L1/release-packaging"]
     paths: [".github/workflows/mac-intel-test.yml"]
   workflow_dispatch:
 

@@ -11,7 +11,7 @@ not publish source, create a release, or update a package manager.
 1. The user authorized pushing and running tests in the existing public repository
    on 20 October 2026. The private-repository restriction has been removed. Test
    artifacts and source are therefore public; only synthetic fixtures belong here.
-2. Push the test branch `codex/release-packaging`; this automatically starts the
+2. Push the test branch `B4L1/release-packaging`; this automatically starts the
    full suite. Do not push a release tag to test it. Manual **Desktop release**
    dispatch on a branch prepares an unpublished candidate after acceptance.
 3. The workflow file must be present on the repository's default branch for

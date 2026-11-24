@@ -17,7 +17,7 @@ candidate. Optional live-provider URLs are not set by this workflow: skipped
 means not tested, not provider certification. The current release gates are in
 `RELEASE_1_0_CHECKLIST.md`.
 
-Manually dispatch **Desktop release** on `codex/release-packaging` to prepare a
+Manually dispatch **Desktop release** on `B4L1/release-packaging` to prepare a
 candidate without publishing. Download `VizorPlay-1.0.0-candidate` from that
 run's artifacts: it includes installers, the exact tested source archive,
 Homebrew formula, WinGet manifests, acceptance receipts, a candidate manifest

@@ -3,7 +3,7 @@ name: Checks
 on:
   workflow_dispatch:
   push:
-    branches: [main, "codex/**"]
+    branches: [main, "B4L1/**"]
   pull_request:
 
 permissions:

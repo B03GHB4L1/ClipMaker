@@ -2,7 +2,7 @@ name: Full Desktop E2E
 
 on:
   push:
-    branches: ["codex/release-packaging"]
+    branches: ["B4L1/release-packaging"]
     # The Mac Intel test build has its own workflow; changing it needs no full E2E run.
     paths-ignore: [".github/workflows/mac-intel-test.yml"]
   workflow_dispatch:

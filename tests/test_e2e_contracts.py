@@ -457,7 +457,7 @@ class AutomationContracts(unittest.TestCase):
         parsed = yaml.safe_load(source)
         triggers = parsed.get("on", parsed.get(True))
         self.assertEqual(set(triggers), {"workflow_dispatch", "workflow_call", "push"})
-        self.assertEqual(triggers["push"]["branches"], ["codex/release-packaging"])
+        self.assertEqual(triggers["push"]["branches"], ["B4L1/release-packaging"])
         self.assertEqual(parsed["permissions"], {"contents": "read"})
         self.assertEqual(set(parsed["jobs"]["verdict"]["needs"]),
                          {"core", "installed-desktop", "homebrew", "live-providers"})
