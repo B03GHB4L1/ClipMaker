@@ -21,8 +21,8 @@ PLATFORMS = {"Windows": ".exe", "Linux": ".deb", "macOS": ".tar.gz",
 # its absence does not block the other packages.
 OPTIONAL_PLATFORMS = {"macOS-Intel"}
 DISK_IMAGES = {"macOS-AppleSilicon": ("aarch64", "arm64"), "macOS-Intel": ("x64", "x86_64")}
-# Feed key the desktop updater looks up; only Windows installs in the app.
-UPDATER_TARGET = "windows-x86_64"
+# Feed keys the desktop updater looks up; Windows and Linux install in the app.
+UPDATER_TARGETS = {"Windows": "windows-x86_64", "Linux": "linux-x86_64"}
 
 
 def digest(path):
@@ -51,8 +51,8 @@ def record_receipt(platform, payload, evidence, output, commit, signature=None):
     validate_commit(commit)
     if platform not in PLATFORMS or not payload.name.endswith(PLATFORMS[platform]):
         raise ValueError("Unexpected release payload type")
-    if signature is not None and platform != "Windows":
-        raise ValueError("Only the Windows installer is installed by the in-app updater")
+    if signature is not None and platform not in UPDATER_TARGETS:
+        raise ValueError("Only the Windows installer and the Linux .deb are installed by the in-app updater")
     results = [json.loads(path.read_text(encoding="utf-8")) for path in evidence]
     if not results or any(result.get("status") != "passed" for result in results):
         raise ValueError("Every acceptance result must be passed")
@@ -118,6 +118,7 @@ def assemble(directory, output, commit, repository):
     base = f"https://github.com/{repository}/releases/download/v1.0.0/"
     source = next(receipt for receipt in receipts if receipt["platform"] == "macOS")
     windows = next(receipt for receipt in receipts if receipt["platform"] == "Windows")
+    linux = next(receipt for receipt in receipts if receipt["platform"] == "Linux")
     if not windows.get("updater_signature") or not update_verified(windows["acceptance"]):
         raise ValueError("A Windows release needs a signed updater installer and passed in-app update evidence")
     subprocess.run([sys.executable, str(ROOT / "packaging/render_homebrew_formula.py"),
@@ -126,11 +127,14 @@ def assemble(directory, output, commit, repository):
     subprocess.run([sys.executable, str(ROOT / "packaging/render_winget_manifests.py"),
                     "--version", "1.0.0", "--installer-sha256", windows["sha256"],
                     "--installer-url", base + quote(windows["payload"]), "--output", str(output)], check=True)
+    if not linux.get("updater_signature"):
+        raise ValueError("A Linux release needs a signed .deb for in-app updates")
     # The feed every installed copy reads (releases/latest/download/latest.json).
     feed = {"version": "1.0.0", "notes": "See the release page for what changed.",
             "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": {UPDATER_TARGET: {"signature": windows["updater_signature"],
-                                           "url": base + quote(windows["payload"])}}}
+            "platforms": {UPDATER_TARGETS[receipt["platform"]]: {"signature": receipt["updater_signature"],
+                                                                 "url": base + quote(receipt["payload"])}
+                          for receipt in (windows, linux)}}
     (output / "latest.json").write_text(json.dumps(feed, indent=2) + "\n", encoding="utf-8")
     manifest = {"schema": 1, "version": "1.0.0", "commit": commit, "published": False,
                 "repository": repository, "artifacts": receipts,
@@ -171,7 +175,7 @@ def main():
     receipt.add_argument("--payload", type=Path, required=True)
     receipt.add_argument("--evidence", type=Path, action="append", required=True)
     receipt.add_argument("--output", type=Path, required=True)
-    receipt.add_argument("--signature", type=Path, help="Windows only: the installer's updater .sig file")
+    receipt.add_argument("--signature", type=Path, help="Windows and Linux: the package's updater .sig file")
     candidate = commands.add_parser("assemble")
     candidate.add_argument("--input", type=Path, required=True)
     candidate.add_argument("--output", type=Path, required=True)

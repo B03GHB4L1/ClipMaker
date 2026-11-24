@@ -1,8 +1,8 @@
 """Whether a newer VizorPlay release exists, and how this install should get it.
 
 The engine checks the release feed once per run. Installing is not done here:
-on Windows the desktop shell downloads, verifies and installs the signed
-installer; Linux packages and Homebrew get a notice with the way to update.
+on Windows and Linux the desktop shell downloads, verifies and installs the
+signed installer or .deb; Mac and Homebrew get a notice with the way to update.
 """
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ CURRENT_VERSION = "1.0.0"
 RELEASES_URL = "https://github.com/B03GHB4L1/ClipMaker/releases/latest"
 DEFAULT_FEED = RELEASES_URL + "/download/latest.json"
 MAX_FEED_BYTES = 64 * 1024
-# The desktop shell installs only Windows updates itself; this is the feed key
-# its updater looks for.
-WINDOWS_TARGET = "windows-x86_64"
+# The desktop shell installs Windows and Linux updates itself; these are the
+# feed keys its updater looks for.
+IN_APP_TARGETS = {"win32": "windows-x86_64", "linux": "linux-x86_64"}
 
 
 def parse_version(value: object) -> tuple[int, int, int] | None:
@@ -41,7 +41,7 @@ def feed_url(env: Mapping[str, str] = os.environ) -> str:
 
 def install_method(platform: str, desktop: bool) -> str:
     """How this install updates: in the app, with Homebrew, or by downloading."""
-    if desktop and platform == "win32":
+    if desktop and platform in IN_APP_TARGETS:
         return "in-app"
     if platform == "darwin":
         return "homebrew"
@@ -79,8 +79,9 @@ def check(env: Mapping[str, str] = os.environ, platform: str = sys.platform, des
     notes = feed.get("notes")
     status["notes"] = notes[:500] if isinstance(notes, str) else ""
     platforms = feed.get("platforms")
-    if status["install"] == "in-app" and not (isinstance(platforms, dict) and WINDOWS_TARGET in platforms):
-        status["install"] = "download"  # no signed Windows package to install in the app
+    target = IN_APP_TARGETS.get(platform)
+    if status["install"] == "in-app" and not (isinstance(platforms, dict) and target in platforms):
+        status["install"] = "download"  # no signed package for this computer to install in the app
     return status
 
 

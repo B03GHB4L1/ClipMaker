@@ -72,8 +72,8 @@ class ReleaseCandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "VizorPlay.app"):
                 record_receipt("macOS", payload, [evidence], self.receipts, self.commit)
 
-    def updater(self, passed=True):
-        signature = self.root / "VizorPlay_1.0.0_x64-setup.exe.sig"
+    def updater(self, passed=True, name="VizorPlay_1.0.0_x64-setup.exe.sig"):
+        signature = self.root / name
         signature.write_text("dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkK\n")
         evidence = self.root / "update.json"
         evidence.write_text(json.dumps({"status": "passed", "update_installed": passed, "bad_signature_rejected": True}))
@@ -85,6 +85,9 @@ class ReleaseCandidateTests(unittest.TestCase):
             if platform == "Windows" and signed:
                 signature, update = self.updater()
                 record_receipt(platform, payload, [evidence, update], self.receipts, self.commit, signature)
+            elif platform == "Linux" and signed:
+                signature, _ = self.updater(name="VizorPlay_1.0.0_amd64.deb.sig")
+                record_receipt(platform, payload, [evidence], self.receipts, self.commit, signature)
             else:
                 record_receipt(platform, payload, [evidence], self.receipts, self.commit)
 
@@ -111,7 +114,9 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.assertEqual(feed["platforms"]["windows-x86_64"], {
             "signature": windows["updater_signature"],
             "url": "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_x64-setup.exe"})
-        self.assertEqual(set(feed["platforms"]), {"windows-x86_64"}, "Only Windows installs in the app")
+        self.assertEqual(set(feed["platforms"]), {"windows-x86_64", "linux-x86_64"}, "Only Windows and Linux install in the app")
+        self.assertEqual(feed["platforms"]["linux-x86_64"]["url"],
+                         "https://github.com/B03GHB4L1/ClipMaker/releases/download/v1.0.0/VizorPlay_1.0.0_amd64.deb")
         with self.assertRaises(ValueError):
             assemble(self.receipts, target, self.commit, "B03GHB4L1/ClipMaker")
 
@@ -127,9 +132,17 @@ class ReleaseCandidateTests(unittest.TestCase):
         signature.write_text("not a signature")
         with self.assertRaisesRegex(ValueError, "signature"):
             record_receipt("Windows", payload, [evidence], self.receipts, self.commit, signature)
-        linux, linux_evidence = self.fixture("Linux")
+        mac, mac_evidence = self.fixture("macOS")
         with self.assertRaisesRegex(ValueError, "Only the Windows"):
-            record_receipt("Linux", linux, [linux_evidence], self.receipts, self.commit, signature)
+            record_receipt("macOS", mac, [mac_evidence], self.receipts, self.commit, signature)
+
+    def test_release_needs_a_signed_linux_deb(self):
+        self.record_all()
+        (self.receipts / "receipt-Linux.json").unlink()
+        linux, linux_evidence = self.fixture("Linux")
+        record_receipt("Linux", linux, [linux_evidence], self.receipts, self.commit)
+        with self.assertRaisesRegex(ValueError, "signed .deb"):
+            assemble(self.receipts, self.root / "unsigned-linux", self.commit, "B03GHB4L1/ClipMaker")
 
     def test_rejects_modified_payload_wrong_commit_and_path_escape(self):
         self.record_all()

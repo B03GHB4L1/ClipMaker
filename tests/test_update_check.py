@@ -41,7 +41,12 @@ class FeedCheckTests(unittest.TestCase):
         self.assertTrue(self.check(feed("1.0.10"))[0]["available"])
 
     def test_each_install_kind_gets_its_own_way_to_update(self):
+        # Linux (the .deb) installs in the app once the feed carries a signed package for it.
+        self.assertEqual(self.check(feed("1.1.0", platforms=("linux-x86_64",)), platform="linux")[0]["install"], "in-app")
         self.assertEqual(self.check(feed("1.1.0"), platform="linux")[0]["install"], "download")
+        self.assertEqual(self.check(feed("1.1.0", platforms=("linux-x86_64",)), platform="linux", desktop=False)[0]["install"], "download")
+        # A Windows package in the feed never makes a Linux or Mac install update itself.
+        self.assertEqual(self.check(feed("1.1.0"), platform="darwin")[0]["install"], "homebrew")
         self.assertEqual(self.check(feed("1.1.0"), platform="darwin", desktop=False)[0]["install"], "homebrew")
         self.assertEqual(self.check(feed("1.1.0"), platform="win32", desktop=False)[0]["install"], "download")
         # Without a signed Windows package in the feed, Windows falls back to downloading.
@@ -180,7 +185,11 @@ class UpdaterWiringTests(unittest.TestCase):
         lib = (ROOT / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
         self.assertNotIn(".pubkey(", lib)  # tests may move the feed, never the key
         self.assertIn("is_install_request(url, port)", lib)
-        self.assertIn("stop_backend(&app);\n    update\n        .install(", lib)
+        self.assertIn("stop_backend(app);\n    update\n        .install(", lib)
+        # Linux: the signed .deb goes through apt, and the app keeps running if the install fails.
+        self.assertIn('Command::new("pkexec")', lib)
+        self.assertLess(lib.index("result??;"), lib.index("stop_backend(app);\n    app.restart();"))
+        self.assertIn('cfg!(any(windows, target_os = "linux"))', lib)
         # The window is created in setup so its navigations can be watched.
         self.assertFalse(next(w for w in config["app"]["windows"] if w["label"] == "main")["create"])
         self.assertIn("tauri-plugin-updater", (ROOT / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
@@ -190,6 +199,10 @@ class UpdaterWiringTests(unittest.TestCase):
         self.assertIn('"createUpdaterArtifacts":true', e2e)
         self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", e2e)
         self.assertIn("python tests/windows_update.py", e2e)
+        self.assertIn('tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY"', e2e)  # the Linux .deb
+        self.assertIn('updater=(--signature "$package.sig")', e2e)
+        self.assertIn('tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY"', e2e)  # the Linux .deb
+        self.assertIn('updater=(--signature "$package.sig")', e2e)
         self.assertIn('--signature "$package.sig" --evidence build/update-evidence/result.json', e2e)
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("secrets: inherit", release)

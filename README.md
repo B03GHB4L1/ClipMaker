@@ -189,9 +189,11 @@ When a new version comes out, a message appears at the bottom of the app.
   vizorplay
   ```
 
-- **Linux:** this doesn't update itself. Click **Download** in the message to
-  open the Releases page, download the newer `.deb`, and install it with the
-  same command as before. It replaces the old version.
+- **Linux:** click **Update and restart**. VizorPlay downloads the new `.deb`,
+  checks it is genuine, then asks for your password in the usual system window
+  and installs it. If you cancel that window, nothing changes and VizorPlay keeps
+  running. If no password window can open, download the newer `.deb` from the
+  Releases page and install it with the same command as before.
 
 ---
 
@@ -200,7 +202,7 @@ When a new version comes out, a message appears at the bottom of the app.
 ### VizorPlay 1.0 (coming soon)
 
 - A brand-new app for Windows, Mac and Linux, under a new name
-- Smaller download, and it updates itself on Windows
+- Smaller download, and it updates itself on Windows and Linux
 - Much faster video saving on computers with an NVIDIA graphics card
 - VizorPlay xG: how good every chance was, on the shot map, an xG race and more
 - Your projects are saved and reopen exactly as you left them

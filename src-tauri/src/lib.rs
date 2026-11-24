@@ -207,8 +207,8 @@ fn is_install_request(url: &Url, port: u16) -> bool {
 }
 
 /// Download the update named by the release feed, check its signature against
-/// the public key built into this app, stop the engine, and run the installer.
-/// On Windows the installer closes VizorPlay, updates it and reopens it.
+/// the public key built into this app, and install it (Windows installer or
+/// Linux .deb; see install_downloaded).
 async fn install_update(app: AppHandle) -> Result<(), String> {
     let mut builder = app.updater_builder();
     // Acceptance tests point at a local https feed. The public key cannot be
@@ -229,12 +229,75 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         report_update(&window, "installing", "");
     }
-    // The installer replaces the engine's files, so the engine must exit first.
-    stop_backend(&app);
+    install_downloaded(&app, &update, installer).await
+}
+
+/// Windows: the installer replaces the engine's files, so the engine must exit
+/// first; the installer then closes VizorPlay, updates it and reopens it.
+#[cfg(windows)]
+async fn install_downloaded(app: &AppHandle, update: &tauri_plugin_updater::Update, installer: Vec<u8>) -> Result<(), String> {
+    stop_backend(app);
     update
         .install(installer)
         .map_err(|error| format!("{error}. Close VizorPlay and open it again"))?;
     app.restart();
+}
+
+/// Linux (.deb): the signed package is installed with the system's own package
+/// manager, which asks for the user's password in a normal system dialog. The
+/// app keeps running until the install has succeeded, so cancelling the
+/// password prompt leaves everything as it was.
+#[cfg(target_os = "linux")]
+async fn install_downloaded(app: &AppHandle, _update: &tauri_plugin_updater::Update, package: Vec<u8>) -> Result<(), String> {
+    let directory = app.path().app_cache_dir().map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let file = directory.join("vizorplay-update.deb");
+    std::fs::write(&file, &package).map_err(|error| error.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking({
+        let file = file.clone();
+        move || run_deb_install(&file)
+    })
+    .await
+    .map_err(|error| error.to_string());
+    let _ = std::fs::remove_file(&file);
+    result??;
+    stop_backend(app);
+    app.restart();
+}
+
+#[cfg(target_os = "linux")]
+fn run_deb_install(file: &std::path::Path) -> Result<(), String> {
+    // apt-get (not dpkg) so any new dependency is fetched too. pkexec shows the
+    // password dialog; a copy already running as root needs no prompt.
+    let root = unsafe { libc_geteuid() } == 0;
+    let mut command = if root { Command::new("apt-get") } else { Command::new("pkexec") };
+    if !root {
+        command.arg("apt-get");
+    }
+    command.args(["install", "-y"]).arg(file).env("DEBIAN_FRONTEND", "noninteractive");
+    let output = command.output().map_err(|error| {
+        format!("could not start the package installer ({error}). Install the downloaded file yourself with: sudo apt install ./VizorPlay_<version>_amd64.deb")
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    // pkexec exits 126 when the password dialog is cancelled and 127 when it cannot ask.
+    Err(match output.status.code() {
+        Some(126) => "the password prompt was cancelled, so nothing was installed".to_string(),
+        Some(127) => "no password prompt is available. Install the new .deb yourself with: sudo apt install ./VizorPlay_<version>_amd64.deb".to_string(),
+        _ => format!("the package installer failed: {}", String::from_utf8_lossy(&output.stderr).trim()),
+    })
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    #[link_name = "geteuid"]
+    fn libc_geteuid() -> u32;
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+async fn install_downloaded(_app: &AppHandle, _update: &tauri_plugin_updater::Update, _installer: Vec<u8>) -> Result<(), String> {
+    Err("this computer updates outside the app".to_string())
 }
 
 const START_FAILED: &str = "document.body.innerHTML = '<main style=\"font:16px system-ui;padding:32px;max-width:640px\"><h1>VizorPlay could not start</h1><p>The local engine stopped or did not answer. Close this window and open VizorPlay again. If it keeps happening, reinstall VizorPlay; security software may have blocked or quarantined part of it.</p></main>';";
@@ -362,8 +425,8 @@ pub fn run() {
                     if !is_install_request(url, port) {
                         return true;
                     }
-                    // Linux packages and Homebrew update outside the app.
-                    if cfg!(windows) && !UPDATING.swap(true, Ordering::SeqCst) {
+                    // Homebrew and Mac disk images update outside the app.
+                    if cfg!(any(windows, target_os = "linux")) && !UPDATING.swap(true, Ordering::SeqCst) {
                         let app = updater_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Some(window) = app.get_webview_window("main") {

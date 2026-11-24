@@ -174,7 +174,7 @@ jobs:
           npm run tauri build -- --config "$PWD/../upgrade-config.json" --bundles ${{ matrix.bundles }}
           mkdir -p ../upgrade-baseline
           cp "$CARGO_TARGET_DIR"/release/bundle/${{ matrix.bundles }}/*.${{ matrix.package_ext }} ../upgrade-baseline/
-      - name: Build the candidate (the Windows installer is signed for the in-app updater)
+      - name: Build the candidate (the Windows installer and Linux .deb are signed for the in-app updater)
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -189,7 +189,15 @@ jobs:
             npm run tauri build -- --config "$PWD/build/updater-config.json" --bundles ${{ matrix.bundles }}
             test -s src-tauri/target/release/bundle/nsis/*1.0.0*-setup.exe.sig
           else
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+              echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is unavailable, so the Linux .deb cannot be signed for in-app updates."
+              exit 1
+            fi
             npm run tauri build -- --bundles ${{ matrix.bundles }}
+            # Tauri signs only AppImages itself; sign the .deb with the same key.
+            deb="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*1.0.0*.deb' -type f -print -quit)"
+            npx tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password '' "$deb"
+            test -s "$deb.sig"
           fi
       - name: Install Windows package and exercise the installed window
         timeout-minutes: 12
@@ -238,6 +246,8 @@ jobs:
           updater=()
           if [ "${{ runner.os }}" = Windows ]; then
             updater=(--signature "$package.sig" --evidence build/update-evidence/result.json)
+          elif [ "${{ runner.os }}" = Linux ]; then
+            updater=(--signature "$package.sig")
           fi
           python packaging/release_candidate.py receipt --platform "${{ runner.os }}" --payload "$package" --evidence build/native-evidence/result.json "${updater[@]}" --output build/release-packages
       - uses: actions/upload-artifact@v4
