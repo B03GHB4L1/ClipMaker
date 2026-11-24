@@ -146,19 +146,27 @@ few minutes and an internet connection to get ready. After that it opens
 straight away: just type `vizorplay` in Terminal. Your Mac may still show a
 security message the first time.
 
-**Older Intel Macs (macOS 11 or older).** The disk image can't run on these, and
-Apple and Homebrew no longer support them, so the normal Homebrew installer
-won't work. A community-made installer, `homebrew-intel`, sets Homebrew up on
-these Macs. It is made by someone else, not by VizorPlay, so read the script
-before you run it. Open **Terminal**, paste this one line and press Enter:
+**Intel Macs that need Homebrew (including macOS 11).** Since September 2026
+the installer on brew.sh only works on Apple Silicon Macs. Homebrew still runs
+on Intel Macs with macOS 11 or newer; it just has no official installer for
+them. This matters to you if you have an Intel Mac on macOS 11 (the disk image
+needs macOS 12), or you want Homebrew on an Intel Mac before the Intel disk image
+is out. Apple Silicon Macs use the normal brew.sh installer and can skip this.
+
+A community-made, unofficial installer called `homebrew-intel` sets Homebrew up
+on Intel Macs. It is not made by VizorPlay or Homebrew, so read its script
+before you run it. First install Apple's command line tools: open **Terminal**,
+type `xcode-select --install` and press Enter. Then paste this one line and
+press Enter:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/itsmaclol/homebrew-intel/HEAD/install.sh)"
 ```
 
-When it finishes, follow the Homebrew steps above (`brew tap`, `brew install`,
-`vizorplay`). Installing VizorPlay this way compiles it on your Mac, so it can
-take a long time, and it isn't tested by VizorPlay.
+(Its [page](https://github.com/itsmaclol/homebrew-intel) also offers a `.pkg`
+installer you can verify.) When it finishes, follow the Homebrew steps below
+(`brew tap`, `brew install`, `vizorplay`). On Intel, VizorPlay compiles on your
+Mac, so it can take a long time, and VizorPlay hasn't tested it.
 
 ### Linux (Ubuntu 22.04 or newer, Debian, Linux Mint)
 
