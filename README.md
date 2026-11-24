@@ -58,37 +58,82 @@ Data: StatsBomb.
 ## Install
 
 > Version 1.0 is not out yet. When it is, the files below will be on the
-> [Releases](../../releases) page.
+> [Releases](../../releases) page. Everything on this page is about version 1.0.
+
+VizorPlay needs nothing else installed: no Python, no FFmpeg. Pick your
+computer below.
+
+| Your computer | Download this file | Needs |
+|---|---|---|
+| Windows 10 or 11 (64-bit) | `VizorPlay_1.0.0_x64-setup.exe` | Nothing else |
+| Mac with an Apple chip (M1, M2, M3, M4) | `VizorPlay_1.0.0_aarch64.dmg` | macOS 14 (Sonoma) or newer |
+| Mac with an Intel chip | `VizorPlay_1.0.0_x64.dmg` | macOS 12 (Monterey) or newer |
+| Ubuntu 22.04 or newer, Debian, Linux Mint (64-bit) | `VizorPlay_1.0.0_amd64.deb` | Nothing else |
 
 ### Windows 10 and 11
 
 1. Download `VizorPlay_1.0.0_x64-setup.exe` from the [Releases](../../releases) page.
-2. Open it to install VizorPlay.
+2. Close VizorPlay if it is open, then open the file you downloaded. It
+   installs for your own account, so you don't need an administrator password.
 3. If Windows says "Windows protected your PC", click **More info**, then
    **Run anyway**. This appears because the app isn't registered with
    Microsoft, not because something is wrong.
+4. Open **VizorPlay** from the Start menu.
+
+To remove it later: **Settings**, **Apps**, **VizorPlay**, **Uninstall**. Your
+projects stay on your computer.
 
 ### Mac
 
-1. Check your Mac's chip: Apple menu, **About This Mac**. *Chip: Apple M…*
-   means Apple Silicon; *Processor: Intel* means Intel.
-2. Download `VizorPlay_1.0.0_aarch64.dmg` (Apple Silicon) or
-   `VizorPlay_1.0.0_x64.dmg` (Intel) from the [Releases](../../releases) page.
-   The Intel file is still being tested; until it is there, use Homebrew below.
-3. Open the file and drag **VizorPlay** onto **Applications**.
-4. Open VizorPlay from Applications. VizorPlay isn't approved by Apple, so your
-   Mac blocks it the first time. On macOS 15 or later, open **System Settings**,
-   **Privacy & Security**, and click **Open Anyway**. On macOS 14 or earlier,
-   Control-click VizorPlay in Applications and choose **Open**. You only do this
-   once.
+**Step 1: find out which kind of Mac you have.** Click the Apple menu in the top
+left, then **About This Mac**.
 
-Step-by-step help, including a Terminal option, is in
-[docs/INSTALLATION.md](docs/INSTALLATION.md).
+- It says **Chip: Apple M1** (or M2, M3, M4): you have an **Apple Silicon** Mac.
+  Download the `aarch64.dmg` file. You need macOS 14 or newer.
+- It says **Processor: Intel**: you have an **Intel** Mac. Download the
+  `x64.dmg` file. You need macOS 12 or newer.
 
-**Or, with Homebrew** (slower, because it builds the app on your Mac): if you
-don't have it, follow the one-step instructions at [brew.sh](https://brew.sh).
-Then open the **Terminal** app and type these three lines, pressing Enter after
-each one:
+Not sure? The same window shows your macOS version. If it is older than the
+number above, VizorPlay will tell you it can't open on your Mac. Every Apple
+Silicon Mac can be updated to macOS 14; an Intel Mac stuck on macOS 11 or older
+can't run VizorPlay. An Intel Mac can't run the Apple Silicon file. An Apple
+Silicon Mac can run the Intel file, but use the Apple Silicon one.
+
+The Intel file is still being tested. Until it is on the Releases page, Intel
+Mac users should use Homebrew (below).
+
+**Step 2: install.** Open the file you downloaded. A window shows VizorPlay and
+your Applications folder. Drag **VizorPlay** onto **Applications**, then eject
+the disk (the eject button next to it in the Finder sidebar).
+
+**Step 3: open it the first time.** VizorPlay isn't approved by Apple (there is
+no Apple Developer membership behind it), so your Mac blocks the first launch
+with a message that it can't verify the app. You do this once, and later
+launches open normally.
+
+- **macOS 15 (Sequoia) or newer:** open VizorPlay from Applications and close
+  the message. Open **System Settings**, then **Privacy & Security**, scroll
+  down to **Security**, find "VizorPlay was blocked" and click **Open Anyway**.
+  Confirm with your password or Touch ID, then click **Open**.
+- **macOS 14 (Sonoma) or older:** in Applications, Control-click (or right-click)
+  **VizorPlay**, choose **Open**, then click **Open** again.
+- **Still blocked, or it says the app is damaged?** Open **Terminal** and type
+  the line below, then open VizorPlay again:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/VizorPlay.app
+  ```
+
+This doesn't get around Apple's check: you are telling your Mac to trust this
+one app. More detail is in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+To remove VizorPlay, drag it from Applications to the Bin. Your projects stay on
+your Mac.
+
+**Or install with Homebrew** (slower, because it builds the app on your Mac).
+If you don't have Homebrew, follow the one-step instructions at
+[brew.sh](https://brew.sh). Then open **Terminal** and type these three lines,
+pressing Enter after each one:
 
 ```sh
 brew tap B03GHB4L1/vizorplay
@@ -98,33 +143,58 @@ vizorplay
 
 Installing takes a few minutes. The first time VizorPlay opens, it also needs a
 few minutes and an internet connection to get ready. After that it opens
-straight away: just type `vizorplay` in Terminal.
+straight away: just type `vizorplay` in Terminal. Your Mac may still show a
+security message the first time.
 
-VizorPlay isn't approved by Apple, so it's possible your Mac shows a security
-message when you open it.
+**Older Intel Macs (macOS 11 or older).** The disk image can't run on these, and
+Apple and Homebrew no longer support them, so Homebrew may not install
+VizorPlay on them either. A separate install method for these Macs is planned
+and its command will be added here.
 
-### Linux (Ubuntu, Debian, Linux Mint)
+### Linux (Ubuntu 22.04 or newer, Debian, Linux Mint)
 
 1. Download `VizorPlay_1.0.0_amd64.deb` from the [Releases](../../releases) page.
-2. Double-click it to install it. Or open a terminal in your Downloads folder
-   and type `sudo apt install ./VizorPlay_1.0.0_amd64.deb`.
+2. Close VizorPlay if it is open. Then double-click the file to install it, or
+   open a terminal in your Downloads folder and type:
+
+   ```sh
+   sudo apt install ./VizorPlay_1.0.0_amd64.deb
+   ```
+
 3. Open **VizorPlay** from your apps menu.
+
+Other Linux types (Fedora, Arch and so on) and ARM computers aren't supported
+yet. To remove it later: `sudo apt remove vizorplay`. Your projects stay.
 
 ---
 
 ## Updating
 
-You only install VizorPlay once. When a new version comes out, a message
-appears at the bottom of the app:
+When a new version comes out, a message appears at the bottom of the app. Your
+projects are kept every time; they are stored apart from the program. Close
+VizorPlay before you update by hand.
 
-- **Windows:** click **Update and restart**. That's it.
-- **Mac:** download the newer disk image and drag VizorPlay onto Applications
-  again (choose **Replace**). If you used Homebrew, close VizorPlay, then type
-  `brew upgrade vizorplay` in Terminal.
-- **Linux:** click **Download**, then install the new file the same way as
-  before.
+- **Windows:** click **Update and restart**. VizorPlay downloads the new
+  version, checks it is genuine, closes, updates and opens again by itself. You
+  can also just run a newer setup file.
+- **Mac (disk image):** this doesn't update itself yet. Download the newer
+  `.dmg` for your chip (see the table above), open it and drag **VizorPlay** onto
+  **Applications** again. Choose **Replace** when asked. You don't need to do
+  the Open Anyway step again if macOS remembers it; if the message comes back,
+  repeat step 3.
+- **Mac (Homebrew):** close VizorPlay, then type these three lines in Terminal,
+  pressing Enter after each one. It takes a few minutes because it rebuilds the
+  app:
 
-Updating never deletes your projects.
+  ```sh
+  brew update
+  brew upgrade vizorplay
+  vizorplay
+  ```
+
+- **Linux:** this doesn't update itself. Click **Download** in the message to
+  open the Releases page, download the newer `.deb`, and install it with the
+  same command as before. It replaces the old version.
 
 ---
 
