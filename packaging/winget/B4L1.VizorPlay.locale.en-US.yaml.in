@@ -5,11 +5,11 @@ PackageVersion: @VERSION@
 PackageLocale: en-US
 Publisher: B4L1
 PublisherUrl: https://github.com/B03GHB4L1
-PublisherSupportUrl: https://github.com/B03GHB4L1/ClipMaker/issues
+PublisherSupportUrl: https://github.com/B03GHB4L1/VizorPlay/issues
 PackageName: VizorPlay
-PackageUrl: https://github.com/B03GHB4L1/ClipMaker
+PackageUrl: https://github.com/B03GHB4L1/VizorPlay
 License: PolyForm Strict 1.0.0 (noncommercial use; commercial licences available)
-LicenseUrl: https://github.com/B03GHB4L1/ClipMaker/blob/main/LICENSE
+LicenseUrl: https://github.com/B03GHB4L1/VizorPlay/blob/main/LICENSE
 ShortDescription: Football video clipping and analysis workstation
 Tags:
   - football

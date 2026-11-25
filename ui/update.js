@@ -43,7 +43,7 @@ const openReleasePage = async () => {
     if (!response.ok) throw new Error();
     setMessage(`VizorPlay ${latest} download page opened in your browser.`);
   } catch {
-    setMessage(`VizorPlay ${latest} is available at github.com/B03GHB4L1/ClipMaker/releases.`);
+    setMessage(`VizorPlay ${latest} is available at github.com/B03GHB4L1/VizorPlay/releases.`);
   }
 };
 

@@ -418,7 +418,7 @@ class AutomationContracts(unittest.TestCase):
             source = target.read_text()
             self.assertIn('url "file:///tmp/vizorplay.tar.gz"', source)
             self.assertIn('version "1.0.0"', source)
-            self.assertIn('homepage "https://github.com/B03GHB4L1/ClipMaker"', source)
+            self.assertIn('homepage "https://github.com/B03GHB4L1/VizorPlay"', source)
             rejected = subprocess.run([*command, "--source-url", 'file:///tmp/a"; system("bad")'], capture_output=True)
             self.assertNotEqual(rejected.returncode, 0)
 
