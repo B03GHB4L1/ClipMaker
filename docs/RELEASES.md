@@ -159,7 +159,7 @@ random server port. Deleted snapshots are retained under `snapshot-trash/`.
 ## In-app updates
 
 Every release publishes `latest.json` next to its installers. Installed copies
-read `https://github.com/B03GHB4L1/ClipMaker/releases/latest/download/latest.json`
+read `https://github.com/B03GHB4L1/VizorPlay/releases/latest/download/latest.json`
 once per launch (`packaging/update_check.py`) and show a notice in the bottom
 bar of every screen when its `version` is newer:
 

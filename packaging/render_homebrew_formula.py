@@ -29,7 +29,7 @@ def main() -> None:
         if urlparse(args.source_url).scheme not in {"file", "https"} or any(char in args.source_url for char in ('"', '\n', '\r', '\\', '#{')):
             parser.error("source URL must be an HTTPS or file URL without Ruby string escapes")
         rendered = rendered.replace(
-            f'https://github.com/B03GHB4L1/ClipMaker/archive/refs/tags/v{args.version.lstrip("v")}.tar.gz',
+            f'https://github.com/B03GHB4L1/VizorPlay/archive/refs/tags/v{args.version.lstrip("v")}.tar.gz',
             args.source_url,
         )
         rendered = rendered.replace('  sha256 "', f'  version "{version}"\n  sha256 "', 1)

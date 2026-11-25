@@ -901,7 +901,7 @@ def exercise_update_notice(page, base):
     """The footer offers a newer release the way this kind of install updates (ui/update.js)."""
     def offer(install):
         status = {"available": True, "current": "1.0.0", "latest": "1.0.1", "install": install,
-                  "release_url": "https://github.com/B03GHB4L1/ClipMaker/releases/latest"}
+                  "release_url": "https://github.com/B03GHB4L1/VizorPlay/releases/latest"}
         page.route("**/api/update", lambda route: route.fulfill(json={"update": status}))
     notice = page.locator("[data-update-notice]")
 

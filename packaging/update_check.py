@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 CURRENT_VERSION = "1.0.0"
-RELEASES_URL = "https://github.com/B03GHB4L1/ClipMaker/releases/latest"
+RELEASES_URL = "https://github.com/B03GHB4L1/VizorPlay/releases/latest"
 DEFAULT_FEED = RELEASES_URL + "/download/latest.json"
 MAX_FEED_BYTES = 64 * 1024
 # The desktop shell installs Windows, Linux and Mac (disk image) updates itself;

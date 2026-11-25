@@ -216,7 +216,7 @@ def main():
     candidate = commands.add_parser("assemble")
     candidate.add_argument("--input", type=Path, required=True)
     candidate.add_argument("--output", type=Path, required=True)
-    candidate.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "B03GHB4L1/ClipMaker"))
+    candidate.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "B03GHB4L1/VizorPlay"))
     for command in (receipt, candidate):
         command.add_argument("--commit", default=os.environ.get("GITHUB_SHA", ""))
     args = parser.parse_args()
