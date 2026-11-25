@@ -57,7 +57,7 @@ Data: StatsBomb.
 > The files below are on the [Releases](../../releases) page. Everything on this
 > page is about version 1.0.
 
-Pick your computer below.
+Pick your computer below. A [user manual (PDF)](https://b03ghb4l1.github.io/VizorPlay/VizorPlay-User-Manual.pdf) covers every screen.
 
 | Your computer | Download this file | Needs |
 |---|---|---|

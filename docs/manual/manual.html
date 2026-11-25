@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VizorPlay 1.0 User Manual</title>
+<style>
+@page { size: A4; margin: 16mm 15mm 18mm; }
+:root { --ink:#141412; --mut:#5d5d56; --acc:#2f8a2f; --lime:#c6f03a; --line:#d9d9d2; --bg:#f6f6f3; }
+* { box-sizing: border-box; }
+body { font: 10.5pt/1.5 "Segoe UI", Arial, sans-serif; color: var(--ink); margin: 0; }
+h1,h2,h3 { font-family: "Cascadia Code", Consolas, "Segoe UI", monospace; letter-spacing: -.01em; line-height: 1.2; }
+h2 { font-size: 18pt; margin: 0 0 .4em; padding-bottom: .25em; border-bottom: 2px solid var(--ink); break-after: avoid; }
+h3 { font-size: 12pt; margin: 1.3em 0 .3em; break-after: avoid; }
+p { margin: .5em 0; }
+ul,ol { margin: .4em 0 .6em; padding-left: 1.3em; }
+li { margin: .2em 0; }
+code, kbd { font-family: "Cascadia Code", Consolas, monospace; font-size: 9.5pt; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 0 .3em; }
+section { break-before: page; }
+.cover { height: 255mm; display: flex; flex-direction: column; justify-content: center; break-after: page; }
+.cover .brand { font: 700 40pt "Cascadia Code", Consolas, monospace; }
+.cover .brand span { color: var(--acc); }
+.cover h1 { font-size: 22pt; margin: .2em 0; font-weight: 500; }
+.cover p { color: var(--mut); max-width: 120mm; }
+.cover .bar { height: 8px; width: 60mm; background: var(--lime); margin: 12mm 0; }
+.toc ol { columns: 2; list-style: none; padding: 0; }
+.toc li { padding: .25em 0; border-bottom: 1px dotted var(--line); }
+figure { margin: .8em 0; break-inside: avoid; }
+figure img { width: 100%; display: block; border: 1px solid var(--line); border-radius: 4px; }
+figure.crop img { object-fit: cover; object-position: top; }
+figure.h1 img { height: 105mm; } figure.h2 img { height: 120mm; } figure.h3 img { height: 90mm; } figure.h4 img { height: 140mm; }
+figcaption { font-size: 9pt; color: var(--mut); margin-top: .3em; }
+.note { background: var(--bg); border-left: 4px solid var(--lime); padding: .5em .8em; margin: .8em 0; break-inside: avoid; }
+.warn { border-left-color: #d9822b; }
+table { border-collapse: collapse; width: 100%; margin: .6em 0; font-size: 9.5pt; break-inside: avoid; }
+th,td { border: 1px solid var(--line); padding: .3em .5em; text-align: left; vertical-align: top; }
+th { background: var(--bg); }
+.small { font-size: 9pt; color: var(--mut); }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="brand">Vizor<span>Play</span></div>
+  <div class="bar"></div>
+  <h1>User manual</h1>
+  <p>Version 1.0. How to turn match event data and footage into clips, analysis and annotated videos, entirely on your own computer.</p>
+  <p class="small">Screenshots use a made-up demo match (Northbridge v Southport) with a synthetic test video, so no real footage or data is shown.</p>
+</div>
+
+<div class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li>1. Getting started</li><li>2. Match intake</li><li>3. Code (live tagging)</li>
+    <li>4. Filter and export</li><li>5. Analyst Room</li><li>6. Tactical Lab</li>
+    <li>7. Annotate</li><li>8. Projects, matches and your data</li><li>9. Updating and keyboard tips</li>
+    <li>10. Troubleshooting</li>
+  </ol>
+  <h3>The workflow in one line</h3>
+  <p><b>Intake</b> (load a match and footage, align the clock) &rarr; <b>Filter</b> (find the moments) &rarr; <b>Export</b> a reel &rarr; optionally <b>Annotate</b>. <b>Code</b> lets you tag a match yourself while watching; <b>Analyst</b> and <b>Tactical</b> read the same data as charts.</p>
+  <div class="note">Everything runs and is stored on your computer. Footage is used where it is and never copied. Nothing is uploaded, and the app sends no usage data.</div>
+</div>
+
+<section>
+<h2>1. Getting started</h2>
+<p>Install VizorPlay for your system from the download page (Windows installer, macOS disk image for Apple silicon or Intel, Linux package) and open it. The status at the top right reads <b>Engine ready</b> once the built-in engine has started. If it reads anything else, see Troubleshooting.</p>
+<h3>The layout</h3>
+<ul>
+<li><b>Tabs at the top</b>: Intake, Code, Filter, Analyst, Tactical, Annotate. They work in that order, but you can move freely.</li>
+<li><b>VizorPlay menu (the three dots)</b>: jumps between the same screens and shows the workspace.</li>
+<li><b>New project</b> (Intake, top right): starts a fresh project. Your previous project is saved first and is never overwritten.</li>
+<li><b>Footer</b>: the version (1.0), a theme switch (system, light or dark) and full screen.</li>
+</ul>
+<figure class="crop h2"><img src="img/06-menu.png"><figcaption>The VizorPlay menu lists the five working areas.</figcaption></figure>
+<h3>What a project is</h3>
+<p>A project is one piece of work saved locally: its match data, footage reference, kick-off alignment, filters and export settings. Every project is independent. The top right of each screen shows <b>Saved locally</b> when your work is stored.</p>
+</section>
+
+<section>
+<h2>2. Match intake</h2>
+<p>Intake gets a match and its footage into the project. It has three parts: <b>A Match source</b>, <b>B Match footage</b> and <b>Align the match</b>.</p>
+<figure class="crop h4"><img src="img/01-intake-empty.png"><figcaption>An empty project: match source on the left, footage on the right, timeline alignment below.</figcaption></figure>
+<h3>A. Match source</h3>
+<p>Choose one of these:</p>
+<ul>
+<li><b>Paste a link</b>: a Scoresway or WhoScored match URL, then press the arrow button to fetch the events.</li>
+<li><b>Import match CSV</b>: pick an event file you already have.</li>
+<li><b>Add a saved match</b>: reuse a match you fetched before (see Matches in section 8).</li>
+<li><b>Batch scrape</b>: open it, paste one match URL per line, press <b>Scrape batch</b>.</li>
+</ul>
+<p>Once loaded, the saved-match card shows the teams, score and event count. <b>Browse event data</b> opens a searchable table of every event, with a period filter and an <b>Open full table</b> link.</p>
+<h3>B. Match footage</h3>
+<p>Press <b>Choose match footage</b> and pick an MP4, MKV or MOV. The file stays where it is. If your recording is split into periods, open <b>Separate period videos</b> and choose a file for the second half, extra time 1, extra time 2 or penalties.</p>
+<h3>Align the match</h3>
+<p>Events are tied to the match clock, so VizorPlay needs to know where kick-off is in your video.</p>
+<ol>
+<li>Pick the period button (<b>1H</b>, <b>2H</b>, <b>ET1</b>, <b>ET2</b>, <b>PEN</b>). Extra time and penalties are enabled with their checkboxes only when the match had them.</li>
+<li>Scrub the video to the whistle with the step buttons (&minus;1m, &minus;10s, &minus;1s, &minus;1f, play, +1f, +1s, +10s, +1m). The zoom buttons (Full, 10 min, 2 min) refine the timeline.</li>
+<li>Press <b>Set kick-off here</b>. The period marker appears and the time is shown.</li>
+<li>Repeat for each period, then press <b>Confirm &amp; continue</b>. <b>Reset marker</b> undoes a marker.</li>
+</ol>
+<figure class="crop h4"><img src="img/03-intake-aligned.png"><figcaption>Footage loaded and kick-off markers set. The toast at the bottom confirms each marker.</figcaption></figure>
+<div class="note">Local history at the bottom of Intake lists your saved projects. Open one with its arrow, or delete it with the bin.</div>
+</section>
+
+<section>
+<h2>3. Code: tag a match yourself</h2>
+<p>Use Code when you have footage but no event feed, or when you want your own tags on top of the feed. Watch the video and press keys to mark what happens.</p>
+<figure class="crop h4"><img src="img/31-code-panels.png"><figcaption>The Code screen: video with transport on the left, code buttons on the right.</figcaption></figure>
+<h3>Codes, intervals and tags</h3>
+<ul>
+<li><b>Codes</b> mark a moment at the playhead for the chosen team: Goal, Shot on target, Shot off target, Save, Corner, Foul, Card, Offside, Ball won, Ball lost, Key moment. Each has a single-letter key shown on its button.</li>
+<li><b>Intervals</b> (Possession, Build-up, Pressing, Transition) have a start and an end: press the key once to start, again to stop. A running timer shows on the button.</li>
+<li><b>Tags</b> add detail with Shift plus a letter: Left, Centre, Right, Successful, Unsuccessful, Header, Set piece, Counter-attack, Big chance.</li>
+<li><b>Team</b>: <kbd>H</kbd> and <kbd>A</kbd> (or the Home and Away buttons) choose which team a code belongs to.</li>
+</ul>
+<h3>Pitch location, teams and squads</h3>
+<ul>
+<li><b>Pitch location</b>: click the small pitch to say where the chosen event happened. Drag to also mark where it ended, for example a pass target.</li>
+<li><b>Teams and keys</b>: rename the home and away teams.</li>
+<li><b>Squads</b>: optionally list one player per line, shirt number first (for example <code>9 Saka</code>). Typing a number straight after a code names its player.</li>
+</ul>
+<h3>Editing</h3>
+<p>Space plays and pauses. Arrows move one second (Shift for five). Comma and full stop nudge the chosen event by one frame. Delete removes the chosen event, Backspace removes the last one, and Ctrl+Z / Ctrl+Shift+Z undo and redo. Keys are ignored while you type in a field.</p>
+<div class="note">Your codes join the match feed's events in Filter and export. The Analyst Room keeps using the feed alone, so nothing is counted twice.</div>
+</section>
+
+<section>
+<h2>4. Filter and export</h2>
+<p>Filter turns the event list into clips. Use the controls on the left, press <b>Find clips</b>, then review, trim and export.</p>
+<figure class="crop h2"><img src="img/10-filters.png"><figcaption>Find clips: a summary of the current filter, quick presets, and collapsible sections for the detail.</figcaption></figure>
+<h3>Quick presets</h3>
+<p>Four one-click starting points: <b>Set pieces</b>, <b>Ball progression</b>, <b>Attacking chaos</b> and <b>Defensive display</b>. They fill in the filters, which you can then adjust. <b>Reset all</b> clears everything.</p>
+<h3>The filter sections</h3>
+<table>
+<tr><th style="width:30%">Section</th><th>What it does</th></tr>
+<tr><td>Team, players and period</td><td>Pick a team (or both), specific players, and the half or periods to search.</td></tr>
+<tr><td>Action types</td><td>Choose which kinds of event to find: passes, shots, tackles, carries and so on. The header shows how many are chosen.</td></tr>
+<tr><td>Qualifiers</td><td>Narrow actions by detail, such as the outcome or how a shot was taken. The header shows how many qualifiers the match offers.</td></tr>
+<tr><td>Pitch area and xT</td><td>Limit events to a part of the pitch, and by expected-threat value.</td></tr>
+<tr><td>Clip length</td><td>Seconds before and after each event, and the merge gap: events closer together than this become one clip.</td></tr>
+<tr><td>Timing corrections</td><td>Fixes a recording that drifts from the match clock (see below).</td></tr>
+<tr><td>Saved filters</td><td>Save the current setup under a name and recall it later, in any project.</td></tr>
+</table>
+<figure class="crop h3"><img src="img/11-f-4-timing.png"><figcaption>Clip length: seconds before, seconds after and the merge gap.</figcaption></figure>
+<h3>Timing corrections</h3>
+<p>If part of the recording was cut or paused, every event after that point lines up wrongly. Choose the period, the match-clock time where it happens, what happened to the recording and how long, add an optional note, then press <b>Add correction</b>. Later events shift to match.</p>
+<figure class="crop h3"><img src="img/11-f-5-corrections.png"><figcaption>Timing corrections realign events after a cut or pause in the recording.</figcaption></figure>
+<h3>Review and trim</h3>
+<p>Press <b>Find clips</b>. The result appears as a timeline of clips with the player above it.</p>
+<figure class="crop h4"><img src="img/13-clips.png"><figcaption>Six clips found. Clip 1 is selected, with its start and end shown in the panel on the right.</figcaption></figure>
+<ul>
+<li>Click a clip to play it. <b>Play on through every clip</b> plays them back to back.</li>
+<li>Trim with <b>&minus;1s</b> / <b>+1s</b> on Start and End, or <b>Set to playhead</b>. You can also drag a clip's edges on the bar or timeline. <b>Reset timing</b> restores the original; <b>Remove clip</b> deletes it from the set.</li>
+<li>Keys: <kbd>Space</kbd> play or pause, <kbd>I</kbd> and <kbd>O</kbd> set start and end, arrows seek one second or move to the previous or next clip.</li>
+<li>Tick clips to select them. <b>Select all</b> and <b>Select none</b> help. The timeline's zoom slider helps with long lists.</li>
+</ul>
+<h3>Export</h3>
+<ol>
+<li>Choose <b>All clips</b> or <b>Selected</b>, and <b>One reel</b> (a single video) or <b>Separate files</b>.</li>
+<li>Open <b>File name, folder and quality</b> to set the output folder (Browse), reel name, format (MP4) , quality and encoder.</li>
+<li>Press <b>Export reel</b>. Progress is shown and you can cancel at any time. When finished the file is in your chosen folder.</li>
+</ol>
+<figure class="crop h4"><img src="img/14-export-settings.png"><figcaption>With the clips selected, the export settings expand below the timeline.</figcaption></figure>
+<p><b>Annotate clip</b> (or <b>Annotate N clips</b>) sends the clips to the Annotate screen instead of exporting directly.</p>
+</section>
+
+<section>
+<h2>5. Analyst Room</h2>
+<p>Charts built from the match's events. Seven tabs sit along the top; each has its own filters, and the numbers above a chart update as you change them. Use the <b>Northbridge / Southport</b> style team buttons to switch team.</p>
+<figure class="crop h4"><img src="img/3-analyst-shot-map.png"><figcaption>Shot Map: shot share, shots, on target, goals and xG for both teams, with a shot-by-shot pitch map.</figcaption></figure>
+<table>
+<tr><th style="width:24%">Tab</th><th>What it shows</th></tr>
+<tr><td>Shot Map</td><td>Every shot, sized by expected goals (xG), with outcome markers. Normal or Penalty Shootout mode; filter by player and pitch zone.</td></tr>
+<tr><td>Pass Map</td><td>A pass network: where players pass from, how often each link is used, passes, accuracy and key passes. Choose before or after substitutions and the minimum number of links.</td></tr>
+<tr><td>Defensive Actions</td><td>Tackles, interceptions, clearances, aerials, blocks, challenges and dispossessions, by player, pitch zone and depth zone.</td></tr>
+<tr><td>Dribbles &amp; Carries</td><td>Pick a player to see their dribbles and carries on the pitch.</td></tr>
+<tr><td>Goalkeeper</td><td>Pick a goalkeeper: their actions, shots faced and distribution.</td></tr>
+<tr><td>Build-Up</td><td>Sequences of play: progressive chains, possession chains, final-third entries and box entries, with a minimum actions per sequence. Pick a sequence to inspect it.</td></tr>
+<tr><td>Pressing</td><td>Pressing wins by zone (all, high press in the final third, or mid-block), with press wins, high-press share and average press height.</td></tr>
+<tr><td>Comparison</td><td>Two players side by side: a performance radar and a shooting and xG breakdown.</td></tr>
+</table>
+<figure class="crop h3"><img src="img/3-analyst-pass-map.png"><figcaption>Pass Map: pass network, with before-subs and links controls below the pitch.</figcaption></figure>
+<h3>Chart buttons</h3>
+<ul>
+<li><b>PNG</b>: saves the chart as an image.</li>
+<li><b>Send to clip</b>: turns the plotted events into clips in Filter, so you can watch what you see.</li>
+<li><b>Preview</b> and <b>GIF</b>: an animated version of the chart (a style menu next to them picks the animation).</li>
+</ul>
+<figure class="crop h3"><img src="img/3-analyst-pressing.png"><figcaption>Pressing: wins marked on the pitch, split by high press and mid-block.</figcaption></figure>
+</section>
+
+<section>
+<h2>6. Tactical Lab</h2>
+<p>Team-level patterns. Open <b>Match and team</b> to choose the team. Tick <b>Analyze across matches</b> to combine every match in the project (see section 8).</p>
+<table>
+<tr><th style="width:26%">Tab</th><th>What it shows</th></tr>
+<tr><td>Defensive Transitions</td><td>What happens just after your team loses the ball: where losses happen and whether the opponent shot, entered the box or progressed. Sliders set the reaction window and the opponent event cap.</td></tr>
+<tr><td>Attacking Transitions</td><td>The same view after winning the ball: recovery locations, threat rate and progression rate, with sliders for the attack window and own event cap.</td></tr>
+<tr><td>Style Profile</td><td>A radar of seven scores (possession control, pressing intensity, directness, wide play, final-third penetration, set-piece reliance and transition threat), with the figures behind each one explained underneath.</td></tr>
+<tr><td>Set Pieces</td><td>Restarts: how many, how often possession is kept, threat rate, and a map of where they are delivered.</td></tr>
+<tr><td>Video Lab</td><td>Ranks key moments from a chosen playlist, lets you add them to a reel and cut them as clips.</td></tr>
+</table>
+<figure class="crop h4"><img src="img/3-tactical-attacking-transitions.png"><figcaption>Attacking Transitions: recovery locations coloured by what followed, with the headline rates on the left.</figcaption></figure>
+<figure class="crop h4"><img src="img/3-tactical-style-profile.png"><figcaption>Style Profile: a radar with plain-language notes on how each axis is calculated.</figcaption></figure>
+<h3>Video Lab reels</h3>
+<p>Choose a playlist and set how many seconds to keep before and after each moment. Tick moments to add them to the <b>Reel</b> (or press <b>Add top 5</b>), then cut them as clips. Highlighting a row also draws an event trace of what led up to it.</p>
+<figure class="crop h4"><img src="img/3-tactical-video-lab.png"><figcaption>Video Lab: a scored list of moments, ready to tick into a reel.</figcaption></figure>
+</section>
+
+<section>
+<h2>7. Annotate</h2>
+<p>Draw on your clips and build a finished analysis video. Open it with <b>Annotate clip</b> from Filter, or from the Annotate tab.</p>
+<figure class="crop h4"><img src="img/40-annotate.png"><figcaption>Annotate: tools on the left, the video in the middle, settings on the right, and a timeline below.</figcaption></figure>
+<h3>Tools</h3>
+<table>
+<tr><th style="width:22%">Group</th><th>Tools</th></tr>
+<tr><td>Draw</td><td>Arrow, Line, Freehand, Shape</td></tr>
+<tr><td>Highlight</td><td>Zone, Spotlight (a cone on a player), Ring that tracks a player, numbered Token</td></tr>
+<tr><td>Pitch</td><td>Offside line, Measure, Minimap</td></tr>
+<tr><td>Write</td><td>Text, with colour, background, size and bold</td></tr>
+</table>
+<p>Most tools have a letter shortcut shown next to them. Click a tool, then click or drag on the video.</p>
+<h3>Add at this frame</h3>
+<ul>
+<li><b>Freeze frame</b>: pauses the picture for a set time.</li>
+<li><b>Board from frame</b>: turns the frame into a tactics board with the players.</li>
+<li><b>Insert picture</b>: place a chart or a photo for a few seconds.</li>
+<li><b>Mark the pitch</b>: flat rings and arrows drawn on the pitch.</li>
+</ul>
+<h3>Timeline</h3>
+<p>The timeline shows tracks for Clips, Video, Inserts and Drawings. Each drawing is a bar you can drag to change when it appears. In <b>Timing and animation</b> set From and Until (press <b>Here</b> to use the playhead) and how it comes in and goes out. <b>Follow a player</b> makes a drawing follow a player through the clip. <b>Split</b>, <b>Add clip</b>, <b>Card</b> and the zoom buttons let you cut, add more clips, add a title card and zoom the timeline. The lists at the bottom (Parts, Freezes and boards, Drawings) let you select and remove items.</p>
+<figure class="crop h4"><img src="img/42-annotate-panel.png"><figcaption>A clip with four drawings (arrow, ring, spotlight and text) and their bars on the timeline.</figcaption></figure>
+<p>When you are happy, export the annotated video from the Annotate screen. It is saved to your chosen folder as a normal video file.</p>
+</section>
+
+<section>
+<h2>8. Projects, matches and your data</h2>
+<h3>Several matches in one project</h3>
+<p>In Filter, the <b>Matches</b> button lists the matches in the project. Add another saved match with <b>Add a saved match</b>; each keeps its own events, footage and kick-off times, and the list shows whether video and kick-offs are set. Use the Match menu at the top to choose which match you are working on. In Analyst and Tactical, <b>Analyze across matches</b> combines them.</p>
+<figure class="crop h4"><img src="img/17-matches-menu.png"><figcaption>The Matches panel shows each match, its events, and whether video and kick-offs are set.</figcaption></figure>
+<h3>Where things are kept</h3>
+<ul>
+<li>Projects, events and settings are saved on your computer, automatically.</li>
+<li>Footage is read from where it already is. If you move or rename a video, choose it again in Intake.</li>
+<li>Exports go to the folder you set; nothing leaves your computer.</li>
+<li>Starting a new project never erases the old one.</li>
+</ul>
+<div class="note">Back up by copying your exported videos and, if you want your projects safe, the VizorPlay data folder in your user profile.</div>
+</section>
+
+<section>
+<h2>9. Updating and keyboard tips</h2>
+<h3>Updating</h3>
+<p>VizorPlay checks for a newer version and shows a notice in the app when one exists. Updates are signed and checked before they are applied. On Linux the app updates the .deb package through your system's package manager. If you installed with Homebrew on a Mac, you can update with Homebrew instead. Your projects are kept.</p>
+<h3>Shortcuts</h3>
+<table>
+<tr><th style="width:32%">Where</th><th>Keys</th></tr>
+<tr><td>Code</td><td>Letter on each button for codes and intervals; Shift+letter for tags; <kbd>H</kbd>/<kbd>A</kbd> team; <kbd>Space</kbd> play; arrows seek; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</td></tr>
+<tr><td>Filter clip review</td><td><kbd>Space</kbd> play or pause; <kbd>I</kbd>/<kbd>O</kbd> set start/end; &larr; &rarr; seek 1 s; &uarr; &darr; previous or next clip</td></tr>
+<tr><td>Annotate</td><td>Letter shortcut beside each tool</td></tr>
+</table>
+</section>
+
+<section>
+<h2>10. Troubleshooting</h2>
+<table>
+<tr><th style="width:32%">Problem</th><th>What to try</th></tr>
+<tr><td>Status does not say Engine ready</td><td>Wait a few seconds after opening. If it stays, close and reopen the app. On a Mac, make sure you opened it as described on the download page.</td></tr>
+<tr><td>A match link does not load</td><td>Check the link opens in your browser and is a Scoresway or WhoScored match page. Otherwise import a CSV.</td></tr>
+<tr><td>Clips show the wrong moment</td><td>Re-check the kick-off markers in Intake for that period. If the recording was cut or paused, add a timing correction in Filter.</td></tr>
+<tr><td>No clips found</td><td>Loosen the filters (press Reset all), or lower the number of qualifiers you chose.</td></tr>
+<tr><td>Video will not play or is missing</td><td>Choose the footage again in Intake. Use MP4, MKV or MOV.</td></tr>
+<tr><td>Export is slow or fails</td><td>Pick a different output folder with free space, and try the default encoder. You can cancel an export and start again.</td></tr>
+</table>
+<p class="small">VizorPlay 1.0. For help or to report a problem, use the Issues page of the project on GitHub.</p>
+</section>
+
+</body>
+</html>
