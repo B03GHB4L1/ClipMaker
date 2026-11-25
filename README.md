@@ -54,8 +54,8 @@ Data: StatsBomb.
 
 ## Install
 
-> Version 1.0 is not out yet. When it is, the files below will be on the
-> [Releases](../../releases) page. Everything on this page is about version 1.0.
+> The files below are on the [Releases](../../releases) page. Everything on this
+> page is about version 1.0.
 
 Pick your computer below.
 
@@ -199,7 +199,7 @@ When a new version comes out, a message appears at the bottom of the app.
 
 ## Version history
 
-### VizorPlay 1.0 (coming soon)
+### VizorPlay 1.0
 
 - A brand-new app for Windows, Mac and Linux, under a new name
 - Smaller download, and it updates itself on Windows, Linux and the Mac disk-image app
