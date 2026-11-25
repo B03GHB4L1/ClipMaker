@@ -86,9 +86,9 @@ not signed or notarized.
 
 The prepared formula downloads the exact source archive attached to the release,
 using the checksum of the archive installed during acceptance. The source repo
-is public by the owner's instruction. The separate tap remains private and
-empty until an authorized publication step; `brew tap` is not yet a public
-installation path.
+is public by the owner's instruction. The separate tap
+(`B03GHB4L1/homebrew-vizorplay`) is public, so `brew tap B03GHB4L1/vizorplay`
+is a working installation path.
 
 The candidate includes a rendered `vizorplay.rb` formula with its source SHA-256.
 To render a tag-archive formula locally when troubleshooting, run:

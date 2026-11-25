@@ -44,12 +44,12 @@ Nothing below happens on its own. Each step that changes what the public sees
 
 Edit when the release exists, before turning Pages on:
 
-- [ ] Hero: replace the "Version 1.0: coming soon" button with a real download
+- [x] Hero: replace the "Version 1.0: coming soon" button with a real download
       button; remove the "not released yet" status line.
-- [ ] Install tabs: every "Coming soon" button becomes a real link to its file
+- [x] Install tabs: every "Coming soon" button becomes a real link to its file
       on the release page.
-- [ ] Footer: change "Version 1.0 (not yet released)" to "Version 1.0".
-- [ ] PRODUCT.md and the README: remove "not out yet" and "(coming soon)".
+- [x] Footer: change "Version 1.0 (not yet released)" to "Version 1.0".
+- [x] PRODUCT.md and the README: remove "not out yet" and "(coming soon)".
 - [ ] Preview at desktop and phone width.
 - [ ] Repository Settings, Pages: serve `main`, folder `/site` (or add a deploy
       workflow). Check the live address, then add it to the repository's
