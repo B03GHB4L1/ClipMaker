@@ -1225,6 +1225,21 @@ eventDialog.addEventListener("click", (event) => {
 
 const heroBall = document.querySelector("[data-hero-ball]");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+// Apple silicon Macs (an Apple GPU behind the webview) show the ball as one still render: a
+// frame-by-frame WebGL loop was making the interface lag and freeze on fanless MacBook Airs.
+// The webview reports an Apple GPU only on Apple hardware, so this is checked from WebGL.
+const usesAppleGpu = () => {
+  try {
+    if (!/Mac/i.test(navigator.platform || "")) return false;
+    const gl = document.createElement("canvas").getContext("webgl");
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return /Apple/i.test(name) && !/Intel|AMD|Radeon/i.test(name);
+  } catch {
+    return false;
+  }
+};
 const initializeBall = async () => {
   // The supplied still is also the low-cost, accessible reduced-motion view.
   if (reducedMotion.matches) return;
@@ -1238,8 +1253,9 @@ const initializeBall = async () => {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
     camera.position.set(0, 0.04, 4.9);
-    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    const stillOnly = usesAppleGpu();
+    renderer = new THREE.WebGLRenderer({ alpha: true, antialias: !stillOnly });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, stillOnly ? 1.5 : 1.75));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.85;
@@ -1273,6 +1289,17 @@ const initializeBall = async () => {
     };
     resize();
     new ResizeObserver(resize).observe(heroBall);
+    if (stillOnly) {
+      // One render, repeated only when the size changes: no animation loop at all.
+      const drawStill = () => {
+        ball.rotation.set(0.01, 0.08, 0);
+        renderer.render(scene, camera);
+        heroBall.classList.add("model-ready");
+      };
+      new ResizeObserver(drawStill).observe(heroBall);
+      drawStill();
+      return;
+    }
     let visible = true;
     new IntersectionObserver(entries => visible = entries[0].isIntersecting).observe(heroBall);
     let lastFrame = -Infinity;
