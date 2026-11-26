@@ -13,7 +13,7 @@ class LicenceTests(unittest.TestCase):
         self.assertIn("# PolyForm Strict License 1.0.0", text)
         self.assertIn("other than distributing the software or making changes", text)
         self.assertIn("Commercial licences", text)
-        self.assertIn("granvskaia@gmail.com", text)
+        self.assertIn("vizorplayapp@gmail.com", text)
         self.assertNotIn("Permission is hereby granted", text)  # the MIT grant lives in its own file
 
     def test_licence_summary_speaks_to_the_public(self):

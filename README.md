@@ -230,7 +230,7 @@ research and government. The licence, the
 sharing copies of it.
 
 Professional clubs, paid analysts and coaching businesses need a commercial
-licence: email [granvskaia@gmail.com](mailto:granvskaia@gmail.com).
+licence: email [vizorplayapp@gmail.com](mailto:vizorplayapp@gmail.com).
 
 ClipMaker, the app VizorPlay replaces, was released under the MIT License, and
 that still applies to every ClipMaker release

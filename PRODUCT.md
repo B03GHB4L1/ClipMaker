@@ -30,7 +30,7 @@ Desktop app for Windows 10/11, macOS (Apple chip, macOS 14+; Intel, macOS 12+) a
 
 - Version 1.0 is released; download buttons link to the v1.0.0 files on Releases.
 - Windows, Linux and the Mac disk-image app update in-app; a Homebrew install updates with `brew upgrade`.
-- Licence: PolyForm Strict 1.0.0 plus separate commercial licences (contact granvskaia@gmail.com); earlier ClipMaker code is MIT.
+- Licence: PolyForm Strict 1.0.0 plus separate commercial licences (contact vizorplayapp@gmail.com); earlier ClipMaker code is MIT.
 - AI filtering is excluded from scope.
 - VizorPlay xG trained on StatsBomb open data (attribution required: "Data: StatsBomb").
 
